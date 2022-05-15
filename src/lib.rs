@@ -136,7 +136,7 @@ mod tests {
         assert!(obj_back_casted.is_some());
         let expl_obj_back_casted = obj_back_casted.unwrap();
         assert_eq!(expl_obj_back_casted.dummy, 42);
-        assert_eq!(expl_obj_back_casted.was_initialized, true);
+        assert!(expl_obj_back_casted.was_initialized);
 
         let second_obj_id = ObjectId {
             id: 12,
@@ -156,6 +156,6 @@ mod tests {
         assert!(obj_back_casted.is_some());
         let expl_obj_back_casted = obj_back_casted.unwrap();
         assert_eq!(expl_obj_back_casted.string, String::from("Hello Test"));
-        assert_eq!(expl_obj_back_casted.was_initialized, true);
+        assert!(expl_obj_back_casted.was_initialized);
     }
 }
