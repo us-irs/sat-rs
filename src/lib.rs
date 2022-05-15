@@ -33,10 +33,10 @@ impl ObjectManager {
     }
     pub fn insert(&mut self, sys_obj: Box<dyn ManagedSystemObject>) -> bool {
         let obj_id = sys_obj.get_object_id();
-        if self.obj_map.contains_key(&obj_id) {
+        if self.obj_map.contains_key(obj_id) {
             return false;
         }
-        self.obj_map.insert(obj_id.clone(), sys_obj).is_none()
+        self.obj_map.insert(*obj_id, sys_obj).is_none()
     }
 
     /// Initializes all System Objects in the hash map and returns the number of successful
