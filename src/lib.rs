@@ -4,7 +4,7 @@ use std::error::Error;
 // use thiserror::Error;
 
 pub struct Event {
-    event_id: u32,
+    pub event_id: u32,
 }
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]
@@ -23,6 +23,12 @@ pub trait ManagedSystemObject: SystemObject + Any {}
 
 pub struct ObjectManager {
     obj_map: HashMap<ObjectId, Box<dyn ManagedSystemObject>>,
+}
+
+impl Default for ObjectManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ObjectManager {
