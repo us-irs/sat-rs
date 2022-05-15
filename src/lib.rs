@@ -128,7 +128,7 @@ mod tests {
             name: "Example 0",
         };
         let example_obj = ExampleSysObj::new(expl_obj_id, 42);
-        assert_eq!(obj_manager.insert(Box::new(example_obj)), true);
+        assert!(obj_manager.insert(Box::new(example_obj)), true);
         let res = obj_manager.initialize();
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), 1);
@@ -148,7 +148,7 @@ mod tests {
             was_initialized: false,
         };
 
-        assert_eq!(obj_manager.insert(Box::new(second_example_obj)), true);
+        assert!(obj_manager.insert(Box::new(second_example_obj)), true);
         let res = obj_manager.initialize();
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), 2);
