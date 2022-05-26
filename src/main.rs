@@ -60,7 +60,7 @@ impl Executable for FixedCyclesTask {
     type Error = ExampleError;
 
     fn exec_type(&self) -> ExecutionType {
-        ExecutionType::Cycles(5)
+        ExecutionType::Cycles(3)
     }
 
     fn task_name(&self) -> &'static str {
@@ -103,10 +103,11 @@ impl Executable for PeriodicTask {
 fn test0() {
     let exec_task = OneShotTask {};
     let task_vec = vec![Box::new(exec_task)];
-    let jhandle = test_thread(task_vec, Some(Duration::from_millis(500)), 0);
+    let jhandle = executable_scheduler(task_vec, Some(Duration::from_millis(100)), 0);
     let exec_task2 = FixedCyclesTask {};
-    let task_vec2 = vec![Box::new(exec_task2)];
-    let jhandle2 = test_thread(task_vec2, Some(Duration::from_millis(1000)), 1);
+    let task_vec2: Vec<Box<dyn Executable<Error = ExampleError> + Send>> =
+        vec![Box::new(exec_task2)];
+    let jhandle2 = executable_scheduler(task_vec2, Some(Duration::from_millis(100)), 1);
 
     jhandle
         .join()
@@ -117,21 +118,28 @@ fn test0() {
         .expect("Joining thread 2 failed")
         .expect("Task 2 failed");
 }
-fn main() {
 
-
-    thread::sleep(Duration::from_millis(1000));
+fn test1() {
     let one_shot_in_vec = OneShotTask {};
     let cycles_in_vec = FixedCyclesTask {};
-    let test_vec: Vec<Box<dyn Executable<Error=ExampleError>>> = vec![Box::new(one_shot_in_vec), Box::new(cycles_in_vec)];
-    let jhandle3 = test_thread(test_vec, Some(Duration::from_millis(500)), 3);
+    let test_vec: Vec<Box<dyn Executable<Error = ExampleError>>> =
+        vec![Box::new(one_shot_in_vec), Box::new(cycles_in_vec)];
+    let jhandle3 = executable_scheduler(test_vec, Some(Duration::from_millis(100)), 3);
     jhandle3
         .join()
         .expect("Joining thread 3 failed")
         .expect("Task 3 failed");
 }
+fn main() {
+    test0();
+    thread::sleep(Duration::from_millis(1000));
+    test1();
+}
 
-fn test_thread<T: Executable<Error = E> + Send + 'static + ?Sized, E: Error + Send + 'static>(
+fn executable_scheduler<
+    T: Executable<Error = E> + Send + 'static + ?Sized,
+    E: Error + Send + 'static,
+>(
     mut executable_vec: Vec<Box<T>>,
     task_freq: Option<Duration>,
     op_code: i32,
@@ -157,13 +165,15 @@ fn test_thread<T: Executable<Error = E> + Send + 'static + ?Sized, E: Error + Se
                 }
             }
         }
-        executable_vec.retain(|_| !*removal_flags.iter().next().unwrap());
+        let mut removal_iter = removal_flags.iter();
+        executable_vec.retain(|_| !*removal_iter.next().unwrap());
+        removal_iter = removal_flags.iter();
+        cycle_counts.retain(|_| !*removal_iter.next().unwrap());
         removal_flags.retain(|&i| !i);
         if executable_vec.is_empty() {
             return Ok(OpResult::Ok);
         }
-        let freq = task_freq
-            .unwrap_or_else(|| panic!("No task frequency specified"));
+        let freq = task_freq.unwrap_or_else(|| panic!("No task frequency specified"));
         thread::sleep(freq);
     })
 }
