@@ -1,6 +1,9 @@
+use bus::{Bus, BusReader};
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use launchpad::core::executable::{executable_scheduler, Executable, ExecutionType, OpResult};
 use std::error::Error;
 use std::fmt;
+use std::mem::transmute;
 use std::thread;
 use std::time::Duration;
 
@@ -99,14 +102,24 @@ impl Executable for PeriodicTask {
     }
 }
 
-fn test0() {
+fn test0(term_bus: &mut Bus<()>) {
     let exec_task = OneShotTask {};
     let task_vec = vec![Box::new(exec_task)];
-    let jhandle = executable_scheduler(task_vec, Some(Duration::from_millis(100)), 0);
+    let jhandle = executable_scheduler(
+        task_vec,
+        Some(Duration::from_millis(100)),
+        0,
+        term_bus.add_rx(),
+    );
     let exec_task2 = FixedCyclesTask {};
     let task_vec2: Vec<Box<dyn Executable<Error = ExampleError> + Send>> =
         vec![Box::new(exec_task2)];
-    let jhandle2 = executable_scheduler(task_vec2, Some(Duration::from_millis(100)), 1);
+    let jhandle2 = executable_scheduler(
+        task_vec2,
+        Some(Duration::from_millis(100)),
+        1,
+        term_bus.add_rx(),
+    );
 
     jhandle
         .join()
@@ -118,19 +131,32 @@ fn test0() {
         .expect("Task 2 failed");
 }
 
-fn test1() {
+fn test1(term_bus: &mut Bus<()>) {
     let one_shot_in_vec = OneShotTask {};
     let cycles_in_vec = FixedCyclesTask {};
-    let test_vec: Vec<Box<dyn Executable<Error = ExampleError>>> =
-        vec![Box::new(one_shot_in_vec), Box::new(cycles_in_vec)];
-    let jhandle3 = executable_scheduler(test_vec, Some(Duration::from_millis(100)), 3);
+    let periodic_in_vec = PeriodicTask {};
+    let test_vec: Vec<Box<dyn Executable<Error = ExampleError>>> = vec![
+        Box::new(one_shot_in_vec),
+        Box::new(cycles_in_vec),
+        Box::new(periodic_in_vec),
+    ];
+    let jhandle3 = executable_scheduler(
+        test_vec,
+        Some(Duration::from_millis(100)),
+        3,
+        term_bus.add_rx(),
+    );
+    thread::sleep(Duration::from_millis(5000));
+    println!("Broadcasting cancel");
+    term_bus.broadcast(());
     jhandle3
         .join()
         .expect("Joining thread 3 failed")
         .expect("Task 3 failed");
 }
+
 fn main() {
-    test0();
-    thread::sleep(Duration::from_millis(1000));
-    test1();
+    let mut tx = Bus::new(5);
+    test0(&mut tx);
+    test1(&mut tx);
 }

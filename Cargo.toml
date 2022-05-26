@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 thiserror = "1.0"
+bus = "2.2.3"
+crossbeam-channel = "0.5.4"

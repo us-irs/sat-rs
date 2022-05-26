@@ -1,10 +1,13 @@
+use bus::BusReader;
 use std::error::Error;
+use std::sync::mpsc::TryRecvError;
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 pub enum OpResult {
     Ok,
+    TerminationRequested,
 }
 
 pub enum ExecutionType {
@@ -28,10 +31,17 @@ pub fn executable_scheduler<
     mut executable_vec: Vec<Box<T>>,
     task_freq: Option<Duration>,
     op_code: i32,
+    mut termination: BusReader<()>,
 ) -> JoinHandle<Result<OpResult, E>> {
     let mut cycle_counts = vec![0; executable_vec.len()];
     let mut removal_flags = vec![false; executable_vec.len()];
     thread::spawn(move || loop {
+        match termination.try_recv() {
+            Ok(_) | Err(TryRecvError::Disconnected) => {
+                removal_flags.iter_mut().for_each(|x| *x = true);
+            }
+            Err(TryRecvError::Empty) => (),
+        }
         for (idx, executable) in executable_vec.iter_mut().enumerate() {
             match executable.exec_type() {
                 ExecutionType::OneShot => {
