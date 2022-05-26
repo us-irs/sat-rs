@@ -1,9 +1,9 @@
-use bus::{Bus, BusReader};
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use bus::{Bus};
+
 use launchpad::core::executable::{executable_scheduler, Executable, ExecutionType, OpResult};
 use std::error::Error;
 use std::fmt;
-use std::mem::transmute;
+
 use std::thread;
 use std::time::Duration;
 
