@@ -8,16 +8,16 @@ pub enum ExecutionType {
     OneShot,
 }
 
-pub trait Executable {
+pub trait Executable: Send {
     type Error;
-    const EXEC_TYPE: ExecutionType;
-    const TASK_NAME: &'static str;
-    fn periodic_op(&mut self, op_code: i32) -> Result<OpResult, Self::Error>;
-}
+    //const EXEC_TYPE: ExecutionType;
+    //const TASK_NAME: &'static str;
 
-trait ExecutableWithAssociatedFuncs {
-    type Error;
-    fn exec_type(&self) -> ExecutionType;
-    fn task_name(&self) -> &'static str;
-    fn periodic_op(&mut self) -> Result<OpResult, Self::Error>;
+    fn exec_type(&self) -> ExecutionType;// {
+    //    return Self::EXEC_TYPE;
+    //}
+    fn task_name(&self) -> &'static str;//{
+    //    return Self::TASK_NAME;
+    //}
+    fn periodic_op(&mut self, op_code: i32) -> Result<OpResult, Self::Error>;
 }
