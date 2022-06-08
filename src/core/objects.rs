@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn test_obj_manager_simple() {
-        let mut obj_manager = ObjectManager::new();
+        let mut obj_manager = ObjectManager::default();
         let expl_obj_id = ObjectId {
             id: 0,
             name: "Example 0",
@@ -159,5 +159,17 @@ mod tests {
         let expl_obj_back_casted = obj_back_casted.unwrap();
         assert_eq!(expl_obj_back_casted.string, String::from("Hello Test"));
         assert!(expl_obj_back_casted.was_initialized);
+
+        let existing_obj_id = ObjectId {
+            id: 12,
+            name: "Example 1",
+        };
+        let invalid_obj = OtherExampleObject {
+            id: existing_obj_id,
+            string: String::from("Hello Test"),
+            was_initialized: false,
+        };
+
+        assert_eq!(obj_manager.insert(Box::new(invalid_obj)), false);
     }
 }
