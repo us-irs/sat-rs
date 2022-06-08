@@ -170,6 +170,6 @@ mod tests {
             was_initialized: false,
         };
 
-        assert_eq!(obj_manager.insert(Box::new(invalid_obj)), false);
+        assert!(!obj_manager.insert(Box::new(invalid_obj)));
     }
 }

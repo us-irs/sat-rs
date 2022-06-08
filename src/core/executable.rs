@@ -181,7 +181,7 @@ mod tests {
         }
     }
 
-    const ONE_SHOT_TASK_NAME: &'static str = "One Shot Task";
+    const ONE_SHOT_TASK_NAME: &str = "One Shot Task";
 
     impl Executable for OneShotTask {
         type Error = ExampleError;
@@ -191,7 +191,7 @@ mod tests {
         }
 
         fn task_name(&self) -> &'static str {
-            return ONE_SHOT_TASK_NAME;
+            ONE_SHOT_TASK_NAME
         }
 
         fn periodic_op(&mut self, op_code: i32) -> Result<OpResult, ExampleError> {
@@ -207,7 +207,7 @@ mod tests {
         }
     }
 
-    const CYCLE_TASK_NAME: &'static str = "Fixed Cycles Task";
+    const CYCLE_TASK_NAME: &str = "Fixed Cycles Task";
 
     impl Executable for FixedCyclesTask {
         type Error = ExampleError;
@@ -217,7 +217,7 @@ mod tests {
         }
 
         fn task_name(&self) -> &'static str {
-            return CYCLE_TASK_NAME
+            CYCLE_TASK_NAME
         }
 
         fn periodic_op(&mut self, op_code: i32) -> Result<OpResult, ExampleError> {
