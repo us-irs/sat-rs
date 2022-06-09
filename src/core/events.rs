@@ -1,11 +1,11 @@
 use num::pow;
 
-#[derive (Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Severity {
     INFO = 1,
     LOW = 2,
     MEDIUM = 3,
-    HIGH = 4
+    HIGH = 4,
 }
 
 impl TryFrom<u8> for Severity {
@@ -22,7 +22,7 @@ impl TryFrom<u8> for Severity {
     }
 }
 
-#[derive (Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Event {
     severity: Severity,
     group_id: u16,
@@ -30,7 +30,6 @@ pub struct Event {
 }
 
 impl Event {
-
     /// Generate an event. The raw representation of an event has 32 bits.
     /// If the passed group ID is invalid (too large), None wil be returned
     ///
@@ -44,12 +43,12 @@ impl Event {
     ///     raw event ID
     pub fn new(severity: Severity, group_id: u16, unique_id: u16) -> Option<Event> {
         if group_id > (pow::pow(2u8 as u16, 13) - 1) {
-            return None
+            return None;
         }
         Some(Event {
             severity,
             group_id,
-            unique_id
+            unique_id,
         })
     }
 
@@ -68,7 +67,9 @@ impl Event {
     }
 
     pub fn raw(&self) -> u32 {
-        (((self.severity as u32) << 29) as u32 | ((self.group_id as u32) << 16) as u32 | self.unique_id as u32) as u32
+        (((self.severity as u32) << 29) as u32
+            | ((self.group_id as u32) << 16) as u32
+            | self.unique_id as u32) as u32
     }
 }
 
@@ -78,7 +79,7 @@ impl TryFrom<u32> for Event {
     fn try_from(raw: u32) -> Result<Self, Self::Error> {
         let severity: Option<Severity> = (((raw >> 29) & 0b111) as u8).try_into().ok();
         if severity.is_none() {
-            return Err(())
+            return Err(());
         }
         let group_id = ((raw >> 16) & 0x1FFF) as u16;
         let unique_id = (raw & 0xFFFF) as u16;
@@ -88,8 +89,8 @@ impl TryFrom<u32> for Event {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::events::Severity;
     use super::Event;
+    use crate::core::events::Severity;
 
     #[test]
     fn test_events() {
