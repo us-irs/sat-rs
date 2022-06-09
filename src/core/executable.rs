@@ -26,6 +26,7 @@ pub trait Executable: Send {
 }
 
 /// This function allows executing one task which implements the [Executable][Executable] trait
+///
 /// # Arguments
 ///
 /// * `executable`: Executable task
@@ -74,6 +75,7 @@ pub fn exec_sched_single<
 
 /// This function allows executing multiple tasks as long as the tasks implement the
 /// [Executable][Executable] trait
+///
 /// # Arguments
 ///
 /// * `executable_vec`: Vector of executable objects
@@ -134,10 +136,11 @@ pub fn exec_sched_multi<
 #[cfg(test)]
 mod tests {
     use super::{exec_sched_multi, exec_sched_single, Executable, ExecutionType, OpResult};
+    use bus::Bus;
     use std::error::Error;
-    use std::fmt;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+    use std::{fmt, thread};
 
     struct TestInfo {
         exec_num: u32,
@@ -154,32 +157,41 @@ mod tests {
         exec_num: Arc<Mutex<TestInfo>>,
     }
 
-    #[derive(Debug, PartialEq)]
+    #[derive(Clone, Debug)]
     struct ExampleError {
-        details: String,
-        code: i32,
+        kind: ErrorKind,
+    }
+
+    /// The kind of an error that can occur.
+    #[derive(Clone, Debug)]
+    pub enum ErrorKind {
+        Generic(String, i32)
     }
 
     impl ExampleError {
         fn new(msg: &str, code: i32) -> ExampleError {
             ExampleError {
-                details: msg.to_string(),
-                code,
+                kind: ErrorKind::Generic(msg.to_string(), code)
             }
+        }
+
+        /// Return the kind of this error.
+        pub fn kind(&self) -> &ErrorKind {
+            &self.kind
         }
     }
 
     impl fmt::Display for ExampleError {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            write!(f, "{}", self.details)
+            match self.kind() {
+                ErrorKind::Generic(str, code) => {
+                    write!(f, "{str} with code {code}")
+                }
+            }
         }
     }
 
-    impl Error for ExampleError {
-        fn description(&self) -> &str {
-            &self.details
-        }
-    }
+    impl Error for ExampleError {}
 
     const ONE_SHOT_TASK_NAME: &str = "One Shot Task";
 
@@ -233,6 +245,8 @@ mod tests {
         }
     }
 
+    const PERIODIC_TASK_NAME: &str = "Periodic Task";
+
     impl Executable for PeriodicTask {
         type Error = ExampleError;
 
@@ -241,7 +255,7 @@ mod tests {
         }
 
         fn task_name(&self) -> &'static str {
-            "Periodic Task"
+            PERIODIC_TASK_NAME
         }
 
         fn periodic_op(&mut self, op_code: i32) -> Result<OpResult, ExampleError> {
@@ -283,6 +297,41 @@ mod tests {
     }
 
     #[test]
+    fn test_failed_one_shot() {
+        let op_code_inducing_failure = -1;
+        let shared = Arc::new(Mutex::new(TestInfo {
+            exec_num: 0,
+            op_code: 0,
+        }));
+        let exec_task = OneShotTask {
+            exec_num: shared.clone(),
+        };
+        let task = Box::new(exec_task);
+        let jhandle = exec_sched_single(
+            task,
+            Some(Duration::from_millis(100)),
+            op_code_inducing_failure,
+            None,
+        );
+        let thread_res = jhandle.join().expect("One Shot Task failed");
+        assert!(thread_res.is_err());
+        let error = thread_res.unwrap_err();
+        let err = error.kind();
+        assert!(matches!(err, &ErrorKind::Generic { .. }));
+        match err {
+            ErrorKind::Generic(str, op_code) => {
+                assert_eq!(str, &String::from("One Shot Task Failure"));
+                assert_eq!(op_code, &op_code_inducing_failure);
+            }
+        }
+        let error_display = error.to_string();
+        assert_eq!(error_display, "One Shot Task Failure with code -1");
+        let data = shared.lock().expect("Locking Mutex failed");
+        assert_eq!(data.exec_num, 1);
+        assert_eq!(data.op_code, op_code_inducing_failure);
+    }
+
+    #[test]
     fn test_simple_multi_one_shot() {
         let expected_op_code = 43;
         let shared = Arc::new(Mutex::new(TestInfo {
@@ -314,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cycles() {
+    fn test_cycles_single() {
         let expected_op_code = 44;
         let shared = Arc::new(Mutex::new(TestInfo {
             exec_num: 0,
@@ -325,7 +374,12 @@ mod tests {
             cycles: 1,
         });
         assert_eq!(cycled_task.task_name(), CYCLE_TASK_NAME);
-        let jh = exec_sched_single(cycled_task, Some(Duration::from_millis(100)), expected_op_code, None);
+        let jh = exec_sched_single(
+            cycled_task,
+            Some(Duration::from_millis(100)),
+            expected_op_code,
+            None,
+        );
         let thread_res = jh.join().expect("Cycles Task failed");
         assert!(thread_res.is_ok());
         let data = shared.lock().expect("Locking Mutex failed");
@@ -335,21 +389,106 @@ mod tests {
     }
 
     #[test]
+    fn test_single_and_cycles() {
+        let expected_op_code = 50;
+        let shared = Arc::new(Mutex::new(TestInfo {
+            exec_num: 0,
+            op_code: 0,
+        }));
+        let one_shot_task = Box::new(OneShotTask {
+            exec_num: shared.clone(),
+        });
+        let cycled_task_0 = Box::new(FixedCyclesTask {
+            exec_num: shared.clone(),
+            cycles: 1,
+        });
+        let cycled_task_1 = Box::new(FixedCyclesTask {
+            exec_num: shared.clone(),
+            cycles: 1,
+        });
+        assert_eq!(cycled_task_0.task_name(), CYCLE_TASK_NAME);
+        assert_eq!(one_shot_task.task_name(), ONE_SHOT_TASK_NAME);
+        let task_vec: Vec<Box<dyn Executable<Error=ExampleError>>> = vec![one_shot_task, cycled_task_0, cycled_task_1];
+        let jh = exec_sched_multi(
+            task_vec,
+            Some(Duration::from_millis(100)),
+            expected_op_code,
+            None,
+        );
+        let thread_res = jh.join().expect("Cycles Task failed");
+        assert!(thread_res.is_ok());
+        let data = shared.lock().expect("Locking Mutex failed");
+        assert_eq!(thread_res.unwrap(), OpResult::Ok);
+        assert_eq!(data.exec_num, 3);
+        assert_eq!(data.op_code, expected_op_code);
+    }
+
+    #[test]
     #[ignore]
-    fn test_periodic() {
+    fn test_periodic_single() {
+        let mut terminator = Bus::new(5);
         let expected_op_code = 45;
         let shared = Arc::new(Mutex::new(TestInfo {
             exec_num: 0,
             op_code: 0,
         }));
         let periodic_task = Box::new(PeriodicTask {
-            exec_num: shared.clone()
+            exec_num: shared.clone(),
         });
-        let jh = exec_sched_single(periodic_task, Some(Duration::from_millis(50)), expected_op_code, None);
+        assert_eq!(periodic_task.task_name(), PERIODIC_TASK_NAME);
+        let jh = exec_sched_single(
+            periodic_task,
+            Some(Duration::from_millis(20)),
+            expected_op_code,
+            Some(terminator.add_rx()),
+        );
+        thread::sleep(Duration::from_millis(40));
+        terminator.broadcast(());
         let thread_res = jh.join().expect("Periodic Task failed");
         assert!(thread_res.is_ok());
         let data = shared.lock().expect("Locking Mutex failed");
         assert_eq!(thread_res.unwrap(), OpResult::Ok);
+        let range = 2..4;
+        assert!(range.contains(&data.exec_num));
+        assert_eq!(data.op_code, expected_op_code);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_periodic_multi() {
+        let mut terminator = Bus::new(5);
+        let expected_op_code = 46;
+        let shared = Arc::new(Mutex::new(TestInfo {
+            exec_num: 0,
+            op_code: 0,
+        }));
+        let cycled_task = Box::new(FixedCyclesTask {
+            exec_num: shared.clone(),
+            cycles: 1,
+        });
+        let periodic_task_0 = Box::new(PeriodicTask {
+            exec_num: shared.clone(),
+        });
+        let periodic_task_1 = Box::new(PeriodicTask {
+            exec_num: shared.clone(),
+        });
+        assert_eq!(periodic_task_0.task_name(), PERIODIC_TASK_NAME);
+        assert_eq!(periodic_task_1.task_name(), PERIODIC_TASK_NAME);
+        let task_vec: Vec<Box<dyn Executable<Error=ExampleError>>> = vec![cycled_task, periodic_task_0, periodic_task_1];
+        let jh = exec_sched_multi(
+            task_vec,
+            Some(Duration::from_millis(20)),
+            expected_op_code,
+            Some(terminator.add_rx()),
+        );
+        thread::sleep(Duration::from_millis(60));
+        terminator.broadcast(());
+        let thread_res = jh.join().expect("Periodic Task failed");
+        assert!(thread_res.is_ok());
+        let data = shared.lock().expect("Locking Mutex failed");
+        assert_eq!(thread_res.unwrap(), OpResult::Ok);
+        let range = 7..11;
+        assert!(range.contains(&data.exec_num));
         assert_eq!(data.op_code, expected_op_code);
     }
 }
