@@ -8,6 +8,8 @@ pub struct ObjectId {
     name: &'static str,
 }
 
+/// Each object which is stored inside the [object manager][ObjectManager] needs to implemented
+/// this trait
 pub trait SystemObject {
     fn as_any(&self) -> &dyn Any;
     fn get_object_id(&self) -> &ObjectId;
@@ -16,7 +18,21 @@ pub trait SystemObject {
 
 pub trait ManagedSystemObject: SystemObject + Any {}
 
-/// Helper module to manage multiple SystemObject by mapping them using an ObjectId
+/// Helper module to manage multiple [ManagedSystemObjects][ManagedSystemObject] by mapping them
+/// using an [object ID][ObjectId]
+///
+/// # Example
+/// ```rs
+/// let mut obj_manager = ObjectManager::default();
+/// let expl_obj_id = ObjectId {
+///    id: 0,
+///    name: "Example 0",
+/// };
+/// let example_obj = ExampleSysObj::new(expl_obj_id, 42);
+/// obj_manager.insert(Box::new(example_obj))
+/// let obj_back_casted: Option<&ExampleSysObj> = obj_manager.get(&expl_obj_id);
+/// let expl_obj_back_casted = obj_back_casted.unwrap();
+/// ```
 pub struct ObjectManager {
     obj_map: HashMap<ObjectId, Box<dyn ManagedSystemObject>>,
 }
@@ -53,6 +69,8 @@ impl ObjectManager {
         Ok(init_success)
     }
 
+    /// Retrieve an object stored inside the manager. The type to retrieve needs to be explicitly
+    /// passed as a generic parameter
     pub fn get<T: Any>(&self, key: &ObjectId) -> Option<&T> {
         self.obj_map
             .get(key)

@@ -80,7 +80,7 @@ pub fn exec_sched_single<
 ///
 /// * `executable_vec`: Vector of executable objects
 /// * `task_freq`: Optional frequency of task. Required for periodic and fixed cycle tasks
-/// * `op_code`: Operation code which is passed to the executable task periodic_op call
+/// * `op_code`: Operation code which is passed to the executable task [operation call][Executable::periodic_op]
 /// * `termination`: Optional termination handler which can cancel threads with a broadcast
 pub fn exec_sched_multi<
     T: Executable<Error = E> + Send + 'static + ?Sized,
