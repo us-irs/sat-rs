@@ -105,9 +105,24 @@ mod tests {
         assert!(conv_from_raw.is_ok());
         let opt_event = conv_from_raw.ok();
         assert!(opt_event.is_some());
-        let event_conv_back = opt_event.unwrap();
-        assert_eq!(event_conv_back.severity(), Severity::INFO);
-        assert_eq!(event_conv_back.unique_id(), 0);
-        assert_eq!(event_conv_back.group_id(), 0);
+        let event = opt_event.unwrap();
+        assert_eq!(event.severity(), Severity::INFO);
+        assert_eq!(event.unique_id(), 0);
+        assert_eq!(event.group_id(), 0);
+
+        let event = Event::new(Severity::HIGH, 0x1FFF, 0xFFFF).unwrap();
+        assert_eq!(event.severity(), Severity::HIGH);
+        assert_eq!(event.group_id(), 0x1FFF);
+        assert_eq!(event.unique_id(), 0xFFFF);
+        let raw_event = event.raw();
+        assert_eq!(raw_event, 0x9FFFFFFF);
+        let conv_from_raw = Event::try_from(raw_event);
+        assert!(conv_from_raw.is_ok());
+        let opt_event = conv_from_raw.ok();
+        assert!(opt_event.is_some());
+        let event = opt_event.unwrap();
+        assert_eq!(event.severity(), Severity::HIGH);
+        assert_eq!(event.group_id(), 0x1FFF);
+        assert_eq!(event.unique_id(), 0xFFFF);
     }
 }
