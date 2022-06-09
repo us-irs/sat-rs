@@ -165,13 +165,13 @@ mod tests {
     /// The kind of an error that can occur.
     #[derive(Clone, Debug)]
     pub enum ErrorKind {
-        Generic(String, i32)
+        Generic(String, i32),
     }
 
     impl ExampleError {
         fn new(msg: &str, code: i32) -> ExampleError {
             ExampleError {
-                kind: ErrorKind::Generic(msg.to_string(), code)
+                kind: ErrorKind::Generic(msg.to_string(), code),
             }
         }
 
@@ -408,7 +408,8 @@ mod tests {
         });
         assert_eq!(cycled_task_0.task_name(), CYCLE_TASK_NAME);
         assert_eq!(one_shot_task.task_name(), ONE_SHOT_TASK_NAME);
-        let task_vec: Vec<Box<dyn Executable<Error=ExampleError>>> = vec![one_shot_task, cycled_task_0, cycled_task_1];
+        let task_vec: Vec<Box<dyn Executable<Error = ExampleError>>> =
+            vec![one_shot_task, cycled_task_0, cycled_task_1];
         let jh = exec_sched_multi(
             task_vec,
             Some(Duration::from_millis(100)),
@@ -474,7 +475,8 @@ mod tests {
         });
         assert_eq!(periodic_task_0.task_name(), PERIODIC_TASK_NAME);
         assert_eq!(periodic_task_1.task_name(), PERIODIC_TASK_NAME);
-        let task_vec: Vec<Box<dyn Executable<Error=ExampleError>>> = vec![cycled_task, periodic_task_0, periodic_task_1];
+        let task_vec: Vec<Box<dyn Executable<Error = ExampleError>>> =
+            vec![cycled_task, periodic_task_0, periodic_task_1];
         let jh = exec_sched_multi(
             task_vec,
             Some(Duration::from_millis(20)),
