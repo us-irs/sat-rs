@@ -25,15 +25,9 @@ fn basic_event_test() {
 
     let mut event_cntr = 0;
     while event_cntr < 2 {
-        match event_receiver.recv() {
-            Ok(event) => {
-                println!("Received event {:?}", event);
-                event_cntr += 1;
-            }
-            Err(_) => {
-                ()
-                // println!("Received error {:?}", error);
-            }
+        if let Ok(event) = event_receiver.recv() {
+            println!("Received event {:?}", event);
+            event_cntr += 1;
         }
     }
     t0.join().unwrap();
