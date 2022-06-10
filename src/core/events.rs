@@ -1,6 +1,10 @@
 use num::pow;
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+pub type GroupId = u16;
+pub type UniqueId = u16;
+pub type EventRaw = u32;
+
+#[derive(Copy, Clone, Debug)]
 pub enum Severity {
     INFO = 1,
     LOW = 2,
@@ -25,8 +29,8 @@ impl TryFrom<u8> for Severity {
 #[derive(Copy, Clone, Debug)]
 pub struct Event {
     severity: Severity,
-    group_id: u16,
-    unique_id: u16,
+    group_id: GroupId,
+    unique_id: UniqueId,
 }
 
 impl Event {
@@ -41,7 +45,7 @@ impl Event {
     ///     next 13 bits after the severity. Therefore, the size is limited by dec 8191 hex 0x1FFF.
     /// `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
     ///     raw event ID
-    pub fn new(severity: Severity, group_id: u16, unique_id: u16) -> Option<Event> {
+    pub fn new(severity: Severity, group_id: GroupId, unique_id: UniqueId) -> Option<Event> {
         if group_id > (pow::pow(2u8 as u16, 13) - 1) {
             return None;
         }
@@ -58,22 +62,22 @@ impl Event {
         self.severity
     }
 
-    pub fn group_id(&self) -> u16 {
+    pub fn group_id(&self) -> GroupId {
         self.group_id
     }
 
-    pub fn unique_id(&self) -> u16 {
+    pub fn unique_id(&self) -> UniqueId {
         self.unique_id
     }
 
-    pub fn raw(&self) -> u32 {
+    pub fn raw(&self) -> EventRaw {
         (((self.severity as u32) << 29) as u32
             | ((self.group_id as u32) << 16) as u32
-            | self.unique_id as u32) as u32
+            | self.unique_id as u32) as EventRaw
     }
 }
 
-impl TryFrom<u32> for Event {
+impl TryFrom<EventRaw> for Event {
     type Error = ();
 
     fn try_from(raw: u32) -> Result<Self, Self::Error> {
