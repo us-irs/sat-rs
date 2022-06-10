@@ -37,37 +37,41 @@ impl<E> EventManager<E> {
     }
 
     fn update_listeners (&mut self, key: ListenerType, dest: impl EventRecipient<Error=E> + 'static) {
-        if !self.listeners.contains_key(&key) {
-            self.listeners.insert(key, vec![Listener { _ltype: key, dest: Box::new(dest) }]);
+        if let std::collections::hash_map::Entry::Vacant(e) = self.listeners.entry(key) {
+            e.insert(vec![Listener { _ltype: key, dest: Box::new(dest) }]);
         } else {
             let vec = self.listeners.get_mut(&key).unwrap();
             vec.push(Listener { _ltype: key, dest: Box::new(dest) });
         }
     }
 
-    pub fn periodic_op(&mut self) -> Result<(), E> {
+    pub fn handle_one_event(&mut self) -> Result<(), E> {
+        let mut status = Ok(());
         if let Some(event) = self.event_receiver.receive() {
-            println!("Received event {:?}", event);
             for (ltype, listener_list) in self.listeners.iter_mut() {
                 match ltype {
                     ListenerType::Single(raw_event) => {
                         if event.raw() == *raw_event {
                             for listener in listener_list.iter_mut() {
-                                listener.dest.send_to(event)?;
+                                if let Err(e) = listener.dest.send_to(event) {
+                                    status = Err(e);
+                                }
                             }
                         }
                     }
                     ListenerType::Group(group_id) => {
                         if event.group_id() == *group_id {
                             for listener in listener_list.iter_mut() {
-                                listener.dest.send_to(event)?;
+                                if let Err(e) = listener.dest.send_to(event) {
+                                    status = Err(e);
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        Ok(())
+        status
     }
 }
 

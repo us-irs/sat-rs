@@ -4,7 +4,7 @@ pub type GroupId = u16;
 pub type UniqueId = u16;
 pub type EventRaw = u32;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Severity {
     INFO = 1,
     LOW = 2,
