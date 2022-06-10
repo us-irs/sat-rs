@@ -26,7 +26,7 @@ impl TryFrom<u8> for Severity {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Event {
     severity: Severity,
     group_id: GroupId,
