@@ -2,7 +2,6 @@ use launchpad::core::events::{Event, Severity};
 use std::sync::mpsc::channel;
 use std::thread;
 
-
 fn main() {
     basic_event_test();
 }
