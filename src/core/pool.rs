@@ -23,7 +23,7 @@ pub struct LocalPool {
     sizes_lists: Vec<Vec<PoolSize>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct StoreAddr {
     pool_idx: u16,
     packet_idx: NumBuckets,
@@ -42,6 +42,7 @@ pub enum StoreError {
     InvalidSubpool(u16),
     StoreFull(u16),
     InvalidStoreId(StoreAddr),
+    DataDoesNotExist(StoreAddr),
     InternalError(String),
 }
 
@@ -60,7 +61,9 @@ impl LocalPool {
             let next_pool_len = elem_size * num_elems as usize;
             local_pool.pool.push(vec![0; next_pool_len]);
             let next_sizes_list_len = num_elems as usize;
-            local_pool.sizes_lists.push(vec![Self::STORE_FREE; next_sizes_list_len]);
+            local_pool
+                .sizes_lists
+                .push(vec![Self::STORE_FREE; next_sizes_list_len]);
         }
         local_pool
     }
@@ -69,41 +72,59 @@ impl LocalPool {
         if data.len() > Self::MAX_SIZE {
             return Err(StoreError::DataTooLarge(data.len()));
         }
-        self.reserve(data)?;
-        let addr = StoreAddr {
-            packet_idx: 0,
-            pool_idx: 0,
-        };
+        let addr = self.reserve(data.len())?;
         self.write(&addr, data)?;
         Ok(addr)
     }
 
-    pub fn free_element(&mut self) -> Result<(StoreAddr, &mut [u8]), StoreError> {
-        Ok((
-            StoreAddr {
-                packet_idx: 0,
-                pool_idx: 0,
-            },
-            self.pool[0].as_mut_slice(),
-        ))
+    pub fn free_element(&mut self, len: usize) -> Result<(StoreAddr, &mut [u8]), StoreError> {
+        if len > Self::MAX_SIZE {
+            return Err(StoreError::DataTooLarge(len));
+        }
+        let addr = self.reserve(len)?;
+        let raw_pos = self.raw_pos(&addr).unwrap();
+        let pool = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..len];
+        Ok((addr, pool))
     }
 
-    pub fn get(&self, _addr: StoreAddr) -> Result<&[u8], StoreError> {
-        Ok(self.pool[0].as_slice())
+    pub fn modify(&mut self, addr: StoreAddr) -> Result<&mut [u8], StoreError> {
+        let curr_size = self.addr_check(&addr)?;
+        let raw_pos = self.raw_pos(&addr).unwrap();
+        let pool = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..curr_size];
+        Ok(pool)
     }
 
-    pub fn modify(&mut self, _addr: StoreAddr) -> Result<&mut [u8], StoreError> {
-        Ok(self.pool[0].as_mut_slice())
+    pub fn get(&self, addr: StoreAddr) -> Result<&[u8], StoreError> {
+        let curr_size = self.addr_check(&addr)?;
+        let raw_pos = self.raw_pos(&addr).unwrap();
+        let pool = &self.pool.get(addr.pool_idx as usize).unwrap()[raw_pos..curr_size];
+        Ok(pool)
     }
 
     pub fn delete(&mut self, _addr: StoreAddr) -> Result<(), StoreError> {
         Ok(())
     }
 
-    fn reserve(&mut self, data: &[u8]) -> Result<StoreAddr, StoreError> {
-        let subpool_idx = self.find_subpool(data.len(), 0)?;
+    fn addr_check(&self, addr: &StoreAddr) -> Result<usize, StoreError> {
+        let pool_idx = addr.pool_idx as usize;
+        if pool_idx as usize >= self.pool_cfg.cfg.len() {
+            return Err(StoreError::InvalidStoreId(*addr));
+        }
+        if addr.packet_idx >= self.pool_cfg.cfg[addr.pool_idx as usize].0 {
+            return Err(StoreError::InvalidStoreId(*addr));
+        }
+        let size_list = self.sizes_lists.get(pool_idx).unwrap();
+        let curr_size = size_list[addr.packet_idx as usize];
+        if curr_size == Self::STORE_FREE {
+            return Err(StoreError::DataDoesNotExist(*addr));
+        }
+        Ok(curr_size)
+    }
+
+    fn reserve(&mut self, data_len: usize) -> Result<StoreAddr, StoreError> {
+        let subpool_idx = self.find_subpool(data_len, 0)?;
         let (slot, size_slot_ref) = self.find_empty(subpool_idx)?;
-        *size_slot_ref = data.len();
+        *size_slot_ref = data_len;
         Ok(StoreAddr {
             pool_idx: subpool_idx,
             packet_idx: slot,
@@ -123,23 +144,18 @@ impl LocalPool {
     }
 
     fn write(&mut self, addr: &StoreAddr, data: &[u8]) -> Result<(), StoreError> {
-        let packet_pos = self
-            .raw_pos(addr)
-            .ok_or_else(||{
-                StoreError::InternalError(format!(
-                    "write: Error in raw_pos func with address {:?}",
-                    addr
-                ))
-            })?;
-        let subpool =
-            self.pool
-                .get_mut(addr.pool_idx as usize)
-                .ok_or_else(||{
-                    StoreError::InternalError(format!(
-                        "write: Error retrieving pool slice with address {:?}",
-                        addr
-                    ))
-                })?;
+        let packet_pos = self.raw_pos(addr).ok_or_else(|| {
+            StoreError::InternalError(format!(
+                "write: Error in raw_pos func with address {:?}",
+                addr
+            ))
+        })?;
+        let subpool = self.pool.get_mut(addr.pool_idx as usize).ok_or_else(|| {
+            StoreError::InternalError(format!(
+                "write: Error retrieving pool slice with address {:?}",
+                addr
+            ))
+        })?;
         let pool_slice = &mut subpool[packet_pos..self.pool_cfg.cfg[addr.pool_idx as usize].1];
         pool_slice.copy_from_slice(data);
         Ok(())
