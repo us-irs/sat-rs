@@ -158,12 +158,9 @@ mod tests {
 
     fn check_handled_event(res: HandlerResult, expected: Event, expected_num_sent: u32) {
         assert!(matches!(res, HandlerResult::Handled { .. }));
-        match res {
-            HandlerResult::Handled(num_recipients, event) => {
-                assert_eq!(event, expected);
-                assert_eq!(num_recipients, expected_num_sent);
-            }
-            _ => (),
+        if let HandlerResult::Handled(num_recipients, event) = res {
+            assert_eq!(event, expected);
+            assert_eq!(num_recipients, expected_num_sent);
         }
     }
 
