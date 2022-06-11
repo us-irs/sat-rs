@@ -5,12 +5,15 @@ pub struct PoolCfg {
 }
 
 impl PoolCfg {
-    pub fn add_pool(&mut self, num_elems: NumBuckets, elem_size: usize) {
-        self.cfg.push((num_elems, elem_size))
+    pub fn new(cfg: Vec<(NumBuckets, usize)>) -> Self {
+        PoolCfg { cfg }
     }
 
-    fn order(&mut self) -> usize {
-        self.cfg.sort_unstable();
+    pub fn sanitize(&mut self) -> usize {
+        self.cfg
+            .retain(|&(bucket_num, size)| bucket_num > 0 && size < LocalPool::MAX_SIZE);
+        self.cfg
+            .sort_unstable_by(|(_, sz0), (_, sz1)| sz0.partial_cmp(sz1).unwrap());
         self.cfg.len()
     }
 }
@@ -51,7 +54,7 @@ impl LocalPool {
     const MAX_SIZE: PoolSize = Self::STORE_FREE - 1;
 
     pub fn new(mut cfg: PoolCfg) -> LocalPool {
-        let subpools_num = cfg.order();
+        let subpools_num = cfg.sanitize();
         let mut local_pool = LocalPool {
             pool_cfg: cfg,
             pool: Vec::with_capacity(subpools_num),
@@ -184,5 +187,36 @@ impl LocalPool {
     fn raw_pos(&self, addr: &StoreAddr) -> Option<usize> {
         let (_, size) = self.pool_cfg.cfg.get(addr.pool_idx as usize)?;
         Some(addr.packet_idx as usize * size)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::core::pool::{LocalPool, PoolCfg};
+
+    #[test]
+    fn test_cfg() {
+        // Values where number of buckets is 0 or size is too large should be removed
+        let mut pool_cfg = PoolCfg::new(vec![(0, 0), (1, 0), (2, LocalPool::MAX_SIZE)]);
+        pool_cfg.sanitize();
+        assert_eq!(pool_cfg.cfg, vec![(1, 0)]);
+        // Entries should be ordered according to bucket size
+        pool_cfg = PoolCfg::new(vec![(16, 6), (32, 3), (8, 12)]);
+        pool_cfg.sanitize();
+        assert_eq!(pool_cfg.cfg, vec![(32, 3), (16, 6), (8, 12)]);
+        // Unstable sort is used, so order of entries with same block length should not matter
+        pool_cfg = PoolCfg::new(vec![(12, 12), (14, 16), (10, 12)]);
+        pool_cfg.sanitize();
+        assert!(
+            pool_cfg.cfg == vec![(12, 12), (10, 12), (14, 16)]
+                || pool_cfg.cfg == vec![(10, 12), (12, 12), (14, 16)]
+        );
+    }
+
+    #[test]
+    fn test_basic() {
+        // 4 buckets of 4 bytes, 2 of 8 bytes and 1 of 16 bytes
+        let pool_cfg = PoolCfg::new(vec![(4, 4), (2, 8), (1, 16)]);
+        let _local_pool = LocalPool::new(pool_cfg);
     }
 }
