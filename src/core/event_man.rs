@@ -71,7 +71,7 @@ impl<E> EventManager<E> {
             // To prevent double insertions
             for entry in vec.iter() {
                 if entry.ltype == key && entry.dest.id() == dest.id() {
-                    return
+                    return;
                 }
             }
             vec.push(Listener {
