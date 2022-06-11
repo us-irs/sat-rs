@@ -16,7 +16,7 @@ pub trait SystemObject {
     fn initialize(&mut self) -> Result<(), Box<dyn Error>>;
 }
 
-pub trait ManagedSystemObject: SystemObject + Any {}
+pub trait ManagedSystemObject: SystemObject + Any + Send {}
 
 /// Helper module to manage multiple [ManagedSystemObjects][ManagedSystemObject] by mapping them
 /// using an [object ID][ObjectId]
@@ -83,6 +83,8 @@ mod tests {
     use crate::core::objects::{ManagedSystemObject, ObjectId, ObjectManager, SystemObject};
     use std::any::Any;
     use std::error::Error;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
 
     struct ExampleSysObj {
         id: ObjectId,
@@ -189,5 +191,54 @@ mod tests {
         };
 
         assert!(!obj_manager.insert(Box::new(invalid_obj)));
+    }
+
+    #[test]
+    fn object_man_threaded() {
+        let obj_manager = Arc::new(Mutex::new(ObjectManager::new()));
+        let expl_obj_id = ObjectId {
+            id: 0,
+            name: "Example 0",
+        };
+        let example_obj = ExampleSysObj::new(expl_obj_id, 42);
+        let second_obj_id = ObjectId {
+            id: 12,
+            name: "Example 1",
+        };
+        let second_example_obj = OtherExampleObject {
+            id: second_obj_id,
+            string: String::from("Hello Test"),
+            was_initialized: false,
+        };
+
+        let mut obj_man_handle = obj_manager.lock().expect("Mutex lock failed");
+        assert!(obj_man_handle.insert(Box::new(example_obj)));
+        assert!(obj_man_handle.insert(Box::new(second_example_obj)));
+        let res = obj_man_handle.initialize();
+        std::mem::drop(obj_man_handle);
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), 2);
+        let obj_man_0 = obj_manager.clone();
+        let jh0 = thread::spawn(move || {
+            let locked_man = obj_man_0.lock().expect("Mutex lock failed");
+            let obj_back_casted: Option<&ExampleSysObj> = locked_man.get(&expl_obj_id);
+            assert!(obj_back_casted.is_some());
+            let expl_obj_back_casted = obj_back_casted.unwrap();
+            assert_eq!(expl_obj_back_casted.dummy, 42);
+            assert!(expl_obj_back_casted.was_initialized);
+            std::mem::drop(locked_man)
+        });
+
+        let jh1 = thread::spawn(move || {
+            let locked_man = obj_manager.lock().expect("Mutex lock failed");
+            let obj_back_casted: Option<&OtherExampleObject> = locked_man.get(&second_obj_id);
+            assert!(obj_back_casted.is_some());
+            let expl_obj_back_casted = obj_back_casted.unwrap();
+            assert_eq!(expl_obj_back_casted.string, String::from("Hello Test"));
+            assert!(expl_obj_back_casted.was_initialized);
+            std::mem::drop(locked_man)
+        });
+        jh0.join().expect("Joining thread 0 failed");
+        jh1.join().expect("Joining thread 1 failed");
     }
 }
