@@ -83,25 +83,32 @@ impl LocalPool {
         }
         let addr = self.reserve(len)?;
         let raw_pos = self.raw_pos(&addr).unwrap();
-        let pool = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..len];
-        Ok((addr, pool))
+        let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..len];
+        Ok((addr, block))
     }
 
     pub fn modify(&mut self, addr: StoreAddr) -> Result<&mut [u8], StoreError> {
         let curr_size = self.addr_check(&addr)?;
         let raw_pos = self.raw_pos(&addr).unwrap();
-        let pool = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..curr_size];
-        Ok(pool)
+        let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..curr_size];
+        Ok(block)
     }
 
     pub fn get(&self, addr: StoreAddr) -> Result<&[u8], StoreError> {
         let curr_size = self.addr_check(&addr)?;
         let raw_pos = self.raw_pos(&addr).unwrap();
-        let pool = &self.pool.get(addr.pool_idx as usize).unwrap()[raw_pos..curr_size];
-        Ok(pool)
+        let block = &self.pool.get(addr.pool_idx as usize).unwrap()[raw_pos..curr_size];
+        Ok(block)
     }
 
-    pub fn delete(&mut self, _addr: StoreAddr) -> Result<(), StoreError> {
+    pub fn delete(&mut self, addr: StoreAddr) -> Result<(), StoreError> {
+        self.addr_check(&addr)?;
+        let block_size = self.pool_cfg.cfg.get(addr.pool_idx as usize).unwrap().1;
+        let raw_pos = self.raw_pos(&addr).unwrap();
+        let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..block_size];
+        let size_list = self.sizes_lists.get_mut(addr.pool_idx as usize).unwrap();
+        size_list[addr.packet_idx as usize] = Self::STORE_FREE;
+        block.fill(0);
         Ok(())
     }
 
