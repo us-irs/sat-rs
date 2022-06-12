@@ -1,3 +1,4 @@
+//! Event support module
 use num::pow;
 
 pub type GroupId = u16;

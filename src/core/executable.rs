@@ -1,3 +1,4 @@
+//! Task scheduling module
 use bus::BusReader;
 use std::error::Error;
 use std::sync::mpsc::TryRecvError;

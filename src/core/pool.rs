@@ -1,4 +1,4 @@
-//! # Pool implementation providing sub-pools with fixed size memory blocks
+//! # Pool implementation providing pre-allocated sub-pools with fixed size memory blocks
 //!
 //! This is a simple memory pool implementation which pre-allocates all sub-pools using a given pool
 //! configuration. After the pre-allocation, no dynamic memory allocation will be performed
@@ -85,7 +85,6 @@ pub struct PoolCfg {
     cfg: Vec<(NumBlocks, usize)>,
 }
 
-
 impl PoolCfg {
     pub fn new(cfg: Vec<(NumBlocks, usize)>) -> Self {
         PoolCfg { cfg }
@@ -128,7 +127,7 @@ impl StoreAddr {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StoreIdError {
     InvalidSubpool(u16),
-    InvalidPacketIdx(u16)
+    InvalidPacketIdx(u16),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -226,10 +225,16 @@ impl LocalPool {
     fn addr_check(&self, addr: &StoreAddr) -> Result<usize, StoreError> {
         let pool_idx = addr.pool_idx as usize;
         if pool_idx as usize >= self.pool_cfg.cfg.len() {
-            return Err(StoreError::InvalidStoreId(StoreIdError::InvalidSubpool(addr.pool_idx), Some(*addr)));
+            return Err(StoreError::InvalidStoreId(
+                StoreIdError::InvalidSubpool(addr.pool_idx),
+                Some(*addr),
+            ));
         }
         if addr.packet_idx >= self.pool_cfg.cfg[addr.pool_idx as usize].0 {
-            return Err(StoreError::InvalidStoreId(StoreIdError::InvalidPacketIdx(addr.packet_idx), Some(*addr)));
+            return Err(StoreError::InvalidStoreId(
+                StoreIdError::InvalidPacketIdx(addr.packet_idx),
+                Some(*addr),
+            ));
         }
         let size_list = self.sizes_lists.get(pool_idx).unwrap();
         let curr_size = size_list[addr.packet_idx as usize];
@@ -287,7 +292,10 @@ impl LocalPool {
                 }
             }
         } else {
-            return Err(StoreError::InvalidStoreId(StoreIdError::InvalidSubpool(subpool),None));
+            return Err(StoreError::InvalidStoreId(
+                StoreIdError::InvalidSubpool(subpool),
+                None,
+            ));
         }
         Err(StoreError::StoreFull(subpool))
     }
@@ -327,12 +335,15 @@ mod tests {
         let pool_cfg = PoolCfg::new(vec![(4, 4), (2, 8), (1, 16)]);
         let mut local_pool = LocalPool::new(pool_cfg);
         // Try to access data which does not exist
-        let res = local_pool.read(&StoreAddr{
+        let res = local_pool.read(&StoreAddr {
             packet_idx: 0,
-            pool_idx: 0
+            pool_idx: 0,
         });
         assert!(res.is_err());
-        assert!(matches!(res.unwrap_err(), StoreError::DataDoesNotExist { .. }));
+        assert!(matches!(
+            res.unwrap_err(),
+            StoreError::DataDoesNotExist { .. }
+        ));
         let mut test_buf: [u8; 16] = [0; 16];
         for (i, val) in test_buf.iter_mut().enumerate() {
             *val = i as u8;
@@ -341,16 +352,19 @@ mod tests {
         assert!(res.is_ok());
         let addr = res.unwrap();
         // Only the second subpool has enough storage and only one bucket
-        assert_eq!(addr, StoreAddr {
-            pool_idx: 2,
-            packet_idx: 0
-        });
+        assert_eq!(
+            addr,
+            StoreAddr {
+                pool_idx: 2,
+                packet_idx: 0
+            }
+        );
 
         // The subpool is now full and the call should fail accordingly
         let res = local_pool.add(test_buf);
         assert!(res.is_err());
         let err = res.unwrap_err();
-        assert!(matches!(err, StoreError::StoreFull {..}));
+        assert!(matches!(err, StoreError::StoreFull { .. }));
         if let StoreError::StoreFull(subpool) = err {
             assert_eq!(subpool, 2);
         }
@@ -361,7 +375,7 @@ mod tests {
         let buf_read_back = res.unwrap();
         assert_eq!(buf_read_back.len(), 16);
         for (i, &val) in buf_read_back.iter().enumerate() {
-            assert_eq!(val , i as u8);
+            assert_eq!(val, i as u8);
         }
 
         // Delete the data
@@ -373,7 +387,13 @@ mod tests {
             let res = local_pool.free_element(12);
             assert!(res.is_ok());
             let (addr, buf_ref) = res.unwrap();
-            assert_eq!(addr, StoreAddr {pool_idx: 2, packet_idx:0});
+            assert_eq!(
+                addr,
+                StoreAddr {
+                    pool_idx: 2,
+                    packet_idx: 0
+                }
+            );
             assert_eq!(buf_ref.len(), 12);
             assert_eq!(buf_ref, [0; 12]);
             buf_ref[0] = 5;
@@ -397,20 +417,32 @@ mod tests {
         }
 
         {
-            let addr = StoreAddr{pool_idx: 3, packet_idx: 0};
+            let addr = StoreAddr {
+                pool_idx: 3,
+                packet_idx: 0,
+            };
             let res = local_pool.read(&addr);
             assert!(res.is_err());
             let err = res.unwrap_err();
-            assert!(matches!(err, StoreError::InvalidStoreId(StoreIdError::InvalidSubpool(3), Some(_))));
+            assert!(matches!(
+                err,
+                StoreError::InvalidStoreId(StoreIdError::InvalidSubpool(3), Some(_))
+            ));
         }
 
         {
-            let addr = StoreAddr{pool_idx: 2, packet_idx: 1};
+            let addr = StoreAddr {
+                pool_idx: 2,
+                packet_idx: 1,
+            };
             assert_eq!(addr.raw(), 0x00020001);
             let res = local_pool.read(&addr);
             assert!(res.is_err());
             let err = res.unwrap_err();
-            assert!(matches!(err, StoreError::InvalidStoreId(StoreIdError::InvalidPacketIdx(1), Some(_))));
+            assert!(matches!(
+                err,
+                StoreError::InvalidStoreId(StoreIdError::InvalidPacketIdx(1), Some(_))
+            ));
 
             let data_too_large = [0; 20];
             let res = local_pool.add(data_too_large);
@@ -420,7 +452,10 @@ mod tests {
 
             let res = local_pool.free_element(LocalPool::MAX_SIZE + 1);
             assert!(res.is_err());
-            assert_eq!(res.unwrap_err(), StoreError::DataTooLarge(LocalPool::MAX_SIZE + 1));
+            assert_eq!(
+                res.unwrap_err(),
+                StoreError::DataTooLarge(LocalPool::MAX_SIZE + 1)
+            );
         }
 
         {
