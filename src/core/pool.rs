@@ -1,11 +1,93 @@
-type NumBuckets = u16;
+//! # Pool implementation providing sub-pools with fixed size memory blocks
+//!
+//! This is a simple memory pool implementation which pre-allocates all sub-pools using a given pool
+//! configuration. After the pre-allocation, no dynamic memory allocation will be performed
+//! during run-time. This makes the implementation suitable for real-time applications and
+//! embedded environments. The pool implementation will also track the size of the data stored
+//! inside it.
+//!
+//! Transaction with the [pool][LocalPool] are done using a special [address][StoreAddr] type.
+//! Adding any data to the pool will yield a store address. Modification and read operations are
+//! done using a reference to a store address. Deletion will consume the store address.
+//!
+//! # Example
+//!
+//! ```
+//! use launchpad::core::pool::{LocalPool, PoolCfg};
+//!
+//! // 4 buckets of 4 bytes, 2 of 8 bytes and 1 of 16 bytes
+//! let pool_cfg = PoolCfg::new(vec![(4, 4), (2, 8), (1, 16)]);
+//! let mut local_pool = LocalPool::new(pool_cfg);
+//! let mut addr;
+//! {
+//!     // Add new data to the pool
+//!     let mut example_data = [0; 4];
+//!     example_data[0] = 42;
+//!     let res = local_pool.add(example_data);
+//!     assert!(res.is_ok());
+//!     addr = res.unwrap();
+//! }
+//!
+//! {
+//!     // Read the store data back
+//!     let res = local_pool.read(&addr);
+//!     assert!(res.is_ok());
+//!     let buf_read_back = res.unwrap();
+//!     assert_eq!(buf_read_back.len(), 4);
+//!     assert_eq!(buf_read_back[0], 42);
+//!     // Modify the stored data
+//!     let res = local_pool.modify(&addr);
+//!     assert!(res.is_ok());
+//!     let buf_read_back = res.unwrap();
+//!     buf_read_back[0] = 12;
+//! }
+//!
+//! {
+//!     // Read the modified data back
+//!     let res = local_pool.read(&addr);
+//!     assert!(res.is_ok());
+//!     let buf_read_back = res.unwrap();
+//!     assert_eq!(buf_read_back.len(), 4);
+//!     assert_eq!(buf_read_back[0], 12);
+//! }
+//!
+//! // Delete the stored data
+//! local_pool.delete(addr);
+//!
+//! // Get a free element in the pool with an appropriate size
+//! {
+//!     let res = local_pool.free_element(12);
+//!     assert!(res.is_ok());
+//!     let (tmp, mut_buf) = res.unwrap();
+//!     addr = tmp;
+//!     mut_buf[0] = 7;
+//! }
+//!
+//! // Read back the data
+//! {
+//!     // Read the store data back
+//!     let res = local_pool.read(&addr);
+//!     assert!(res.is_ok());
+//!     let buf_read_back = res.unwrap();
+//!     assert_eq!(buf_read_back.len(), 12);
+//!     assert_eq!(buf_read_back[0], 7);
+//! }
+//! ```
+type NumBlocks = u16;
 
+/// Configuration structure of the [local pool][LocalPool]
+///
+/// # Parameters
+///
+/// * `cfg`: Vector of tuples which represent a subpool. The first entry in the tuple specifies the
+///       number of memory blocks in the subpool, the second entry the size of the blocks
 pub struct PoolCfg {
-    cfg: Vec<(NumBuckets, usize)>,
+    cfg: Vec<(NumBlocks, usize)>,
 }
 
+
 impl PoolCfg {
-    pub fn new(cfg: Vec<(NumBuckets, usize)>) -> Self {
+    pub fn new(cfg: Vec<(NumBlocks, usize)>) -> Self {
         PoolCfg { cfg }
     }
 
@@ -20,16 +102,19 @@ impl PoolCfg {
 
 type PoolSize = usize;
 
+/// Pool implementation providing sub-pools with fixed size memory blocks. More details in
+/// the [module documentation][super::pool]
 pub struct LocalPool {
     pool_cfg: PoolCfg,
     pool: Vec<Vec<u8>>,
     sizes_lists: Vec<Vec<PoolSize>>,
 }
 
+/// Simple address type used for transactions with the local pool.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct StoreAddr {
     pool_idx: u16,
-    packet_idx: NumBuckets,
+    packet_idx: NumBlocks,
 }
 
 impl StoreAddr {
@@ -50,7 +135,7 @@ pub enum StoreIdError {
 pub enum StoreError {
     /// Requested data block is too large
     DataTooLarge(usize),
-    /// The store is full. Contains the faulty subpool
+    /// The store is full. Contains the index of the full subpool
     StoreFull(u16),
     /// Store ID is invalid. This also includes partial errors where only the subpool is invalid
     InvalidStoreId(StoreIdError, Option<StoreAddr>),
@@ -64,6 +149,8 @@ impl LocalPool {
     const STORE_FREE: PoolSize = PoolSize::MAX;
     const MAX_SIZE: PoolSize = Self::STORE_FREE - 1;
 
+    /// Create a new local pool from the [given configuration][PoolCfg]. This function will sanitize
+    /// the given configuration as well.
     pub fn new(mut cfg: PoolCfg) -> LocalPool {
         let subpools_num = cfg.sanitize();
         let mut local_pool = LocalPool {
@@ -82,15 +169,21 @@ impl LocalPool {
         local_pool
     }
 
-    pub fn add(&mut self, data: &[u8]) -> Result<StoreAddr, StoreError> {
-        if data.len() > Self::MAX_SIZE {
-            return Err(StoreError::DataTooLarge(data.len()));
+    /// Add new data to the pool. It will attempt to reserve a memory block with the appropriate
+    /// size and then copy the given data to the block. Yields a [StoreAddr] which can be used
+    /// to access the data stored in the pool
+    pub fn add(&mut self, data: impl AsRef<[u8]>) -> Result<StoreAddr, StoreError> {
+        let data_len = data.as_ref().len();
+        if data_len > Self::MAX_SIZE {
+            return Err(StoreError::DataTooLarge(data_len));
         }
-        let addr = self.reserve(data.len())?;
-        self.write(&addr, data)?;
+        let addr = self.reserve(data_len)?;
+        self.write(&addr, data.as_ref())?;
         Ok(addr)
     }
 
+    /// Reserves a free memory block with the appropriate size and returns a mutable reference
+    /// to it. Yields a [StoreAddr] which can be used to access the data stored in the pool
     pub fn free_element(&mut self, len: usize) -> Result<(StoreAddr, &mut [u8]), StoreError> {
         if len > Self::MAX_SIZE {
             return Err(StoreError::DataTooLarge(len));
@@ -101,20 +194,24 @@ impl LocalPool {
         Ok((addr, block))
     }
 
+    /// Modify data added previously using a given [StoreAddr] by yielding a mutable reference
+    /// to it
     pub fn modify(&mut self, addr: &StoreAddr) -> Result<&mut [u8], StoreError> {
-        let curr_size = self.addr_check(&addr)?;
-        let raw_pos = self.raw_pos(&addr).unwrap();
+        let curr_size = self.addr_check(addr)?;
+        let raw_pos = self.raw_pos(addr).unwrap();
         let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..curr_size];
         Ok(block)
     }
 
+    /// Read data by yielding a read-only reference given a [StoreAddr]
     pub fn read(&self, addr: &StoreAddr) -> Result<&[u8], StoreError> {
-        let curr_size = self.addr_check(&addr)?;
-        let raw_pos = self.raw_pos(&addr).unwrap();
+        let curr_size = self.addr_check(addr)?;
+        let raw_pos = self.raw_pos(addr).unwrap();
         let block = &self.pool.get(addr.pool_idx as usize).unwrap()[raw_pos..curr_size];
         Ok(block)
     }
 
+    /// Delete data inside the pool given a [StoreAddr]
     pub fn delete(&mut self, addr: StoreAddr) -> Result<(), StoreError> {
         self.addr_check(&addr)?;
         let block_size = self.pool_cfg.cfg.get(addr.pool_idx as usize).unwrap().1;
@@ -240,7 +337,7 @@ mod tests {
         for (i, val) in test_buf.iter_mut().enumerate() {
             *val = i as u8;
         }
-        let res = local_pool.add(test_buf.as_slice());
+        let res = local_pool.add(test_buf);
         assert!(res.is_ok());
         let addr = res.unwrap();
         // Only the second subpool has enough storage and only one bucket
@@ -250,7 +347,7 @@ mod tests {
         });
 
         // The subpool is now full and the call should fail accordingly
-        let res = local_pool.add(test_buf.as_slice());
+        let res = local_pool.add(test_buf);
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert!(matches!(err, StoreError::StoreFull {..}));
@@ -316,7 +413,7 @@ mod tests {
             assert!(matches!(err, StoreError::InvalidStoreId(StoreIdError::InvalidPacketIdx(1), Some(_))));
 
             let data_too_large = [0; 20];
-            let res = local_pool.add(data_too_large.as_slice());
+            let res = local_pool.add(data_too_large);
             assert!(res.is_err());
             let err = res.unwrap_err();
             assert_eq!(err, StoreError::DataTooLarge(20));

@@ -1,11 +1,69 @@
+//! # Module providing addressable object support and a manager for them
+//!
+//! Each addressable object can be identified using an [object ID][ObjectId].
+//! The [system object][ManagedSystemObject] trait also allows storing these objects into the
+//! [object manager][ObjectManager]. They can then be retrieved and casted back to a known type
+//! using the object ID.
+//!
+//! # Examples
+//!
+//! ```
+//! use std::any::Any;
+//! use std::error::Error;
+//! use launchpad::core::objects::{ManagedSystemObject, ObjectId, ObjectManager, SystemObject};
+//!
+//! struct ExampleSysObj {
+//!     id: ObjectId,
+//!     dummy: u32,
+//!     was_initialized: bool,
+//! }
+//!
+//! impl ExampleSysObj {
+//!     fn new(id: ObjectId, dummy: u32) -> ExampleSysObj {
+//!         ExampleSysObj {
+//!             id,
+//!             dummy,
+//!             was_initialized: false,
+//!         }
+//!     }
+//! }
+//!
+//! impl SystemObject for ExampleSysObj {
+//!     fn as_any(&self) -> &dyn Any {
+//!         self
+//!     }
+//!
+//!     fn get_object_id(&self) -> &ObjectId {
+//!         &self.id
+//!     }
+//!
+//!     fn initialize(&mut self) -> Result<(), Box<dyn Error>> {
+//!         self.was_initialized = true;
+//!             Ok(())
+//!         }
+//!     }
+//!
+//! impl ManagedSystemObject for ExampleSysObj {}
+//!
+//!
+//!  let mut obj_manager = ObjectManager::default();
+//!  let obj_id = ObjectId { id: 0, name: "Example 0"};
+//!  let example_obj = ExampleSysObj::new(obj_id, 42);
+//!  obj_manager.insert(Box::new(example_obj));
+//!  let obj_back_casted: Option<&ExampleSysObj> = obj_manager.get(&obj_id);
+//!  let example_obj = obj_back_casted.unwrap();
+//!  assert_eq!(example_obj.id, obj_id);
+//!  assert_eq!(example_obj.dummy, 42);
+//! ```
+
 use std::any::Any;
 use std::collections::HashMap;
 use std::error::Error;
 
-#[derive(PartialEq, Eq, Hash, Copy, Clone)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub struct ObjectId {
-    id: u32,
-    name: &'static str,
+    pub id: u32,
+    pub name: &'static str,
 }
 
 /// Each object which is stored inside the [object manager][ObjectManager] needs to implemented
@@ -20,19 +78,6 @@ pub trait ManagedSystemObject: SystemObject + Any + Send {}
 
 /// Helper module to manage multiple [ManagedSystemObjects][ManagedSystemObject] by mapping them
 /// using an [object ID][ObjectId]
-///
-/// # Example
-/// ```rs
-/// let mut obj_manager = ObjectManager::default();
-/// let expl_obj_id = ObjectId {
-///    id: 0,
-///    name: "Example 0",
-/// };
-/// let example_obj = ExampleSysObj::new(expl_obj_id, 42);
-/// obj_manager.insert(Box::new(example_obj))
-/// let obj_back_casted: Option<&ExampleSysObj> = obj_manager.get(&expl_obj_id);
-/// let expl_obj_back_casted = obj_back_casted.unwrap();
-/// ```
 pub struct ObjectManager {
     obj_map: HashMap<ObjectId, Box<dyn ManagedSystemObject>>,
 }

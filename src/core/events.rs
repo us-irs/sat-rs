@@ -39,12 +39,12 @@ impl Event {
     ///
     /// # Parameter
     ///
-    /// `severity`: Each event has a [severity][Severity]. The raw value of the severity will
-    ///     be stored inside the uppermost 3 bits of the raw event ID
-    /// `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
-    ///     next 13 bits after the severity. Therefore, the size is limited by dec 8191 hex 0x1FFF.
-    /// `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
-    ///     raw event ID
+    /// * `severity`: Each event has a [severity][Severity]. The raw value of the severity will
+    ///        be stored inside the uppermost 3 bits of the raw event ID
+    /// * `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
+    ///        next 13 bits after the severity. Therefore, the size is limited by dec 8191 hex 0x1FFF.
+    /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
+    ///       raw event ID
     pub fn new(severity: Severity, group_id: GroupId, unique_id: UniqueId) -> Option<Event> {
         if group_id > (pow::pow(2u8 as u16, 13) - 1) {
             return None;
