@@ -1,5 +1,7 @@
 //! # Space related components including CCSDS and ECSS packet standards
 use serde::{Deserialize, Serialize};
+pub mod tc;
+pub mod tm;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone)]
 pub enum PacketType {
