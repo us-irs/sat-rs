@@ -1,5 +1,4 @@
 //! # Space related components including CCSDS and ECSS packet standards
-pub use ccsds_spacepacket::PrimaryHeader as DekuSpHeader;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone)]
@@ -18,6 +17,10 @@ impl TryFrom<u8> for PacketType {
             _ => Err(()),
         }
     }
+}
+
+pub fn type_from_packet_id(packet_id: u16) -> PacketType {
+    PacketType::try_from((packet_id  >> 12) as u8 & 0b1).unwrap()
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone)]
@@ -44,25 +47,92 @@ impl TryFrom<u8> for SequenceFlags {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone)]
+pub struct PacketId {
+    pub ptype: PacketType,
+    pub sec_header_flag: bool,
+    pub apid: u16
+}
+
+impl PacketId {
+    pub fn raw(&self) -> u16 {
+        ((self.ptype as u16) << 12) | ((self.sec_header_flag as u16) << 11) | self.apid
+    }
+}
+
+impl From<u16> for PacketId {
+    fn from(raw_id: u16) -> Self {
+        PacketId {
+            ptype: PacketType::try_from(((raw_id >> 12) & 0b1) as u8).unwrap(),
+            sec_header_flag: ((raw_id >> 11) & 0b1) != 0,
+            apid: raw_id & 0x7FFF
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone)]
+pub struct PacketSequenceCtrl {
+    pub seq_flags: SequenceFlags,
+    pub ssc: u16
+}
+
+impl PacketSequenceCtrl {
+    pub fn raw(&self) -> u16 {
+        ((self.seq_flags as u16) << 14) | self.ssc
+    }
+}
+
+impl From<u16> for PacketSequenceCtrl {
+    fn from(raw_id: u16) -> Self {
+        PacketSequenceCtrl {
+            seq_flags: SequenceFlags::try_from(((raw_id >> 14) & 0b11) as u8).unwrap(),
+            ssc: raw_id & 0x3FFF
+        }
+    }
+}
+
+macro_rules! sph_from_other {
+    ($Self: path, $other: path) => {
+        impl From<$other> for $Self {
+            fn from(other: $other) -> Self {
+                Self::from_composite_fields(other.packet_id(), other.psc(), other.data_len(), Some(other.version()))
+            }
+        }
+    }
+}
+
 /// Generic trait to access fields of a CCSDS space packet header according to CCSDS 133.0-B-2
 pub trait CcsdsPrimaryHeader {
     const SEQ_FLAG_MASK: u16 = 0xC000;
 
+    fn from_composite_fields(packet_id: PacketId, psc: PacketSequenceCtrl, data_len: u16, version: Option<u8>) -> Self;
+
     fn version(&self) -> u8;
-    /// Retrieve 13 bit Packet Identification field. Can usually be retrieved with a bitwise AND
-    /// of the first 2 bytes with 0x1FFF
-    fn packet_id(&self) -> u16;
-    /// Retrieve Packet Sequence Count
-    fn psc(&self) -> u16;
+    fn packet_id(&self) -> PacketId;
+    fn psc(&self) -> PacketSequenceCtrl;
+
     /// Retrieve data length field
     fn data_len(&self) -> u16;
+
+    /// Retrieve 13 bit Packet Identification field. Can usually be retrieved with a bitwise AND
+    /// of the first 2 bytes with 0x1FFF
+    #[inline]
+    fn packet_id_raw(&self) -> u16 {
+        self.packet_id().raw()
+    }
+    /// Retrieve Packet Sequence Count
+    #[inline]
+    fn psc_raw(&self) -> u16 {
+        self.psc().raw()
+    }
 
     #[inline]
     /// Retrieve Packet Type (TM: 0, TC: 1)
     fn ptype(&self) -> PacketType {
         // This call should never fail because only 0 and 1 can be passed to the try_from call
-        PacketType::try_from((self.packet_id() >> 12) as u8 & 0b1).unwrap()
+        self.packet_id().ptype
     }
+
     #[inline]
     fn is_tm(&self) -> bool {
         self.ptype() == PacketType::Tm
@@ -77,52 +147,45 @@ pub trait CcsdsPrimaryHeader {
     /// and false if it is not
     #[inline]
     fn sec_header_flag(&self) -> bool {
-        (self.packet_id() >> 11) & 0x01 != 0
+        self.packet_id().sec_header_flag
     }
 
     /// Retrieve Application Process ID
     #[inline]
     fn apid(&self) -> u16 {
-        self.packet_id() & 0x7FF
+        self.packet_id().apid
     }
 
     #[inline]
     fn ssc(&self) -> u16 {
-        self.psc() & (!Self::SEQ_FLAG_MASK)
+        self.psc().ssc
     }
 
     #[inline]
     fn sequence_flags(&self) -> SequenceFlags {
         // This call should never fail because the mask ensures that only valid values are passed
         // into the try_from function
-        SequenceFlags::try_from(((self.psc() & Self::SEQ_FLAG_MASK) >> 14) as u8).unwrap()
+        self.psc().seq_flags
     }
 }
 
 pub mod srd {
-    use crate::sp::SequenceFlags;
-    use crate::sp::{CcsdsPrimaryHeader, PacketType};
+    use crate::sp::{self, SequenceFlags, CcsdsPrimaryHeader, PacketType, PacketId, PacketSequenceCtrl};
 
     /// Space Packet Primary Header according to CCSDS 133.0-B-2
     #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
     pub struct SpHeader {
         pub version: u8,
-        pub ptype: PacketType,
-        pub apid: u16,
-        pub sec_header_flag: bool,
-        pub seq_flags: SequenceFlags,
-        pub ssc: u16,
+        pub packet_id: PacketId,
+        pub psc: PacketSequenceCtrl,
         pub data_len: u16,
     }
     impl Default for SpHeader {
         fn default() -> Self {
             SpHeader {
                 version: 0,
-                ptype: PacketType::Tm,
-                apid: 0,
-                sec_header_flag: true,
-                seq_flags: SequenceFlags::Unsegmented,
-                ssc: 0,
+                packet_id: PacketId{ ptype: PacketType::Tm, apid: 0, sec_header_flag: true},
+                psc: PacketSequenceCtrl { seq_flags: SequenceFlags::Unsegmented, ssc: 0},
                 data_len: 0,
             }
         }
@@ -132,12 +195,11 @@ pub mod srd {
             if ssc > num::pow(2, 14) || apid > num::pow(2, 11) {
                 return None;
             }
-            Some(SpHeader {
-                ptype,
-                apid,
-                ssc,
-                ..Default::default()
-            })
+            let mut header = SpHeader::default();
+            header.packet_id.apid = apid;
+            header.packet_id.ptype = ptype;
+            header.psc.ssc = ssc;
+            Some(header)
         }
 
         pub fn tm(apid: u16, ssc: u16) -> Option<Self> {
@@ -150,21 +212,32 @@ pub mod srd {
     }
 
     impl CcsdsPrimaryHeader for SpHeader {
+        fn from_composite_fields(packet_id: PacketId, psc: PacketSequenceCtrl, data_len: u16, version: Option<u8>) -> Self {
+            let mut version_to_set = 0b000;
+            if let Some(version) = version {
+                version_to_set = version;
+            }
+            SpHeader {
+                version: version_to_set,
+                packet_id,
+                psc,
+                data_len
+            }
+        }
+
         #[inline]
         fn version(&self) -> u8 {
             self.version
         }
 
-        /// Retrieve Packet Identification composite field
         #[inline]
-        fn packet_id(&self) -> u16 {
-            ((self.ptype as u16) << 13) | ((self.sec_header_flag as u16) << 12) | self.apid
+        fn packet_id(&self) -> PacketId {
+            self.packet_id
         }
 
-        /// Function to retrieve the packet sequence control field
         #[inline]
-        fn psc(&self) -> u16 {
-            ((self.seq_flags as u16) << 14) | self.sec_header_flag as u16
+        fn psc(&self) -> PacketSequenceCtrl {
+            self.psc
         }
 
         #[inline]
@@ -172,35 +245,54 @@ pub mod srd {
             self.data_len
         }
     }
+
+    sph_from_other!(SpHeader, sp::zc::SpHeader);
+    // sph_from_other!(SpHeader, sp::deku::SpHeader);
 }
 
 pub mod zc {
-    use crate::sp::CcsdsPrimaryHeader;
+    use crate::sp::{self, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl};
     use zerocopy::byteorder::NetworkEndian;
     use zerocopy::{AsBytes, FromBytes, Unaligned, U16};
 
     #[derive(FromBytes, AsBytes, Unaligned)]
     #[repr(C)]
-    struct SpHeader {
+    pub struct SpHeader {
         version_packet_id: U16<NetworkEndian>,
         psc: U16<NetworkEndian>,
         data_len: U16<NetworkEndian>,
     }
 
+    impl SpHeader {
+        pub fn new(packet_id: PacketId, psc: PacketSequenceCtrl, data_len: u16, version: Option<u8>) -> Self {
+            let mut version_packet_id = packet_id.raw();
+            if let Some(version) = version {
+                version_packet_id = ((version as u16) << 13) | packet_id.raw()
+            }
+            SpHeader {
+                version_packet_id: U16::from(version_packet_id),
+                psc: U16::from(psc.raw()),
+                data_len: U16::from(data_len)
+            }
+        }
+    }
+
     impl CcsdsPrimaryHeader for SpHeader {
+        fn from_composite_fields(packet_id: PacketId, psc: PacketSequenceCtrl, data_len: u16, version: Option<u8>) -> Self {
+            SpHeader::new(packet_id, psc, data_len, version)
+        }
+
         #[inline]
         fn version(&self) -> u8 {
             ((self.version_packet_id.get() >> 13) as u8) & 0b111
         }
 
-        #[inline]
-        fn packet_id(&self) -> u16 {
-            self.version_packet_id.get() & 0x1FFF
+        fn packet_id(&self) -> PacketId {
+            PacketId::from(self.packet_id_raw())
         }
 
-        #[inline]
-        fn psc(&self) -> u16 {
-            self.psc.get()
+        fn psc(&self) -> PacketSequenceCtrl {
+            PacketSequenceCtrl::from(self.packet_id_raw())
         }
 
         #[inline]
@@ -208,51 +300,68 @@ pub mod zc {
             self.data_len.get()
         }
     }
+
+    sph_from_other!(SpHeader, sp::srd::SpHeader);
+    //sph_from_other!(SpHeader, sp::deku::SpHeader);
 }
 
+/*
 pub mod deku {
-    use crate::sp::srd::SpHeader;
-    use crate::sp::{CcsdsPrimaryHeader, DekuSpHeader, PacketType, SequenceFlags};
-    use ccsds_spacepacket::PrimaryHeader;
+    pub use ccsds_spacepacket::PrimaryHeader as SpHeader;
+    use crate::sp::{self, PacketId, PacketSequenceCtrl};
+    use crate::sp::{CcsdsPrimaryHeader, PacketType, SequenceFlags};
 
-    /// The [DekuSpHeader] is very useful to deserialize a packed raw space packet header with 6 bytes.
-    /// This function allows converting it to the [SpHeader] which is compatible to the [serde]
-    /// framework
-    impl TryFrom<DekuSpHeader> for SpHeader {
-        type Error = ();
-
-        fn try_from(header: PrimaryHeader) -> Result<Self, Self::Error> {
-            let seq_num = SequenceFlags::try_from(header.sequence_flags as u8)?;
-            let packet_type = PacketType::try_from(header.packet_type as u8)?;
-            let sec_header_flag = header.sec_header_flag as u8 != 0;
-            Ok(SpHeader {
-                version: header.version,
-                seq_flags: seq_num,
-                data_len: header.data_length,
-                ssc: header.sequence_count,
-                ptype: packet_type,
-                apid: header.app_proc_id,
+    impl CcsdsPrimaryHeader for SpHeader {
+        fn from_composite_fields(packet_id: PacketId, psc: PacketSequenceCtrl, data_len: u16, version: Option<u8>) -> Self {
+            let mut version_to_set = 0b000;
+            if let Some(version) = version {
+                version_to_set = version;
+            }
+            let packet_type = match packet_id.ptype {
+                PacketType::Tm => ccsds_spacepacket::types::PacketType::Data,
+                PacketType::Tc => ccsds_spacepacket::types::PacketType::Command
+            };
+            let sec_header_flag = match packet_id.sec_header_flag {
+                true => ccsds_spacepacket::types::SecondaryHeaderFlag::Present,
+                false => ccsds_spacepacket::types::SecondaryHeaderFlag::NotPresent
+            };
+            let sequence_flags = match psc.seq_flags {
+                SequenceFlags::ContinuationSegment => ccsds_spacepacket::types::SeqFlag::Continuation,
+                SequenceFlags::FirstSegment => ccsds_spacepacket::types::SeqFlag::FirstSegment,
+                SequenceFlags::LastSegment => ccsds_spacepacket::types::SeqFlag::LastSegment,
+                SequenceFlags::Unsegmented => ccsds_spacepacket::types::SeqFlag::Unsegmented
+            };
+            SpHeader {
+                version: version_to_set,
+                packet_type,
                 sec_header_flag,
-            })
+                app_proc_id: packet_id.apid,
+                sequence_flags,
+                sequence_count: psc.ssc,
+                data_length: data_len
+            }
         }
-    }
 
-    impl CcsdsPrimaryHeader for DekuSpHeader {
         #[inline]
         fn version(&self) -> u8 {
             self.version
         }
 
         #[inline]
-        fn packet_id(&self) -> u16 {
-            ((self.packet_type as u16) << 12)
-                | ((self.sec_header_flag as u16) << 11)
-                | self.app_proc_id
+        fn packet_id(&self) -> PacketId {
+            PacketId {
+                ptype: PacketType::try_from(self.packet_type as u8).unwrap(),
+                apid: self.app_proc_id,
+                sec_header_flag: self.sec_header_flag as u8 != 0
+            }
         }
 
         #[inline]
-        fn psc(&self) -> u16 {
-            ((self.sequence_flags as u16) << 14) | self.sequence_count
+        fn psc(&self) -> PacketSequenceCtrl {
+            PacketSequenceCtrl {
+                seq_flags: SequenceFlags::try_from(self.sequence_flags as u8).unwrap(),
+                ssc: self.sequence_count
+            }
         }
 
         #[inline]
@@ -260,79 +369,104 @@ pub mod deku {
             self.data_length
         }
     }
-    /// It is possible to convert the [serde] compatible [SpHeader] back into a [DekuSpHeader]
-    /// to allow for packed binary serialization
-    impl TryFrom<SpHeader> for DekuSpHeader {
-        type Error = ();
 
-        fn try_from(value: SpHeader) -> Result<Self, Self::Error> {
-            use ccsds_spacepacket::types::PacketType as DekuPacketType;
-            use ccsds_spacepacket::types::SecondaryHeaderFlag as DekuSecHeaderFlag;
-            use ccsds_spacepacket::types::SeqFlag as DekuSeqFlag;
-            let sequence_flags = match value.seq_flags as u8 {
-                x if x == SequenceFlags::Unsegmented as u8 => DekuSeqFlag::Unsegmented,
-                x if x == SequenceFlags::FirstSegment as u8 => DekuSeqFlag::FirstSegment,
-                x if x == SequenceFlags::LastSegment as u8 => DekuSeqFlag::LastSegment,
-                x if x == SequenceFlags::ContinuationSegment as u8 => DekuSeqFlag::Continuation,
-                _ => return Err(()),
-            };
-            let packet_type = match value.ptype as u8 {
-                x if x == PacketType::Tm as u8 => DekuPacketType::Data,
-                x if x == PacketType::Tc as u8 => DekuPacketType::Command,
-                _ => return Err(()),
-            };
-            let sec_header_flag = match value.sec_header_flag as bool {
-                true => DekuSecHeaderFlag::Present,
-                false => DekuSecHeaderFlag::NotPresent,
-            };
-            Ok(DekuSpHeader {
-                version: value.version,
-                packet_type,
-                sec_header_flag,
-                app_proc_id: value.apid,
-                sequence_flags,
-                data_length: value.data_len,
-                sequence_count: value.ssc,
-            })
-        }
-    }
+    sph_from_other!(SpHeader, sp::srd::SpHeader);
+    sph_from_other!(SpHeader, sp::zc::SpHeader);
 }
+*/
 
 #[cfg(test)]
 mod tests {
     use crate::sp::srd::SpHeader;
-    use crate::sp::{DekuSpHeader, PacketType, SequenceFlags};
+    use crate::sp::{CcsdsPrimaryHeader, PacketType, SequenceFlags};
     use postcard::{from_bytes, to_stdvec};
+    use crate::sp;
 
     #[test]
     fn test_deser_internally() {
         let sp_header = SpHeader::tc(0x42, 12).expect("Error creating SP header");
-        assert_eq!(sp_header.version, 0b000);
-        assert_eq!(sp_header.sec_header_flag, true);
-        assert_eq!(sp_header.ptype, PacketType::Tc);
-        assert_eq!(sp_header.ssc, 12);
-        assert_eq!(sp_header.apid, 0x42);
-        assert_eq!(sp_header.seq_flags, SequenceFlags::Unsegmented);
-        assert_eq!(sp_header.data_len, 0);
+        assert_eq!(sp_header.version(), 0b000);
+        assert_eq!(sp_header.sec_header_flag(), true);
+        assert_eq!(sp_header.ptype(), PacketType::Tc);
+        assert_eq!(sp_header.ssc(), 12);
+        assert_eq!(sp_header.apid(), 0x42);
+        assert_eq!(sp_header.sequence_flags(), SequenceFlags::Unsegmented);
+        assert_eq!(sp_header.data_len(), 0);
         let output = to_stdvec(&sp_header).unwrap();
-        println!("Output: {:?} with length {}", output, output.len());
         let sp_header: SpHeader = from_bytes(&output).unwrap();
         assert_eq!(sp_header.version, 0b000);
-        assert_eq!(sp_header.sec_header_flag, true);
-        assert_eq!(sp_header.ptype, PacketType::Tc);
-        assert_eq!(sp_header.ssc, 12);
-        assert_eq!(sp_header.apid, 0x42);
-        assert_eq!(sp_header.seq_flags, SequenceFlags::Unsegmented);
+        assert_eq!(sp_header.packet_id.sec_header_flag, true);
+        assert_eq!(sp_header.ptype(), PacketType::Tc);
+        assert_eq!(sp_header.ssc(), 12);
+        assert_eq!(sp_header.apid(), 0x42);
+        assert_eq!(sp_header.sequence_flags(), SequenceFlags::Unsegmented);
+        assert_eq!(sp_header.packet_id_raw(), 0x1842);
+        assert_eq!(sp_header.psc_raw(), 0xC00C);
+        assert_eq!(sp_header.version(), 0b000);
         assert_eq!(sp_header.data_len, 0);
+
+        let mut sp_header = SpHeader::tm(0x7, 22).expect("Error creating SP header");
+        sp_header.data_len = 36;
+        assert_eq!(sp_header.version(), 0b000);
+        assert_eq!(sp_header.sec_header_flag(), true);
+        assert_eq!(sp_header.ptype(), PacketType::Tm);
+        assert_eq!(sp_header.ssc(), 22);
+        assert_eq!(sp_header.apid(), 0x07);
+        assert_eq!(sp_header.sequence_flags(), SequenceFlags::Unsegmented);
+        assert_eq!(sp_header.packet_id_raw(), 0x0807);
+        assert_eq!(sp_header.psc_raw(), 0xC016);
+        assert_eq!(sp_header.data_len(), 36);
+        assert_eq!(sp_header.version(), 0b000);
     }
 
+    /*
     #[test]
     fn test_deser_to_raw_packed_deku() {
         let sp_header = SpHeader::tc(0x42, 12).expect("Error creating SP header");
         // TODO: Wait with these tests until KubOS merged
         //       https://github.com/KubOS-Preservation-Group/ccsds-spacepacket/pull/14
         let _deku_header =
-            DekuSpHeader::try_from(sp_header).expect("Error creating Deku Sp Header");
+            deku::SpHeader::try_from(sp_header).expect("Error creating Deku Sp Header");
         // deku_header.to_bytes().unwrap();
+    }
+     */
+
+    #[test]
+    fn test_deser_zerocopy() {
+        use zerocopy::{AsBytes};
+
+        let sp_header = SpHeader::tc(0x7FF, num::pow(2, 14) - 1).expect("Error creating SP header");
+        assert_eq!(sp_header.packet_id.ptype, PacketType::Tc);
+        let sp_header_zc = sp::zc::SpHeader::from(sp_header);
+        let slice = sp_header_zc.as_bytes();
+        assert_eq!(slice.len(), 6);
+        assert_eq!(slice[0], 0x1F);
+        assert_eq!(slice[1], 0xFF);
+        assert_eq!(slice[2], 0xFF);
+        assert_eq!(slice[3], 0xFF);
+        assert_eq!(slice[4], 0x00);
+        assert_eq!(slice[5], 0x00);
+
+        let mut slice = [0; 6];
+        sp_header_zc.write_to(slice.as_mut_slice());
+        assert_eq!(slice.len(), 6);
+        assert_eq!(slice[0], 0x1F);
+        assert_eq!(slice[1], 0xFF);
+        assert_eq!(slice[2], 0xFF);
+        assert_eq!(slice[3], 0xFF);
+        assert_eq!(slice[4], 0x00);
+        assert_eq!(slice[5], 0x00);
+
+        let mut test_vec = vec![0 as u8; 6];
+        let slice = test_vec.as_mut_slice();
+        sp_header_zc.write_to(slice);
+        let slice = test_vec.as_slice();
+        assert_eq!(slice.len(), 6);
+        assert_eq!(slice[0], 0x1F);
+        assert_eq!(slice[1], 0xFF);
+        assert_eq!(slice[2], 0xFF);
+        assert_eq!(slice[3], 0xFF);
+        assert_eq!(slice[4], 0x00);
+        assert_eq!(slice[5], 0x00);
     }
 }
