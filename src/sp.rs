@@ -20,7 +20,7 @@ impl TryFrom<u8> for PacketType {
 }
 
 pub fn type_from_packet_id(packet_id: u16) -> PacketType {
-    PacketType::try_from((packet_id  >> 12) as u8 & 0b1).unwrap()
+    PacketType::try_from((packet_id >> 12) as u8 & 0b1).unwrap()
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone)]
@@ -51,7 +51,7 @@ impl TryFrom<u8> for SequenceFlags {
 pub struct PacketId {
     pub ptype: PacketType,
     pub sec_header_flag: bool,
-    pub apid: u16
+    pub apid: u16,
 }
 
 impl PacketId {
@@ -65,7 +65,7 @@ impl From<u16> for PacketId {
         PacketId {
             ptype: PacketType::try_from(((raw_id >> 12) & 0b1) as u8).unwrap(),
             sec_header_flag: ((raw_id >> 11) & 0b1) != 0,
-            apid: raw_id & 0x7FFF
+            apid: raw_id & 0x7FFF,
         }
     }
 }
@@ -73,7 +73,7 @@ impl From<u16> for PacketId {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone)]
 pub struct PacketSequenceCtrl {
     pub seq_flags: SequenceFlags,
-    pub ssc: u16
+    pub ssc: u16,
 }
 
 impl PacketSequenceCtrl {
@@ -86,7 +86,7 @@ impl From<u16> for PacketSequenceCtrl {
     fn from(raw_id: u16) -> Self {
         PacketSequenceCtrl {
             seq_flags: SequenceFlags::try_from(((raw_id >> 14) & 0b11) as u8).unwrap(),
-            ssc: raw_id & 0x3FFF
+            ssc: raw_id & 0x3FFF,
         }
     }
 }
@@ -95,17 +95,27 @@ macro_rules! sph_from_other {
     ($Self: path, $other: path) => {
         impl From<$other> for $Self {
             fn from(other: $other) -> Self {
-                Self::from_composite_fields(other.packet_id(), other.psc(), other.data_len(), Some(other.version()))
+                Self::from_composite_fields(
+                    other.packet_id(),
+                    other.psc(),
+                    other.data_len(),
+                    Some(other.version()),
+                )
             }
         }
-    }
+    };
 }
 
 /// Generic trait to access fields of a CCSDS space packet header according to CCSDS 133.0-B-2
 pub trait CcsdsPrimaryHeader {
     const SEQ_FLAG_MASK: u16 = 0xC000;
 
-    fn from_composite_fields(packet_id: PacketId, psc: PacketSequenceCtrl, data_len: u16, version: Option<u8>) -> Self;
+    fn from_composite_fields(
+        packet_id: PacketId,
+        psc: PacketSequenceCtrl,
+        data_len: u16,
+        version: Option<u8>,
+    ) -> Self;
 
     fn version(&self) -> u8;
     fn packet_id(&self) -> PacketId;
@@ -170,7 +180,9 @@ pub trait CcsdsPrimaryHeader {
 }
 
 pub mod srd {
-    use crate::sp::{self, SequenceFlags, CcsdsPrimaryHeader, PacketType, PacketId, PacketSequenceCtrl};
+    use crate::sp::{
+        self, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, PacketType, SequenceFlags,
+    };
 
     /// Space Packet Primary Header according to CCSDS 133.0-B-2
     #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
@@ -184,8 +196,15 @@ pub mod srd {
         fn default() -> Self {
             SpHeader {
                 version: 0,
-                packet_id: PacketId{ ptype: PacketType::Tm, apid: 0, sec_header_flag: true},
-                psc: PacketSequenceCtrl { seq_flags: SequenceFlags::Unsegmented, ssc: 0},
+                packet_id: PacketId {
+                    ptype: PacketType::Tm,
+                    apid: 0,
+                    sec_header_flag: true,
+                },
+                psc: PacketSequenceCtrl {
+                    seq_flags: SequenceFlags::Unsegmented,
+                    ssc: 0,
+                },
                 data_len: 0,
             }
         }
@@ -212,7 +231,12 @@ pub mod srd {
     }
 
     impl CcsdsPrimaryHeader for SpHeader {
-        fn from_composite_fields(packet_id: PacketId, psc: PacketSequenceCtrl, data_len: u16, version: Option<u8>) -> Self {
+        fn from_composite_fields(
+            packet_id: PacketId,
+            psc: PacketSequenceCtrl,
+            data_len: u16,
+            version: Option<u8>,
+        ) -> Self {
             let mut version_to_set = 0b000;
             if let Some(version) = version {
                 version_to_set = version;
@@ -221,7 +245,7 @@ pub mod srd {
                 version: version_to_set,
                 packet_id,
                 psc,
-                data_len
+                data_len,
             }
         }
 
@@ -264,7 +288,12 @@ pub mod zc {
     }
 
     impl SpHeader {
-        pub fn new(packet_id: PacketId, psc: PacketSequenceCtrl, data_len: u16, version: Option<u8>) -> Self {
+        pub fn new(
+            packet_id: PacketId,
+            psc: PacketSequenceCtrl,
+            data_len: u16,
+            version: Option<u8>,
+        ) -> Self {
             let mut version_packet_id = packet_id.raw();
             if let Some(version) = version {
                 version_packet_id = ((version as u16) << 13) | packet_id.raw()
@@ -272,13 +301,18 @@ pub mod zc {
             SpHeader {
                 version_packet_id: U16::from(version_packet_id),
                 psc: U16::from(psc.raw()),
-                data_len: U16::from(data_len)
+                data_len: U16::from(data_len),
             }
         }
     }
 
     impl CcsdsPrimaryHeader for SpHeader {
-        fn from_composite_fields(packet_id: PacketId, psc: PacketSequenceCtrl, data_len: u16, version: Option<u8>) -> Self {
+        fn from_composite_fields(
+            packet_id: PacketId,
+            psc: PacketSequenceCtrl,
+            data_len: u16,
+            version: Option<u8>,
+        ) -> Self {
             SpHeader::new(packet_id, psc, data_len, version)
         }
 
@@ -377,10 +411,10 @@ pub mod deku {
 
 #[cfg(test)]
 mod tests {
+    use crate::sp;
     use crate::sp::srd::SpHeader;
     use crate::sp::{CcsdsPrimaryHeader, PacketType, SequenceFlags};
     use postcard::{from_bytes, to_stdvec};
-    use crate::sp;
 
     #[test]
     fn test_deser_internally() {
@@ -433,7 +467,7 @@ mod tests {
 
     #[test]
     fn test_deser_zerocopy() {
-        use zerocopy::{AsBytes};
+        use zerocopy::AsBytes;
 
         let sp_header = SpHeader::tc(0x7FF, num::pow(2, 14) - 1).expect("Error creating SP header");
         assert_eq!(sp_header.packet_id.ptype, PacketType::Tc);
