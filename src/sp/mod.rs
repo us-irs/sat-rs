@@ -454,7 +454,7 @@ mod tests {
         let sp_header = SpHeader::tc(0x42, 12).expect("Error creating SP header");
         assert_eq!(sp_header.version(), 0b000);
         assert!(sp_header.is_tc());
-        assert_eq!(sp_header.sec_header_flag(), true);
+        assert!(sp_header.sec_header_flag());
         assert_eq!(sp_header.ptype(), PacketType::Tc);
         assert_eq!(sp_header.ssc(), 12);
         assert_eq!(sp_header.apid(), 0x42);
@@ -463,7 +463,7 @@ mod tests {
         let output = to_stdvec(&sp_header).unwrap();
         let sp_header: SpHeader = from_bytes(&output).unwrap();
         assert_eq!(sp_header.version, 0b000);
-        assert_eq!(sp_header.packet_id.sec_header_flag, true);
+        assert!(sp_header.packet_id.sec_header_flag);
         assert_eq!(sp_header.ptype(), PacketType::Tc);
         assert_eq!(sp_header.ssc(), 12);
         assert_eq!(sp_header.apid(), 0x42);
@@ -477,7 +477,7 @@ mod tests {
         sp_header.data_len = 36;
         assert_eq!(sp_header.version(), 0b000);
         assert!(sp_header.is_tm());
-        assert_eq!(sp_header.sec_header_flag(), true);
+        assert!(sp_header.sec_header_flag());
         assert_eq!(sp_header.ptype(), PacketType::Tm);
         assert_eq!(sp_header.ssc(), 22);
         assert_eq!(sp_header.apid(), 0x07);
@@ -515,7 +515,7 @@ mod tests {
         assert_eq!(slice[4], 0x00);
         assert_eq!(slice[5], 0x00);
 
-        let mut test_vec = vec![0 as u8; 6];
+        let mut test_vec = vec![0_u8; 6];
         let slice = test_vec.as_mut_slice();
         sp_header_zc.write_to(slice);
         let slice = test_vec.as_slice();
