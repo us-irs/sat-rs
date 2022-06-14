@@ -51,10 +51,33 @@ impl TryFrom<u8> for SequenceFlags {
 pub struct PacketId {
     pub ptype: PacketType,
     pub sec_header_flag: bool,
-    pub apid: u16,
+    apid: u16,
 }
 
 impl PacketId {
+    pub fn new(ptype: PacketType, sec_header_flag: bool, apid: u16) -> Option<PacketId> {
+        if apid > num::pow(2, 11) - 1 {
+            return None
+        }
+        Some(PacketId{
+            ptype,
+            sec_header_flag,
+            apid
+        })
+    }
+
+    pub fn set_apid(&mut self, apid: u16) -> bool {
+        if apid > num::pow(2, 11) {
+            return false;
+        }
+        self.apid = apid;
+        true
+    }
+
+    pub fn apid(&self) -> u16 {
+        self.apid
+    }
+
     pub fn raw(&self) -> u16 {
         ((self.ptype as u16) << 12) | ((self.sec_header_flag as u16) << 11) | self.apid
     }
@@ -73,12 +96,32 @@ impl From<u16> for PacketId {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone)]
 pub struct PacketSequenceCtrl {
     pub seq_flags: SequenceFlags,
-    pub ssc: u16,
+    ssc: u16,
 }
 
 impl PacketSequenceCtrl {
+    pub fn new(seq_flags: SequenceFlags, ssc: u16) -> Option<PacketSequenceCtrl> {
+        if ssc > num::pow(2, 14) - 1 {
+            return None
+        }
+        Some(PacketSequenceCtrl {
+            seq_flags,
+            ssc
+        })
+    }
     pub fn raw(&self) -> u16 {
         ((self.seq_flags as u16) << 14) | self.ssc
+    }
+    pub fn set_ssc(&mut self, ssc: u16) -> bool {
+        if ssc > num::pow(2, 14) - 1 {
+            return false
+        }
+        self.ssc = ssc;
+        true
+    }
+
+    pub fn ssc(&self) -> u16 {
+        self.ssc
     }
 }
 
@@ -355,6 +398,10 @@ mod tests {
         let packet_id_from_raw = PacketId::from(packet_id.raw());
         assert_eq!(packet_id_from_raw, packet_id);
 
+        let packet_id_invalid = PacketId::new(PacketType::Tc, true, 0xFFFF);
+        assert!(packet_id_invalid.is_none());
+        let packet_id_from_new = PacketId::new(PacketType::Tm, false, 0x42).unwrap();
+        assert_eq!(packet_id_from_new, packet_id);
         let psc = PacketSequenceCtrl {
             seq_flags: SequenceFlags::ContinuationSegment,
             ssc: 77,
@@ -362,12 +409,18 @@ mod tests {
         assert_eq!(psc.raw(), 77);
         let psc_from_raw = PacketSequenceCtrl::from(psc.raw());
         assert_eq!(psc_from_raw, psc);
+
+        let psc_invalid = PacketSequenceCtrl::new(SequenceFlags::FirstSegment, 0xFFFF);
+        assert!(psc_invalid.is_none());
+        let psc_from_new = PacketSequenceCtrl::new(SequenceFlags::ContinuationSegment, 77).unwrap();
+        assert_eq!(psc_from_new, psc);
     }
 
     #[test]
     fn test_deser_internally() {
         let sp_header = SpHeader::tc(0x42, 12).expect("Error creating SP header");
         assert_eq!(sp_header.version(), 0b000);
+        assert!(sp_header.is_tc());
         assert_eq!(sp_header.sec_header_flag(), true);
         assert_eq!(sp_header.ptype(), PacketType::Tc);
         assert_eq!(sp_header.ssc(), 12);
@@ -390,6 +443,7 @@ mod tests {
         let mut sp_header = SpHeader::tm(0x7, 22).expect("Error creating SP header");
         sp_header.data_len = 36;
         assert_eq!(sp_header.version(), 0b000);
+        assert!(sp_header.is_tm());
         assert_eq!(sp_header.sec_header_flag(), true);
         assert_eq!(sp_header.ptype(), PacketType::Tm);
         assert_eq!(sp_header.ssc(), 22);
@@ -407,6 +461,7 @@ mod tests {
 
         let sp_header = SpHeader::tc(0x7FF, num::pow(2, 14) - 1).expect("Error creating SP header");
         assert_eq!(sp_header.packet_id.ptype, PacketType::Tc);
+        assert!(sp_header.is_tc());
         let sp_header_zc = sp::zc::SpHeader::from(sp_header);
         let slice = sp_header_zc.as_bytes();
         assert_eq!(slice.len(), 6);
