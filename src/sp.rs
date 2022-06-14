@@ -57,27 +57,41 @@ pub trait CcsdsPrimaryHeader {
     /// Retrieve data length field
     fn data_len(&self) -> u16;
 
+    #[inline]
     /// Retrieve Packet Type (TM: 0, TC: 1)
     fn ptype(&self) -> PacketType {
         // This call should never fail because only 0 and 1 can be passed to the try_from call
-        PacketType::try_from((self.packet_id() >> 13) as u8 & 0b1).unwrap()
+        PacketType::try_from((self.packet_id() >> 12) as u8 & 0b1).unwrap()
+    }
+    #[inline]
+    fn is_tm(&self) -> bool {
+        self.ptype() == PacketType::Tm
+    }
+
+    #[inline]
+    fn is_tc(&self) -> bool {
+        self.ptype() == PacketType::Tc
     }
 
     /// Retrieve the secondary header flag. Returns true if a secondary header is present
     /// and false if it is not
+    #[inline]
     fn sec_header_flag(&self) -> bool {
-        (self.packet_id() >> 12) & 0x01 != 0
+        (self.packet_id() >> 11) & 0x01 != 0
     }
 
     /// Retrieve Application Process ID
+    #[inline]
     fn apid(&self) -> u16 {
         self.packet_id() & 0x7FF
     }
 
+    #[inline]
     fn ssc(&self) -> u16 {
         self.psc() & (!Self::SEQ_FLAG_MASK)
     }
 
+    #[inline]
     fn sequence_flags(&self) -> SequenceFlags {
         // This call should never fail because the mask ensures that only valid values are passed
         // into the try_from function
@@ -86,8 +100,8 @@ pub trait CcsdsPrimaryHeader {
 }
 
 pub mod srd {
-    use crate::sp::PacketType;
     use crate::sp::SequenceFlags;
+    use crate::sp::{CcsdsPrimaryHeader, PacketType};
 
     /// Space Packet Primary Header according to CCSDS 133.0-B-2
     #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
@@ -118,11 +132,12 @@ pub mod srd {
             if ssc > num::pow(2, 14) || apid > num::pow(2, 11) {
                 return None;
             }
-            let mut header = SpHeader::default();
-            header.ptype = ptype;
-            header.apid = apid;
-            header.ssc = ssc;
-            Some(header)
+            Some(SpHeader {
+                ptype,
+                apid,
+                ssc,
+                ..Default::default()
+            })
         }
 
         pub fn tm(apid: u16, ssc: u16) -> Option<Self> {
@@ -132,27 +147,29 @@ pub mod srd {
         pub fn tc(apid: u16, ssc: u16) -> Option<Self> {
             Self::new(apid, PacketType::Tc, ssc)
         }
+    }
 
-        /// Function to retrieve the packet sequence control field
+    impl CcsdsPrimaryHeader for SpHeader {
         #[inline]
-        pub fn psc(&self) -> u16 {
-            ((self.seq_flags as u16) << 14) | self.sec_header_flag as u16
+        fn version(&self) -> u8 {
+            self.version
         }
 
         /// Retrieve Packet Identification composite field
         #[inline]
-        pub fn packet_id(&self) -> u16 {
+        fn packet_id(&self) -> u16 {
             ((self.ptype as u16) << 13) | ((self.sec_header_flag as u16) << 12) | self.apid
         }
 
+        /// Function to retrieve the packet sequence control field
         #[inline]
-        pub fn is_tm(&self) -> bool {
-            self.ptype == PacketType::Tm
+        fn psc(&self) -> u16 {
+            ((self.seq_flags as u16) << 14) | self.sec_header_flag as u16
         }
 
         #[inline]
-        pub fn is_tc(&self) -> bool {
-            self.ptype == PacketType::Tc
+        fn data_len(&self) -> u16 {
+            self.data_len
         }
     }
 }
@@ -171,18 +188,22 @@ pub mod zc {
     }
 
     impl CcsdsPrimaryHeader for SpHeader {
+        #[inline]
         fn version(&self) -> u8 {
             ((self.version_packet_id.get() >> 13) as u8) & 0b111
         }
 
+        #[inline]
         fn packet_id(&self) -> u16 {
             self.version_packet_id.get() & 0x1FFF
         }
 
+        #[inline]
         fn psc(&self) -> u16 {
             self.psc.get()
         }
 
+        #[inline]
         fn data_len(&self) -> u16 {
             self.data_len.get()
         }
@@ -191,7 +212,7 @@ pub mod zc {
 
 pub mod deku {
     use crate::sp::srd::SpHeader;
-    use crate::sp::{DekuSpHeader, PacketType, SequenceFlags};
+    use crate::sp::{CcsdsPrimaryHeader, DekuSpHeader, PacketType, SequenceFlags};
     use ccsds_spacepacket::PrimaryHeader;
 
     /// The [DekuSpHeader] is very useful to deserialize a packed raw space packet header with 6 bytes.
@@ -216,6 +237,29 @@ pub mod deku {
         }
     }
 
+    impl CcsdsPrimaryHeader for DekuSpHeader {
+        #[inline]
+        fn version(&self) -> u8 {
+            self.version
+        }
+
+        #[inline]
+        fn packet_id(&self) -> u16 {
+            ((self.packet_type as u16) << 12)
+                | ((self.sec_header_flag as u16) << 11)
+                | self.app_proc_id
+        }
+
+        #[inline]
+        fn psc(&self) -> u16 {
+            ((self.sequence_flags as u16) << 14) | self.sequence_count
+        }
+
+        #[inline]
+        fn data_len(&self) -> u16 {
+            self.data_length
+        }
+    }
     /// It is possible to convert the [serde] compatible [SpHeader] back into a [DekuSpHeader]
     /// to allow for packed binary serialization
     impl TryFrom<SpHeader> for DekuSpHeader {
