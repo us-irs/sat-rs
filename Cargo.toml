@@ -14,3 +14,4 @@ postcard = { version = "0.7.3", features = ["use-std"] }
 serde = "1.0.137"
 deku = "0.13"
 ccsds_spacepacket = "0.2.0"
+zerocopy = "0.6.1"
