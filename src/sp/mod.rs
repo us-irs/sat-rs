@@ -57,12 +57,12 @@ pub struct PacketId {
 impl PacketId {
     pub fn new(ptype: PacketType, sec_header_flag: bool, apid: u16) -> Option<PacketId> {
         if apid > num::pow(2, 11) - 1 {
-            return None
+            return None;
         }
-        Some(PacketId{
+        Some(PacketId {
             ptype,
             sec_header_flag,
-            apid
+            apid,
         })
     }
 
@@ -102,19 +102,16 @@ pub struct PacketSequenceCtrl {
 impl PacketSequenceCtrl {
     pub fn new(seq_flags: SequenceFlags, ssc: u16) -> Option<PacketSequenceCtrl> {
         if ssc > num::pow(2, 14) - 1 {
-            return None
+            return None;
         }
-        Some(PacketSequenceCtrl {
-            seq_flags,
-            ssc
-        })
+        Some(PacketSequenceCtrl { seq_flags, ssc })
     }
     pub fn raw(&self) -> u16 {
         ((self.seq_flags as u16) << 14) | self.ssc
     }
     pub fn set_ssc(&mut self, ssc: u16) -> bool {
         if ssc > num::pow(2, 14) - 1 {
-            return false
+            return false;
         }
         self.ssc = ssc;
         true
