@@ -4,6 +4,14 @@ pub mod ecss;
 pub mod tc;
 pub mod tm;
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum PacketError {
+    /// The passed slice is too small. Returns the required size of the failed size chgeck
+    ToBytesSliceTooSmall(usize),
+    /// The [zerocopy] library failed to write to bytes
+    ToBytesZeroCopyError,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone)]
 pub enum PacketType {
     Tm = 0,
@@ -355,8 +363,12 @@ pub mod zc {
             }
         }
 
-        pub fn from_slice(slice: impl AsRef<[u8]>) -> Option<Self> {
+        pub fn from_bytes(slice: impl AsRef<[u8]>) -> Option<Self> {
             SpHeader::read_from(slice.as_ref())
+        }
+
+        pub fn to_bytes(&self, mut slice: impl AsMut<[u8]>) -> Option<()> {
+            self.write_to(slice.as_mut())
         }
     }
 
@@ -515,7 +527,7 @@ mod tests {
         assert_eq!(slice[4], 0x00);
         assert_eq!(slice[5], 0x00);
 
-        let sp_header = zc::SpHeader::from_slice(slice);
+        let sp_header = zc::SpHeader::from_bytes(slice);
         assert!(sp_header.is_some());
         let sp_header = sp_header.unwrap();
         println!("Header: {:?}", sp_header);

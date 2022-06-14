@@ -11,11 +11,25 @@ pub enum PusVersion {
 
 pub const CRC_CCITT_FALSE: Crc<u16> = Crc::<u16>::new(&CRC_16_IBM_3740);
 
+pub mod zc {
+    use zerocopy::{AsBytes, FromBytes, NetworkEndian, Unaligned, U16};
+
+    #[derive(FromBytes, AsBytes, Unaligned)]
+    #[repr(C)]
+    pub struct PusTcDataFieldHeader {
+        version_ack: u8,
+        service: u8,
+        subservice: u8,
+        source_id: U16<NetworkEndian>,
+    }
+}
+
 pub mod srd {
+    use crate::sp;
     use crate::sp::ecss::PusPacket;
     use crate::sp::srd::SpHeader;
     use crate::sp::tc::{PusVersion, CRC_CCITT_FALSE};
-    use crate::sp::{CcsdsPacket, PacketId, PacketSequenceCtrl};
+    use crate::sp::{CcsdsPacket, PacketError, PacketId, PacketSequenceCtrl, PacketType};
     use serde::{Deserialize, Serialize};
 
     #[derive(PartialEq, Copy, Clone, Serialize, Deserialize)]
@@ -39,28 +53,42 @@ pub mod srd {
         }
     }
 
+    #[derive(PartialEq, Copy, Clone, Serialize, Deserialize)]
     pub struct PusTc<'slice> {
         pub sph: SpHeader,
         pub data_field_header: PusTcDataFieldHeader,
         raw_data: Option<&'slice [u8]>,
         app_data: Option<&'slice [u8]>,
-        crc16: u16,
+        crc16: Option<u16>,
     }
 
     impl<'slice> PusTc<'slice> {
         pub fn new(
-            sph: &SpHeader,
+            sph: &mut SpHeader,
             service: u8,
             subservice: u8,
             app_data: Option<&'slice [u8]>,
         ) -> Self {
+            sph.packet_id.ptype = PacketType::Tc;
             PusTc {
-                sph: sph.clone(),
+                sph: *sph,
                 raw_data: None,
                 app_data,
                 data_field_header: PusTcDataFieldHeader::new(service, subservice, 0b1111),
-                crc16: 0,
+                crc16: None,
             }
+        }
+
+        pub fn write(&mut self, mut slice: impl AsMut<[u8]>) -> Result<(), PacketError> {
+            let sph_zc = sp::zc::SpHeader::from(self.sph);
+            if slice.as_mut().len() < 6 {
+                return Err(PacketError::ToBytesSliceTooSmall(6));
+            }
+            sph_zc
+                .to_bytes(slice)
+                .ok_or(PacketError::ToBytesZeroCopyError)?;
+            // TODO: Finish impl
+            Ok(())
         }
     }
     impl CcsdsPacket for PusTc<'_> {
@@ -102,7 +130,7 @@ pub mod srd {
             self.app_data
         }
 
-        fn crc16(&self) -> u16 {
+        fn crc16(&self) -> Option<u16> {
             self.crc16
         }
 
@@ -120,15 +148,17 @@ pub mod srd {
     }
 }
 
-pub mod zc {
-    use zerocopy::{AsBytes, FromBytes, NetworkEndian, Unaligned, U16};
+#[cfg(test)]
+mod tests {
+    use crate::sp::srd::SpHeader;
+    use crate::sp::tc::srd::PusTc;
+    use postcard::to_stdvec;
 
-    #[derive(FromBytes, AsBytes, Unaligned)]
-    #[repr(C)]
-    pub struct PusTcDataFieldHeader {
-        version_ack: u8,
-        service: u8,
-        subservice: u8,
-        source_id: U16<NetworkEndian>,
+    #[test]
+    fn test_tc() {
+        let mut sph = SpHeader::tc(0x42, 12).unwrap();
+        let pus_tc = PusTc::new(&mut sph, 1, 1, None);
+        let out = to_stdvec(&pus_tc).unwrap();
+        println!("Vector {:#04x?} with length {}", out, out.len());
     }
 }
