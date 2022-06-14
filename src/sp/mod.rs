@@ -1,5 +1,6 @@
 //! # Space related components including CCSDS and ECSS packet standards
 use serde::{Deserialize, Serialize};
+pub mod ecss;
 pub mod tc;
 pub mod tm;
 
@@ -90,7 +91,7 @@ impl From<u16> for PacketId {
         PacketId {
             ptype: PacketType::try_from(((raw_id >> 12) & 0b1) as u8).unwrap(),
             sec_header_flag: ((raw_id >> 11) & 0b1) != 0,
-            apid: raw_id & 0x7FFF,
+            apid: raw_id & 0x7FF,
         }
     }
 }
@@ -128,7 +129,7 @@ impl From<u16> for PacketSequenceCtrl {
     fn from(raw_id: u16) -> Self {
         PacketSequenceCtrl {
             seq_flags: SequenceFlags::try_from(((raw_id >> 14) & 0b11) as u8).unwrap(),
-            ssc: raw_id & 0x3FFF,
+            ssc: raw_id & SSC_MASK,
         }
     }
 }
@@ -148,17 +149,11 @@ macro_rules! sph_from_other {
     };
 }
 
+const SSC_MASK: u16 = 0x3FFF;
+const VERSION_MASK: u16 = 0xE000;
+
 /// Generic trait to access fields of a CCSDS space packet header according to CCSDS 133.0-B-2
-pub trait CcsdsPrimaryHeader {
-    const SEQ_FLAG_MASK: u16 = 0xC000;
-
-    fn from_composite_fields(
-        packet_id: PacketId,
-        psc: PacketSequenceCtrl,
-        data_len: u16,
-        version: Option<u8>,
-    ) -> Self;
-
+pub trait CcsdsPacket {
     fn version(&self) -> u8;
     fn packet_id(&self) -> PacketId;
     fn psc(&self) -> PacketSequenceCtrl;
@@ -221,13 +216,23 @@ pub trait CcsdsPrimaryHeader {
     }
 }
 
+pub trait CcsdsPrimaryHeader {
+    fn from_composite_fields(
+        packet_id: PacketId,
+        psc: PacketSequenceCtrl,
+        data_len: u16,
+        version: Option<u8>,
+    ) -> Self;
+}
+
 pub mod srd {
     use crate::sp::{
-        self, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, PacketType, SequenceFlags,
+        self, CcsdsPacket, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, PacketType,
+        SequenceFlags,
     };
 
     /// Space Packet Primary Header according to CCSDS 133.0-B-2
-    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Copy, Clone)]
     pub struct SpHeader {
         pub version: u8,
         pub packet_id: PacketId,
@@ -272,25 +277,7 @@ pub mod srd {
         }
     }
 
-    impl CcsdsPrimaryHeader for SpHeader {
-        fn from_composite_fields(
-            packet_id: PacketId,
-            psc: PacketSequenceCtrl,
-            data_len: u16,
-            version: Option<u8>,
-        ) -> Self {
-            let mut version_to_set = 0b000;
-            if let Some(version) = version {
-                version_to_set = version;
-            }
-            SpHeader {
-                version: version_to_set,
-                packet_id,
-                psc,
-                data_len,
-            }
-        }
-
+    impl CcsdsPacket for SpHeader {
         #[inline]
         fn version(&self) -> u8 {
             self.version
@@ -312,15 +299,37 @@ pub mod srd {
         }
     }
 
+    impl CcsdsPrimaryHeader for SpHeader {
+        fn from_composite_fields(
+            packet_id: PacketId,
+            psc: PacketSequenceCtrl,
+            data_len: u16,
+            version: Option<u8>,
+        ) -> Self {
+            let mut version_to_set = 0b000;
+            if let Some(version) = version {
+                version_to_set = version;
+            }
+            SpHeader {
+                version: version_to_set,
+                packet_id,
+                psc,
+                data_len,
+            }
+        }
+    }
+
     sph_from_other!(SpHeader, sp::zc::SpHeader);
 }
 
 pub mod zc {
-    use crate::sp::{self, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl};
+    use crate::sp::{
+        self, CcsdsPacket, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, VERSION_MASK,
+    };
     use zerocopy::byteorder::NetworkEndian;
     use zerocopy::{AsBytes, FromBytes, Unaligned, U16};
 
-    #[derive(FromBytes, AsBytes, Unaligned)]
+    #[derive(FromBytes, AsBytes, Unaligned, Debug)]
     #[repr(C)]
     pub struct SpHeader {
         version_packet_id: U16<NetworkEndian>,
@@ -345,6 +354,37 @@ pub mod zc {
                 data_len: U16::from(data_len),
             }
         }
+
+        pub fn from_slice(slice: impl AsRef<[u8]>) -> Option<Self> {
+            SpHeader::read_from(slice.as_ref())
+        }
+    }
+
+    impl CcsdsPacket for SpHeader {
+        #[inline]
+        fn version(&self) -> u8 {
+            ((self.version_packet_id.get() >> 13) as u8) & 0b111
+        }
+
+        fn packet_id_raw(&self) -> u16 {
+            self.version_packet_id.get() & (!VERSION_MASK)
+        }
+        fn packet_id(&self) -> PacketId {
+            PacketId::from(self.packet_id_raw())
+        }
+
+        fn psc_raw(&self) -> u16 {
+            self.psc.get()
+        }
+
+        fn psc(&self) -> PacketSequenceCtrl {
+            PacketSequenceCtrl::from(self.psc_raw())
+        }
+
+        #[inline]
+        fn data_len(&self) -> u16 {
+            self.data_len.get()
+        }
     }
 
     impl CcsdsPrimaryHeader for SpHeader {
@@ -356,24 +396,6 @@ pub mod zc {
         ) -> Self {
             SpHeader::new(packet_id, psc, data_len, version)
         }
-
-        #[inline]
-        fn version(&self) -> u8 {
-            ((self.version_packet_id.get() >> 13) as u8) & 0b111
-        }
-
-        fn packet_id(&self) -> PacketId {
-            PacketId::from(self.packet_id_raw())
-        }
-
-        fn psc(&self) -> PacketSequenceCtrl {
-            PacketSequenceCtrl::from(self.packet_id_raw())
-        }
-
-        #[inline]
-        fn data_len(&self) -> u16 {
-            self.data_len.get()
-        }
     }
 
     sph_from_other!(SpHeader, sp::srd::SpHeader);
@@ -383,7 +405,7 @@ pub mod zc {
 mod tests {
     use crate::sp;
     use crate::sp::srd::SpHeader;
-    use crate::sp::{CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, PacketType, SequenceFlags};
+    use crate::sp::{zc, CcsdsPacket, PacketId, PacketSequenceCtrl, PacketType, SequenceFlags};
     use postcard::{from_bytes, to_stdvec};
 
     #[test]
@@ -492,5 +514,15 @@ mod tests {
         assert_eq!(slice[3], 0xFF);
         assert_eq!(slice[4], 0x00);
         assert_eq!(slice[5], 0x00);
+
+        let sp_header = zc::SpHeader::from_slice(slice);
+        assert!(sp_header.is_some());
+        let sp_header = sp_header.unwrap();
+        println!("Header: {:?}", sp_header);
+        assert_eq!(sp_header.version(), 0b000);
+        assert_eq!(sp_header.packet_id_raw(), 0x1FFF);
+        assert_eq!(sp_header.apid(), 0x7FF);
+        assert_eq!(sp_header.ptype(), PacketType::Tc);
+        assert_eq!(sp_header.data_len(), 0);
     }
 }
