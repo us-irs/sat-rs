@@ -1,5 +1,5 @@
 //! [Event][crate::core::events::Event] management and forwarding
-use crate::core::events::{Event, EventRaw, GroupId};
+use crate::events::{Event, EventRaw, GroupId};
 use std::collections::HashMap;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]
@@ -115,8 +115,8 @@ impl<E> EventManager<E> {
 #[cfg(test)]
 mod tests {
     use super::{EventListener, HandlerResult, ReceivesAllEvent};
-    use crate::core::event_man::EventManager;
-    use crate::core::events::{Event, Severity};
+    use crate::event_man::EventManager;
+    use crate::events::{Event, Severity};
     use std::sync::mpsc::{channel, Receiver, SendError, Sender};
     use std::thread;
     use std::time::Duration;
