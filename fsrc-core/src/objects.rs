@@ -10,7 +10,7 @@
 //! ```
 //! use std::any::Any;
 //! use std::error::Error;
-//! use launchpad::core::objects::{ManagedSystemObject, ObjectId, ObjectManager, SystemObject};
+//! use fsrc_core::objects::{ManagedSystemObject, ObjectId, ObjectManager, SystemObject};
 //!
 //! struct ExampleSysObj {
 //!     id: ObjectId,
@@ -125,7 +125,7 @@ impl ObjectManager {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::objects::{ManagedSystemObject, ObjectId, ObjectManager, SystemObject};
+    use crate::objects::{ManagedSystemObject, ObjectId, ObjectManager, SystemObject};
     use std::any::Any;
     use std::error::Error;
     use std::sync::{Arc, Mutex};

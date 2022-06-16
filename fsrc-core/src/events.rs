@@ -95,7 +95,7 @@ impl TryFrom<EventRaw> for Event {
 #[cfg(test)]
 mod tests {
     use super::Event;
-    use crate::core::events::Severity;
+    use crate::events::Severity;
 
     #[test]
     fn test_events() {

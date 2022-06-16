@@ -25,11 +25,10 @@ pub mod zc {
 }
 
 pub mod srd {
-    use crate::sp;
-    use crate::sp::ecss::PusPacket;
-    use crate::sp::srd::SpHeader;
-    use crate::sp::tc::{PusVersion, CRC_CCITT_FALSE};
-    use crate::sp::{CcsdsPacket, PacketError, PacketId, PacketSequenceCtrl, PacketType};
+    use crate::ecss::PusPacket;
+    use crate::srd::SpHeader;
+    use crate::tc::{PusVersion, CRC_CCITT_FALSE};
+    use crate::{CcsdsPacket, PacketError, PacketId, PacketSequenceCtrl, PacketType};
     use serde::{Deserialize, Serialize};
 
     #[derive(PartialEq, Copy, Clone, Serialize, Deserialize)]
@@ -80,7 +79,7 @@ pub mod srd {
         }
 
         pub fn write(&mut self, mut slice: impl AsMut<[u8]>) -> Result<(), PacketError> {
-            let sph_zc = sp::zc::SpHeader::from(self.sph);
+            let sph_zc = crate::zc::SpHeader::from(self.sph);
             if slice.as_mut().len() < 6 {
                 return Err(PacketError::ToBytesSliceTooSmall(6));
             }
@@ -150,8 +149,8 @@ pub mod srd {
 
 #[cfg(test)]
 mod tests {
-    use crate::sp::srd::SpHeader;
-    use crate::sp::tc::srd::PusTc;
+    use crate::srd::SpHeader;
+    use crate::tc::srd::PusTc;
     use postcard::to_stdvec;
 
     #[test]

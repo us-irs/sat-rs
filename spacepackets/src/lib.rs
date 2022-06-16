@@ -234,8 +234,8 @@ pub trait CcsdsPrimaryHeader {
 }
 
 pub mod srd {
-    use crate::sp::{
-        self, CcsdsPacket, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, PacketType,
+    use crate::{
+        CcsdsPacket, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, PacketType,
         SequenceFlags,
     };
 
@@ -327,12 +327,12 @@ pub mod srd {
         }
     }
 
-    sph_from_other!(SpHeader, sp::zc::SpHeader);
+    sph_from_other!(SpHeader, crate::zc::SpHeader);
 }
 
 pub mod zc {
-    use crate::sp::{
-        self, CcsdsPacket, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, VERSION_MASK,
+    use crate::{
+        CcsdsPacket, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, VERSION_MASK,
     };
     use zerocopy::byteorder::NetworkEndian;
     use zerocopy::{AsBytes, FromBytes, Unaligned, U16};
@@ -410,14 +410,13 @@ pub mod zc {
         }
     }
 
-    sph_from_other!(SpHeader, sp::srd::SpHeader);
+    sph_from_other!(SpHeader, crate::srd::SpHeader);
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::sp;
-    use crate::sp::srd::SpHeader;
-    use crate::sp::{zc, CcsdsPacket, PacketId, PacketSequenceCtrl, PacketType, SequenceFlags};
+    use crate::srd::SpHeader;
+    use crate::{zc, CcsdsPacket, PacketId, PacketSequenceCtrl, PacketType, SequenceFlags};
     use postcard::{from_bytes, to_stdvec};
 
     #[test]
@@ -495,7 +494,7 @@ mod tests {
         let sp_header = SpHeader::tc(0x7FF, num::pow(2, 14) - 1).expect("Error creating SP header");
         assert_eq!(sp_header.packet_id.ptype, PacketType::Tc);
         assert!(sp_header.is_tc());
-        let sp_header_zc = sp::zc::SpHeader::from(sp_header);
+        let sp_header_zc = zc::SpHeader::from(sp_header);
         let slice = sp_header_zc.as_bytes();
         assert_eq!(slice.len(), 6);
         assert_eq!(slice[0], 0x1F);

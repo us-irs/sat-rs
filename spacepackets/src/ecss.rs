@@ -1,4 +1,4 @@
-use crate::sp::CcsdsPacket;
+use crate::CcsdsPacket;
 
 pub trait PusPacket: CcsdsPacket {
     fn service(&self) -> u8;
