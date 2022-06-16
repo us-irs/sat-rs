@@ -364,7 +364,7 @@ pub mod zc {
             SpHeader::read_from(slice.as_ref())
         }
 
-        pub fn to_bytes(&self, mut slice: impl AsMut<[u8]>) -> Option<()> {
+        pub fn to_bytes(&self, slice: &mut (impl AsMut<[u8]> + ?Sized)) -> Option<()> {
             self.write_to(slice.as_mut())
         }
     }

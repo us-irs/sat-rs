@@ -1,3 +1,8 @@
+use std::mem::size_of;
+
+pub const PUS_TC_MIN_LEN_WITHOUT_APP_DATA: usize =
+    size_of::<crate::zc::SpHeader>() + size_of::<zc::PusTcDataFieldHeader>();
+
 pub mod zc {
     use crate::ecss::{PusError, PusVersion};
     use crate::tc::srd;
@@ -37,9 +42,10 @@ pub mod zc {
 pub mod srd {
     use crate::ecss::{PusPacket, PusVersion, CRC_CCITT_FALSE};
     use crate::srd::SpHeader;
-    use crate::tc::zc;
     use crate::{CcsdsPacket, PacketError, PacketId, PacketSequenceCtrl, PacketType};
     use serde::{Deserialize, Serialize};
+    use std::mem::size_of;
+    use zerocopy::AsBytes;
 
     #[derive(PartialEq, Copy, Clone, Serialize, Deserialize)]
     pub struct PusTcDataFieldHeader {
@@ -89,31 +95,55 @@ pub mod srd {
             }
         }
 
-        pub fn write(
+        pub fn copy_to_buf(
             &mut self,
             slice: &mut (impl AsMut<[u8]> + ?Sized),
-        ) -> Result<(), PacketError> {
+        ) -> Result<usize, PacketError> {
             let mut_slice = slice.as_mut();
             let mut curr_idx = 0;
             let sph_zc = crate::zc::SpHeader::from(self.sph);
-            if mut_slice.len() < 6 {
-                return Err(PacketError::ToBytesSliceTooSmall(6));
+            let tc_header_len = size_of::<super::zc::PusTcDataFieldHeader>();
+            let mut total_size = super::PUS_TC_MIN_LEN_WITHOUT_APP_DATA;
+            if let Some(app_data) = self.app_data {
+                total_size += app_data.len();
+            };
+            if total_size > mut_slice.len() {
+                return Err(PacketError::ToBytesSliceTooSmall(total_size));
             }
             sph_zc
                 .to_bytes(&mut mut_slice[curr_idx..curr_idx + 6])
                 .ok_or(PacketError::ToBytesZeroCopyError)?;
             curr_idx += 6;
             // The PUS version is hardcoded to PUS C
-            let pus_tc_header = zc::PusTcDataFieldHeader::try_from(self.data_field_header).unwrap();
-            let tc_header_len = std::mem::size_of::<PusTcDataFieldHeader>();
+            let pus_tc_header =
+                super::zc::PusTcDataFieldHeader::try_from(self.data_field_header).unwrap();
+
             pus_tc_header
                 .to_bytes(&mut mut_slice[curr_idx..curr_idx + tc_header_len])
                 .ok_or(PacketError::ToBytesZeroCopyError)?;
             curr_idx += tc_header_len;
             if let Some(app_data) = self.app_data {
                 mut_slice[curr_idx..curr_idx + app_data.len()].copy_from_slice(app_data);
+                curr_idx += app_data.len();
             }
-            Ok(())
+            Ok(curr_idx)
+        }
+
+        pub fn append_to_vec(&mut self, vec: &mut Vec<u8>) -> Result<usize, PacketError> {
+            let sph_zc = crate::zc::SpHeader::from(self.sph);
+            let mut appended_len = super::PUS_TC_MIN_LEN_WITHOUT_APP_DATA;
+            if let Some(app_data) = self.app_data {
+                appended_len += app_data.len();
+            };
+            vec.extend_from_slice(sph_zc.as_bytes());
+            // The PUS version is hardcoded to PUS C
+            let pus_tc_header =
+                super::zc::PusTcDataFieldHeader::try_from(self.data_field_header).unwrap();
+            vec.extend_from_slice(pus_tc_header.as_bytes());
+            if let Some(app_data) = self.app_data {
+                vec.extend_from_slice(app_data);
+            }
+            Ok(appended_len)
         }
     }
     impl CcsdsPacket for PusTc<'_> {
@@ -182,8 +212,20 @@ mod tests {
     #[test]
     fn test_tc() {
         let mut sph = SpHeader::tc(0x42, 12).unwrap();
-        let pus_tc = PusTc::new(&mut sph, 1, 1, None);
+        let mut pus_tc = PusTc::new(&mut sph, 1, 1, None);
         let out = to_stdvec(&pus_tc).unwrap();
         println!("Vector {:#04x?} with length {}", out, out.len());
+
+        let mut test_buf = [0; 32];
+        let size = pus_tc
+            .copy_to_buf(test_buf.as_mut_slice())
+            .expect("Error writing TC to buffer");
+        println!("Test buffer: {:?} with {size} written bytes", test_buf);
+
+        let mut test_vec = Vec::new();
+        let size = pus_tc
+            .append_to_vec(&mut test_vec)
+            .expect("Error writing TC to vector");
+        println!("Test Vector: {:?} with {size} written bytes", test_vec);
     }
 }
