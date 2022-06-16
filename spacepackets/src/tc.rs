@@ -98,7 +98,7 @@ pub mod srd {
             }
         }
 
-        pub fn len(&self) -> usize {
+        pub fn len_packed(&self) -> usize {
             let mut length = super::PUS_TC_MIN_LEN_WITHOUT_APP_DATA;
             if let Some(app_data) = self.app_data {
                 length += app_data.len();
@@ -108,7 +108,8 @@ pub mod srd {
 
         /// Calculate the CCSDS space packet data length field and sets it
         pub fn set_ccsds_data_len(&mut self) {
-            self.sph.data_len = self.len() as u16 - size_of::<crate::zc::SpHeader>() as u16 - 1;
+            self.sph.data_len =
+                self.len_packed() as u16 - size_of::<crate::zc::SpHeader>() as u16 - 1;
         }
 
         pub fn calc_crc16(&mut self) {
@@ -263,7 +264,7 @@ mod tests {
         let _out = to_stdvec(&pus_tc).unwrap();
         let mut test_buf = [0; 32];
         pus_tc.update_packet_fields();
-        assert_eq!(pus_tc.len(), 13);
+        assert_eq!(pus_tc.len_packed(), 13);
         let size = pus_tc
             .copy_to_buf(test_buf.as_mut_slice())
             .expect("Error writing TC to buffer");
