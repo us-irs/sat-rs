@@ -10,6 +10,8 @@ pub enum PacketError {
     ToBytesSliceTooSmall(usize),
     /// The [zerocopy] library failed to write to bytes
     ToBytesZeroCopyError,
+    /// CRC16 needs to be calculated first
+    CrcCalculationMissing,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone)]
@@ -375,17 +377,9 @@ pub mod zc {
             ((self.version_packet_id.get() >> 13) as u8) & 0b111
         }
 
-        fn packet_id_raw(&self) -> u16 {
-            self.version_packet_id.get() & (!VERSION_MASK)
-        }
         fn packet_id(&self) -> PacketId {
             PacketId::from(self.packet_id_raw())
         }
-
-        fn psc_raw(&self) -> u16 {
-            self.psc.get()
-        }
-
         fn psc(&self) -> PacketSequenceCtrl {
             PacketSequenceCtrl::from(self.psc_raw())
         }
@@ -393,6 +387,14 @@ pub mod zc {
         #[inline]
         fn data_len(&self) -> u16 {
             self.data_len.get()
+        }
+
+        fn packet_id_raw(&self) -> u16 {
+            self.version_packet_id.get() & (!VERSION_MASK)
+        }
+
+        fn psc_raw(&self) -> u16 {
+            self.psc.get()
         }
     }
 
