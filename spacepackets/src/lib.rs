@@ -235,8 +235,7 @@ pub trait CcsdsPrimaryHeader {
 
 pub mod srd {
     use crate::{
-        CcsdsPacket, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, PacketType,
-        SequenceFlags,
+        CcsdsPacket, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, PacketType, SequenceFlags,
     };
 
     /// Space Packet Primary Header according to CCSDS 133.0-B-2
@@ -331,9 +330,7 @@ pub mod srd {
 }
 
 pub mod zc {
-    use crate::{
-        CcsdsPacket, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, VERSION_MASK,
-    };
+    use crate::{CcsdsPacket, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, VERSION_MASK};
     use zerocopy::byteorder::NetworkEndian;
     use zerocopy::{AsBytes, FromBytes, Unaligned, U16};
 

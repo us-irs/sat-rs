@@ -1,4 +1,4 @@
-use postcard::to_stdvec;
+use postcard::{from_bytes, to_stdvec};
 use serde::{Deserialize, Serialize};
 use zerocopy::byteorder::{I32, U16};
 use zerocopy::{AsBytes, FromBytes, NetworkEndian, Unaligned};
@@ -18,6 +18,13 @@ struct PostcardTest {
     some_u16: u16,
     some_i32: i32,
     some_float: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct SliceSerTest<'slice> {
+    some_u8: u8,
+    some_u32: u32,
+    some_slice: &'slice [u8],
 }
 
 fn main() {
@@ -40,4 +47,21 @@ fn main() {
     let mut slice = [0; 11];
     sample_hk.write_to(slice.as_mut_slice());
     println!("{:#04x?}", slice);
+
+    let ser_vec;
+    {
+        let test_buf = [0, 1, 2, 3];
+        let test_with_slice = SliceSerTest {
+            some_u8: 12,
+            some_u32: 1,
+            some_slice: test_buf.as_slice(),
+        };
+        ser_vec = to_stdvec(&test_with_slice).unwrap();
+        println!("{:#04x?}", out);
+    }
+
+    {
+        let test_deser: SliceSerTest = from_bytes(ser_vec.as_slice()).unwrap();
+        println!("{:?}", test_deser);
+    }
 }
