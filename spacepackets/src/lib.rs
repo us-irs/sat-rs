@@ -1,4 +1,6 @@
 //! # Space related components including CCSDS and ECSS packet standards
+extern crate core;
+
 use serde::{Deserialize, Serialize};
 pub mod ecss;
 pub mod tc;
@@ -32,7 +34,7 @@ impl TryFrom<u8> for PacketType {
     }
 }
 
-pub fn type_from_packet_id(packet_id: u16) -> PacketType {
+pub fn packet_type_in_raw_packet_id(packet_id: u16) -> PacketType {
     PacketType::try_from((packet_id >> 12) as u8 & 0b1).unwrap()
 }
 
@@ -69,18 +71,16 @@ pub struct PacketId {
 
 impl PacketId {
     pub fn new(ptype: PacketType, sec_header_flag: bool, apid: u16) -> Option<PacketId> {
-        if apid > num::pow(2, 11) - 1 {
-            return None;
-        }
-        Some(PacketId {
+        let mut pid = PacketId {
             ptype,
             sec_header_flag,
-            apid,
-        })
+            apid: 0,
+        };
+        pid.set_apid(apid).then(|| pid)
     }
 
     pub fn set_apid(&mut self, apid: u16) -> bool {
-        if apid > num::pow(2, 11) {
+        if apid > num::pow(2, 11) - 1 {
             return false;
         }
         self.apid = apid;
@@ -114,14 +114,13 @@ pub struct PacketSequenceCtrl {
 
 impl PacketSequenceCtrl {
     pub fn new(seq_flags: SequenceFlags, ssc: u16) -> Option<PacketSequenceCtrl> {
-        if ssc > num::pow(2, 14) - 1 {
-            return None;
-        }
-        Some(PacketSequenceCtrl { seq_flags, ssc })
+        let mut psc = PacketSequenceCtrl { seq_flags, ssc: 0 };
+        psc.set_ssc(ssc).then(|| psc)
     }
     pub fn raw(&self) -> u16 {
         ((self.seq_flags as u16) << 14) | self.ssc
     }
+
     pub fn set_ssc(&mut self, ssc: u16) -> bool {
         if ssc > num::pow(2, 14) - 1 {
             return false;
@@ -267,7 +266,7 @@ pub mod srd {
     }
     impl SpHeader {
         pub fn new(apid: u16, ptype: PacketType, ssc: u16) -> Option<Self> {
-            if ssc > num::pow(2, 14) || apid > num::pow(2, 11) {
+            if ssc > num::pow(2, 14) - 1 || apid > num::pow(2, 11) - 1 {
                 return None;
             }
             let mut header = SpHeader::default();
@@ -415,31 +414,54 @@ pub mod zc {
 #[cfg(test)]
 mod tests {
     use crate::srd::SpHeader;
-    use crate::{zc, CcsdsPacket, PacketId, PacketSequenceCtrl, PacketType, SequenceFlags};
+    use crate::{
+        packet_type_in_raw_packet_id, zc, CcsdsPacket, CcsdsPrimaryHeader, PacketId,
+        PacketSequenceCtrl, PacketType, SequenceFlags,
+    };
     use postcard::{from_bytes, to_stdvec};
 
     #[test]
     fn test_helpers() {
-        let packet_id = PacketId {
-            ptype: PacketType::Tm,
-            sec_header_flag: false,
-            apid: 0x42,
-        };
-        assert_eq!(packet_id.raw(), 0x42);
+        assert_eq!(
+            SequenceFlags::try_from(0b00).expect("SEQ flag creation failed"),
+            SequenceFlags::ContinuationSegment
+        );
+        assert_eq!(
+            SequenceFlags::try_from(0b01).expect("SEQ flag creation failed"),
+            SequenceFlags::FirstSegment
+        );
+        assert_eq!(
+            SequenceFlags::try_from(0b10).expect("SEQ flag creation failed"),
+            SequenceFlags::LastSegment
+        );
+        assert_eq!(
+            SequenceFlags::try_from(0b11).expect("SEQ flag creation failed"),
+            SequenceFlags::Unsegmented
+        );
+        assert!(SequenceFlags::try_from(0b100).is_err());
+        assert!(PacketType::try_from(0b10).is_err());
+        let packet_id =
+            PacketId::new(PacketType::Tm, false, 0x42).expect("Packet ID creation failed");
+        assert_eq!(packet_id.raw(), 0x0042);
         let packet_id_from_raw = PacketId::from(packet_id.raw());
+        assert_eq!(
+            packet_type_in_raw_packet_id(packet_id.raw()),
+            PacketType::Tm
+        );
         assert_eq!(packet_id_from_raw, packet_id);
 
         let packet_id_invalid = PacketId::new(PacketType::Tc, true, 0xFFFF);
         assert!(packet_id_invalid.is_none());
         let packet_id_from_new = PacketId::new(PacketType::Tm, false, 0x42).unwrap();
         assert_eq!(packet_id_from_new, packet_id);
-        let psc = PacketSequenceCtrl {
-            seq_flags: SequenceFlags::ContinuationSegment,
-            ssc: 77,
-        };
+        let mut psc = PacketSequenceCtrl::new(SequenceFlags::ContinuationSegment, 77)
+            .expect("PSC creation failed");
         assert_eq!(psc.raw(), 77);
         let psc_from_raw = PacketSequenceCtrl::from(psc.raw());
         assert_eq!(psc_from_raw, psc);
+        // Fails because SSC is limited to 14 bits
+        assert!(!psc.set_ssc(num::pow(2, 15)));
+        assert_eq!(psc.raw(), 77);
 
         let psc_invalid = PacketSequenceCtrl::new(SequenceFlags::FirstSegment, 0xFFFF);
         assert!(psc_invalid.is_none());
@@ -448,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn test_deser_internally() {
+    fn test_serde_sph() {
         let sp_header = SpHeader::tc(0x42, 12).expect("Error creating SP header");
         assert_eq!(sp_header.version(), 0b000);
         assert!(sp_header.is_tc());
@@ -484,14 +506,33 @@ mod tests {
         assert_eq!(sp_header.psc_raw(), 0xC016);
         assert_eq!(sp_header.data_len(), 36);
         assert_eq!(sp_header.version(), 0b000);
+
+        let from_comp_fields = SpHeader::from_composite_fields(
+            PacketId::new(PacketType::Tc, true, 0x42).unwrap(),
+            PacketSequenceCtrl::new(SequenceFlags::Unsegmented, 0x7).unwrap(),
+            0,
+            None,
+        );
+        assert_eq!(from_comp_fields.ptype(), PacketType::Tc);
+        assert_eq!(from_comp_fields.apid(), 0x42);
+        assert_eq!(from_comp_fields.sec_header_flag(), true);
+        assert_eq!(
+            from_comp_fields.sequence_flags(),
+            SequenceFlags::Unsegmented
+        );
+        assert_eq!(from_comp_fields.ssc(), 0x7);
+        assert_eq!(from_comp_fields.data_len(), 0);
     }
 
     #[test]
-    fn test_deser_zerocopy() {
+    fn test_zc_sph() {
         use zerocopy::AsBytes;
 
         let sp_header = SpHeader::tc(0x7FF, num::pow(2, 14) - 1).expect("Error creating SP header");
-        assert_eq!(sp_header.packet_id.ptype, PacketType::Tc);
+        assert_eq!(sp_header.ptype(), PacketType::Tc);
+        assert_eq!(sp_header.apid(), 0x7FF);
+        assert_eq!(sp_header.data_len(), 0);
+        assert_eq!(sp_header.version(), 0b000);
         assert!(sp_header.is_tc());
         let sp_header_zc = zc::SpHeader::from(sp_header);
         let slice = sp_header_zc.as_bytes();

@@ -46,6 +46,7 @@ pub mod srd {
     use crate::ecss::{PusPacket, PusVersion, CRC_CCITT_FALSE};
     use crate::srd::SpHeader;
     use crate::{CcsdsPacket, PacketError, PacketId, PacketSequenceCtrl, PacketType};
+    use delegate::delegate;
     use serde::{Deserialize, Serialize};
     use std::mem::size_of;
     use zerocopy::AsBytes;
@@ -194,22 +195,15 @@ pub mod srd {
             Ok(appended_len)
         }
     }
+
+    //noinspection RsTraitImplementation
     impl CcsdsPacket for PusTc<'_> {
-        fn version(&self) -> u8 {
-            self.sph.version
-        }
-
-        fn packet_id(&self) -> PacketId {
-            self.sph.packet_id
-        }
-
-        fn psc(&self) -> PacketSequenceCtrl {
-            self.sph.psc
-        }
-
-        fn data_len(&self) -> u16 {
-            self.sph.data_len
-        }
+        delegate!(to self.sph {
+            fn version(&self) -> u8;
+            fn packet_id(&self) -> PacketId;
+            fn psc(&self) -> PacketSequenceCtrl;
+            fn data_len(&self) -> u16;
+        });
     }
 
     impl PusPacket for PusTc<'_> {
