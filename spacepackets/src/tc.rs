@@ -1,6 +1,7 @@
 use std::mem::size_of;
 
 type CrcType = u16;
+
 /// PUS C secondary header length is fixed
 pub const PUC_TC_SECONDARY_HEADER_LEN: usize = size_of::<zc::PusTcDataFieldHeader>();
 pub const PUS_TC_MIN_LEN_WITHOUT_APP_DATA: usize =
@@ -169,7 +170,7 @@ pub mod srd {
                 curr_idx += app_data.len();
             }
             mut_slice[curr_idx..curr_idx + 2]
-                .copy_from_slice(self.crc16.unwrap().to_ne_bytes().as_slice());
+                .copy_from_slice(self.crc16.unwrap().to_be_bytes().as_slice());
             curr_idx += 2;
             Ok(curr_idx)
         }
@@ -191,7 +192,7 @@ pub mod srd {
             if let Some(app_data) = self.app_data {
                 vec.extend_from_slice(app_data);
             }
-            vec.extend_from_slice(self.crc16.unwrap().to_ne_bytes().as_slice());
+            vec.extend_from_slice(self.crc16.unwrap().to_be_bytes().as_slice());
             Ok(appended_len)
         }
     }
@@ -253,8 +254,8 @@ mod tests {
 
     #[test]
     fn test_tc() {
-        let mut sph = SpHeader::tc(0x42, 12).unwrap();
-        let mut pus_tc = PusTc::new(&mut sph, 1, 1, None);
+        let mut sph = SpHeader::tc(0x01, 0).unwrap();
+        let mut pus_tc = PusTc::new(&mut sph, 17, 1, None);
         let _out = to_stdvec(&pus_tc).unwrap();
         let mut test_buf = [0; 32];
         pus_tc.update_packet_fields();

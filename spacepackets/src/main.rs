@@ -42,7 +42,7 @@ fn main() {
         some_bool: true as u8,
         some_u16: U16::from(0x42),
         some_i32: I32::from(-200),
-        some_float: 7.7_f32.to_ne_bytes(),
+        some_float: 7.7_f32.to_be_bytes(),
     };
     let mut slice = [0; 11];
     sample_hk.write_to(slice.as_mut_slice());
