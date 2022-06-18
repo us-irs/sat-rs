@@ -420,12 +420,12 @@ pub mod zc {
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
     use crate::ser::SpHeader;
     use crate::{
         packet_type_in_raw_packet_id, zc, CcsdsPacket, CcsdsPrimaryHeader, PacketId,
         PacketSequenceCtrl, PacketType, SequenceFlags,
     };
+    use alloc::vec;
     use postcard::{from_bytes, to_stdvec};
 
     #[test]

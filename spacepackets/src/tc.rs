@@ -89,7 +89,6 @@ pub mod zc {
 }
 
 pub mod ser {
-    use alloc::vec::Vec;
     use crate::ecss::{PusError, PusPacket, PusVersion, CRC_CCITT_FALSE};
     use crate::ser::SpHeader;
     use crate::tc::{
@@ -97,9 +96,10 @@ pub mod ser {
         PUS_TC_MIN_LEN_WITHOUT_APP_DATA, PUS_VERSION,
     };
     use crate::{zc, CcsdsPacket, PacketError, PacketId, PacketSequenceCtrl, PacketType};
+    use alloc::vec::Vec;
+    use core::mem::size_of;
     use delegate::delegate;
     use serde::{Deserialize, Serialize};
-    use core::mem::size_of;
     use zerocopy::AsBytes;
 
     #[derive(PartialEq, Copy, Clone, Serialize, Deserialize)]
@@ -393,13 +393,13 @@ pub mod ser {
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec::Vec;
     use crate::ecss::PusPacket;
     use crate::ser::SpHeader;
     use crate::tc::ser::PusTc;
     use crate::tc::PusTcSecondaryHeader;
     use crate::tc::ACK_ALL;
     use crate::{CcsdsPacket, PacketType};
+    use alloc::vec::Vec;
     use postcard::to_stdvec;
 
     #[test]
