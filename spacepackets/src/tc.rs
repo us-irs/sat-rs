@@ -1,4 +1,4 @@
-use crate::ecss::{PusPacket, PusVersion};
+use crate::ecss::PusVersion;
 use crate::CCSDS_HEADER_LEN;
 use std::mem::size_of;
 
@@ -28,24 +28,6 @@ pub trait PusTcSecondaryHeader {
     fn service(&self) -> u8;
     fn subservice(&self) -> u8;
     fn source_id(&self) -> u16;
-}
-
-impl<T: PusPacket> PusTcSecondaryHeader for T {
-    fn ack_flags(&self) -> u8 {
-        self.ack_flags()
-    }
-
-    fn service(&self) -> u8 {
-        self.service()
-    }
-
-    fn subservice(&self) -> u8 {
-        self.subservice()
-    }
-
-    fn source_id(&self) -> u16 {
-        self.source_id()
-    }
 }
 
 pub mod zc {
@@ -338,21 +320,20 @@ pub mod srd {
                 PacketError::FromBytesZeroCopyError,
             ))?;
             current_idx += PUC_TC_SECONDARY_HEADER_LEN;
-            let app_data;
-            if current_idx > total_len - 2 {
-                return Err(PusError::RawDataTooShort(raw_data_len));
-            } else if current_idx == total_len - 2 {
-                app_data = None
-            } else {
-                app_data = Some(&slice_ref[current_idx..total_len - 2]);
-            }
             let mut pus_tc = PusTc {
                 sph: SpHeader::from(sph),
                 data_field_header: PusTcDataFieldHeader::try_from(sec_header).unwrap(),
                 raw_data: Some(slice_ref),
-                app_data,
+                app_data: match current_idx {
+                    _ if current_idx == total_len - 2 => None,
+                    _ if current_idx > total_len - 2 => {
+                        return Err(PusError::RawDataTooShort(raw_data_len))
+                    }
+                    _ => Some(&slice_ref[current_idx..total_len - 2]),
+                },
                 crc16: None,
             };
+            pus_tc.crc_from_raw_data()?;
             pus_tc.verify()?;
             Ok((pus_tc, total_len))
         }
@@ -387,8 +368,6 @@ pub mod srd {
         delegate!(to self.data_field_header {
             fn service(&self) -> u8;
             fn subservice(&self) -> u8;
-            fn source_id(&self) -> u16;
-            fn ack_flags(&self) -> u8;
         });
 
         fn user_data(&self) -> Option<&[u8]> {
@@ -399,6 +378,16 @@ pub mod srd {
             self.crc16
         }
     }
+
+    //noinspection RsTraitImplementation
+    impl PusTcSecondaryHeader for PusTc<'_> {
+        delegate!(to self.data_field_header {
+            fn service(&self) -> u8;
+            fn subservice(&self) -> u8;
+            fn source_id(&self) -> u16;
+            fn ack_flags(&self) -> u8;
+        });
+    }
 }
 
 #[cfg(test)]
@@ -406,42 +395,80 @@ mod tests {
     use crate::ecss::PusPacket;
     use crate::srd::SpHeader;
     use crate::tc::srd::PusTc;
+    use crate::tc::PusTcSecondaryHeader;
     use crate::tc::ACK_ALL;
-    use crate::CcsdsPacket;
+    use crate::{CcsdsPacket, PacketType};
     use postcard::to_stdvec;
 
     #[test]
     fn test_tc() {
-        let mut sph = SpHeader::tc(0x01, 0).unwrap();
+        let mut sph = SpHeader::tc(0x01, 0, 0).unwrap();
         let mut pus_tc = PusTc::new(&mut sph, 17, 1, None);
-        verify_test_tc(&pus_tc);
         let _out = to_stdvec(&pus_tc).unwrap();
+        assert_eq!(pus_tc.crc16(), None);
         let mut test_buf: [u8; 32] = [0; 32];
         pus_tc.update_packet_fields();
+        verify_test_tc(&pus_tc);
         assert_eq!(pus_tc.len_packed(), 13);
         let size = pus_tc
             .copy_to_buf(test_buf.as_mut_slice())
             .expect("Error writing TC to buffer");
-        let (tc_from_raw, sz) = PusTc::new_from_raw_slice(&test_buf)
+        assert_eq!(size, 13);
+        let (tc_from_raw, mut size) = PusTc::new_from_raw_slice(&test_buf)
             .expect("Creating PUS TC struct from raw buffer failed");
-        assert_eq!(sz, 13);
+        assert_eq!(size, 13);
         verify_test_tc(&tc_from_raw);
-        println!("Test buffer: {:02x?} with {size} written bytes", test_buf);
+        verify_test_tc_raw(PacketType::Tm, &test_buf);
 
         let mut test_vec = Vec::new();
-        let size = pus_tc
+        size = pus_tc
             .append_to_vec(&mut test_vec)
             .expect("Error writing TC to vector");
-        println!("Test Vector: {:02x?} with {size} written bytes", test_vec);
+        assert_eq!(size, 13);
+        assert_eq!(&test_buf[0..pus_tc.len_packed()], test_vec.as_slice());
+        verify_test_tc_raw(PacketType::Tm, &test_vec.as_slice());
     }
 
     fn verify_test_tc(tc: &PusTc) {
-        assert_eq!(tc.service(), 17);
-        assert_eq!(tc.subservice(), 1);
+        assert_eq!(PusPacket::service(tc), 17);
+        assert_eq!(PusPacket::subservice(tc), 1);
         assert_eq!(tc.user_data(), None);
         assert_eq!(tc.source_id(), 0);
         assert_eq!(tc.apid(), 0x01);
         assert_eq!(tc.ack_flags(), ACK_ALL);
-        assert_eq!(tc.crc16(), None);
+        assert_eq!(tc.sph, SpHeader::tc(0x01, 0, 6).unwrap());
+    }
+
+    fn verify_test_tc_raw(ptype: PacketType, slice: &impl AsRef<[u8]>) {
+        // Reference comparison implementation:
+        // https://github.com/robamu-org/py-spacepackets/blob/main/examples/example_pus.py
+        let slice = slice.as_ref();
+        // 0x1801 is the generic
+        if ptype == PacketType::Tm {
+            assert_eq!(slice[0], 0x18);
+        } else {
+            assert_eq!(slice[0], 0x08);
+        }
+        // APID is 0x01
+        assert_eq!(slice[1], 0x01);
+        // Unsegmented packets
+        assert_eq!(slice[2], 0xc0);
+        // Sequence count 0
+        assert_eq!(slice[3], 0x00);
+        assert_eq!(slice[4], 0x00);
+        // Space data length of 6 equals total packet length of 13
+        assert_eq!(slice[5], 0x06);
+        // PUS Version C 0b0010 and ACK flags 0b1111
+        assert_eq!(slice[6], 0x2f);
+        // Service 17
+        assert_eq!(slice[7], 0x11);
+        // Subservice 1
+        assert_eq!(slice[8], 0x01);
+        // Source ID 0
+        assert_eq!(slice[9], 0x00);
+        assert_eq!(slice[10], 0x00);
+        // CRC first byte assuming big endian format is 0x16 and 0x1d
+        assert_eq!(slice[11], 0x16);
+        assert_eq!(slice[12], 0x1d);
     }
 }

@@ -268,7 +268,7 @@ pub mod srd {
         }
     }
     impl SpHeader {
-        pub fn new(apid: u16, ptype: PacketType, ssc: u16) -> Option<Self> {
+        pub fn new(apid: u16, ptype: PacketType, ssc: u16, data_len: u16) -> Option<Self> {
             if ssc > num::pow(2, 14) - 1 || apid > num::pow(2, 11) - 1 {
                 return None;
             }
@@ -276,15 +276,16 @@ pub mod srd {
             header.packet_id.apid = apid;
             header.packet_id.ptype = ptype;
             header.psc.ssc = ssc;
+            header.data_len = data_len;
             Some(header)
         }
 
-        pub fn tm(apid: u16, ssc: u16) -> Option<Self> {
-            Self::new(apid, PacketType::Tm, ssc)
+        pub fn tm(apid: u16, ssc: u16, data_len: u16) -> Option<Self> {
+            Self::new(apid, PacketType::Tm, ssc, data_len)
         }
 
-        pub fn tc(apid: u16, ssc: u16) -> Option<Self> {
-            Self::new(apid, PacketType::Tc, ssc)
+        pub fn tc(apid: u16, ssc: u16, data_len: u16) -> Option<Self> {
+            Self::new(apid, PacketType::Tc, ssc, data_len)
         }
     }
 
@@ -474,7 +475,7 @@ mod tests {
 
     #[test]
     fn test_serde_sph() {
-        let sp_header = SpHeader::tc(0x42, 12).expect("Error creating SP header");
+        let sp_header = SpHeader::tc(0x42, 12, 0).expect("Error creating SP header");
         assert_eq!(sp_header.ccsds_version(), 0b000);
         assert!(sp_header.is_tc());
         assert!(sp_header.sec_header_flag());
@@ -496,8 +497,7 @@ mod tests {
         assert_eq!(sp_header.ccsds_version(), 0b000);
         assert_eq!(sp_header.data_len, 0);
 
-        let mut sp_header = SpHeader::tm(0x7, 22).expect("Error creating SP header");
-        sp_header.data_len = 36;
+        let sp_header = SpHeader::tm(0x7, 22, 36).expect("Error creating SP header");
         assert_eq!(sp_header.ccsds_version(), 0b000);
         assert!(sp_header.is_tm());
         assert!(sp_header.sec_header_flag());
@@ -531,7 +531,8 @@ mod tests {
     fn test_zc_sph() {
         use zerocopy::AsBytes;
 
-        let sp_header = SpHeader::tc(0x7FF, num::pow(2, 14) - 1).expect("Error creating SP header");
+        let sp_header =
+            SpHeader::tc(0x7FF, num::pow(2, 14) - 1, 0).expect("Error creating SP header");
         assert_eq!(sp_header.ptype(), PacketType::Tc);
         assert_eq!(sp_header.apid(), 0x7FF);
         assert_eq!(sp_header.data_len(), 0);
@@ -572,7 +573,6 @@ mod tests {
         let sp_header = zc::SpHeader::from_bytes(slice);
         assert!(sp_header.is_some());
         let sp_header = sp_header.unwrap();
-        println!("Header: {:?}", sp_header);
         assert_eq!(sp_header.ccsds_version(), 0b000);
         assert_eq!(sp_header.packet_id_raw(), 0x1FFF);
         assert_eq!(sp_header.apid(), 0x7FF);
