@@ -1,7 +1,7 @@
 //! # Space related components including CCSDS and ECSS packet standards
-extern crate core;
-
+use crate::ecss::CCSDS_HEADER_LEN;
 use serde::{Deserialize, Serialize};
+
 pub mod ecss;
 pub mod tc;
 pub mod tm;
@@ -12,8 +12,7 @@ pub enum PacketError {
     ToBytesSliceTooSmall(usize),
     /// The [zerocopy] library failed to write to bytes
     ToBytesZeroCopyError,
-    /// CRC16 needs to be calculated first
-    CrcCalculationMissing,
+    FromBytesZeroCopyError,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone)]
@@ -151,7 +150,7 @@ macro_rules! sph_from_other {
                     other.packet_id(),
                     other.psc(),
                     other.data_len(),
-                    Some(other.version()),
+                    Some(other.ccsds_version()),
                 )
             }
         }
@@ -163,12 +162,16 @@ const VERSION_MASK: u16 = 0xE000;
 
 /// Generic trait to access fields of a CCSDS space packet header according to CCSDS 133.0-B-2
 pub trait CcsdsPacket {
-    fn version(&self) -> u8;
+    fn ccsds_version(&self) -> u8;
     fn packet_id(&self) -> PacketId;
     fn psc(&self) -> PacketSequenceCtrl;
 
     /// Retrieve data length field
     fn data_len(&self) -> u16;
+    /// Retrieve the total packet size based on the data length field
+    fn total_len(&self) -> usize {
+        usize::from(self.data_len()) + CCSDS_HEADER_LEN + 1
+    }
 
     /// Retrieve 13 bit Packet Identification field. Can usually be retrieved with a bitwise AND
     /// of the first 2 bytes with 0x1FFF
@@ -287,7 +290,7 @@ pub mod srd {
 
     impl CcsdsPacket for SpHeader {
         #[inline]
-        fn version(&self) -> u8 {
+        fn ccsds_version(&self) -> u8 {
             self.version
         }
 
@@ -361,7 +364,7 @@ pub mod zc {
             }
         }
 
-        pub fn from_bytes(slice: impl AsRef<[u8]>) -> Option<Self> {
+        pub fn from_bytes(slice: &(impl AsRef<[u8]> + ?Sized)) -> Option<Self> {
             SpHeader::read_from(slice.as_ref())
         }
 
@@ -372,7 +375,7 @@ pub mod zc {
 
     impl CcsdsPacket for SpHeader {
         #[inline]
-        fn version(&self) -> u8 {
+        fn ccsds_version(&self) -> u8 {
             ((self.version_packet_id.get() >> 13) as u8) & 0b111
         }
 
@@ -472,7 +475,7 @@ mod tests {
     #[test]
     fn test_serde_sph() {
         let sp_header = SpHeader::tc(0x42, 12).expect("Error creating SP header");
-        assert_eq!(sp_header.version(), 0b000);
+        assert_eq!(sp_header.ccsds_version(), 0b000);
         assert!(sp_header.is_tc());
         assert!(sp_header.sec_header_flag());
         assert_eq!(sp_header.ptype(), PacketType::Tc);
@@ -490,12 +493,12 @@ mod tests {
         assert_eq!(sp_header.sequence_flags(), SequenceFlags::Unsegmented);
         assert_eq!(sp_header.packet_id_raw(), 0x1842);
         assert_eq!(sp_header.psc_raw(), 0xC00C);
-        assert_eq!(sp_header.version(), 0b000);
+        assert_eq!(sp_header.ccsds_version(), 0b000);
         assert_eq!(sp_header.data_len, 0);
 
         let mut sp_header = SpHeader::tm(0x7, 22).expect("Error creating SP header");
         sp_header.data_len = 36;
-        assert_eq!(sp_header.version(), 0b000);
+        assert_eq!(sp_header.ccsds_version(), 0b000);
         assert!(sp_header.is_tm());
         assert!(sp_header.sec_header_flag());
         assert_eq!(sp_header.ptype(), PacketType::Tm);
@@ -505,7 +508,7 @@ mod tests {
         assert_eq!(sp_header.packet_id_raw(), 0x0807);
         assert_eq!(sp_header.psc_raw(), 0xC016);
         assert_eq!(sp_header.data_len(), 36);
-        assert_eq!(sp_header.version(), 0b000);
+        assert_eq!(sp_header.ccsds_version(), 0b000);
 
         let from_comp_fields = SpHeader::from_composite_fields(
             PacketId::new(PacketType::Tc, true, 0x42).unwrap(),
@@ -532,7 +535,7 @@ mod tests {
         assert_eq!(sp_header.ptype(), PacketType::Tc);
         assert_eq!(sp_header.apid(), 0x7FF);
         assert_eq!(sp_header.data_len(), 0);
-        assert_eq!(sp_header.version(), 0b000);
+        assert_eq!(sp_header.ccsds_version(), 0b000);
         assert!(sp_header.is_tc());
         let sp_header_zc = zc::SpHeader::from(sp_header);
         let slice = sp_header_zc.as_bytes();
@@ -570,7 +573,7 @@ mod tests {
         assert!(sp_header.is_some());
         let sp_header = sp_header.unwrap();
         println!("Header: {:?}", sp_header);
-        assert_eq!(sp_header.version(), 0b000);
+        assert_eq!(sp_header.ccsds_version(), 0b000);
         assert_eq!(sp_header.packet_id_raw(), 0x1FFF);
         assert_eq!(sp_header.apid(), 0x7FF);
         assert_eq!(sp_header.ptype(), PacketType::Tc);

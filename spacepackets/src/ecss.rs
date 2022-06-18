@@ -1,9 +1,11 @@
-use crate::CcsdsPacket;
+use crate::{CcsdsPacket, PacketError};
 use crc::{Crc, CRC_16_IBM_3740};
 use serde::{Deserialize, Serialize};
+use std::mem::size_of;
 
 /// CRC algorithm used by the PUS standard
 pub const CRC_CCITT_FALSE: Crc<u16> = Crc::<u16>::new(&CRC_16_IBM_3740);
+pub const CCSDS_HEADER_LEN: usize = size_of::<crate::zc::SpHeader>();
 
 /// All PUS versions. Only PUS C is supported by this library
 #[derive(PartialEq, Copy, Clone, Serialize, Deserialize, Debug)]
@@ -16,9 +18,17 @@ pub enum PusVersion {
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum PusError {
     VersionNotSupported(PusVersion),
+    IncorrectCrc(u16),
+    RawDataTooShort(usize),
+    NoRawData,
+    /// CRC16 needs to be calculated first
+    CrcCalculationMissing,
+    OtherPacketError(PacketError),
 }
 
 pub trait PusPacket: CcsdsPacket {
+    const PUS_VERSION: PusVersion = PusVersion::PusC;
+
     fn service(&self) -> u8;
     fn subservice(&self) -> u8;
     fn source_id(&self) -> u16;
@@ -26,6 +36,4 @@ pub trait PusPacket: CcsdsPacket {
 
     fn user_data(&self) -> Option<&[u8]>;
     fn crc16(&self) -> Option<u16>;
-    /// Verify that the packet is valid. PUS packets have a CRC16 checksum to do this
-    fn verify(&mut self) -> bool;
 }
