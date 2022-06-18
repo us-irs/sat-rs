@@ -518,7 +518,7 @@ mod tests {
         );
         assert_eq!(from_comp_fields.ptype(), PacketType::Tc);
         assert_eq!(from_comp_fields.apid(), 0x42);
-        assert_eq!(from_comp_fields.sec_header_flag(), true);
+        assert!(from_comp_fields.sec_header_flag());
         assert_eq!(
             from_comp_fields.sequence_flags(),
             SequenceFlags::Unsegmented
