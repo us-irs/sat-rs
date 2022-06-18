@@ -1,7 +1,7 @@
 use crate::{CcsdsPacket, PacketError};
 use crc::{Crc, CRC_16_IBM_3740};
 use serde::{Deserialize, Serialize};
-use std::mem::size_of;
+use core::mem::size_of;
 
 /// CRC algorithm used by the PUS standard
 pub const CRC_CCITT_FALSE: Crc<u16> = Crc::<u16>::new(&CRC_16_IBM_3740);

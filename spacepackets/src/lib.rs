@@ -1,4 +1,7 @@
 //! # Space related components including CCSDS and ECSS packet standards
+#![no_std]
+extern crate alloc;
+
 use crate::ecss::CCSDS_HEADER_LEN;
 use serde::{Deserialize, Serialize};
 
@@ -237,7 +240,7 @@ pub trait CcsdsPrimaryHeader {
     ) -> Self;
 }
 
-pub mod srd {
+pub mod ser {
     use crate::{
         CcsdsPacket, CcsdsPrimaryHeader, PacketId, PacketSequenceCtrl, PacketType, SequenceFlags,
     };
@@ -412,12 +415,13 @@ pub mod zc {
         }
     }
 
-    sph_from_other!(SpHeader, crate::srd::SpHeader);
+    sph_from_other!(SpHeader, crate::ser::SpHeader);
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::srd::SpHeader;
+    use alloc::vec;
+    use crate::ser::SpHeader;
     use crate::{
         packet_type_in_raw_packet_id, zc, CcsdsPacket, CcsdsPrimaryHeader, PacketId,
         PacketSequenceCtrl, PacketType, SequenceFlags,

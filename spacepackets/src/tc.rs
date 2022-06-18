@@ -1,6 +1,6 @@
 use crate::ecss::PusVersion;
 use crate::CCSDS_HEADER_LEN;
-use std::mem::size_of;
+use core::mem::size_of;
 
 type CrcType = u16;
 
@@ -32,7 +32,7 @@ pub trait PusTcSecondaryHeader {
 
 pub mod zc {
     use crate::ecss::{PusError, PusVersion};
-    use crate::tc::{srd, PusTcSecondaryHeader};
+    use crate::tc::{ser, PusTcSecondaryHeader};
     use zerocopy::{AsBytes, FromBytes, NetworkEndian, Unaligned, U16};
 
     #[derive(FromBytes, AsBytes, Unaligned)]
@@ -44,9 +44,9 @@ pub mod zc {
         source_id: U16<NetworkEndian>,
     }
 
-    impl TryFrom<srd::PusTcDataFieldHeader> for PusTcDataFieldHeader {
+    impl TryFrom<ser::PusTcDataFieldHeader> for PusTcDataFieldHeader {
         type Error = PusError;
-        fn try_from(value: srd::PusTcDataFieldHeader) -> Result<Self, Self::Error> {
+        fn try_from(value: ser::PusTcDataFieldHeader) -> Result<Self, Self::Error> {
             if value.version != PusVersion::PusC {
                 return Err(PusError::VersionNotSupported(value.version));
             }
@@ -88,9 +88,10 @@ pub mod zc {
     }
 }
 
-pub mod srd {
+pub mod ser {
+    use alloc::vec::Vec;
     use crate::ecss::{PusError, PusPacket, PusVersion, CRC_CCITT_FALSE};
-    use crate::srd::SpHeader;
+    use crate::ser::SpHeader;
     use crate::tc::{
         PusTcSecondaryHeader, ACK_ALL, PUC_TC_SECONDARY_HEADER_LEN,
         PUS_TC_MIN_LEN_WITHOUT_APP_DATA, PUS_VERSION,
@@ -98,7 +99,7 @@ pub mod srd {
     use crate::{zc, CcsdsPacket, PacketError, PacketId, PacketSequenceCtrl, PacketType};
     use delegate::delegate;
     use serde::{Deserialize, Serialize};
-    use std::mem::size_of;
+    use core::mem::size_of;
     use zerocopy::AsBytes;
 
     #[derive(PartialEq, Copy, Clone, Serialize, Deserialize)]
@@ -392,9 +393,10 @@ pub mod srd {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
     use crate::ecss::PusPacket;
-    use crate::srd::SpHeader;
-    use crate::tc::srd::PusTc;
+    use crate::ser::SpHeader;
+    use crate::tc::ser::PusTc;
     use crate::tc::PusTcSecondaryHeader;
     use crate::tc::ACK_ALL;
     use crate::{CcsdsPacket, PacketType};
