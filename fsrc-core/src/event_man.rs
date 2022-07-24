@@ -1,4 +1,4 @@
-//! [Event][crate::core::events::Event] management and forwarding
+//! [Event][crate::events::Event] management and forwarding
 use crate::events::{Event, EventRaw, GroupId};
 use std::collections::HashMap;
 
