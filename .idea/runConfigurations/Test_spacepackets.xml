@@ -1,10 +1,10 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Test spacepackets" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-    <option name="command" value="test -p spacepackets --all-features" />
+    <option name="command" value="test -p spacepackets" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <option name="channel" value="DEFAULT" />
     <option name="requiredFeatures" value="true" />
-    <option name="allFeatures" value="false" />
+    <option name="allFeatures" value="true" />
     <option name="emulateTerminal" value="false" />
     <option name="withSudo" value="false" />
     <option name="backtrace" value="SHORT" />
