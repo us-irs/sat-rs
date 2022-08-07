@@ -211,6 +211,7 @@ version = "0.1.0"
 dependencies = [
  "bus",
  "num",
+ "spacepackets",
  "thiserror",
 ]
 

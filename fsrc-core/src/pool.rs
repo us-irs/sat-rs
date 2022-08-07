@@ -171,7 +171,7 @@ impl LocalPool {
     /// Add new data to the pool. It will attempt to reserve a memory block with the appropriate
     /// size and then copy the given data to the block. Yields a [StoreAddr] which can be used
     /// to access the data stored in the pool
-    pub fn add(&mut self, data: impl AsRef<[u8]>) -> Result<StoreAddr, StoreError> {
+    pub fn add(&mut self, data: &[u8]) -> Result<StoreAddr, StoreError> {
         let data_len = data.as_ref().len();
         if data_len > Self::MAX_SIZE {
             return Err(StoreError::DataTooLarge(data_len));
