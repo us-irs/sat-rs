@@ -348,7 +348,7 @@ mod tests {
         for (i, val) in test_buf.iter_mut().enumerate() {
             *val = i as u8;
         }
-        let res = local_pool.add(test_buf);
+        let res = local_pool.add(&test_buf);
         assert!(res.is_ok());
         let addr = res.unwrap();
         // Only the second subpool has enough storage and only one bucket
@@ -361,7 +361,7 @@ mod tests {
         );
 
         // The subpool is now full and the call should fail accordingly
-        let res = local_pool.add(test_buf);
+        let res = local_pool.add(&test_buf);
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert!(matches!(err, StoreError::StoreFull { .. }));
@@ -445,7 +445,7 @@ mod tests {
             ));
 
             let data_too_large = [0; 20];
-            let res = local_pool.add(data_too_large);
+            let res = local_pool.add(&data_too_large);
             assert!(res.is_err());
             let err = res.unwrap_err();
             assert_eq!(err, StoreError::DataTooLarge(20));

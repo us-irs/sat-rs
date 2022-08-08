@@ -4,13 +4,26 @@ use crate::tmtc::{
 };
 use spacepackets::{CcsdsPacket, PacketError, SpHeader};
 
-pub trait ApidHandler {
-    fn get_apid_handler(&self, apid: u16) -> Box<dyn ReceivesCcsds>;
+pub trait HandlesPacketForApid {
+    fn get_apid_handler(&mut self, apid: u16) -> Option<&mut Box<dyn ReceivesCcsds>>;
+    fn handle_unknown_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]);
 }
 
-struct CcsdsDistributor {
+pub struct CcsdsDistributor {
+    apid_handlers: Box<dyn HandlesPacketForApid>,
     error_handler: Box<dyn FsrcErrorHandler>,
-    apid_handlers: Box<dyn ApidHandler>,
+}
+
+impl CcsdsDistributor {
+    pub fn new(
+        apid_handlers: Box<dyn HandlesPacketForApid>,
+        error_handler: Box<dyn FsrcErrorHandler>,
+    ) -> Self {
+        CcsdsDistributor {
+            apid_handlers,
+            error_handler,
+        }
+    }
 }
 
 impl ReceivesTc for CcsdsDistributor {
@@ -36,7 +49,14 @@ impl ReceivesTc for CcsdsDistributor {
                 return;
             }
         };
-        let mut handler = self.apid_handlers.get_apid_handler(sp_header.apid());
-        handler.pass_ccsds(&sp_header, tm_raw).unwrap();
+        let apid = sp_header.apid();
+        match self.apid_handlers.get_apid_handler(apid) {
+            None => {
+                self.apid_handlers.handle_unknown_apid(&sp_header, tm_raw);
+            }
+            Some(handler) => {
+                handler.pass_ccsds(&sp_header, tm_raw).ok();
+            }
+        }
     }
 }

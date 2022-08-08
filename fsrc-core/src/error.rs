@@ -6,7 +6,7 @@ pub struct FsrcErrorRaw {
     pub group_id: u8,
     pub unique_id: u8,
     pub group_name: &'static str,
-    pub error_info: &'static str,
+    pub info: &'static str,
 }
 
 pub trait FsrcErrorHandler {
@@ -19,6 +19,22 @@ pub trait FsrcErrorHandler {
     }
 }
 
+impl FsrcErrorRaw {
+    pub const fn new(
+        group_id: u8,
+        unique_id: u8,
+        group_name: &'static str,
+        info: &'static str,
+    ) -> Self {
+        FsrcErrorRaw {
+            group_id,
+            unique_id,
+            group_name,
+            info,
+        }
+    }
+}
+
 pub struct SimpleStdErrorHandler {}
 
 #[cfg(feature = "use_std")]
@@ -26,7 +42,7 @@ impl FsrcErrorHandler for SimpleStdErrorHandler {
     fn error(&mut self, e: FsrcErrorRaw) {
         println!(
             "Received error from group {} with ID ({},{}): {}",
-            e.group_name, e.group_id, e.unique_id, e.error_info
+            e.group_name, e.group_id, e.unique_id, e.info
         );
     }
 }
