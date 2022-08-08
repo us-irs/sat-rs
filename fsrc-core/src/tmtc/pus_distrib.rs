@@ -1,3 +1,4 @@
+use crate::error::FsrcErrorHandler;
 use crate::tmtc::{ReceivesCcsds, ReceivesPus, ReceivesTc};
 use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
@@ -9,6 +10,7 @@ pub trait PusServiceProvider {
 }
 
 pub struct PusDistributor {
+    error_handler: Box<dyn FsrcErrorHandler>,
     service_provider: Box<dyn PusServiceProvider>,
 }
 
