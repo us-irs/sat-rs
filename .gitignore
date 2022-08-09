@@ -2,3 +2,5 @@
 
 /.idea/*
 !/.idea/runConfigurations
+.vscode/*
+.gitignore
