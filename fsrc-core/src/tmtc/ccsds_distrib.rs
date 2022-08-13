@@ -13,7 +13,7 @@ pub struct CcsdsDistributor {
     error_handler: Box<dyn FsrcErrorHandler>,
 }
 
-impl<'a> CcsdsDistributor {
+impl CcsdsDistributor {
     pub fn new(
         apid_handler: Box<dyn HandlesPacketForApid>,
         error_handler: Box<dyn FsrcErrorHandler>,
