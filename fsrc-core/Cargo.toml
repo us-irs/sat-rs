@@ -11,6 +11,11 @@ bus = "2.2.3"
 num = "0.4"
 spacepackets = { path = "../spacepackets"}
 
+[dev-dependencies]
+postcard = { version = "1.0.1", features = ["use-std"] }
+serde = "1.0.143"
+zerocopy = "0.6.1"
+
 [features]
 default = ["use_std"]
 use_std = []

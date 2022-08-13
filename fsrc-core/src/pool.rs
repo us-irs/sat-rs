@@ -23,7 +23,7 @@
 //!     // Add new data to the pool
 //!     let mut example_data = [0; 4];
 //!     example_data[0] = 42;
-//!     let res = local_pool.add(example_data);
+//!     let res = local_pool.add(&example_data);
 //!     assert!(res.is_ok());
 //!     addr = res.unwrap();
 //! }

@@ -1,12 +1,12 @@
 use crate::error::FsrcErrorHandler;
-use crate::tmtc::{ReceivesCcsds, ReceivesPus, ReceivesTc};
+use crate::tmtc::{ReceivesCcsdsTc, ReceivesPusTc, ReceivesTc};
 use spacepackets::ecss::{PusError, PusPacket};
 use spacepackets::tc::PusTc;
 use spacepackets::{CcsdsPacket, PacketError, SpHeader};
 
 pub trait PusServiceProvider {
     fn get_apid(&self, service: u8) -> u16;
-    fn get_service_handler(&self, service: u8, subservice: u8) -> Box<dyn ReceivesPus>;
+    fn get_service_handler(&self, service: u8, subservice: u8) -> Box<dyn ReceivesPusTc>;
 }
 
 pub struct PusDistributor {
@@ -22,7 +22,7 @@ impl ReceivesTc for PusDistributor {
     }
 }
 
-impl ReceivesCcsds for PusDistributor {
+impl ReceivesCcsdsTc for PusDistributor {
     fn pass_ccsds(&mut self, _header: &SpHeader, tm_raw: &[u8]) -> Result<(), PacketError> {
         // TODO: Better error handling
         let (tc, _) = match PusTc::new_from_raw_slice(tm_raw) {

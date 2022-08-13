@@ -125,6 +125,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cobs"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
+
+[[package]]
 name = "cortex-m"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -211,8 +217,11 @@ version = "0.1.0"
 dependencies = [
  "bus",
  "num",
+ "postcard 1.0.1",
+ "serde",
  "spacepackets",
  "thiserror",
+ "zerocopy",
 ]
 
 [[package]]
@@ -432,6 +441,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "postcard"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41f5465c5e5a38e04552d8fb53ebcf4f58124ab3bbd0c02add043b33f82792e5"
+dependencies = [
+ "cobs",
+ "heapless",
+ "serde",
+]
+
+[[package]]
 name = "postcard-cobs"
 version = "0.1.5-pre"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -546,18 +566,18 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "serde"
-version = "1.0.142"
+version = "1.0.143"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e590c437916fb6b221e1d00df6e3294f3fccd70ca7e92541c475d6ed6ef5fee2"
+checksum = "53e8e5d5b70924f74ff5c6d64d9a5acd91422117c60f48c4e07855238a254553"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.142"
+version = "1.0.143"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34b5b8d809babe02f538c2cfec6f2c1ed10804c0e5a6a041a049a4f5588ccc2e"
+checksum = "d3d8e8de557aee63c26b85b947f5e59b690d0454c753f3adeb5cd7835ab88391"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -578,7 +598,7 @@ dependencies = [
  "crc",
  "delegate",
  "num",
- "postcard",
+ "postcard 0.7.3",
  "serde",
  "zerocopy",
 ]
