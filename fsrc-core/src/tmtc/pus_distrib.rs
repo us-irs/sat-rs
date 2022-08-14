@@ -1,54 +1,101 @@
-use crate::any::AsAny;
+//! ECSS PUS packet routing components.
+//!
+//! The routing components consist of two core components:
+//!  1. [PusDistributor] component which dispatches received packets to a user-provided handler.
+//!  2. [PusServiceProvider] trait which should be implemented by the user-provided PUS packet
+//!     handler.
+//!
+//! The [PusDistributor] implements the [ReceivesCcsdsTc] and [ReceivesTc] trait which allows to
+//! pass raw or CCSDS packets to it. Upon receiving a packet, it performs the following steps:
+//!
+//! 1. It tries to identify the target Application Process Identifier (APID) based on the
+//!    respective CCSDS space packet header field. If that process fails, the error
+//!    will be reported to the provided [FsrcErrorHandler] instance.
+//! 2. If a valid APID is found and matches one of the APIDs provided by
+//!    [ApidPacketHandler::valid_apids], it will pass the packet to the user provided
+//!    [ApidPacketHandler::handle_known_apid] function. If no valid APID is found, the packet
+//!    will be passed to the [ApidPacketHandler::handle_unknown_apid] function.
 use crate::error::FsrcErrorHandler;
-use crate::tmtc::{ReceivesCcsdsTc, ReceivesTc};
+use crate::tmtc::{ReceivesCcsdsTc, ReceivesEcssPusTc, ReceivesTc};
+use downcast_rs::Downcast;
 use spacepackets::ecss::{PusError, PusPacket};
 use spacepackets::tc::PusTc;
-use spacepackets::{CcsdsPacket, PacketError, SpHeader};
+use spacepackets::{PacketError, SpHeader};
 
-pub trait PusServiceProvider: AsAny {
-    fn handle_pus_tc_packet(&mut self, service: u8, apid: u16, pus_tc: &PusTc);
+pub trait PusServiceProvider: Downcast {
+    type Error;
+    fn handle_pus_tc_packet(
+        &mut self,
+        service: u8,
+        header: &SpHeader,
+        pus_tc: &PusTc,
+    ) -> Result<(), Self::Error>;
+}
+downcast_rs::impl_downcast!(PusServiceProvider assoc Error);
+
+pub struct PusDistributor<E> {
+    pub service_provider: Box<dyn PusServiceProvider<Error = E>>,
+    pub error_handler: Box<dyn FsrcErrorHandler>,
 }
 
-pub struct PusDistributor {
-    pub service_provider: Box<dyn PusServiceProvider>,
-    error_handler: Box<dyn FsrcErrorHandler>,
+pub enum PusDistribError<E> {
+    CustomError(E),
+    PusError(PusError),
 }
 
-impl ReceivesTc for PusDistributor {
-    fn pass_tc(&mut self, tm_raw: &[u8]) {
+impl<E> ReceivesTc for PusDistributor<E> {
+    type Error = PusDistribError<E>;
+    fn pass_tc(&mut self, tm_raw: &[u8]) -> Result<(), Self::Error> {
         // Convert to ccsds and call pass_ccsds
         match SpHeader::from_raw_slice(tm_raw) {
-            Ok(sp_header) => {
-                self.pass_ccsds(&sp_header, tm_raw).unwrap();
-            }
+            Ok(sp_header) => self.pass_ccsds(&sp_header, tm_raw),
             Err(error) => {
                 // TODO: Error handling
+                match error {
+                    PacketError::ToBytesSliceTooSmall(_) => {
+                        //self.error_handler.error()
+                    }
+                    PacketError::FromBytesSliceTooSmall(_) => {}
+                    PacketError::ToBytesZeroCopyError => {}
+                    PacketError::FromBytesZeroCopyError => {}
+                }
+                Err(PusDistribError::PusError(PusError::PacketError(error)))
             }
         }
     }
 }
 
-impl ReceivesCcsdsTc for PusDistributor {
-    fn pass_ccsds(&mut self, _header: &SpHeader, tm_raw: &[u8]) -> Result<(), PacketError> {
+impl<E> ReceivesCcsdsTc for PusDistributor<E> {
+    type Error = PusDistribError<E>;
+    fn pass_ccsds(&mut self, header: &SpHeader, tm_raw: &[u8]) -> Result<(), Self::Error> {
         // TODO: Better error handling
         let (tc, _) = match PusTc::new_from_raw_slice(tm_raw) {
             Ok(tuple) => tuple,
-            Err(e) => {
-                match e {
-                    PusError::VersionNotSupported(_) => {}
-                    PusError::IncorrectCrc(_) => {}
-                    PusError::RawDataTooShort(_) => {}
-                    PusError::NoRawData => {}
-                    PusError::CrcCalculationMissing => {}
-                    PusError::PacketError(_) => {}
-                }
-                return Ok(());
-            }
+            Err(e) => return Err(PusDistribError::PusError(e)),
         };
 
         self.service_provider
-            .handle_pus_tc_packet(tc.service(), tc.apid(), &tc);
-        Ok(())
+            .handle_pus_tc_packet(tc.service(), header, &tc)
+            .map_err(|e| PusDistribError::CustomError(e))
+    }
+}
+
+impl<E> ReceivesEcssPusTc for PusDistributor<E> {
+    type Error = PusDistribError<E>;
+    fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTc) -> Result<(), Self::Error> {
+        self.service_provider
+            .handle_pus_tc_packet(pus_tc.service(), header, pus_tc)
+            .map_err(|e| PusDistribError::CustomError(e))
+    }
+}
+
+impl<E: 'static> PusDistributor<E> {
+    pub fn service_provider_ref<T: PusServiceProvider<Error = E>>(&self) -> Option<&T> {
+        self.service_provider.downcast_ref::<T>()
+    }
+
+    pub fn service_provider_mut<T: PusServiceProvider<Error = E>>(&mut self) -> Option<&mut T> {
+        self.service_provider.downcast_mut::<T>()
     }
 }
 
@@ -61,7 +108,7 @@ mod tests {
     };
     use crate::tmtc::ccsds_distrib::{ApidPacketHandler, CcsdsDistributor};
     use spacepackets::tc::PusTc;
-    use std::any::Any;
+    use spacepackets::CcsdsPacket;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
 
@@ -74,104 +121,149 @@ mod tests {
         pub pus_queue: VecDeque<(u8, u16, Vec<u8>)>,
     }
 
-    impl AsAny for PusHandlerSharedQueue {
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-
-        fn as_mut_any(&mut self) -> &mut dyn Any {
-            self
-        }
-    }
-
     impl PusServiceProvider for PusHandlerSharedQueue {
-        fn handle_pus_tc_packet(&mut self, service: u8, apid: u16, pus_tc: &PusTc) {
+        type Error = PusError;
+        fn handle_pus_tc_packet(
+            &mut self,
+            service: u8,
+            sp_header: &SpHeader,
+            pus_tc: &PusTc,
+        ) -> Result<(), Self::Error> {
             let mut vec: Vec<u8> = Vec::new();
-            pus_tc
-                .append_to_vec(&mut vec)
-                .expect("Appending raw PUS TC to vector failed");
-            self.pus_queue
+            pus_tc.append_to_vec(&mut vec)?;
+            Ok(self
+                .pus_queue
                 .lock()
                 .unwrap()
-                .push_back((service, apid, vec));
-        }
-    }
-
-    impl AsAny for PusHandlerOwnedQueue {
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-
-        fn as_mut_any(&mut self) -> &mut dyn Any {
-            self
+                .push_back((service, sp_header.apid(), vec)))
         }
     }
 
     impl PusServiceProvider for PusHandlerOwnedQueue {
-        fn handle_pus_tc_packet(&mut self, service: u8, apid: u16, pus_tc: &PusTc) {
+        type Error = PusError;
+        fn handle_pus_tc_packet(
+            &mut self,
+            service: u8,
+            sp_header: &SpHeader,
+            pus_tc: &PusTc,
+        ) -> Result<(), Self::Error> {
             let mut vec: Vec<u8> = Vec::new();
-            pus_tc
-                .append_to_vec(&mut vec)
-                .expect("Appending raw PUS TC to vector failed");
-            self.pus_queue.push_back((service, apid, vec));
+            pus_tc.append_to_vec(&mut vec)?;
+            Ok(self.pus_queue.push_back((service, sp_header.apid(), vec)))
         }
     }
 
     struct ApidHandlerShared {
-        pub pus_distrib: PusDistributor,
+        pub pus_distrib: PusDistributor<PusError>,
         handler_base: BasicApidHandlerSharedQueue,
-    }
-
-    impl AsAny for ApidHandlerShared {
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-
-        fn as_mut_any(&mut self) -> &mut dyn Any {
-            self
-        }
     }
 
     macro_rules! apid_handler_impl {
         () => {
+            type Error = PusError;
+
             fn valid_apids(&self) -> &'static [u16] {
                 &[0x000, 0x002]
             }
 
-            fn handle_known_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) {
+            fn handle_known_apid(
+                &mut self,
+                sp_header: &SpHeader,
+                tc_raw: &[u8],
+            ) -> Result<(), Self::Error> {
                 self.handler_base.handle_known_apid(&sp_header, tc_raw);
                 self.pus_distrib
                     .pass_ccsds(&sp_header, tc_raw)
                     .expect("Passing PUS packet failed");
             }
 
-            fn handle_unknown_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) {
+            fn handle_unknown_apid(
+                &mut self,
+                sp_header: &SpHeader,
+                tc_raw: &[u8],
+            ) -> Result<(), Self::Error> {
                 self.handler_base.handle_unknown_apid(&sp_header, tc_raw);
             }
         };
     }
 
-    impl ApidPacketHandler for ApidHandlerShared {
-        apid_handler_impl!();
-    }
-
     struct ApidHandlerOwned {
-        pub pus_distrib: PusDistributor,
+        pub pus_distrib: PusDistributor<PusError>,
         handler_base: BasicApidHandlerOwnedQueue,
     }
 
-    impl AsAny for ApidHandlerOwned {
-        fn as_any(&self) -> &dyn Any {
-            self
+    impl ApidPacketHandler for ApidHandlerOwned {
+        //apid_handler_impl!();
+        type Error = PusError;
+
+        fn valid_apids(&self) -> &'static [u16] {
+            &[0x000, 0x002]
         }
 
-        fn as_mut_any(&mut self) -> &mut dyn Any {
-            self
+        fn handle_known_apid(
+            &mut self,
+            sp_header: &SpHeader,
+            tc_raw: &[u8],
+        ) -> Result<(), Self::Error> {
+            self.handler_base.handle_known_apid(&sp_header, tc_raw).ok();
+            match self.pus_distrib.pass_ccsds(&sp_header, tc_raw) {
+                Ok(_) => Ok(()),
+                Err(e) => match e {
+                    PusDistribError::CustomError(_) => Ok(()),
+                    PusDistribError::PusError(e) => Err(e),
+                },
+            }
+        }
+
+        fn handle_unknown_apid(
+            &mut self,
+            sp_header: &SpHeader,
+            tc_raw: &[u8],
+        ) -> Result<(), Self::Error> {
+            match self.handler_base.handle_unknown_apid(&sp_header, tc_raw) {
+                Ok(_) => Ok(()),
+                Err(e) => match e {
+                    PusDistribError::CustomError(_) => Ok(()),
+                    PusDistribError::PusError(e) => Err(e),
+                },
+            }
         }
     }
 
-    impl ApidPacketHandler for ApidHandlerOwned {
-        apid_handler_impl!();
+    impl ApidPacketHandler for ApidHandlerShared {
+        //apid_handler_impl!();
+        type Error = PusError;
+
+        fn valid_apids(&self) -> &'static [u16] {
+            &[0x000, 0x002]
+        }
+
+        fn handle_known_apid(
+            &mut self,
+            sp_header: &SpHeader,
+            tc_raw: &[u8],
+        ) -> Result<(), Self::Error> {
+            self.handler_base.handle_known_apid(&sp_header, tc_raw).ok();
+            match self.pus_distrib.pass_ccsds(&sp_header, tc_raw) {
+                Ok(_) => Ok(()),
+                Err(e) => match e {
+                    PusDistribError::CustomError(_) => Ok(()),
+                    PusDistribError::PusError(e) => Err(e),
+                },
+            }
+        }
+
+        fn handle_unknown_apid(
+            &mut self,
+            sp_header: &SpHeader,
+            tc_raw: &[u8],
+        ) -> Result<(), Self::Error> {
+            Ok(self
+                .handler_base
+                .handle_unknown_apid(&sp_header, tc_raw)
+                .ok()
+                .unwrap())
+        }
     }
 
     #[test]
@@ -207,7 +299,9 @@ mod tests {
             .write_to(test_buf.as_mut_slice())
             .expect("Error writing TC to buffer");
         let tc_slice = &test_buf[0..size];
-        ccsds_distrib.pass_tc(tc_slice);
+        ccsds_distrib
+            .pass_tc(tc_slice)
+            .expect("Passing TC slice failed");
         let recvd_ccsds = known_packet_queue.lock().unwrap().pop_front();
         assert!(unknown_packet_queue.lock().unwrap().is_empty());
         assert!(recvd_ccsds.is_some());
@@ -246,12 +340,12 @@ mod tests {
             .write_to(test_buf.as_mut_slice())
             .expect("Error writing TC to buffer");
         let tc_slice = &test_buf[0..size];
-        ccsds_distrib.pass_tc(tc_slice);
+        ccsds_distrib
+            .pass_tc(tc_slice)
+            .expect("Passing TC slice failed");
 
         let apid_handler_casted_back: &mut ApidHandlerOwned = ccsds_distrib
-            .apid_handler
-            .as_mut_any()
-            .downcast_mut::<ApidHandlerOwned>()
+            .apid_handler_mut()
             .expect("Cast to concrete type ApidHandler failed");
         assert!(!apid_handler_casted_back
             .handler_base
@@ -259,10 +353,8 @@ mod tests {
             .is_empty());
         let handler_casted_back: &mut PusHandlerOwnedQueue = apid_handler_casted_back
             .pus_distrib
-            .service_provider
-            .as_mut_any()
-            .downcast_mut::<PusHandlerOwnedQueue>()
-            .expect("Cast to concrete type PusHandler failed");
+            .service_provider_mut()
+            .expect("Cast to concrete type PusHandlerOwnedQueue failed");
         assert!(!handler_casted_back.pus_queue.is_empty());
         let (service, apid, packet_raw) = handler_casted_back.pus_queue.pop_front().unwrap();
         assert_eq!(service, 17);

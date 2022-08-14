@@ -1,5 +1,7 @@
+//! TMTC module. Contains packet routing components with special support for CCSDS and ECSS packets.
 use crate::error::{FsrcErrorRaw, FsrcGroupIds};
-use spacepackets::{PacketError, SpHeader};
+use spacepackets::tc::PusTc;
+use spacepackets::SpHeader;
 
 pub mod ccsds_distrib;
 pub mod pus_distrib;
@@ -24,9 +26,18 @@ const FROM_BYTES_ZEROCOPY_ERROR: FsrcErrorRaw = FsrcErrorRaw::new(
 );
 
 pub trait ReceivesTc {
-    fn pass_tc(&mut self, tc_raw: &[u8]);
+    type Error;
+    // TODO: Maybe it makes sense to return Result<(), Self::Error> here with Error being an associated
+    //       type..
+    fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error>;
 }
 
 pub trait ReceivesCcsdsTc {
-    fn pass_ccsds(&mut self, header: &SpHeader, tc_raw: &[u8]) -> Result<(), PacketError>;
+    type Error;
+    fn pass_ccsds(&mut self, header: &SpHeader, tc_raw: &[u8]) -> Result<(), Self::Error>;
+}
+
+pub trait ReceivesEcssPusTc {
+    type Error;
+    fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTc) -> Result<(), Self::Error>;
 }

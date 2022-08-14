@@ -35,7 +35,7 @@ impl FsrcErrorRaw {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct SimpleStdErrorHandler {}
 
 #[cfg(feature = "use_std")]
