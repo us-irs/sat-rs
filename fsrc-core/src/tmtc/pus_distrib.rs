@@ -38,6 +38,7 @@ pub struct PusDistributor<E> {
     pub error_handler: Box<dyn FsrcErrorHandler>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum PusDistribError<E> {
     CustomError(E),
     PusError(PusError),
@@ -107,6 +108,7 @@ mod tests {
         BasicApidHandlerOwnedQueue, BasicApidHandlerSharedQueue,
     };
     use crate::tmtc::ccsds_distrib::{ApidPacketHandler, CcsdsDistributor};
+    use spacepackets::ecss::PusError;
     use spacepackets::tc::PusTc;
     use spacepackets::CcsdsPacket;
     use std::collections::VecDeque;
@@ -134,7 +136,7 @@ mod tests {
             Ok(self
                 .pus_queue
                 .lock()
-                .unwrap()
+                .expect("Mutex lock failed")
                 .push_back((service, sp_header.apid(), vec)))
         }
     }
@@ -155,7 +157,12 @@ mod tests {
 
     struct ApidHandlerShared {
         pub pus_distrib: PusDistributor<PusError>,
-        handler_base: BasicApidHandlerSharedQueue,
+        pub handler_base: BasicApidHandlerSharedQueue,
+    }
+
+    struct ApidHandlerOwned {
+        pub pus_distrib: PusDistributor<PusError>,
+        handler_base: BasicApidHandlerOwnedQueue,
     }
 
     macro_rules! apid_handler_impl {
@@ -171,10 +178,17 @@ mod tests {
                 sp_header: &SpHeader,
                 tc_raw: &[u8],
             ) -> Result<(), Self::Error> {
-                self.handler_base.handle_known_apid(&sp_header, tc_raw);
-                self.pus_distrib
-                    .pass_ccsds(&sp_header, tc_raw)
-                    .expect("Passing PUS packet failed");
+                self.handler_base
+                    .handle_known_apid(&sp_header, tc_raw)
+                    .ok()
+                    .expect("Unexpected error");
+                match self.pus_distrib.pass_ccsds(&sp_header, tc_raw) {
+                    Ok(_) => Ok(()),
+                    Err(e) => match e {
+                        PusDistribError::CustomError(_) => Ok(()),
+                        PusDistribError::PusError(e) => Err(e),
+                    },
+                }
             }
 
             fn handle_unknown_apid(
@@ -182,88 +196,21 @@ mod tests {
                 sp_header: &SpHeader,
                 tc_raw: &[u8],
             ) -> Result<(), Self::Error> {
-                self.handler_base.handle_unknown_apid(&sp_header, tc_raw);
+                self.handler_base
+                    .handle_unknown_apid(&sp_header, tc_raw)
+                    .ok()
+                    .expect("Unexpected error");
+                Ok(())
             }
         };
     }
 
-    struct ApidHandlerOwned {
-        pub pus_distrib: PusDistributor<PusError>,
-        handler_base: BasicApidHandlerOwnedQueue,
-    }
-
     impl ApidPacketHandler for ApidHandlerOwned {
-        //apid_handler_impl!();
-        type Error = PusError;
-
-        fn valid_apids(&self) -> &'static [u16] {
-            &[0x000, 0x002]
-        }
-
-        fn handle_known_apid(
-            &mut self,
-            sp_header: &SpHeader,
-            tc_raw: &[u8],
-        ) -> Result<(), Self::Error> {
-            self.handler_base.handle_known_apid(&sp_header, tc_raw).ok();
-            match self.pus_distrib.pass_ccsds(&sp_header, tc_raw) {
-                Ok(_) => Ok(()),
-                Err(e) => match e {
-                    PusDistribError::CustomError(_) => Ok(()),
-                    PusDistribError::PusError(e) => Err(e),
-                },
-            }
-        }
-
-        fn handle_unknown_apid(
-            &mut self,
-            sp_header: &SpHeader,
-            tc_raw: &[u8],
-        ) -> Result<(), Self::Error> {
-            match self.handler_base.handle_unknown_apid(&sp_header, tc_raw) {
-                Ok(_) => Ok(()),
-                Err(e) => match e {
-                    PusDistribError::CustomError(_) => Ok(()),
-                    PusDistribError::PusError(e) => Err(e),
-                },
-            }
-        }
+        apid_handler_impl!();
     }
 
     impl ApidPacketHandler for ApidHandlerShared {
-        //apid_handler_impl!();
-        type Error = PusError;
-
-        fn valid_apids(&self) -> &'static [u16] {
-            &[0x000, 0x002]
-        }
-
-        fn handle_known_apid(
-            &mut self,
-            sp_header: &SpHeader,
-            tc_raw: &[u8],
-        ) -> Result<(), Self::Error> {
-            self.handler_base.handle_known_apid(&sp_header, tc_raw).ok();
-            match self.pus_distrib.pass_ccsds(&sp_header, tc_raw) {
-                Ok(_) => Ok(()),
-                Err(e) => match e {
-                    PusDistribError::CustomError(_) => Ok(()),
-                    PusDistribError::PusError(e) => Err(e),
-                },
-            }
-        }
-
-        fn handle_unknown_apid(
-            &mut self,
-            sp_header: &SpHeader,
-            tc_raw: &[u8],
-        ) -> Result<(), Self::Error> {
-            Ok(self
-                .handler_base
-                .handle_unknown_apid(&sp_header, tc_raw)
-                .ok()
-                .unwrap())
-        }
+        apid_handler_impl!();
     }
 
     #[test]

@@ -114,7 +114,7 @@ pub struct CcsdsDistributor<E> {
     pub error_handler: Box<dyn FsrcErrorHandler>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum CcsdsError<E> {
     CustomError(E),
     PacketError(PacketError),
@@ -200,7 +200,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::error::SimpleStdErrorHandler;
     use crate::tmtc::ccsds_distrib::{ApidPacketHandler, CcsdsDistributor};
-    use crate::tmtc::pus_distrib::PusDistribError;
     use spacepackets::tc::PusTc;
     use spacepackets::CcsdsPacket;
     use std::collections::VecDeque;
@@ -253,7 +252,7 @@ pub(crate) mod tests {
     }
 
     impl ApidPacketHandler for BasicApidHandlerOwnedQueue {
-        type Error = PusDistribError<()>;
+        type Error = ();
 
         fn valid_apids(&self) -> &'static [u16] {
             &[0x000, 0x002]
