@@ -1,15 +1,16 @@
+use crate::any::AsAny;
 use crate::error::FsrcErrorHandler;
 use crate::tmtc::{ReceivesTc, FROM_BYTES_SLICE_TOO_SMALL_ERROR, FROM_BYTES_ZEROCOPY_ERROR};
 use spacepackets::{CcsdsPacket, PacketError, SpHeader};
 
-pub trait ApidPacketHandler {
+pub trait ApidPacketHandler: AsAny {
     fn valid_apids(&self) -> &'static [u16];
     fn handle_known_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]);
     fn handle_unknown_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]);
 }
 
 pub struct CcsdsDistributor {
-    apid_handler: Box<dyn ApidPacketHandler>,
+    pub apid_handler: Box<dyn ApidPacketHandler>,
     error_handler: Box<dyn FsrcErrorHandler>,
 }
 
@@ -66,16 +67,32 @@ pub(crate) mod tests {
     use crate::tmtc::ccsds_distrib::{ApidPacketHandler, CcsdsDistributor};
     use spacepackets::tc::PusTc;
     use spacepackets::CcsdsPacket;
+    use std::any::Any;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
 
-    #[derive(Default)]
-    pub struct BasicApidHandler {
+    pub struct BasicApidHandlerSharedQueue {
         pub known_packet_queue: Arc<Mutex<VecDeque<(u16, Vec<u8>)>>>,
         pub unknown_packet_queue: Arc<Mutex<VecDeque<(u16, Vec<u8>)>>>,
     }
 
-    impl ApidPacketHandler for BasicApidHandler {
+    #[derive(Default)]
+    pub struct BasicApidHandlerOwnedQueue {
+        pub known_packet_queue: VecDeque<(u16, Vec<u8>)>,
+        pub unknown_packet_queue: VecDeque<(u16, Vec<u8>)>,
+    }
+
+    impl AsAny for BasicApidHandlerSharedQueue {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_mut_any(&mut self) -> &mut dyn Any {
+            self
+        }
+    }
+
+    impl ApidPacketHandler for BasicApidHandlerSharedQueue {
         fn valid_apids(&self) -> &'static [u16] {
             &[0x000, 0x002]
         }
@@ -99,11 +116,39 @@ pub(crate) mod tests {
         }
     }
 
+    impl AsAny for BasicApidHandlerOwnedQueue {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_mut_any(&mut self) -> &mut dyn Any {
+            self
+        }
+    }
+
+    impl ApidPacketHandler for BasicApidHandlerOwnedQueue {
+        fn valid_apids(&self) -> &'static [u16] {
+            &[0x000, 0x002]
+        }
+
+        fn handle_known_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) {
+            let mut vec = Vec::new();
+            vec.extend_from_slice(tc_raw);
+            self.known_packet_queue.push_back((sp_header.apid(), vec));
+        }
+
+        fn handle_unknown_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) {
+            let mut vec = Vec::new();
+            vec.extend_from_slice(tc_raw);
+            self.unknown_packet_queue.push_back((sp_header.apid(), vec));
+        }
+    }
+
     #[test]
     fn test_distribs_known_apid() {
         let known_packet_queue = Arc::new(Mutex::default());
         let unknown_packet_queue = Arc::new(Mutex::default());
-        let apid_handler = BasicApidHandler {
+        let apid_handler = BasicApidHandlerSharedQueue {
             known_packet_queue: known_packet_queue.clone(),
             unknown_packet_queue: unknown_packet_queue.clone(),
         };
@@ -129,7 +174,7 @@ pub(crate) mod tests {
     fn test_distribs_unknown_apid() {
         let known_packet_queue = Arc::new(Mutex::default());
         let unknown_packet_queue = Arc::new(Mutex::default());
-        let apid_handler = BasicApidHandler {
+        let apid_handler = BasicApidHandlerSharedQueue {
             known_packet_queue: known_packet_queue.clone(),
             unknown_packet_queue: unknown_packet_queue.clone(),
         };
