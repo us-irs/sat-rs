@@ -17,8 +17,14 @@ pub struct PusDistributor {
 impl ReceivesTc for PusDistributor {
     fn pass_tc(&mut self, tm_raw: &[u8]) {
         // Convert to ccsds and call pass_ccsds
-        let sp_header = SpHeader::from_raw_slice(tm_raw).unwrap();
-        self.pass_ccsds(&sp_header, tm_raw).unwrap();
+        match SpHeader::from_raw_slice(tm_raw) {
+            Ok(sp_header) => {
+                self.pass_ccsds(&sp_header, tm_raw).unwrap();
+            }
+            Err(error) => {
+                // TODO: Error handling
+            }
+        }
     }
 }
 
@@ -126,21 +132,27 @@ mod tests {
         }
     }
 
+    macro_rules! apid_handler_impl {
+        () => {
+            fn valid_apids(&self) -> &'static [u16] {
+                &[0x000, 0x002]
+            }
+
+            fn handle_known_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) {
+                self.handler_base.handle_known_apid(&sp_header, tc_raw);
+                self.pus_distrib
+                    .pass_ccsds(&sp_header, tc_raw)
+                    .expect("Passing PUS packet failed");
+            }
+
+            fn handle_unknown_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) {
+                self.handler_base.handle_unknown_apid(&sp_header, tc_raw);
+            }
+        };
+    }
+
     impl ApidPacketHandler for ApidHandlerShared {
-        fn valid_apids(&self) -> &'static [u16] {
-            &[0x000, 0x002]
-        }
-
-        fn handle_known_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) {
-            self.handler_base.handle_known_apid(&sp_header, tc_raw);
-            self.pus_distrib
-                .pass_ccsds(&sp_header, tc_raw)
-                .expect("Passing PUS packet failed");
-        }
-
-        fn handle_unknown_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) {
-            self.handler_base.handle_unknown_apid(&sp_header, tc_raw);
-        }
+        apid_handler_impl!();
     }
 
     struct ApidHandlerOwned {
@@ -159,21 +171,9 @@ mod tests {
     }
 
     impl ApidPacketHandler for ApidHandlerOwned {
-        fn valid_apids(&self) -> &'static [u16] {
-            &[0x000, 0x002]
-        }
-
-        fn handle_known_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) {
-            self.handler_base.handle_known_apid(&sp_header, tc_raw);
-            self.pus_distrib
-                .pass_ccsds(&sp_header, tc_raw)
-                .expect("Passing PUS packet failed");
-        }
-
-        fn handle_unknown_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) {
-            self.handler_base.handle_unknown_apid(&sp_header, tc_raw);
-        }
+        apid_handler_impl!();
     }
+
     #[test]
     fn test_pus_distribution() {
         let known_packet_queue = Arc::new(Mutex::default());
