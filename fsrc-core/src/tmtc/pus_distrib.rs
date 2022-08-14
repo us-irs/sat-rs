@@ -25,6 +25,8 @@
 //!     handler_call_count: u32
 //! }
 //!
+//! // This is a very simple possible service provider. It increments an internal call count field,
+//! // which is used to verify the handler was called
 //! impl PusServiceProvider for ConcretePusHandler {
 //!     type Error = ();
 //!     fn handle_pus_tc_packet(&mut self, service: u8, header: &SpHeader, pus_tc: &PusTc) -> Result<(), Self::Error> {
@@ -40,7 +42,7 @@
 //! };
 //! let mut pus_distributor = PusDistributor::new(Box::new(service_handler));
 //!
-//! // Create and pass PUS telecommand with a valid APID
+//! // Create and pass PUS ping telecommand with a valid APID
 //! let mut space_packet_header = SpHeader::tc(0x002, 0x34, 0).unwrap();
 //! let mut pus_tc = PusTc::new_simple(&mut space_packet_header, 17, 1, None, true);
 //! let mut test_buf: [u8; 32] = [0; 32];
@@ -51,7 +53,8 @@
 //!
 //! pus_distributor.pass_tc(tc_slice).expect("Passing PUS telecommand failed");
 //!
-//! // User helper function to retrieve concrete class
+//! // User helper function to retrieve concrete class. We check the call count here to verify
+//! // that the PUS ping telecommand was routed successfully.
 //! let concrete_handler_ref: &ConcretePusHandler = pus_distributor
 //!     .service_provider_ref()
 //!     .expect("Casting back to concrete type failed");
@@ -80,9 +83,7 @@ pub struct PusDistributor<E> {
 
 impl<E> PusDistributor<E> {
     pub fn new(service_provider: Box<dyn PusServiceProvider<Error = E>>) -> Self {
-        PusDistributor {
-            service_provider
-        }
+        PusDistributor { service_provider }
     }
 }
 

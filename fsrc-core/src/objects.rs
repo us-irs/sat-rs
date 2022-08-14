@@ -7,7 +7,7 @@
 //!
 //! # Examples
 //!
-//! ```
+//! ```rust
 //! use std::any::Any;
 //! use std::error::Error;
 //! use fsrc_core::objects::{ManagedSystemObject, ObjectId, ObjectManager, SystemObject};
@@ -29,9 +29,6 @@
 //! }
 //!
 //! impl SystemObject for ExampleSysObj {
-//!     fn as_any(&self) -> &dyn Any {
-//!         self
-//!     }
 //!
 //!     fn get_object_id(&self) -> &ObjectId {
 //!         &self.id
@@ -39,24 +36,23 @@
 //!
 //!     fn initialize(&mut self) -> Result<(), Box<dyn Error>> {
 //!         self.was_initialized = true;
-//!             Ok(())
-//!         }
+//!         Ok(())
 //!     }
+//! }
 //!
 //! impl ManagedSystemObject for ExampleSysObj {}
-//!
 //!
 //!  let mut obj_manager = ObjectManager::default();
 //!  let obj_id = ObjectId { id: 0, name: "Example 0"};
 //!  let example_obj = ExampleSysObj::new(obj_id, 42);
 //!  obj_manager.insert(Box::new(example_obj));
-//!  let obj_back_casted: Option<&ExampleSysObj> = obj_manager.get(&obj_id);
+//!  let obj_back_casted: Option<&ExampleSysObj> = obj_manager.get_ref(&obj_id);
 //!  let example_obj = obj_back_casted.unwrap();
 //!  assert_eq!(example_obj.id, obj_id);
 //!  assert_eq!(example_obj.dummy, 42);
 //! ```
 
-use std::any::Any;
+use downcast_rs::Downcast;
 use std::collections::HashMap;
 use std::error::Error;
 
@@ -68,13 +64,14 @@ pub struct ObjectId {
 
 /// Each object which is stored inside the [object manager][ObjectManager] needs to implemented
 /// this trait
-pub trait SystemObject {
-    fn as_any(&self) -> &dyn Any;
+pub trait SystemObject: Downcast {
     fn get_object_id(&self) -> &ObjectId;
     fn initialize(&mut self) -> Result<(), Box<dyn Error>>;
 }
+downcast_rs::impl_downcast!(SystemObject);
 
-pub trait ManagedSystemObject: SystemObject + Any + Send {}
+pub trait ManagedSystemObject: SystemObject + Send {}
+downcast_rs::impl_downcast!(ManagedSystemObject);
 
 /// Helper module to manage multiple [ManagedSystemObjects][ManagedSystemObject] by mapping them
 /// using an [object ID][ObjectId]
@@ -114,19 +111,26 @@ impl ObjectManager {
         Ok(init_success)
     }
 
-    /// Retrieve an object stored inside the manager. The type to retrieve needs to be explicitly
-    /// passed as a generic parameter
-    pub fn get<T: Any>(&self, key: &ObjectId) -> Option<&T> {
+    /// Retrieve a reference to an object stored inside the manager. The type to retrieve needs to
+    /// be explicitly passed as a generic parameter or specified on the left hand side of the
+    /// expression.
+    pub fn get_ref<T: ManagedSystemObject>(&self, key: &ObjectId) -> Option<&T> {
+        self.obj_map.get(key).and_then(|o| o.downcast_ref::<T>())
+    }
+
+    /// Retrieve a mutable reference to an object stored inside the manager. The type to retrieve
+    /// needs to be explicitly passed as a generic parameter or specified on the left hand side
+    /// of the expression.
+    pub fn get_mut<T: ManagedSystemObject>(&mut self, key: &ObjectId) -> Option<&mut T> {
         self.obj_map
-            .get(key)
-            .and_then(|o| o.as_ref().as_any().downcast_ref::<T>())
+            .get_mut(key)
+            .and_then(|o| o.downcast_mut::<T>())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::objects::{ManagedSystemObject, ObjectId, ObjectManager, SystemObject};
-    use std::any::Any;
     use std::error::Error;
     use std::sync::{Arc, Mutex};
     use std::thread;
@@ -148,10 +152,6 @@ mod tests {
     }
 
     impl SystemObject for ExampleSysObj {
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-
         fn get_object_id(&self) -> &ObjectId {
             &self.id
         }
@@ -171,10 +171,6 @@ mod tests {
     }
 
     impl SystemObject for OtherExampleObject {
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-
         fn get_object_id(&self) -> &ObjectId {
             &self.id
         }
@@ -199,7 +195,7 @@ mod tests {
         let res = obj_manager.initialize();
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), 1);
-        let obj_back_casted: Option<&ExampleSysObj> = obj_manager.get(&expl_obj_id);
+        let obj_back_casted: Option<&ExampleSysObj> = obj_manager.get_ref(&expl_obj_id);
         assert!(obj_back_casted.is_some());
         let expl_obj_back_casted = obj_back_casted.unwrap();
         assert_eq!(expl_obj_back_casted.dummy, 42);
@@ -219,7 +215,7 @@ mod tests {
         let res = obj_manager.initialize();
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), 2);
-        let obj_back_casted: Option<&OtherExampleObject> = obj_manager.get(&second_obj_id);
+        let obj_back_casted: Option<&OtherExampleObject> = obj_manager.get_ref(&second_obj_id);
         assert!(obj_back_casted.is_some());
         let expl_obj_back_casted = obj_back_casted.unwrap();
         assert_eq!(expl_obj_back_casted.string, String::from("Hello Test"));
@@ -266,7 +262,7 @@ mod tests {
         let obj_man_0 = obj_manager.clone();
         let jh0 = thread::spawn(move || {
             let locked_man = obj_man_0.lock().expect("Mutex lock failed");
-            let obj_back_casted: Option<&ExampleSysObj> = locked_man.get(&expl_obj_id);
+            let obj_back_casted: Option<&ExampleSysObj> = locked_man.get_ref(&expl_obj_id);
             assert!(obj_back_casted.is_some());
             let expl_obj_back_casted = obj_back_casted.unwrap();
             assert_eq!(expl_obj_back_casted.dummy, 42);
@@ -276,7 +272,7 @@ mod tests {
 
         let jh1 = thread::spawn(move || {
             let locked_man = obj_manager.lock().expect("Mutex lock failed");
-            let obj_back_casted: Option<&OtherExampleObject> = locked_man.get(&second_obj_id);
+            let obj_back_casted: Option<&OtherExampleObject> = locked_man.get_ref(&second_obj_id);
             assert!(obj_back_casted.is_some());
             let expl_obj_back_casted = obj_back_casted.unwrap();
             assert_eq!(expl_obj_back_casted.string, String::from("Hello Test"));
