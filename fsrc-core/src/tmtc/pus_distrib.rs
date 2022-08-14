@@ -5,8 +5,9 @@
 //!  2. [PusServiceProvider] trait which should be implemented by the user-provided PUS packet
 //!     handler.
 //!
-//! The [PusDistributor] implements the [ReceivesCcsdsTc] and [ReceivesTc] trait which allows to
-//! pass raw or CCSDS packets to it. Upon receiving a packet, it performs the following steps:
+//! The [PusDistributor] implements the [ReceivesEcssPusTc], [ReceivesCcsdsTc] and the [ReceivesTc]
+//! trait which allows to pass raw packets, CCSDS packets and PUS TC packets into it.
+//! Upon receiving a packet, it performs the following steps:
 //!
 //! 1. It tries to identify the target Application Process Identifier (APID) based on the
 //!    respective CCSDS space packet header field. If that process fails, the error
@@ -15,12 +16,11 @@
 //!    [ApidPacketHandler::valid_apids], it will pass the packet to the user provided
 //!    [ApidPacketHandler::handle_known_apid] function. If no valid APID is found, the packet
 //!    will be passed to the [ApidPacketHandler::handle_unknown_apid] function.
-use crate::error::FsrcErrorHandler;
 use crate::tmtc::{ReceivesCcsdsTc, ReceivesEcssPusTc, ReceivesTc};
 use downcast_rs::Downcast;
 use spacepackets::ecss::{PusError, PusPacket};
 use spacepackets::tc::PusTc;
-use spacepackets::{PacketError, SpHeader};
+use spacepackets::SpHeader;
 
 pub trait PusServiceProvider: Downcast {
     type Error;
@@ -35,7 +35,6 @@ downcast_rs::impl_downcast!(PusServiceProvider assoc Error);
 
 pub struct PusDistributor<E> {
     pub service_provider: Box<dyn PusServiceProvider<Error = E>>,
-    pub error_handler: Box<dyn FsrcErrorHandler>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -48,36 +47,18 @@ impl<E> ReceivesTc for PusDistributor<E> {
     type Error = PusDistribError<E>;
     fn pass_tc(&mut self, tm_raw: &[u8]) -> Result<(), Self::Error> {
         // Convert to ccsds and call pass_ccsds
-        match SpHeader::from_raw_slice(tm_raw) {
-            Ok(sp_header) => self.pass_ccsds(&sp_header, tm_raw),
-            Err(error) => {
-                // TODO: Error handling
-                match error {
-                    PacketError::ToBytesSliceTooSmall(_) => {
-                        //self.error_handler.error()
-                    }
-                    PacketError::FromBytesSliceTooSmall(_) => {}
-                    PacketError::ToBytesZeroCopyError => {}
-                    PacketError::FromBytesZeroCopyError => {}
-                }
-                Err(PusDistribError::PusError(PusError::PacketError(error)))
-            }
-        }
+        let sp_header = SpHeader::from_raw_slice(tm_raw)
+            .map_err(|e| PusDistribError::PusError(PusError::PacketError(e)))?;
+        self.pass_ccsds(&sp_header, tm_raw)
     }
 }
 
 impl<E> ReceivesCcsdsTc for PusDistributor<E> {
     type Error = PusDistribError<E>;
     fn pass_ccsds(&mut self, header: &SpHeader, tm_raw: &[u8]) -> Result<(), Self::Error> {
-        // TODO: Better error handling
-        let (tc, _) = match PusTc::new_from_raw_slice(tm_raw) {
-            Ok(tuple) => tuple,
-            Err(e) => return Err(PusDistribError::PusError(e)),
-        };
-
-        self.service_provider
-            .handle_pus_tc_packet(tc.service(), header, &tc)
-            .map_err(|e| PusDistribError::CustomError(e))
+        let (tc, _) =
+            PusTc::new_from_raw_slice(tm_raw).map_err(|e| PusDistribError::PusError(e))?;
+        self.pass_pus_tc(header, &tc)
     }
 }
 
@@ -105,7 +86,7 @@ mod tests {
     use super::*;
     use crate::error::SimpleStdErrorHandler;
     use crate::tmtc::ccsds_distrib::tests::{
-        BasicApidHandlerOwnedQueue, BasicApidHandlerSharedQueue,
+        generate_ping_tc, BasicApidHandlerOwnedQueue, BasicApidHandlerSharedQueue,
     };
     use crate::tmtc::ccsds_distrib::{ApidPacketHandler, CcsdsDistributor};
     use spacepackets::ecss::PusError;
@@ -229,23 +210,18 @@ mod tests {
         let error_handler = SimpleStdErrorHandler {};
         let pus_distrib = PusDistributor {
             service_provider: Box::new(pus_handler),
-            error_handler: Box::new(error_handler),
         };
 
         let apid_handler = ApidHandlerShared {
             pus_distrib,
             handler_base,
         };
-
         let mut ccsds_distrib =
             CcsdsDistributor::new(Box::new(apid_handler), Box::new(error_handler));
-        let mut sph = SpHeader::tc(0x002, 0x34, 0).unwrap();
-        let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
         let mut test_buf: [u8; 32] = [0; 32];
-        let size = pus_tc
-            .write_to(test_buf.as_mut_slice())
-            .expect("Error writing TC to buffer");
-        let tc_slice = &test_buf[0..size];
+        let tc_slice = generate_ping_tc(test_buf.as_mut_slice());
+
+        // Pass packet to distributor
         ccsds_distrib
             .pass_tc(tc_slice)
             .expect("Passing TC slice failed");
@@ -270,7 +246,6 @@ mod tests {
         let error_handler = SimpleStdErrorHandler {};
         let pus_distrib = PusDistributor {
             service_provider: Box::new(pus_handler),
-            error_handler: Box::new(error_handler),
         };
 
         let apid_handler = ApidHandlerOwned {
@@ -280,13 +255,9 @@ mod tests {
         let mut ccsds_distrib =
             CcsdsDistributor::new(Box::new(apid_handler), Box::new(error_handler));
 
-        let mut sph = SpHeader::tc(0x002, 0x34, 0).unwrap();
-        let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
         let mut test_buf: [u8; 32] = [0; 32];
-        let size = pus_tc
-            .write_to(test_buf.as_mut_slice())
-            .expect("Error writing TC to buffer");
-        let tc_slice = &test_buf[0..size];
+        let tc_slice = generate_ping_tc(test_buf.as_mut_slice());
+
         ccsds_distrib
             .pass_tc(tc_slice)
             .expect("Passing TC slice failed");

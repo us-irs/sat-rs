@@ -205,6 +205,14 @@ pub(crate) mod tests {
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
 
+    pub fn generate_ping_tc(buf: &mut [u8]) -> &[u8] {
+        let mut sph = SpHeader::tc(0x002, 0x34, 0).unwrap();
+        let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
+        let size = pus_tc.write_to(buf).expect("Error writing TC to buffer");
+        assert_eq!(size, 13);
+        &buf[0..size]
+    }
+
     pub struct BasicApidHandlerSharedQueue {
         pub known_packet_queue: Arc<Mutex<VecDeque<(u16, Vec<u8>)>>>,
         pub unknown_packet_queue: Arc<Mutex<VecDeque<(u16, Vec<u8>)>>>,
@@ -290,19 +298,16 @@ pub(crate) mod tests {
         let error_handler = SimpleStdErrorHandler {};
         let mut ccsds_distrib =
             CcsdsDistributor::new(Box::new(apid_handler), Box::new(error_handler));
-        let mut sph = SpHeader::tc(0x002, 0x34, 0).unwrap();
-        let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
         let mut test_buf: [u8; 32] = [0; 32];
-        pus_tc
-            .write_to(test_buf.as_mut_slice())
-            .expect("Error writing TC to buffer");
-        ccsds_distrib.pass_tc(&test_buf).expect("Passing TC failed");
+        let tc_slice = generate_ping_tc(test_buf.as_mut_slice());
+
+        ccsds_distrib.pass_tc(tc_slice).expect("Passing TC failed");
         let recvd = known_packet_queue.lock().unwrap().pop_front();
         assert!(unknown_packet_queue.lock().unwrap().is_empty());
         assert!(recvd.is_some());
         let (apid, packet) = recvd.unwrap();
         assert_eq!(apid, 0x002);
-        assert_eq!(packet.as_slice(), test_buf);
+        assert_eq!(packet, tc_slice);
     }
 
     #[test]
