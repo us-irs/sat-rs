@@ -9,13 +9,54 @@
 //! trait which allows to pass raw packets, CCSDS packets and PUS TC packets into it.
 //! Upon receiving a packet, it performs the following steps:
 //!
-//! 1. It tries to identify the target Application Process Identifier (APID) based on the
-//!    respective CCSDS space packet header field. If that process fails, the error
-//!    will be reported to the provided [FsrcErrorHandler] instance.
-//! 2. If a valid APID is found and matches one of the APIDs provided by
-//!    [ApidPacketHandler::valid_apids], it will pass the packet to the user provided
-//!    [ApidPacketHandler::handle_known_apid] function. If no valid APID is found, the packet
-//!    will be passed to the [ApidPacketHandler::handle_unknown_apid] function.
+//! 1. It tries to extract the [SpHeader] and [PusTc] objects from the raw bytestream. If this
+//!    process fails, a [PusDistribError::PusError] is returned to the user.
+//! 2. If it was possible to extract both components, the packet will be passed to the
+//!    [PusServiceProvider::handle_pus_tc_packet] method provided by the user.
+//!
+//! # Example
+//!
+//! ```rust
+//! use fsrc_core::tmtc::pus_distrib::{PusDistributor, PusServiceProvider};
+//! use fsrc_core::tmtc::ReceivesTc;
+//! use spacepackets::SpHeader;
+//! use spacepackets::tc::PusTc;
+//! struct ConcretePusHandler {
+//!     handler_call_count: u32
+//! }
+//!
+//! impl PusServiceProvider for ConcretePusHandler {
+//!     type Error = ();
+//!     fn handle_pus_tc_packet(&mut self, service: u8, header: &SpHeader, pus_tc: &PusTc) -> Result<(), Self::Error> {
+//!         assert_eq!(service, 17);
+//!         assert_eq!(pus_tc.len_packed(), 13);
+//!         self.handler_call_count += 1;
+//!         Ok(())
+//!     }
+//! }
+//!
+//! let service_handler = ConcretePusHandler {
+//!     handler_call_count: 0
+//! };
+//! let mut pus_distributor = PusDistributor::new(Box::new(service_handler));
+//!
+//! // Create and pass PUS telecommand with a valid APID
+//! let mut space_packet_header = SpHeader::tc(0x002, 0x34, 0).unwrap();
+//! let mut pus_tc = PusTc::new_simple(&mut space_packet_header, 17, 1, None, true);
+//! let mut test_buf: [u8; 32] = [0; 32];
+//! let mut size = pus_tc
+//!     .write_to(test_buf.as_mut_slice())
+//!     .expect("Error writing TC to buffer");
+//! let tc_slice = &test_buf[0..size];
+//!
+//! pus_distributor.pass_tc(tc_slice).expect("Passing PUS telecommand failed");
+//!
+//! // User helper function to retrieve concrete class
+//! let concrete_handler_ref: &ConcretePusHandler = pus_distributor
+//!     .service_provider_ref()
+//!     .expect("Casting back to concrete type failed");
+//! assert_eq!(concrete_handler_ref.handler_call_count, 1);
+//! ```
 use crate::tmtc::{ReceivesCcsdsTc, ReceivesEcssPusTc, ReceivesTc};
 use downcast_rs::Downcast;
 use spacepackets::ecss::{PusError, PusPacket};
@@ -35,6 +76,14 @@ downcast_rs::impl_downcast!(PusServiceProvider assoc Error);
 
 pub struct PusDistributor<E> {
     pub service_provider: Box<dyn PusServiceProvider<Error = E>>,
+}
+
+impl<E> PusDistributor<E> {
+    pub fn new(service_provider: Box<dyn PusServiceProvider<Error = E>>) -> Self {
+        PusDistributor {
+            service_provider
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
