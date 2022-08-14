@@ -1,5 +1,10 @@
 //! Telemetry and Telecommanding (TMTC) module. Contains packet routing components with special
 //! support for CCSDS and ECSS packets.
+//!
+//! The distributor modules provided by this module use trait objects provided by the user to
+//! directly dispatch received packets to packet listeners based on packet fields like the CCSDS
+//! Application Process ID (APID) or the ECSS PUS service type. This allows for fast packet
+//! routing without the overhead and complication of using message queues. However, it also requires
 use crate::error::{FsrcErrorRaw, FsrcGroupIds};
 use spacepackets::tc::PusTc;
 use spacepackets::SpHeader;

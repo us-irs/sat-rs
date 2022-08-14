@@ -8,8 +8,8 @@
 //! pass raw or CCSDS packets to it. Upon receiving a packet, it performs the following steps:
 //!
 //! 1. It tries to identify the target Application Process Identifier (APID) based on the
-//!    respective CCSDS space packet header field. If that process fails, the error
-//!    will be reported to the provided [FsrcErrorHandler] instance.
+//!    respective CCSDS space packet header field. If that process fails, a [PacketError] is
+//!    returned to the user
 //! 2. If a valid APID is found and matches one of the APIDs provided by
 //!    [ApidPacketHandler::valid_apids], it will pass the packet to the user provided
 //!    [ApidPacketHandler::handle_known_apid] function. If no valid APID is found, the packet

@@ -1,4 +1,12 @@
 //! # Core components of the Flight Software Rust Crate (FSRC) collection
+//!
+//! This is a collection of Rust crates which can be used to build On-Board Software for remote
+//! systems like satellites of rovers. It has special support for space tailored protocols
+//! like the ones provided by CCSDS and ECSS.
+//!
+//! The crates can generally be used in a `no_std` environment, but some crates expect that the
+//! [alloc](https://doc.rust-lang.org/alloc) crate is available to allow boxed trait objects.
+//! These are used to supply user code to the crates.
 pub mod error;
 pub mod event_man;
 pub mod events;
