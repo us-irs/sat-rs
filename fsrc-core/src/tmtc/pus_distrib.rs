@@ -134,7 +134,6 @@ impl<E: 'static> PusDistributor<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::SimpleStdErrorHandler;
     use crate::tmtc::ccsds_distrib::tests::{
         generate_ping_tc, BasicApidHandlerOwnedQueue, BasicApidHandlerSharedQueue,
     };
@@ -257,7 +256,6 @@ mod tests {
             unknown_packet_queue: unknown_packet_queue.clone(),
         };
 
-        let error_handler = SimpleStdErrorHandler {};
         let pus_distrib = PusDistributor {
             service_provider: Box::new(pus_handler),
         };
@@ -266,8 +264,7 @@ mod tests {
             pus_distrib,
             handler_base,
         };
-        let mut ccsds_distrib =
-            CcsdsDistributor::new(Box::new(apid_handler), Box::new(error_handler));
+        let mut ccsds_distrib = CcsdsDistributor::new(Box::new(apid_handler));
         let mut test_buf: [u8; 32] = [0; 32];
         let tc_slice = generate_ping_tc(test_buf.as_mut_slice());
 
@@ -293,7 +290,6 @@ mod tests {
     fn test_as_any_cast() {
         let pus_handler = PusHandlerOwnedQueue::default();
         let handler_base = BasicApidHandlerOwnedQueue::default();
-        let error_handler = SimpleStdErrorHandler {};
         let pus_distrib = PusDistributor {
             service_provider: Box::new(pus_handler),
         };
@@ -302,8 +298,7 @@ mod tests {
             pus_distrib,
             handler_base,
         };
-        let mut ccsds_distrib =
-            CcsdsDistributor::new(Box::new(apid_handler), Box::new(error_handler));
+        let mut ccsds_distrib = CcsdsDistributor::new(Box::new(apid_handler));
 
         let mut test_buf: [u8; 32] = [0; 32];
         let tc_slice = generate_ping_tc(test_buf.as_mut_slice());

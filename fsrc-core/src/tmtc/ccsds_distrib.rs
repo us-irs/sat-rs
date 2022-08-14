@@ -18,14 +18,19 @@
 //! # Example
 //!
 //! ```rust
-//! use fsrc_core::error::SimpleStdErrorHandler;
 //! use fsrc_core::tmtc::ccsds_distrib::{ApidPacketHandler, CcsdsDistributor};
 //! use fsrc_core::tmtc::ReceivesTc;
 //! use spacepackets::{CcsdsPacket, SpHeader};
 //! use spacepackets::tc::PusTc;
 //!
+//! #[derive (Default)]
 //! struct ConcreteApidHandler {
-//!     custom_field: u32
+//!     known_call_count: u32,
+//!     unknown_call_count: u32
+//! }
+//!
+//! impl ConcreteApidHandler {
+//!     fn mutable_foo(&mut self) {}
 //! }
 //!
 //! impl ApidPacketHandler for ConcreteApidHandler {
@@ -34,20 +39,19 @@
 //!     fn handle_known_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) -> Result<(), Self::Error> {
 //!         assert_eq!(sp_header.apid(), 0x002);
 //!         assert_eq!(tc_raw.len(), 13);
+//!         self.known_call_count += 1;
 //!         Ok(())
 //!     }
 //!     fn handle_unknown_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) -> Result<(), Self::Error> {
 //!         assert_eq!(sp_header.apid(), 0x003);
 //!         assert_eq!(tc_raw.len(), 13);
+//!         self.unknown_call_count += 1;
 //!         Ok(())
 //!     }
 //! }
 //!
-//! let apid_handler = ConcreteApidHandler {
-//!     custom_field: 0x42
-//! };
-//! let err_handler = SimpleStdErrorHandler::default();
-//! let mut ccsds_distributor = CcsdsDistributor::new(Box::new(apid_handler), Box::new(err_handler));
+//! let apid_handler = ConcreteApidHandler::default();
+//! let mut ccsds_distributor = CcsdsDistributor::new(Box::new(apid_handler));
 //!
 //! // Create and pass PUS telecommand with a valid APID
 //! let mut space_packet_header = SpHeader::tc(0x002, 0x34, 0).unwrap();
@@ -71,12 +75,16 @@
 //! let concrete_handler_ref: &ConcreteApidHandler = ccsds_distributor
 //!     .apid_handler_ref()
 //!     .expect("Casting back to concrete type failed");
-//! assert_eq!(concrete_handler_ref.custom_field, 0x42);
+//! assert_eq!(concrete_handler_ref.known_call_count, 1);
+//! assert_eq!(concrete_handler_ref.unknown_call_count, 1);
+//!
+//! // It's also possible to retrieve a mutable reference
+//! let mutable_ref: &mut ConcreteApidHandler = ccsds_distributor
+//!     .apid_handler_mut()
+//!     .expect("Casting back to concrete type failed");
+//! mutable_ref.mutable_foo();
 //! ```
-use crate::error::FsrcErrorHandler;
-use crate::tmtc::{
-    ReceivesCcsdsTc, ReceivesTc, FROM_BYTES_SLICE_TOO_SMALL_ERROR, FROM_BYTES_ZEROCOPY_ERROR,
-};
+use crate::tmtc::{ReceivesCcsdsTc, ReceivesTc};
 use downcast_rs::Downcast;
 use spacepackets::{CcsdsPacket, PacketError, SpHeader};
 
@@ -111,7 +119,6 @@ pub struct CcsdsDistributor<E> {
     /// It can be cast back to the original concrete type using the [Self::apid_handler_ref] or
     /// the [Self::apid_handler_mut] method.
     pub apid_handler: Box<dyn ApidPacketHandler<Error = E>>,
-    pub error_handler: Box<dyn FsrcErrorHandler>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -132,48 +139,25 @@ impl<E: 'static> ReceivesTc for CcsdsDistributor<E> {
     type Error = CcsdsError<E>;
 
     fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
-        let sp_header = match SpHeader::from_raw_slice(tc_raw) {
-            Ok(header) => header,
-            Err(e) => {
-                match e {
-                    PacketError::FromBytesSliceTooSmall(missmatch) => {
-                        self.error_handler.error_with_two_params(
-                            FROM_BYTES_SLICE_TOO_SMALL_ERROR,
-                            missmatch.found as u32,
-                            missmatch.expected as u32,
-                        );
-                    }
-                    PacketError::FromBytesZeroCopyError => {
-                        self.error_handler.error(FROM_BYTES_ZEROCOPY_ERROR);
-                    }
-                    _ => {
-                        // TODO: Unexpected error
-                    }
-                }
-                return Err(CcsdsError::PacketError(e));
-            }
-        };
+        let sp_header = SpHeader::from_raw_slice(tc_raw).map_err(|e| CcsdsError::PacketError(e))?;
         self.dispatch_ccsds(&sp_header, tc_raw)
     }
 }
 
 impl<E: 'static> CcsdsDistributor<E> {
-    pub fn new(
-        apid_handler: Box<dyn ApidPacketHandler<Error = E>>,
-        error_handler: Box<dyn FsrcErrorHandler>,
-    ) -> Self {
-        CcsdsDistributor {
-            apid_handler,
-            error_handler,
-        }
+    pub fn new(apid_handler: Box<dyn ApidPacketHandler<Error = E>>) -> Self {
+        CcsdsDistributor { apid_handler }
     }
 
-    /// This function can be used to retrieve the concrete instance of the APID handler
-    /// after it was passed to the distributor.
+    /// This function can be used to retrieve a reference to the concrete instance of the APID
+    /// handler after it was passed to the distributor. See the
+    /// [module documentation][crate::tmtc::ccsds_distrib] for an example.
     pub fn apid_handler_ref<T: ApidPacketHandler<Error = E>>(&self) -> Option<&T> {
         self.apid_handler.downcast_ref::<T>()
     }
 
+    /// This function can be used to retrieve a mutable reference to the concrete instance of the
+    /// APID handler after it was passed to the distributor.
     pub fn apid_handler_mut<T: ApidPacketHandler<Error = E>>(&mut self) -> Option<&mut T> {
         self.apid_handler.downcast_mut::<T>()
     }
@@ -198,7 +182,6 @@ impl<E: 'static> CcsdsDistributor<E> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::error::SimpleStdErrorHandler;
     use crate::tmtc::ccsds_distrib::{ApidPacketHandler, CcsdsDistributor};
     use spacepackets::tc::PusTc;
     use spacepackets::CcsdsPacket;
@@ -295,9 +278,7 @@ pub(crate) mod tests {
             known_packet_queue: known_packet_queue.clone(),
             unknown_packet_queue: unknown_packet_queue.clone(),
         };
-        let error_handler = SimpleStdErrorHandler {};
-        let mut ccsds_distrib =
-            CcsdsDistributor::new(Box::new(apid_handler), Box::new(error_handler));
+        let mut ccsds_distrib = CcsdsDistributor::new(Box::new(apid_handler));
         let mut test_buf: [u8; 32] = [0; 32];
         let tc_slice = generate_ping_tc(test_buf.as_mut_slice());
 
@@ -318,9 +299,7 @@ pub(crate) mod tests {
             known_packet_queue: known_packet_queue.clone(),
             unknown_packet_queue: unknown_packet_queue.clone(),
         };
-        let error_handler = SimpleStdErrorHandler {};
-        let mut ccsds_distrib =
-            CcsdsDistributor::new(Box::new(apid_handler), Box::new(error_handler));
+        let mut ccsds_distrib = CcsdsDistributor::new(Box::new(apid_handler));
         let mut sph = SpHeader::tc(0x004, 0x34, 0).unwrap();
         let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
         let mut test_buf: [u8; 32] = [0; 32];
