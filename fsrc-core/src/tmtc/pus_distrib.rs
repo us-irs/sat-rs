@@ -87,13 +87,13 @@ impl<E> PusDistributor<E> {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PusDistribError<E> {
     CustomError(E),
     PusError(PusError),
 }
 
-impl<E> ReceivesTc for PusDistributor<E> {
+impl<E: 'static> ReceivesTc for PusDistributor<E> {
     type Error = PusDistribError<E>;
     fn pass_tc(&mut self, tm_raw: &[u8]) -> Result<(), Self::Error> {
         // Convert to ccsds and call pass_ccsds
@@ -103,7 +103,7 @@ impl<E> ReceivesTc for PusDistributor<E> {
     }
 }
 
-impl<E> ReceivesCcsdsTc for PusDistributor<E> {
+impl<E: 'static> ReceivesCcsdsTc for PusDistributor<E> {
     type Error = PusDistribError<E>;
     fn pass_ccsds(&mut self, header: &SpHeader, tm_raw: &[u8]) -> Result<(), Self::Error> {
         let (tc, _) =
@@ -112,7 +112,7 @@ impl<E> ReceivesCcsdsTc for PusDistributor<E> {
     }
 }
 
-impl<E> ReceivesEcssPusTc for PusDistributor<E> {
+impl<E: 'static> ReceivesEcssPusTc for PusDistributor<E> {
     type Error = PusDistribError<E>;
     fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTc) -> Result<(), Self::Error> {
         self.service_provider

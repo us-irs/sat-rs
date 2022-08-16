@@ -121,7 +121,7 @@ pub struct CcsdsDistributor<E> {
     pub apid_handler: Box<dyn ApidPacketHandler<Error = E>>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CcsdsError<E> {
     CustomError(E),
     PacketError(PacketError),
