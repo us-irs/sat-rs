@@ -151,7 +151,7 @@ impl<E: 'static> CcsdsDistributor<E> {
 
     /// This function can be used to retrieve a reference to the concrete instance of the APID
     /// handler after it was passed to the distributor. See the
-    /// [module documentation][crate::tmtc::ccsds_distrib] for an example.
+    /// [module documentation][crate::tmtc::ccsds_distrib] for an fsrc-example.
     pub fn apid_handler_ref<T: ApidPacketHandler<Error = E>>(&self) -> Option<&T> {
         self.apid_handler.downcast_ref::<T>()
     }

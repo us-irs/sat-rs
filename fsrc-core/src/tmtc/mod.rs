@@ -42,7 +42,7 @@ pub trait ReceivesTc {
     fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error>;
 }
 
-/// Generic trait for object which can receive CCSDS space packets, for example ECSS PUS packets
+/// Generic trait for object which can receive CCSDS space packets, for fsrc-example ECSS PUS packets
 /// for CCSDS File Delivery Protocol (CFDP) packets.
 ///
 /// This trait is implemented by both the [crate::tmtc::pus_distrib::PusDistributor] and the

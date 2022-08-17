@@ -223,11 +223,19 @@ dependencies = [
  "bus",
  "downcast-rs",
  "num",
+ "once_cell",
  "postcard",
  "serde",
  "spacepackets",
  "thiserror",
  "zerocopy",
+]
+
+[[package]]
+name = "fsrc-example"
+version = "0.1.0"
+dependencies = [
+ "spacepackets",
 ]
 
 [[package]]
@@ -417,9 +425,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.13.0"
+version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18a6dbe30758c9f83eb00cbea4ac95966305f5a7772f3f42ebfc7fc7eddbd8e1"
+checksum = "074864da206b4973b84eb91683020dbefd6a8c3f0f38e054d93954e891935e4e"
 
 [[package]]
 name = "parking_lot_core"
