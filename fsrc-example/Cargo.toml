@@ -1,0 +1,8 @@
+[package]
+name = "fsrc-example"
+version = "0.1.0"
+edition = "2021"
+authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
+
+[dependencies.spacepackets]
+path = "../spacepackets"

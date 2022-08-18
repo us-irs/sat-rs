@@ -9,13 +9,20 @@ edition = "2021"
 thiserror = "1.0"
 bus = "2.2.3"
 num = "0.4"
-spacepackets = { path = "../spacepackets"}
+
+[dependencies.spacepackets]
+path = "../spacepackets"
+
+[dependencies.downcast-rs]
+version = "1.2.0"
+default-features = false
 
 [dev-dependencies]
 postcard = { version = "1.0.1", features = ["use-std"] }
 serde = "1.0.143"
 zerocopy = "0.6.1"
+once_cell = "1.13.1"
 
 [features]
 default = ["use_std"]
-use_std = []
+use_std = ["downcast-rs/std"]

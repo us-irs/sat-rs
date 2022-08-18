@@ -1,32 +1,62 @@
+//! Telemetry and Telecommanding (TMTC) module. Contains packet routing components with special
+//! support for CCSDS and ECSS packets.
+//!
+//! The distributor modules provided by this module use trait objects provided by the user to
+//! directly dispatch received packets to packet listeners based on packet fields like the CCSDS
+//! Application Process ID (APID) or the ECSS PUS service type. This allows for fast packet
+//! routing without the overhead and complication of using message queues. However, it also requires
 use crate::error::{FsrcErrorRaw, FsrcGroupIds};
-use spacepackets::{PacketError, SpHeader};
+use spacepackets::tc::PusTc;
+use spacepackets::SpHeader;
 
 pub mod ccsds_distrib;
 pub mod pus_distrib;
 
-const RAW_PACKET_ERROR: &str = "raw-tmtc";
+const _RAW_PACKET_ERROR: &str = "raw-tmtc";
 const _CCSDS_ERROR: &str = "ccsds-tmtc";
 const _PUS_ERROR: &str = "pus-tmtc";
 
 // TODO: A macro for general and unknown errors would be nice
-const FROM_BYTES_SLICE_TOO_SMALL_ERROR: FsrcErrorRaw = FsrcErrorRaw::new(
+const _FROM_BYTES_SLICE_TOO_SMALL_ERROR: FsrcErrorRaw = FsrcErrorRaw::new(
     FsrcGroupIds::Tmtc as u8,
     0,
-    RAW_PACKET_ERROR,
+    _RAW_PACKET_ERROR,
     "FROM_BYTES_SLICE_TOO_SMALL_ERROR",
 );
 
-const FROM_BYTES_ZEROCOPY_ERROR: FsrcErrorRaw = FsrcErrorRaw::new(
+const _FROM_BYTES_ZEROCOPY_ERROR: FsrcErrorRaw = FsrcErrorRaw::new(
     FsrcGroupIds::Tmtc as u8,
     1,
-    RAW_PACKET_ERROR,
+    _RAW_PACKET_ERROR,
     "FROM_BYTES_ZEROCOPY_ERROR",
 );
 
+/// Generic trait for object which can receive any telecommands in form of a raw bytestream, with
+/// no assumptions about the received protocol.
+///
+/// This trait is implemented by both the [crate::tmtc::pus_distrib::PusDistributor] and the
+/// [crate::tmtc::ccsds_distrib::CcsdsDistributor]  which allows to pass the respective packets in
+/// raw byte format into them.
 pub trait ReceivesTc {
-    fn pass_tc(&mut self, tc_raw: &[u8]);
+    type Error;
+    fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error>;
 }
 
+/// Generic trait for object which can receive CCSDS space packets, for fsrc-example ECSS PUS packets
+/// for CCSDS File Delivery Protocol (CFDP) packets.
+///
+/// This trait is implemented by both the [crate::tmtc::pus_distrib::PusDistributor] and the
+/// [crate::tmtc::ccsds_distrib::CcsdsDistributor] which allows
+/// to pass the respective packets in raw byte format or in CCSDS format into them.
 pub trait ReceivesCcsdsTc {
-    fn pass_ccsds(&mut self, header: &SpHeader, tc_raw: &[u8]) -> Result<(), PacketError>;
+    type Error;
+    fn pass_ccsds(&mut self, header: &SpHeader, tc_raw: &[u8]) -> Result<(), Self::Error>;
+}
+
+/// Generic trait for objects which can receive ECSS PUS telecommands. This trait is
+/// implemented by the [crate::tmtc::pus_distrib::PusDistributor] objects to allow passing PUS TC
+/// packets into it.
+pub trait ReceivesEcssPusTc {
+    type Error;
+    fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTc) -> Result<(), Self::Error>;
 }
