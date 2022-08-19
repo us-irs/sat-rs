@@ -1,20 +1,21 @@
 use std::sync::{Arc, RwLock};
 use std::thread;
+use fsrc_core::pool::{LocalPool, PoolCfg, StoreAddr, StoreError};
 
-struct PoolDummy {
-    test_buf: [u8; 128],
-}
 
 struct PoolAccessDummy<'a> {
-    pool_dummy: &'a mut PoolDummy,
+    pool: &'a mut LocalPool,
+    addr: Option<StoreAddr>,
     no_deletion: bool,
 }
 
 impl PoolAccessDummy<'_> {
-    fn modify(&mut self) -> &mut [u8] {
-        self.pool_dummy.modify()
+    #[allow(dead_code)]
+    fn modify(&mut self, addr: &StoreAddr) -> Result<&mut [u8], StoreError> {
+        self.pool.modify(addr)
     }
 
+    #[allow(dead_code)]
     fn release(&mut self) {
         self.no_deletion = true;
     }
@@ -25,67 +26,45 @@ impl Drop for PoolAccessDummy<'_> {
         if self.no_deletion {
             println!("Pool access: Drop with no deletion")
         } else {
-            self.pool_dummy.delete();
+            if let Some(addr) = self.addr {
+                let res = self.pool.delete(addr);
+                if res.is_err() {
+                    println!("Pool access: Deletion failed");
+                }
+            }
             println!("Pool access: Drop with deletion");
         }
     }
 }
 
-impl Default for PoolDummy {
-    fn default() -> Self {
-        PoolDummy { test_buf: [0; 128] }
-    }
-}
-
-impl PoolDummy {
-    fn modify(&mut self) -> &mut [u8] {
-        self.test_buf.as_mut_slice()
-    }
-
-    fn modify_with_accessor(&mut self) -> PoolAccessDummy {
-        PoolAccessDummy {
-            pool_dummy: self,
-            no_deletion: false,
-        }
-    }
-
-    fn read(&self) -> &[u8] {
-        self.test_buf.as_slice()
-    }
-
-    fn delete(&mut self) {
-        println!("Store content was deleted");
-    }
-}
-
-fn pool_test() {
+fn main() {
     println!("Hello World");
-    let shared_dummy = Arc::new(RwLock::new(PoolDummy::default()));
-    let shared_clone = shared_dummy.clone();
+    let pool_cfg = PoolCfg::new(vec![(16, 6), (32, 3), (8, 12)]);
+    let shared_dummy = Arc::new(RwLock::new(LocalPool::new(pool_cfg)));
+    let _shared_clone = shared_dummy.clone();
     let jh0 = thread::spawn(move || loop {
         {
             let mut dummy = shared_dummy.write().unwrap();
-            let buf = dummy.modify();
-            buf[0] = 1;
+            let dummy_data = [0, 1, 2, 3];
+            let _addr = dummy.add(&dummy_data).expect("Writing data failed");
 
-            let mut accessor = dummy.modify_with_accessor();
-            let buf = accessor.modify();
-            buf[0] = 2;
+            // let mut accessor = dummy.modify_with_accessor();
+            // let buf = accessor.modify();
         }
     });
 
     let jh1 = thread::spawn(move || loop {
         {
-            let dummy = shared_clone.read().unwrap();
-            let buf = dummy.read();
-            println!("Buffer 0: {:?}", buf[0]);
+            // let dummy = shared_clone.read().unwrap();
+            // let buf = dummy.read();
+            // println!("Buffer 0: {:?}", buf[0]);
         }
 
-        let mut dummy = shared_clone.write().unwrap();
-        let mut accessor = dummy.modify_with_accessor();
-        let buf = accessor.modify();
-        buf[0] = 3;
-        accessor.release();
+        //let mut dummy = shared_clone.write().unwrap();
+        //let mut accessor = dummy.modify_with_accessor();
+        //let buf = accessor.modify();
+        //buf[0] = 3;
+        //accessor.release();
     });
     jh0.join().unwrap();
     jh1.join().unwrap();
