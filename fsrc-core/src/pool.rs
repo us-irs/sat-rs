@@ -172,12 +172,12 @@ impl LocalPool {
     /// size and then copy the given data to the block. Yields a [StoreAddr] which can be used
     /// to access the data stored in the pool
     pub fn add(&mut self, data: &[u8]) -> Result<StoreAddr, StoreError> {
-        let data_len = data.as_ref().len();
+        let data_len = data.len();
         if data_len > Self::MAX_SIZE {
             return Err(StoreError::DataTooLarge(data_len));
         }
         let addr = self.reserve(data_len)?;
-        self.write(&addr, data.as_ref())?;
+        self.write(&addr, data)?;
         Ok(addr)
     }
 
@@ -206,7 +206,7 @@ impl LocalPool {
     pub fn read(&self, addr: &StoreAddr) -> Result<&[u8], StoreError> {
         let curr_size = self.addr_check(addr)?;
         let raw_pos = self.raw_pos(addr).unwrap();
-        let block = &self.pool.get(addr.pool_idx as usize).unwrap()[raw_pos..curr_size];
+        let block = &self.pool.get(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + curr_size];
         Ok(block)
     }
 
@@ -215,14 +215,36 @@ impl LocalPool {
         self.addr_check(&addr)?;
         let block_size = self.pool_cfg.cfg.get(addr.pool_idx as usize).unwrap().1;
         let raw_pos = self.raw_pos(&addr).unwrap();
-        let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..block_size];
+        let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + block_size];
         let size_list = self.sizes_lists.get_mut(addr.pool_idx as usize).unwrap();
         size_list[addr.packet_idx as usize] = Self::STORE_FREE;
         block.fill(0);
         Ok(())
     }
 
+    pub fn has_element_at(&self, addr: &StoreAddr) -> Result<bool, StoreError> {
+        self.validate_addr(addr)?;
+        let pool_idx = addr.pool_idx as usize;
+        let size_list = self.sizes_lists.get(pool_idx).unwrap();
+        let curr_size = size_list[addr.packet_idx as usize];
+        if curr_size == Self::STORE_FREE {
+            return Ok(false)
+        }
+        Ok(true)
+    }
+
     fn addr_check(&self, addr: &StoreAddr) -> Result<usize, StoreError> {
+        self.validate_addr(addr)?;
+        let pool_idx = addr.pool_idx as usize;
+        let size_list = self.sizes_lists.get(pool_idx).unwrap();
+        let curr_size = size_list[addr.packet_idx as usize];
+        if curr_size == Self::STORE_FREE {
+            return Err(StoreError::DataDoesNotExist(*addr));
+        }
+        Ok(curr_size)
+    }
+
+    fn validate_addr(&self, addr: &StoreAddr) -> Result<(), StoreError> {
         let pool_idx = addr.pool_idx as usize;
         if pool_idx as usize >= self.pool_cfg.cfg.len() {
             return Err(StoreError::InvalidStoreId(
@@ -236,12 +258,7 @@ impl LocalPool {
                 Some(*addr),
             ));
         }
-        let size_list = self.sizes_lists.get(pool_idx).unwrap();
-        let curr_size = size_list[addr.packet_idx as usize];
-        if curr_size == Self::STORE_FREE {
-            return Err(StoreError::DataDoesNotExist(*addr));
-        }
-        Ok(curr_size)
+        Ok(())
     }
 
     fn reserve(&mut self, data_len: usize) -> Result<StoreAddr, StoreError> {
@@ -279,7 +296,7 @@ impl LocalPool {
                 addr
             ))
         })?;
-        let pool_slice = &mut subpool[packet_pos..self.pool_cfg.cfg[addr.pool_idx as usize].1];
+        let pool_slice = &mut subpool[packet_pos..packet_pos + data.len()];
         pool_slice.copy_from_slice(data);
         Ok(())
     }
@@ -303,6 +320,43 @@ impl LocalPool {
     fn raw_pos(&self, addr: &StoreAddr) -> Option<usize> {
         let (_, size) = self.pool_cfg.cfg.get(addr.pool_idx as usize)?;
         Some(addr.packet_idx as usize * size)
+    }
+}
+
+pub struct PoolGuard<'a> {
+    pool: &'a mut LocalPool,
+    pub addr: StoreAddr,
+    no_deletion: bool,
+    deletion_failed_error: Option<StoreError>
+}
+
+impl<'a> PoolGuard<'a> {
+    pub fn new(pool: &'a mut LocalPool, addr: StoreAddr) -> Self {
+        Self {
+            pool,
+            addr,
+            no_deletion: false,
+            deletion_failed_error: None
+        }
+    }
+
+    pub fn read(&self) -> Result<&[u8], StoreError> {
+        self.pool.read(&self.addr)
+    }
+
+    pub fn release(&mut self) {
+        self.no_deletion = true;
+    }
+}
+
+impl Drop for PoolGuard<'_> {
+    fn drop(&mut self) {
+        if !self.no_deletion {
+            let res = self.pool.delete(self.addr);
+            if res.is_err() {
+                self.deletion_failed_error = Some(res.unwrap_err());
+            }
+        }
     }
 }
 
