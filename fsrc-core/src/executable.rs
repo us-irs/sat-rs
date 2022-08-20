@@ -1,10 +1,13 @@
 //! Task scheduling module
 use bus::BusReader;
+use std::boxed::Box;
 use std::error::Error;
 use std::sync::mpsc::TryRecvError;
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
+use std::vec;
+use std::vec::Vec;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum OpResult {
@@ -138,10 +141,13 @@ pub fn exec_sched_multi<
 mod tests {
     use super::{exec_sched_multi, exec_sched_single, Executable, ExecutionType, OpResult};
     use bus::Bus;
+    use std::boxed::Box;
     use std::error::Error;
+    use std::string::{String, ToString};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
-    use std::{fmt, thread};
+    use std::vec::Vec;
+    use std::{fmt, thread, vec};
 
     struct TestInfo {
         exec_num: u32,

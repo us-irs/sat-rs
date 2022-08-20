@@ -73,6 +73,10 @@
 //!     assert_eq!(buf_read_back[0], 7);
 //! }
 //! ```
+use alloc::format;
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
 type NumBlocks = u16;
 
 /// Configuration structure of the [local pool][LocalPool]
@@ -215,7 +219,8 @@ impl LocalPool {
         self.addr_check(&addr)?;
         let block_size = self.pool_cfg.cfg.get(addr.pool_idx as usize).unwrap().1;
         let raw_pos = self.raw_pos(&addr).unwrap();
-        let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + block_size];
+        let block =
+            &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + block_size];
         let size_list = self.sizes_lists.get_mut(addr.pool_idx as usize).unwrap();
         size_list[addr.packet_idx as usize] = Self::STORE_FREE;
         block.fill(0);
@@ -228,7 +233,7 @@ impl LocalPool {
         let size_list = self.sizes_lists.get(pool_idx).unwrap();
         let curr_size = size_list[addr.packet_idx as usize];
         if curr_size == Self::STORE_FREE {
-            return Ok(false)
+            return Ok(false);
         }
         Ok(true)
     }
@@ -327,7 +332,7 @@ pub struct PoolGuard<'a> {
     pool: &'a mut LocalPool,
     pub addr: StoreAddr,
     no_deletion: bool,
-    deletion_failed_error: Option<StoreError>
+    deletion_failed_error: Option<StoreError>,
 }
 
 impl<'a> PoolGuard<'a> {
@@ -336,7 +341,7 @@ impl<'a> PoolGuard<'a> {
             pool,
             addr,
             no_deletion: false,
-            deletion_failed_error: None
+            deletion_failed_error: None,
         }
     }
 
@@ -352,9 +357,8 @@ impl<'a> PoolGuard<'a> {
 impl Drop for PoolGuard<'_> {
     fn drop(&mut self) {
         if !self.no_deletion {
-            let res = self.pool.delete(self.addr);
-            if res.is_err() {
-                self.deletion_failed_error = Some(res.unwrap_err());
+            if let Err(e) = self.pool.delete(self.addr) {
+                self.deletion_failed_error = Some(e);
             }
         }
     }
@@ -363,6 +367,7 @@ impl Drop for PoolGuard<'_> {
 #[cfg(test)]
 mod tests {
     use crate::pool::{LocalPool, PoolCfg, StoreAddr, StoreError, StoreIdError};
+    use alloc::vec;
 
     #[test]
     fn test_cfg() {

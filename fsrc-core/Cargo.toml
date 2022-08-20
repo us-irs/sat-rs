@@ -7,15 +7,22 @@ edition = "2021"
 
 [dependencies]
 thiserror = "1.0"
-bus = "2.2.3"
-num = "0.4"
+hashbrown = "0.12.3"
 
-[dependencies.spacepackets]
-path = "../spacepackets"
+[dependencies.num-traits]
+version = "0.2"
+default-features = false
 
 [dependencies.downcast-rs]
 version = "1.2.0"
 default-features = false
+
+[dependencies.bus]
+version = "2.2.3"
+optional = true
+
+[dependencies.spacepackets]
+path = "../spacepackets"
 
 [dev-dependencies]
 postcard = { version = "1.0.1", features = ["use-std"] }
@@ -25,4 +32,6 @@ once_cell = "1.13.1"
 
 [features]
 default = ["std"]
-std = ["downcast-rs/std"]
+std = ["downcast-rs/std", "alloc", "bus"]
+alloc = []
+

@@ -1,9 +1,9 @@
+use fsrc_core::pool::{LocalPool, PoolCfg, PoolGuard, StoreAddr};
 use std::ops::DerefMut;
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use fsrc_core::pool::{LocalPool, PoolCfg, StoreAddr, PoolGuard};
-use std::sync::mpsc::{Sender, Receiver};
-use std::sync::mpsc;
 
 const DUMMY_DATA: [u8; 4] = [0, 1, 2, 3];
 
@@ -14,11 +14,9 @@ fn threaded_usage() {
     let shared_clone = shared_dummy.clone();
     let (tx, rx): (Sender<StoreAddr>, Receiver<StoreAddr>) = mpsc::channel();
     let jh0 = thread::spawn(move || {
-        {
-            let mut dummy = shared_dummy.write().unwrap();
-            let addr = dummy.add(&DUMMY_DATA).expect("Writing data failed");
-            tx.send(addr).expect("Sending store address failed");
-        }
+        let mut dummy = shared_dummy.write().unwrap();
+        let addr = dummy.add(&DUMMY_DATA).expect("Writing data failed");
+        tx.send(addr).expect("Sending store address failed");
     });
 
     let jh1 = thread::spawn(move || {
