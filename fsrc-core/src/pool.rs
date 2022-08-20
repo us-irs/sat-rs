@@ -77,6 +77,8 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use delegate::delegate;
+
 type NumBlocks = u16;
 
 /// Configuration structure of the [local pool][LocalPool]
@@ -206,12 +208,36 @@ impl LocalPool {
         Ok(block)
     }
 
+    /// This function behaves like [Self::modify], but consumes the provided address and returns a
+    /// RAII conformant guard object.
+    ///
+    /// Unless the guard [PoolRwGuard::release] method is called, the data for the
+    /// given address will be deleted automatically when the guard is dropped.
+    /// This can prevent memory leaks. Users can read (and modify) the data and release the guard
+    /// if the data in the store is valid for further processing. If the data is faulty, no
+    /// manual deletion is necessary when returning from a processing function prematurely.
+    pub fn modify_with_guard(&mut self, addr: StoreAddr) -> PoolRwGuard {
+        PoolRwGuard::new(self, addr)
+    }
+
     /// Read data by yielding a read-only reference given a [StoreAddr]
     pub fn read(&self, addr: &StoreAddr) -> Result<&[u8], StoreError> {
         let curr_size = self.addr_check(addr)?;
         let raw_pos = self.raw_pos(addr).unwrap();
         let block = &self.pool.get(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + curr_size];
         Ok(block)
+    }
+
+    /// This function behaves like [Self::read], but consumes the provided address and returns a
+    /// RAII conformant guard object.
+    ///
+    /// Unless the guard [PoolRwGuard::release] method is called, the data for the
+    /// given address will be deleted automatically when the guard is dropped.
+    /// This can prevent memory leaks. Users can read the data and release the guard
+    /// if the data in the store is valid for further processing. If the data is faulty, no
+    /// manual deletion is necessary when returning from a processing function prematurely.
+    pub fn read_with_guard(&mut self, addr: StoreAddr) -> PoolGuard {
+        PoolGuard::new(self, addr)
     }
 
     /// Delete data inside the pool given a [StoreAddr]
@@ -335,6 +361,7 @@ pub struct PoolGuard<'a> {
     deletion_failed_error: Option<StoreError>,
 }
 
+/// This helper object
 impl<'a> PoolGuard<'a> {
     pub fn new(pool: &'a mut LocalPool, addr: StoreAddr) -> Self {
         Self {
@@ -364,9 +391,34 @@ impl Drop for PoolGuard<'_> {
     }
 }
 
+pub struct PoolRwGuard<'a> {
+    guard: PoolGuard<'a>,
+}
+
+impl<'a> PoolRwGuard<'a> {
+    pub fn new(pool: &'a mut LocalPool, addr: StoreAddr) -> Self {
+        Self {
+            guard: PoolGuard::new(pool, addr),
+        }
+    }
+
+    pub fn modify(&mut self) -> Result<&mut [u8], StoreError> {
+        self.guard.pool.modify(&self.guard.addr)
+    }
+
+    delegate!(
+        to self.guard {
+            pub fn read(&self) -> Result<&[u8], StoreError>;
+            pub fn release(&mut self);
+        }
+    );
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::pool::{LocalPool, PoolCfg, StoreAddr, StoreError, StoreIdError};
+    use crate::pool::{
+        LocalPool, PoolCfg, PoolGuard, PoolRwGuard, StoreAddr, StoreError, StoreIdError,
+    };
     use std::vec;
 
     fn basic_small_pool() -> LocalPool {
@@ -577,5 +629,58 @@ mod tests {
         let res = local_pool.free_element(20);
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), StoreError::DataTooLarge(20));
+    }
+
+    #[test]
+    fn test_pool_guard_deletion_man_creation() {
+        let mut local_pool = basic_small_pool();
+        let test_buf: [u8; 16] = [0; 16];
+        let addr = local_pool.add(&test_buf).expect("Adding data failed");
+        let read_guard = PoolGuard::new(&mut local_pool, addr);
+        drop(read_guard);
+        assert!(!local_pool.has_element_at(&addr).expect("Invalid address"));
+    }
+
+    #[test]
+    fn test_pool_guard_deletion() {
+        let mut local_pool = basic_small_pool();
+        let test_buf: [u8; 16] = [0; 16];
+        let addr = local_pool.add(&test_buf).expect("Adding data failed");
+        let read_guard = local_pool.read_with_guard(addr);
+        drop(read_guard);
+        assert!(!local_pool.has_element_at(&addr).expect("Invalid address"));
+    }
+
+    #[test]
+    fn test_pool_guard_with_release() {
+        let mut local_pool = basic_small_pool();
+        let test_buf: [u8; 16] = [0; 16];
+        let addr = local_pool.add(&test_buf).expect("Adding data failed");
+        let mut read_guard = PoolGuard::new(&mut local_pool, addr);
+        read_guard.release();
+        drop(read_guard);
+        assert!(local_pool.has_element_at(&addr).expect("Invalid address"));
+    }
+
+    #[test]
+    fn test_pool_modify_guard_man_creation() {
+        let mut local_pool = basic_small_pool();
+        let test_buf: [u8; 16] = [0; 16];
+        let addr = local_pool.add(&test_buf).expect("Adding data failed");
+        let mut rw_guard = PoolRwGuard::new(&mut local_pool, addr);
+        let _ = rw_guard.modify().expect("modify failed");
+        drop(rw_guard);
+        assert!(!local_pool.has_element_at(&addr).expect("Invalid address"));
+    }
+
+    #[test]
+    fn test_pool_modify_guard() {
+        let mut local_pool = basic_small_pool();
+        let test_buf: [u8; 16] = [0; 16];
+        let addr = local_pool.add(&test_buf).expect("Adding data failed");
+        let mut rw_guard = local_pool.modify_with_guard(addr);
+        let _ = rw_guard.modify().expect("modify failed");
+        drop(rw_guard);
+        assert!(!local_pool.has_element_at(&addr).expect("Invalid address"));
     }
 }

@@ -232,6 +232,7 @@ name = "fsrc-core"
 version = "0.1.0"
 dependencies = [
  "bus",
+ "delegate",
  "downcast-rs",
  "hashbrown",
  "num-traits",
