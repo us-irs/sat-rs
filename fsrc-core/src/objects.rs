@@ -29,12 +29,12 @@
 //! }
 //!
 //! impl SystemObject for ExampleSysObj {
-//!
+//!     type Error = ();
 //!     fn get_object_id(&self) -> &ObjectId {
 //!         &self.id
 //!     }
 //!
-//!     fn initialize(&mut self) -> Result<(), Box<dyn Error>> {
+//!     fn initialize(&mut self) -> Result<(), Self::Error> {
 //!         self.was_initialized = true;
 //!         Ok(())
 //!     }
@@ -51,9 +51,12 @@
 //!  assert_eq!(example_obj.id, obj_id);
 //!  assert_eq!(example_obj.dummy, 42);
 //! ```
-
+use alloc::boxed::Box;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 use downcast_rs::Downcast;
-use std::collections::HashMap;
+use hashbrown::HashMap;
+#[cfg(feature = "std")]
 use std::error::Error;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
@@ -65,33 +68,37 @@ pub struct ObjectId {
 /// Each object which is stored inside the [object manager][ObjectManager] needs to implemented
 /// this trait
 pub trait SystemObject: Downcast {
+    type Error;
     fn get_object_id(&self) -> &ObjectId;
-    fn initialize(&mut self) -> Result<(), Box<dyn Error>>;
+    fn initialize(&mut self) -> Result<(), Self::Error>;
 }
-downcast_rs::impl_downcast!(SystemObject);
+downcast_rs::impl_downcast!(SystemObject assoc Error);
 
 pub trait ManagedSystemObject: SystemObject + Send {}
-downcast_rs::impl_downcast!(ManagedSystemObject);
+downcast_rs::impl_downcast!(ManagedSystemObject assoc Error);
 
 /// Helper module to manage multiple [ManagedSystemObjects][ManagedSystemObject] by mapping them
 /// using an [object ID][ObjectId]
-pub struct ObjectManager {
-    obj_map: HashMap<ObjectId, Box<dyn ManagedSystemObject>>,
+#[cfg(feature = "alloc")]
+pub struct ObjectManager<E> {
+    obj_map: HashMap<ObjectId, Box<dyn ManagedSystemObject<Error = E>>>,
 }
 
-impl Default for ObjectManager {
+#[cfg(feature = "alloc")]
+impl<E: 'static> Default for ObjectManager<E> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ObjectManager {
-    pub fn new() -> ObjectManager {
+#[cfg(feature = "alloc")]
+impl<E: 'static> ObjectManager<E> {
+    pub fn new() -> Self {
         ObjectManager {
             obj_map: HashMap::new(),
         }
     }
-    pub fn insert(&mut self, sys_obj: Box<dyn ManagedSystemObject>) -> bool {
+    pub fn insert(&mut self, sys_obj: Box<dyn ManagedSystemObject<Error = E>>) -> bool {
         let obj_id = sys_obj.get_object_id();
         if self.obj_map.contains_key(obj_id) {
             return false;
@@ -114,14 +121,14 @@ impl ObjectManager {
     /// Retrieve a reference to an object stored inside the manager. The type to retrieve needs to
     /// be explicitly passed as a generic parameter or specified on the left hand side of the
     /// expression.
-    pub fn get_ref<T: ManagedSystemObject>(&self, key: &ObjectId) -> Option<&T> {
+    pub fn get_ref<T: ManagedSystemObject<Error = E>>(&self, key: &ObjectId) -> Option<&T> {
         self.obj_map.get(key).and_then(|o| o.downcast_ref::<T>())
     }
 
     /// Retrieve a mutable reference to an object stored inside the manager. The type to retrieve
     /// needs to be explicitly passed as a generic parameter or specified on the left hand side
     /// of the expression.
-    pub fn get_mut<T: ManagedSystemObject>(&mut self, key: &ObjectId) -> Option<&mut T> {
+    pub fn get_mut<T: ManagedSystemObject<Error = E>>(&mut self, key: &ObjectId) -> Option<&mut T> {
         self.obj_map
             .get_mut(key)
             .and_then(|o| o.downcast_mut::<T>())
@@ -131,7 +138,8 @@ impl ObjectManager {
 #[cfg(test)]
 mod tests {
     use crate::objects::{ManagedSystemObject, ObjectId, ObjectManager, SystemObject};
-    use std::error::Error;
+    use std::boxed::Box;
+    use std::string::String;
     use std::sync::{Arc, Mutex};
     use std::thread;
 
@@ -152,11 +160,12 @@ mod tests {
     }
 
     impl SystemObject for ExampleSysObj {
+        type Error = ();
         fn get_object_id(&self) -> &ObjectId {
             &self.id
         }
 
-        fn initialize(&mut self) -> Result<(), Box<dyn Error>> {
+        fn initialize(&mut self) -> Result<(), Self::Error> {
             self.was_initialized = true;
             Ok(())
         }
@@ -171,11 +180,12 @@ mod tests {
     }
 
     impl SystemObject for OtherExampleObject {
+        type Error = ();
         fn get_object_id(&self) -> &ObjectId {
             &self.id
         }
 
-        fn initialize(&mut self) -> Result<(), Box<dyn Error>> {
+        fn initialize(&mut self) -> Result<(), Self::Error> {
             self.was_initialized = true;
             Ok(())
         }

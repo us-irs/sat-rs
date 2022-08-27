@@ -85,6 +85,7 @@
 //! mutable_ref.mutable_foo();
 //! ```
 use crate::tmtc::{ReceivesCcsdsTc, ReceivesTc};
+use alloc::boxed::Box;
 use downcast_rs::Downcast;
 use spacepackets::{CcsdsPacket, PacketError, SpHeader};
 
@@ -187,6 +188,7 @@ pub(crate) mod tests {
     use spacepackets::CcsdsPacket;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
+    use std::vec::Vec;
 
     pub fn generate_ping_tc(buf: &mut [u8]) -> &[u8] {
         let mut sph = SpHeader::tc(0x002, 0x34, 0).unwrap();

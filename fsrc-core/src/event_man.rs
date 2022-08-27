@@ -1,6 +1,9 @@
 //! [Event][crate::events::Event] management and forwarding
 use crate::events::{Event, EventRaw, GroupId};
-use std::collections::HashMap;
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
+use hashbrown::HashMap;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]
 enum ListenerType {
@@ -62,11 +65,14 @@ impl<E> EventManager<E> {
         key: ListenerType,
         dest: impl EventListener<Error = E> + 'static,
     ) {
-        if let std::collections::hash_map::Entry::Vacant(e) = self.listeners.entry(key) {
-            e.insert(vec![Listener {
-                ltype: key,
-                dest: Box::new(dest),
-            }]);
+        if !self.listeners.contains_key(&key) {
+            self.listeners.insert(
+                key,
+                vec![Listener {
+                    ltype: key,
+                    dest: Box::new(dest),
+                }],
+            );
         } else {
             let vec = self.listeners.get_mut(&key).unwrap();
             // To prevent double insertions
@@ -117,6 +123,7 @@ mod tests {
     use super::{EventListener, HandlerResult, ReceivesAllEvent};
     use crate::event_man::EventManager;
     use crate::events::{Event, Severity};
+    use alloc::boxed::Box;
     use std::sync::mpsc::{channel, Receiver, SendError, Sender};
     use std::thread;
     use std::time::Duration;
