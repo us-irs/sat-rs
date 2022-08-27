@@ -1,6 +1,6 @@
-use crate::hal::host::udp_server::ReceiveResult::{IoError, ReceiverError};
 use crate::tmtc::ReceivesTc;
 use std::boxed::Box;
+use std::io::ErrorKind;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::vec;
 use std::vec::Vec;
@@ -14,7 +14,8 @@ pub struct UdpTcServer<E> {
 
 #[derive(Debug)]
 pub enum ReceiveResult<E> {
-    IoError(std::io::Error),
+    WouldBlock,
+    OtherIoError(std::io::Error),
     ReceiverError(E),
 }
 
@@ -24,23 +25,36 @@ impl<E> UdpTcServer<E> {
         max_recv_size: usize,
         tc_receiver: Box<dyn ReceivesTc<Error = E>>,
     ) -> Result<Self, std::io::Error> {
-        Ok(Self {
+        let server = Self {
             socket: UdpSocket::bind(addr)?,
             recv_buf: vec![0; max_recv_size],
             sender_addr: None,
             tc_receiver,
-        })
+        };
+        server
+            .socket
+            .set_nonblocking(true)
+            .expect("Setting server non blocking failed");
+        Ok(server)
     }
 
-    pub fn recv_tc(&mut self) -> Result<(usize, SocketAddr), ReceiveResult<E>> {
-        let res = self
-            .socket
-            .recv_from(&mut self.recv_buf)
-            .map_err(|e| IoError(e))?;
-        self.sender_addr = Some(res.1);
+    pub fn try_recv_tc(&mut self) -> Result<(usize, SocketAddr), ReceiveResult<E>> {
+        // .map_err(|e| IoError(e))?;
+        let res = match self.socket.recv_from(&mut self.recv_buf) {
+            Ok(res) => res,
+            Err(e) => {
+                if e.kind() != ErrorKind::WouldBlock {
+                    return Err(ReceiveResult::WouldBlock);
+                } else {
+                    return Err(ReceiveResult::OtherIoError(e));
+                }
+            }
+        };
+        let (num_bytes, from) = res;
+        self.sender_addr = Some(from);
         self.tc_receiver
-            .pass_tc(&self.recv_buf[0..res.0])
-            .map_err(|e| ReceiverError(e))?;
+            .pass_tc(&self.recv_buf[0..num_bytes])
+            .map_err(|e| ReceiveResult::ReceiverError(e))?;
         Ok(res)
     }
 }
