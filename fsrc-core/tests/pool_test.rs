@@ -1,7 +1,6 @@
+use fsrc_core::pool::{LocalPool, PoolCfg, StoreAddr, StoreError};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use fsrc_core::pool::{LocalPool, PoolCfg, StoreAddr, StoreError};
-
 
 struct PoolAccessDummy<'a> {
     pool: &'a mut LocalPool,

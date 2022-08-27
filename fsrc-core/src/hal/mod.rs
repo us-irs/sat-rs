@@ -1,2 +1,2 @@
-#[cfg(feature = "use_std")]
+#[cfg(feature = "std")]
 pub mod host;

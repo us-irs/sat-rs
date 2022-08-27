@@ -6,3 +6,6 @@ authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
 
 [dependencies.spacepackets]
 path = "../spacepackets"
+
+[dependencies.fsrc-core]
+path = "../fsrc-core"

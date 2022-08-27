@@ -12,6 +12,9 @@ use spacepackets::SpHeader;
 pub mod ccsds_distrib;
 pub mod pus_distrib;
 
+pub use ccsds_distrib::{CcsdsDistributor, CcsdsError, CcsdsPacketHandler};
+pub use pus_distrib::{PusDistributor, PusServiceProvider};
+
 const _RAW_PACKET_ERROR: &str = "raw-tmtc";
 const _CCSDS_ERROR: &str = "ccsds-tmtc";
 const _PUS_ERROR: &str = "pus-tmtc";

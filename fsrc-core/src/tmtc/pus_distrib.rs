@@ -137,7 +137,8 @@ mod tests {
     use crate::tmtc::ccsds_distrib::tests::{
         generate_ping_tc, BasicApidHandlerOwnedQueue, BasicApidHandlerSharedQueue,
     };
-    use crate::tmtc::ccsds_distrib::{ApidPacketHandler, CcsdsDistributor};
+    use crate::tmtc::ccsds_distrib::{CcsdsDistributor, CcsdsPacketHandler};
+    use alloc::vec::Vec;
     use spacepackets::ecss::PusError;
     use spacepackets::tc::PusTc;
     use spacepackets::CcsdsPacket;
@@ -235,11 +236,11 @@ mod tests {
         };
     }
 
-    impl ApidPacketHandler for ApidHandlerOwned {
+    impl CcsdsPacketHandler for ApidHandlerOwned {
         apid_handler_impl!();
     }
 
-    impl ApidPacketHandler for ApidHandlerShared {
+    impl CcsdsPacketHandler for ApidHandlerShared {
         apid_handler_impl!();
     }
 
