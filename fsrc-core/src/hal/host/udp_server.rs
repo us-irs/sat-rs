@@ -42,10 +42,10 @@ impl<E> UdpTcServer<E> {
         let res = match self.socket.recv_from(&mut self.recv_buf) {
             Ok(res) => res,
             Err(e) => {
-                if e.kind() != ErrorKind::WouldBlock {
-                    return Err(ReceiveResult::WouldBlock);
+                return if e.kind() == ErrorKind::WouldBlock {
+                    Err(ReceiveResult::WouldBlock)
                 } else {
-                    return Err(ReceiveResult::OtherIoError(e));
+                    Err(ReceiveResult::OtherIoError(e))
                 }
             }
         };

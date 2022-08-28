@@ -11,8 +11,8 @@ use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::{CcsdsPacket, SpHeader};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{mpsc, Arc, Mutex};
-use std::sync::mpsc::TryRecvError;
 use std::thread;
+use std::time::Duration;
 
 const PUS_APID: u16 = 0x02;
 
@@ -96,12 +96,12 @@ struct TmStore {
 
 impl TmStore {
     fn add_pus_tm(&mut self, pus_tm: &PusTm) -> StoreAddr {
-        let (addr, mut buf) = self
+        let (addr, buf) = self
             .pool
             .free_element(pus_tm.len_packed())
             .expect("Store error");
         pus_tm
-            .write_to(&mut buf)
+            .write_to(buf)
             .expect("Writing PUS TM to store failed");
         addr
     }
@@ -144,39 +144,49 @@ fn main() {
         let mut udp_tmtc_server = UdpTmtcServer {
             udp_tc_server,
             tm_rx: tm_server_rx,
-            tm_store: tm_store.clone(),
+            tm_store
         };
         loop {
-            let res = udp_tmtc_server.udp_tc_server.try_recv_tc();
-            match res {
-                Ok(_) => (),
-                Err(e) => match e {
-                    ReceiveResult::ReceiverError(e) => match e {
-                        CcsdsError::PacketError(e) => {
-                            println!("Got packet error: {e:?}");
+            loop {
+                match udp_tmtc_server.udp_tc_server.try_recv_tc() {
+                    Ok(_) => (),
+                    Err(e) => match e {
+                        ReceiveResult::ReceiverError(e) => match e {
+                            CcsdsError::PacketError(e) => {
+                                println!("Got packet error: {e:?}");
+                            }
+                            CcsdsError::CustomError(_) => {
+                                println!("Unknown receiver error")
+                            }
+                        },
+                        ReceiveResult::OtherIoError(e) => {
+                            println!("IO error {e}");
+                            break;
                         }
-                        CcsdsError::CustomError(_) => {
-                            println!("Unknown receiver error")
+                        ReceiveResult::WouldBlock => {
+                            if let Some(recv_addr) = udp_tmtc_server.udp_tc_server.last_sender() {
+                                // TODO: Send TM Here
+                                while let Ok(addr) = udp_tmtc_server.tm_rx.try_recv() {
+                                    let mut store_lock = udp_tmtc_server
+                                        .tm_store
+                                        .lock()
+                                        .expect("Locking TM store failed");
+                                    let pg = store_lock.pool.read_with_guard(addr);
+                                    let buf = pg.read().expect("Error reading TM pool data");
+                                    println!("Sending TM");
+                                    udp_tmtc_server
+                                        .udp_tc_server
+                                        .socket
+                                        .send_to(buf, recv_addr)
+                                        .expect("Sending TM failed");
+                                }
+                            }
+                            break;
                         }
                     },
-                    ReceiveResult::OtherIoError(e) => {
-                        println!("IO error {e}");
-                    }
-                    ReceiveResult::WouldBlock => {
-                        if let Some(recv_addr) = udp_tmtc_server.udp_tc_server.last_sender() {
-                            // TODO: Send TM Here
-                            match udp_tmtc_server.tm_rx.try_recv() {
-                                Ok(addr) => {
-                                    udp_tmtc_server.tm_store.lock().expect("Locking TM store failed").pool.read()
-                                    udp_tmtc_server.udp_tc_server.socket.send_to()
-                                }
-                                Err(_) => {}
-                            }
-                        }
-
-                    }
-                },
+                }
             }
+            thread::sleep(Duration::from_millis(400));
         }
     });
     let jh1 = thread::spawn(move || {
@@ -185,9 +195,7 @@ fn main() {
             tm_funnel_rx,
         };
         loop {
-            let res = tm_funnel.tm_funnel_rx.recv();
-            if res.is_ok() {
-                let addr = res.unwrap();
+            if let Ok(addr) = tm_funnel.tm_funnel_rx.recv() {
                 tm_funnel
                     .tm_server_tx
                     .send(addr)

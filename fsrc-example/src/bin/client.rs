@@ -2,6 +2,7 @@ use fsrc_example::{OBSW_SERVER_ADDR, SERVER_PORT};
 use spacepackets::tc::PusTc;
 use spacepackets::SpHeader;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
+use std::time::Duration;
 
 fn main() {
     let mut buf = [0; 32];
@@ -13,4 +14,12 @@ fn main() {
     client
         .send_to(&buf[0..size], &addr)
         .expect(&*format!("Sending to {:?} failed", addr));
+    client
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("Setting read timeout failed");
+    if let Ok(len) = client.recv(&mut buf) {
+        println!("Received TM with {} bytes", len);
+    } else {
+        println!("No reply received for 2 seconds or timeout");
+    }
 }
