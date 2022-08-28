@@ -13,6 +13,7 @@ use spacepackets::SpHeader;
 pub mod ccsds_distrib;
 #[cfg(feature = "alloc")]
 pub mod pus_distrib;
+pub mod tm_helper;
 
 pub use ccsds_distrib::{CcsdsDistributor, CcsdsError, CcsdsPacketHandler};
 pub use pus_distrib::{PusDistributor, PusServiceProvider};
