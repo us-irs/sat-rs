@@ -1,69 +1,34 @@
-use fsrc_core::pool::{LocalPool, PoolCfg, StoreAddr, StoreError};
+use fsrc_core::pool::{LocalPool, PoolCfg, PoolGuard, StoreAddr};
+use std::ops::DerefMut;
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
-struct PoolAccessDummy<'a> {
-    pool: &'a mut LocalPool,
-    addr: Option<StoreAddr>,
-    no_deletion: bool,
-}
+const DUMMY_DATA: [u8; 4] = [0, 1, 2, 3];
 
-impl PoolAccessDummy<'_> {
-    #[allow(dead_code)]
-    fn modify(&mut self, addr: &StoreAddr) -> Result<&mut [u8], StoreError> {
-        self.pool.modify(addr)
-    }
-
-    #[allow(dead_code)]
-    fn release(&mut self) {
-        self.no_deletion = true;
-    }
-}
-
-impl Drop for PoolAccessDummy<'_> {
-    fn drop(&mut self) {
-        if self.no_deletion {
-            println!("Pool access: Drop with no deletion")
-        } else {
-            if let Some(addr) = self.addr {
-                let res = self.pool.delete(addr);
-                if res.is_err() {
-                    println!("Pool access: Deletion failed");
-                }
-            }
-            println!("Pool access: Drop with deletion");
-        }
-    }
-}
-
-fn main() {
-    println!("Hello World");
+#[test]
+fn threaded_usage() {
     let pool_cfg = PoolCfg::new(vec![(16, 6), (32, 3), (8, 12)]);
     let shared_dummy = Arc::new(RwLock::new(LocalPool::new(pool_cfg)));
-    let _shared_clone = shared_dummy.clone();
-    let jh0 = thread::spawn(move || loop {
-        {
-            let mut dummy = shared_dummy.write().unwrap();
-            let dummy_data = [0, 1, 2, 3];
-            let _addr = dummy.add(&dummy_data).expect("Writing data failed");
-
-            // let mut accessor = dummy.modify_with_accessor();
-            // let buf = accessor.modify();
-        }
+    let shared_clone = shared_dummy.clone();
+    let (tx, rx): (Sender<StoreAddr>, Receiver<StoreAddr>) = mpsc::channel();
+    let jh0 = thread::spawn(move || {
+        let mut dummy = shared_dummy.write().unwrap();
+        let addr = dummy.add(&DUMMY_DATA).expect("Writing data failed");
+        tx.send(addr).expect("Sending store address failed");
     });
 
-    let jh1 = thread::spawn(move || loop {
+    let jh1 = thread::spawn(move || {
+        let mut pool_access = shared_clone.write().unwrap();
+        let addr;
         {
-            // let dummy = shared_clone.read().unwrap();
-            // let buf = dummy.read();
-            // println!("Buffer 0: {:?}", buf[0]);
+            addr = rx.recv().expect("Receiving store address failed");
+            let pg = PoolGuard::new(pool_access.deref_mut(), addr);
+            let read_res = pg.read().expect("Reading failed");
+            assert_eq!(read_res, DUMMY_DATA);
         }
-
-        //let mut dummy = shared_clone.write().unwrap();
-        //let mut accessor = dummy.modify_with_accessor();
-        //let buf = accessor.modify();
-        //buf[0] = 3;
-        //accessor.release();
+        assert!(!pool_access.has_element_at(&addr).expect("Invalid address"));
     });
     jh0.join().unwrap();
     jh1.join().unwrap();

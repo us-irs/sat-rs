@@ -61,6 +61,7 @@
 //! assert_eq!(concrete_handler_ref.handler_call_count, 1);
 //! ```
 use crate::tmtc::{ReceivesCcsdsTc, ReceivesEcssPusTc, ReceivesTc};
+use alloc::boxed::Box;
 use downcast_rs::Downcast;
 use spacepackets::ecss::{PusError, PusPacket};
 use spacepackets::tc::PusTc;
@@ -142,7 +143,9 @@ mod tests {
     use spacepackets::ecss::PusError;
     use spacepackets::tc::PusTc;
     use spacepackets::CcsdsPacket;
+    #[cfg(feature = "std")]
     use std::collections::VecDeque;
+    #[cfg(feature = "std")]
     use std::sync::{Arc, Mutex};
 
     struct PusHandlerSharedQueue {
@@ -245,6 +248,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn test_pus_distribution() {
         let known_packet_queue = Arc::new(Mutex::default());
         let unknown_packet_queue = Arc::new(Mutex::default());

@@ -39,7 +39,6 @@ impl<E> UdpTcServer<E> {
     }
 
     pub fn try_recv_tc(&mut self) -> Result<(usize, SocketAddr), ReceiveResult<E>> {
-        // .map_err(|e| IoError(e))?;
         let res = match self.socket.recv_from(&mut self.recv_buf) {
             Ok(res) => res,
             Err(e) => {
@@ -56,5 +55,9 @@ impl<E> UdpTcServer<E> {
             .pass_tc(&self.recv_buf[0..num_bytes])
             .map_err(|e| ReceiveResult::ReceiverError(e))?;
         Ok(res)
+    }
+
+    pub fn last_sender(&self) -> Option<SocketAddr> {
+        self.sender_addr
     }
 }

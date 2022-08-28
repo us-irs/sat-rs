@@ -1,5 +1,4 @@
 //! Event support module
-use num::pow;
 
 pub type GroupId = u16;
 pub type UniqueId = u16;
@@ -47,7 +46,7 @@ impl Event {
     /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
     ///       raw event ID
     pub fn new(severity: Severity, group_id: GroupId, unique_id: UniqueId) -> Option<Event> {
-        if group_id > (pow::pow(2u8 as u16, 13) - 1) {
+        if group_id > (2u16.pow(13) - 1) {
             return None;
         }
         Some(Event {

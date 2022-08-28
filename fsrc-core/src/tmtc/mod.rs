@@ -9,7 +9,9 @@ use crate::error::{FsrcErrorRaw, FsrcGroupIds};
 use spacepackets::tc::PusTc;
 use spacepackets::SpHeader;
 
+#[cfg(feature = "alloc")]
 pub mod ccsds_distrib;
+#[cfg(feature = "alloc")]
 pub mod pus_distrib;
 
 pub use ccsds_distrib::{CcsdsDistributor, CcsdsError, CcsdsPacketHandler};

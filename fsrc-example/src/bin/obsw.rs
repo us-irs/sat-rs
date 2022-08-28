@@ -11,6 +11,7 @@ use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::{CcsdsPacket, SpHeader};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{mpsc, Arc, Mutex};
+use std::sync::mpsc::TryRecvError;
 use std::thread;
 
 const PUS_APID: u16 = 0x02;
@@ -162,7 +163,17 @@ fn main() {
                         println!("IO error {e}");
                     }
                     ReceiveResult::WouldBlock => {
-                        // TODO: Send TM Here
+                        if let Some(recv_addr) = udp_tmtc_server.udp_tc_server.last_sender() {
+                            // TODO: Send TM Here
+                            match udp_tmtc_server.tm_rx.try_recv() {
+                                Ok(addr) => {
+                                    udp_tmtc_server.tm_store.lock().expect("Locking TM store failed").pool.read()
+                                    udp_tmtc_server.udp_tc_server.socket.send_to()
+                                }
+                                Err(_) => {}
+                            }
+                        }
+
                     }
                 },
             }
