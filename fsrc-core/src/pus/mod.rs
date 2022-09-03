@@ -1,5 +1,6 @@
 use crate::pool::StoreError;
 use spacepackets::time::TimestampError;
+use spacepackets::ByteConversionError;
 
 pub mod verification;
 
@@ -7,5 +8,6 @@ pub mod verification;
 pub enum SendStoredTmError<E> {
     SendError(E),
     TimeStampError(TimestampError),
+    ToFromBytesError(ByteConversionError),
     StoreError(StoreError),
 }

@@ -87,7 +87,7 @@
 use crate::tmtc::{ReceivesCcsdsTc, ReceivesTc};
 use alloc::boxed::Box;
 use downcast_rs::Downcast;
-use spacepackets::{CcsdsPacket, PacketError, SizeMissmatch, SpHeader};
+use spacepackets::{ByteConversionError, CcsdsPacket, SizeMissmatch, SpHeader};
 
 /// Generic trait for a handler or dispatcher object handling CCSDS packets.
 ///
@@ -125,7 +125,7 @@ pub struct CcsdsDistributor<E> {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CcsdsError<E> {
     CustomError(E),
-    PacketError(PacketError),
+    PacketError(ByteConversionError),
 }
 
 impl<E: 'static> ReceivesCcsdsTc for CcsdsDistributor<E> {
@@ -142,7 +142,7 @@ impl<E: 'static> ReceivesTc for CcsdsDistributor<E> {
     fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
         if tc_raw.len() < 7 {
             return Err(CcsdsError::PacketError(
-                PacketError::FromBytesSliceTooSmall(SizeMissmatch {
+                ByteConversionError::FromSliceTooSmall(SizeMissmatch {
                     found: tc_raw.len(),
                     expected: 7,
                 }),
