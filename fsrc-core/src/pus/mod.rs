@@ -3,7 +3,7 @@ use spacepackets::time::TimestampError;
 
 pub mod verification;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum SendStoredTmError<E> {
     SendError(E),
     TimeStampError(TimestampError),
