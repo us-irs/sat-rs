@@ -4,16 +4,12 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use crate::ccsds::CcsdsReceiver;
+use crate::pus::PusReceiver;
 use crate::UdpTmtcServer;
 use fsrc_core::pool::{LocalPool, StoreAddr};
-use fsrc_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
-use fsrc_core::tmtc::{
-    CcsdsDistributor, CcsdsError, CcsdsPacketHandler, PusDistributor, PusServiceProvider,
-    ReceivesCcsdsTc,
-};
-use spacepackets::tc::PusTc;
+use fsrc_core::tmtc::{CcsdsDistributor, CcsdsError, PusDistributor};
 use spacepackets::tm::PusTm;
-use spacepackets::{CcsdsPacket, SpHeader};
 
 pub const PUS_APID: u16 = 0x02;
 
@@ -22,7 +18,7 @@ pub struct TmStore {
 }
 
 impl TmStore {
-    fn add_pus_tm(&mut self, pus_tm: &PusTm) -> StoreAddr {
+    pub fn add_pus_tm(&mut self, pus_tm: &PusTm) -> StoreAddr {
         let (addr, buf) = self
             .pool
             .free_element(pus_tm.len_packed())
@@ -31,92 +27,6 @@ impl TmStore {
             .write_to(buf)
             .expect("Writing PUS TM to store failed");
         addr
-    }
-}
-
-pub struct CcsdsReceiver {
-    pub pus_handler: PusDistributor<()>,
-}
-
-impl CcsdsPacketHandler for CcsdsReceiver {
-    type Error = ();
-
-    fn valid_apids(&self) -> &'static [u16] {
-        &[PUS_APID]
-    }
-
-    fn handle_known_apid(
-        &mut self,
-        sp_header: &SpHeader,
-        tc_raw: &[u8],
-    ) -> Result<(), Self::Error> {
-        if sp_header.apid() == PUS_APID {
-            self.pus_handler
-                .pass_ccsds(sp_header, tc_raw)
-                .expect("Handling PUS packet failed");
-        }
-        Ok(())
-    }
-
-    fn handle_unknown_apid(
-        &mut self,
-        _sp_header: &SpHeader,
-        _tc_raw: &[u8],
-    ) -> Result<(), Self::Error> {
-        println!("Unknown APID detected");
-        Ok(())
-    }
-}
-
-unsafe impl Send for CcsdsReceiver {}
-
-pub struct PusReceiver {
-    pub tm_helper: PusTmWithCdsShortHelper,
-    pub tm_tx: mpsc::Sender<StoreAddr>,
-    pub tm_store: Arc<Mutex<TmStore>>,
-}
-
-impl PusReceiver {
-    pub fn new(apid: u16, tm_tx: mpsc::Sender<StoreAddr>, tm_store: Arc<Mutex<TmStore>>) -> Self {
-        Self {
-            tm_helper: PusTmWithCdsShortHelper::new(apid),
-            tm_tx,
-            tm_store,
-        }
-    }
-}
-
-impl PusServiceProvider for PusReceiver {
-    type Error = ();
-
-    fn handle_pus_tc_packet(
-        &mut self,
-        service: u8,
-        _header: &SpHeader,
-        pus_tc: &PusTc,
-    ) -> Result<(), Self::Error> {
-        if service == 17 {
-            self.handle_test_service(pus_tc);
-        }
-        Ok(())
-    }
-}
-
-impl PusReceiver {
-    fn handle_test_service(&mut self, pus_tc: &PusTc) {
-        println!("Received PUS ping command");
-        let raw_data = pus_tc.raw().expect("Could not retrieve raw data");
-        println!("Raw data: 0x{raw_data:x?}");
-        println!("Sending ping reply");
-        let ping_reply = self.tm_helper.create_pus_tm_timestamp_now(17, 2, None);
-        let addr = self
-            .tm_store
-            .lock()
-            .expect("Locking TM store failed")
-            .add_pus_tm(&ping_reply);
-        self.tm_tx
-            .send(addr)
-            .expect("Sending TM to TM funnel failed");
     }
 }
 

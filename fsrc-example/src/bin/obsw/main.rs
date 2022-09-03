@@ -1,3 +1,4 @@
+mod ccsds;
 mod pus;
 mod tmtc;
 
@@ -24,6 +25,7 @@ struct UdpTmtcServer {
 unsafe impl Send for UdpTmtcServer {}
 
 fn main() {
+    println!("Running OBSW example");
     let pool_cfg = PoolCfg::new(vec![(8, 32), (4, 64), (2, 128)]);
     let tm_pool = LocalPool::new(pool_cfg);
     let tm_store = Arc::new(Mutex::new(TmStore { pool: tm_pool }));
