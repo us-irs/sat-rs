@@ -1,11 +1,10 @@
-use crate::pool::{LocalPool, StoreAddr};
-use crate::pus::SendStoredTmError;
+use crate::pool::{LocalPool, StoreAddr, StoreError};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::size_of;
-use spacepackets::ecss::EcssEnumeration;
+use spacepackets::ecss::{EcssEnumeration, PusError};
 use spacepackets::tc::PusTc;
-use spacepackets::time::CcsdsTimeProvider;
+use spacepackets::time::{CcsdsTimeProvider, TimestampError};
 use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::{ByteConversionError, SizeMissmatch, SpHeader};
 use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
@@ -25,6 +24,18 @@ pub struct RequestId {
     packet_id: PacketId,
     psc: PacketSequenceCtrl,
 }
+
+#[derive(Debug, Clone)]
+pub enum VerificationError<E> {
+    SendError(E),
+    TimeStampError(TimestampError),
+    ByteConversionError(ByteConversionError),
+    PusError(PusError),
+    StoreError(StoreError),
+}
+
+#[derive(Debug, Clone)]
+pub struct VerificationErrorWithToken<E, T>(VerificationError<E>, VerificationToken<T>);
 
 impl RequestId {
     const SIZE_AS_BYTES: usize = size_of::<u32>();
@@ -59,7 +70,7 @@ impl RequestId {
 }
 
 pub trait VerificationSender<E> {
-    fn send_verification_tm(&mut self, tm: PusTm) -> Result<(), SendStoredTmError<E>>;
+    fn send_verification_tm(&mut self, tm: PusTm) -> Result<(), VerificationError<E>>;
 }
 
 #[cfg(feature = "std")]
@@ -92,16 +103,15 @@ impl VerificationSender<StdVerifSenderError> for StdVerifSender {
     fn send_verification_tm(
         &mut self,
         tm: PusTm,
-    ) -> Result<(), SendStoredTmError<StdVerifSenderError>> {
+    ) -> Result<(), VerificationError<StdVerifSenderError>> {
         let operation = |mut mg: MutexGuard<LocalPool>| {
-            let (addr, mut buf) = mg
+            let (addr, buf) = mg
                 .free_element(tm.len_packed())
-                .map_err(|e| SendStoredTmError::StoreError(e))?;
-            tm.write_to(&mut buf)
-                .map_err(|e| SendStoredTmError::PusError(e))?;
+                .map_err(VerificationError::StoreError)?;
+            tm.write_to(buf).map_err(VerificationError::PusError)?;
             self.tx
                 .send(addr)
-                .map_err(|e| SendStoredTmError::SendError(StdVerifSenderError::SendError(e)))?;
+                .map_err(|e| VerificationError::SendError(StdVerifSenderError::SendError(e)))?;
             Ok(())
         };
         match self.tm_store.lock() {
@@ -110,9 +120,9 @@ impl VerificationSender<StdVerifSenderError> for StdVerifSender {
                 if self.ignore_poison_error {
                     operation(poison_error.into_inner())
                 } else {
-                    return Err(SendStoredTmError::SendError(
+                    Err(VerificationError::SendError(
                         StdVerifSenderError::PoisonError,
-                    ));
+                    ))
                 }
             }
         }
@@ -149,22 +159,19 @@ impl VerificationReporterCfg {
     }
 }
 
-pub struct FailParams<'a, E> {
+pub struct FailParams<'a> {
     time_stamp: &'a [u8],
-    sender: &'a mut dyn VerificationSender<E>,
     failure_code: &'a dyn EcssEnumeration,
     failure_data: &'a [u8],
 }
 
-impl<'a, E> FailParams<'a, E> {
+impl<'a> FailParams<'a> {
     pub fn new(
-        sender: &'a mut impl VerificationSender<E>,
         time_stamp: &'a [u8],
         failure_code: &'a impl EcssEnumeration,
         failure_data: &'a [u8],
     ) -> Self {
         Self {
-            sender,
             time_stamp,
             failure_code,
             failure_data,
@@ -172,21 +179,20 @@ impl<'a, E> FailParams<'a, E> {
     }
 }
 
-pub struct FailParamsWithStep<'a, E> {
-    bp: FailParams<'a, E>,
+pub struct FailParamsWithStep<'a> {
+    bp: FailParams<'a>,
     step: &'a dyn EcssEnumeration,
 }
 
-impl<'a, E> FailParamsWithStep<'a, E> {
+impl<'a> FailParamsWithStep<'a> {
     pub fn new(
-        sender: &'a mut impl VerificationSender<E>,
         time_stamp: &'a [u8],
         failure_code: &'a impl EcssEnumeration,
         failure_data: &'a [u8],
         step: &'a impl EcssEnumeration,
     ) -> Self {
         Self {
-            bp: FailParams::new(sender, time_stamp, failure_code, failure_data),
+            bp: FailParams::new(time_stamp, failure_code, failure_data),
             step,
         }
     }
@@ -221,15 +227,19 @@ impl VerificationReporter {
         token: VerificationToken<StateNone>,
         sender: &mut impl VerificationSender<E>,
         time_stamp: &[u8],
-    ) -> Result<VerificationToken<StateAccepted>, SendStoredTmError<E>> {
-        let tm = self.create_pus_verif_success_tm(
-            1,
-            1,
-            &token.req_id,
-            time_stamp,
-            None::<&dyn EcssEnumeration>,
-        )?;
-        sender.send_verification_tm(tm)?;
+    ) -> Result<VerificationToken<StateAccepted>, VerificationErrorWithToken<E, StateNone>> {
+        let tm = self
+            .create_pus_verif_success_tm(
+                1,
+                1,
+                &token.req_id,
+                time_stamp,
+                None::<&dyn EcssEnumeration>,
+            )
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
+        sender
+            .send_verification_tm(tm)
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
         self.msg_count += 1;
         Ok(VerificationToken {
             state: PhantomData,
@@ -240,18 +250,15 @@ impl VerificationReporter {
     pub fn acceptance_failure<E>(
         mut self,
         token: VerificationToken<StateNone>,
-        params: FailParams<E>,
-    ) -> Result<(), SendStoredTmError<E>> {
-        let tm = self.create_pus_verif_fail_tm(
-            1,
-            2,
-            params.time_stamp,
-            &token.req_id,
-            None::<&dyn EcssEnumeration>,
-            params.failure_code,
-            params.failure_data,
-        )?;
-        params.sender.send_verification_tm(tm)?;
+        sender: &mut impl VerificationSender<E>,
+        params: FailParams,
+    ) -> Result<(), VerificationErrorWithToken<E, StateNone>> {
+        let tm = self
+            .create_pus_verif_fail_tm(1, 2, &token.req_id, &params, None::<&dyn EcssEnumeration>)
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
+        sender
+            .send_verification_tm(tm)
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
         self.msg_count += 1;
         Ok(())
     }
@@ -259,17 +266,21 @@ impl VerificationReporter {
     pub fn start_success<E>(
         &mut self,
         token: VerificationToken<StateAccepted>,
-        time_stamp: &[u8],
         sender: &mut impl VerificationSender<E>,
-    ) -> Result<VerificationToken<StateStarted>, SendStoredTmError<E>> {
-        let tm = self.create_pus_verif_success_tm(
-            1,
-            3,
-            &token.req_id,
-            time_stamp,
-            None::<&dyn EcssEnumeration>,
-        )?;
-        sender.send_verification_tm(tm)?;
+        time_stamp: &[u8],
+    ) -> Result<VerificationToken<StateStarted>, VerificationErrorWithToken<E, StateAccepted>> {
+        let tm = self
+            .create_pus_verif_success_tm(
+                1,
+                3,
+                &token.req_id,
+                time_stamp,
+                None::<&dyn EcssEnumeration>,
+            )
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
+        sender
+            .send_verification_tm(tm)
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
         self.msg_count += 1;
         Ok(VerificationToken {
             state: PhantomData,
@@ -280,18 +291,15 @@ impl VerificationReporter {
     pub fn start_failure<E>(
         &mut self,
         token: VerificationToken<StateAccepted>,
-        params: FailParams<E>,
-    ) -> Result<(), SendStoredTmError<E>> {
-        let tm = self.create_pus_verif_fail_tm(
-            1,
-            4,
-            params.time_stamp,
-            &token.req_id,
-            None::<&dyn EcssEnumeration>,
-            params.failure_code,
-            params.failure_data,
-        )?;
-        params.sender.send_verification_tm(tm)?;
+        sender: &mut impl VerificationSender<E>,
+        params: FailParams,
+    ) -> Result<(), VerificationErrorWithToken<E, StateAccepted>> {
+        let tm = self
+            .create_pus_verif_fail_tm(1, 4, &token.req_id, &params, None::<&dyn EcssEnumeration>)
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
+        sender
+            .send_verification_tm(tm)
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
         self.msg_count += 1;
         Ok(())
     }
@@ -302,7 +310,7 @@ impl VerificationReporter {
         sender: &mut impl VerificationSender<E>,
         time_stamp: &[u8],
         step: impl EcssEnumeration,
-    ) -> Result<(), SendStoredTmError<E>> {
+    ) -> Result<(), VerificationError<E>> {
         let tm = self.create_pus_verif_success_tm(1, 5, &token.req_id, time_stamp, Some(&step))?;
         sender.send_verification_tm(tm)?;
         self.msg_count += 1;
@@ -312,18 +320,15 @@ impl VerificationReporter {
     pub fn step_failure<E>(
         &mut self,
         token: VerificationToken<StateAccepted>,
-        params: FailParamsWithStep<E>,
-    ) -> Result<(), SendStoredTmError<E>> {
-        let tm = self.create_pus_verif_fail_tm(
-            1,
-            6,
-            params.bp.time_stamp,
-            &token.req_id,
-            Some(params.step),
-            params.bp.failure_code,
-            params.bp.failure_data,
-        )?;
-        params.bp.sender.send_verification_tm(tm)?;
+        sender: &mut impl VerificationSender<E>,
+        params: FailParamsWithStep,
+    ) -> Result<(), VerificationErrorWithToken<E, StateAccepted>> {
+        let tm = self
+            .create_pus_verif_fail_tm(1, 6, &token.req_id, &params.bp, Some(params.step))
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
+        sender
+            .send_verification_tm(tm)
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
         self.msg_count += 1;
         Ok(())
     }
@@ -333,15 +338,19 @@ impl VerificationReporter {
         token: VerificationToken<StateAccepted>,
         sender: &mut impl VerificationSender<E>,
         time_stamp: &[u8],
-    ) -> Result<(), SendStoredTmError<E>> {
-        let tm = self.create_pus_verif_success_tm(
-            1,
-            7,
-            &token.req_id,
-            time_stamp,
-            None::<&dyn EcssEnumeration>,
-        )?;
-        sender.send_verification_tm(tm)?;
+    ) -> Result<(), VerificationErrorWithToken<E, StateAccepted>> {
+        let tm = self
+            .create_pus_verif_success_tm(
+                1,
+                7,
+                &token.req_id,
+                time_stamp,
+                None::<&dyn EcssEnumeration>,
+            )
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
+        sender
+            .send_verification_tm(tm)
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
         self.msg_count += 1;
         Ok(())
     }
@@ -349,18 +358,15 @@ impl VerificationReporter {
     pub fn completion_failure<E>(
         &mut self,
         token: VerificationToken<StateAccepted>,
-        params: FailParams<E>,
-    ) -> Result<(), SendStoredTmError<E>> {
-        let tm = self.create_pus_verif_fail_tm(
-            1,
-            8,
-            params.time_stamp,
-            &token.req_id,
-            None::<&dyn EcssEnumeration>,
-            params.failure_code,
-            params.failure_data,
-        )?;
-        params.sender.send_verification_tm(tm)?;
+        sender: &mut impl VerificationSender<E>,
+        params: FailParams,
+    ) -> Result<(), VerificationErrorWithToken<E, StateAccepted>> {
+        let tm = self
+            .create_pus_verif_fail_tm(1, 8, &token.req_id, &params, None::<&dyn EcssEnumeration>)
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
+        sender
+            .send_verification_tm(tm)
+            .map_err(|e| VerificationErrorWithToken(e, token))?;
         self.msg_count += 1;
         Ok(())
     }
@@ -372,7 +378,7 @@ impl VerificationReporter {
         req_id: &RequestId,
         time_stamp: &'a [u8],
         step: Option<&(impl EcssEnumeration + ?Sized)>,
-    ) -> Result<PusTm, SendStoredTmError<E>> {
+    ) -> Result<PusTm, VerificationError<E>> {
         let mut source_data_len = size_of::<u32>();
         if let Some(step) = step {
             source_data_len += step.byte_width() as usize;
@@ -400,15 +406,14 @@ impl VerificationReporter {
         &'a mut self,
         service: u8,
         subservice: u8,
-        time_stamp: &'a [u8],
         req_id: &RequestId,
+        params: &'a FailParams,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
-        fail_code: &(impl EcssEnumeration + ?Sized),
-        fail_data: &[u8],
-    ) -> Result<PusTm, SendStoredTmError<E>> {
+    ) -> Result<PusTm, VerificationError<E>> {
         let mut idx = 0;
-        let mut source_data_len =
-            RequestId::SIZE_AS_BYTES + fail_code.byte_width() as usize + fail_data.len();
+        let mut source_data_len = RequestId::SIZE_AS_BYTES
+            + params.failure_code.byte_width() as usize
+            + params.failure_data.len();
         if let Some(step) = step {
             source_data_len += step.byte_width() as usize;
         }
@@ -420,24 +425,28 @@ impl VerificationReporter {
             step.to_bytes(&mut self.source_data_buf[idx..idx + step.byte_width() as usize])
                 .unwrap();
         }
-        fail_code
-            .to_bytes(&mut self.source_data_buf[idx..idx + fail_code.byte_width() as usize])
-            .map_err(|e| SendStoredTmError::<E>::ToFromBytesError(e))?;
-        idx += fail_code.byte_width() as usize;
-        self.source_data_buf[idx..idx + fail_data.len()].copy_from_slice(fail_data);
+        params
+            .failure_code
+            .to_bytes(
+                &mut self.source_data_buf[idx..idx + params.failure_code.byte_width() as usize],
+            )
+            .map_err(|e| VerificationError::<E>::ByteConversionError(e))?;
+        idx += params.failure_code.byte_width() as usize;
+        self.source_data_buf[idx..idx + params.failure_data.len()]
+            .copy_from_slice(params.failure_data);
         let mut sp_header = SpHeader::tm(self.apid, 0, 0).unwrap();
         Ok(self.create_pus_verif_tm_base(
             service,
             subservice,
             &mut sp_header,
-            time_stamp,
+            params.time_stamp,
             source_data_len,
         ))
     }
 
-    fn source_buffer_large_enough<E>(&self, len: usize) -> Result<(), SendStoredTmError<E>> {
+    fn source_buffer_large_enough<E>(&self, len: usize) -> Result<(), VerificationError<E>> {
         if len > self.source_data_buf.capacity() {
-            return Err(SendStoredTmError::ToFromBytesError(
+            return Err(VerificationError::ByteConversionError(
                 ByteConversionError::ToSliceTooSmall(SizeMissmatch {
                     found: self.source_data_buf.capacity(),
                     expected: len,
@@ -471,13 +480,17 @@ impl VerificationReporter {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct VerificationToken<STATE> {
     state: PhantomData<STATE>,
     req_id: RequestId,
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct StateNone;
+#[derive(Copy, Clone, Debug)]
 pub struct StateAccepted;
+#[derive(Copy, Clone, Debug)]
 pub struct StateStarted;
 
 impl<STATE> VerificationToken<STATE> {
@@ -492,9 +505,9 @@ impl<STATE> VerificationToken<STATE> {
 #[cfg(test)]
 mod tests {
     use crate::pus::verification::{
-        RequestId, VerificationReporter, VerificationReporterCfg, VerificationSender,
+        RequestId, VerificationError, VerificationReporter, VerificationReporterCfg,
+        VerificationSender,
     };
-    use crate::pus::SendStoredTmError;
     use alloc::vec::Vec;
     use spacepackets::ecss::PusPacket;
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
@@ -521,7 +534,7 @@ mod tests {
     }
 
     impl VerificationSender<()> for TestSender {
-        fn send_verification_tm(&mut self, tm: PusTm) -> Result<(), SendStoredTmError<()>> {
+        fn send_verification_tm(&mut self, tm: PusTm) -> Result<(), VerificationError<()>> {
             assert_eq!(PusPacket::service(&tm), 1);
             assert!(tm.source_data().is_some());
             let mut time_stamp = [0; 7];
