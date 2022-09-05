@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::mem::size_of;
 use delegate::delegate;
+use downcast_rs::{impl_downcast, Downcast};
 use spacepackets::ecss::{EcssEnumeration, PusError};
 use spacepackets::tc::PusTc;
 use spacepackets::time::{CcsdsTimeProvider, TimestampError};
@@ -70,9 +71,11 @@ pub enum VerificationError<E> {
 #[derive(Debug, Clone)]
 pub struct VerificationErrorWithToken<E, T>(VerificationError<E>, VerificationToken<T>);
 
-pub trait VerificationSender<E> {
+pub trait VerificationSender<E>: Downcast {
     fn send_verification_tm(&mut self, tm: PusTm) -> Result<(), VerificationError<E>>;
 }
+
+impl_downcast!(VerificationSender<E>);
 
 #[derive(Debug, Clone, Copy)]
 pub struct VerificationToken<STATE> {
@@ -147,9 +150,9 @@ pub struct FailParamsWithStep<'a> {
 impl<'a> FailParamsWithStep<'a> {
     pub fn new(
         time_stamp: &'a [u8],
+        step: &'a impl EcssEnumeration,
         failure_code: &'a impl EcssEnumeration,
         failure_data: Option<&'a [u8]>,
-        step: &'a impl EcssEnumeration,
     ) -> Self {
         Self {
             bp: FailParams::new(time_stamp, failure_code, failure_data),
@@ -221,7 +224,7 @@ impl VerificationReporter {
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, StateNone>> {
         let tm = self
-            .create_pus_verif_fail_tm(1, 2, &token.req_id, &params, None::<&dyn EcssEnumeration>)
+            .create_pus_verif_fail_tm(1, 2, &token.req_id, None::<&dyn EcssEnumeration>, &params)
             .map_err(|e| VerificationErrorWithToken(e, token))?;
         sender
             .send_verification_tm(tm)
@@ -262,7 +265,7 @@ impl VerificationReporter {
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, StateAccepted>> {
         let tm = self
-            .create_pus_verif_fail_tm(1, 4, &token.req_id, &params, None::<&dyn EcssEnumeration>)
+            .create_pus_verif_fail_tm(1, 4, &token.req_id, None::<&dyn EcssEnumeration>, &params)
             .map_err(|e| VerificationErrorWithToken(e, token))?;
         sender
             .send_verification_tm(tm)
@@ -273,7 +276,7 @@ impl VerificationReporter {
 
     pub fn step_success<E>(
         &mut self,
-        token: &VerificationToken<StateAccepted>,
+        token: &VerificationToken<StateStarted>,
         sender: &mut (impl VerificationSender<E> + ?Sized),
         time_stamp: &[u8],
         step: impl EcssEnumeration,
@@ -286,12 +289,12 @@ impl VerificationReporter {
 
     pub fn step_failure<E>(
         &mut self,
-        token: VerificationToken<StateAccepted>,
+        token: VerificationToken<StateStarted>,
         sender: &mut (impl VerificationSender<E> + ?Sized),
         params: FailParamsWithStep,
-    ) -> Result<(), VerificationErrorWithToken<E, StateAccepted>> {
+    ) -> Result<(), VerificationErrorWithToken<E, StateStarted>> {
         let tm = self
-            .create_pus_verif_fail_tm(1, 6, &token.req_id, &params.bp, Some(params.step))
+            .create_pus_verif_fail_tm(1, 6, &token.req_id, Some(params.step), &params.bp)
             .map_err(|e| VerificationErrorWithToken(e, token))?;
         sender
             .send_verification_tm(tm)
@@ -302,10 +305,10 @@ impl VerificationReporter {
 
     pub fn completion_success<E>(
         &mut self,
-        token: VerificationToken<StateAccepted>,
+        token: VerificationToken<StateStarted>,
         sender: &mut (impl VerificationSender<E> + ?Sized),
         time_stamp: &[u8],
-    ) -> Result<(), VerificationErrorWithToken<E, StateAccepted>> {
+    ) -> Result<(), VerificationErrorWithToken<E, StateStarted>> {
         let tm = self
             .create_pus_verif_success_tm(
                 1,
@@ -324,12 +327,12 @@ impl VerificationReporter {
 
     pub fn completion_failure<E>(
         &mut self,
-        token: VerificationToken<StateAccepted>,
+        token: VerificationToken<StateStarted>,
         sender: &mut (impl VerificationSender<E> + ?Sized),
         params: FailParams,
-    ) -> Result<(), VerificationErrorWithToken<E, StateAccepted>> {
+    ) -> Result<(), VerificationErrorWithToken<E, StateStarted>> {
         let tm = self
-            .create_pus_verif_fail_tm(1, 8, &token.req_id, &params, None::<&dyn EcssEnumeration>)
+            .create_pus_verif_fail_tm(1, 8, &token.req_id, None::<&dyn EcssEnumeration>, &params)
             .map_err(|e| VerificationErrorWithToken(e, token))?;
         sender
             .send_verification_tm(tm)
@@ -374,8 +377,8 @@ impl VerificationReporter {
         service: u8,
         subservice: u8,
         req_id: &RequestId,
-        params: &'a FailParams,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
+        params: &'a FailParams,
     ) -> Result<PusTm, VerificationError<E>> {
         let mut idx = 0;
         let mut source_data_len =
@@ -393,6 +396,7 @@ impl VerificationReporter {
             // Size check done beforehand
             step.to_bytes(&mut self.source_data_buf[idx..idx + step.byte_width() as usize])
                 .unwrap();
+            idx += step.byte_width() as usize;
         }
         params
             .failure_code
@@ -452,15 +456,19 @@ impl VerificationReporter {
 
 pub struct VerificationReporterWithSender<E> {
     reporter: VerificationReporter,
-    sender: Box<dyn VerificationSender<E>>,
+    pub sender: Box<dyn VerificationSender<E>>,
 }
 
-impl<E> VerificationReporterWithSender<E> {
+impl<E: 'static> VerificationReporterWithSender<E> {
     pub fn new(cfg: VerificationReporterCfg, sender: Box<dyn VerificationSender<E>>) -> Self {
-        Self {
-            reporter: VerificationReporter::new(cfg),
-            sender,
-        }
+        Self::new_from_reporter(VerificationReporter::new(cfg), sender)
+    }
+
+    pub fn new_from_reporter(
+        reporter: VerificationReporter,
+        sender: Box<dyn VerificationSender<E>>,
+    ) -> Self {
+        Self { reporter, sender }
     }
 
     delegate! {
@@ -508,7 +516,7 @@ impl<E> VerificationReporterWithSender<E> {
 
     pub fn step_success(
         &mut self,
-        token: &VerificationToken<StateAccepted>,
+        token: &VerificationToken<StateStarted>,
         time_stamp: &[u8],
         step: impl EcssEnumeration,
     ) -> Result<(), VerificationError<E>> {
@@ -518,27 +526,27 @@ impl<E> VerificationReporterWithSender<E> {
 
     pub fn step_failure(
         &mut self,
-        token: VerificationToken<StateAccepted>,
+        token: VerificationToken<StateStarted>,
         params: FailParamsWithStep,
-    ) -> Result<(), VerificationErrorWithToken<E, StateAccepted>> {
+    ) -> Result<(), VerificationErrorWithToken<E, StateStarted>> {
         self.reporter
             .step_failure(token, self.sender.as_mut(), params)
     }
 
     pub fn completion_success(
         &mut self,
-        token: VerificationToken<StateAccepted>,
+        token: VerificationToken<StateStarted>,
         time_stamp: &[u8],
-    ) -> Result<(), VerificationErrorWithToken<E, StateAccepted>> {
+    ) -> Result<(), VerificationErrorWithToken<E, StateStarted>> {
         self.reporter
             .completion_success(token, self.sender.as_mut(), time_stamp)
     }
 
     pub fn completion_failure(
         &mut self,
-        token: VerificationToken<StateAccepted>,
+        token: VerificationToken<StateStarted>,
         params: FailParams,
-    ) -> Result<(), VerificationErrorWithToken<E, StateAccepted>> {
+    ) -> Result<(), VerificationErrorWithToken<E, StateStarted>> {
         self.reporter
             .completion_failure(token, self.sender.as_mut(), params)
     }
@@ -604,11 +612,13 @@ impl VerificationSender<StdVerifSenderError> for StdVerifSender {
 #[cfg(test)]
 mod tests {
     use crate::pus::verification::{
-        FailParams, RequestId, VerificationError, VerificationReporter, VerificationReporterCfg,
-        VerificationSender,
+        FailParams, FailParamsWithStep, RequestId, StateNone, VerificationError,
+        VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
+        VerificationSender, VerificationToken,
     };
+    use alloc::boxed::Box;
     use alloc::vec::Vec;
-    use spacepackets::ecss::{EcssEnumU16, PusPacket};
+    use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration, PusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::time::{CdsShortTimeProvider, TimeWriter};
     use spacepackets::tm::{PusTm, PusTmSecondaryHeaderT};
@@ -616,7 +626,9 @@ mod tests {
     use std::collections::VecDeque;
 
     const TEST_APID: u16 = 0x02;
+    const EMPTY_STAMP: [u8; 7] = [0; 7];
 
+    #[derive(Debug, Eq, PartialEq)]
     struct TmInfo {
         pub subservice: u8,
         pub apid: u16,
@@ -630,6 +642,73 @@ mod tests {
     #[derive(Default)]
     struct TestSender {
         pub service_queue: VecDeque<TmInfo>,
+    }
+
+    struct TestBase<'a> {
+        #[allow(dead_code)]
+        ts: CdsShortTimeProvider,
+        vr: VerificationReporter,
+        #[allow(dead_code)]
+        tc: PusTc<'a>,
+        req_id: RequestId,
+    }
+
+    struct TestBaseWithHelper<'a, E> {
+        #[allow(dead_code)]
+        ts: CdsShortTimeProvider,
+        helper: VerificationReporterWithSender<E>,
+        #[allow(dead_code)]
+        tc: PusTc<'a>,
+        req_id: RequestId,
+    }
+
+    fn base_reporter_and_stamper() -> (CdsShortTimeProvider, VerificationReporter) {
+        let time_stamper = CdsShortTimeProvider::default();
+        let cfg = VerificationReporterCfg::new(time_stamper, 0x02);
+        (time_stamper, VerificationReporter::new(cfg))
+    }
+
+    fn base_tc_init(app_data: Option<&[u8]>) -> (PusTc, RequestId) {
+        let mut sph = SpHeader::tc(TEST_APID, 0x34, 0).unwrap();
+        let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let pus_tc = PusTc::new(&mut sph, tc_header, app_data, true);
+        let req_id = RequestId::new(&pus_tc);
+        (pus_tc, req_id)
+    }
+
+    fn base_init() -> (TestBase<'static>, VerificationToken<StateNone>) {
+        let (ts, mut reporter) = base_reporter_and_stamper();
+        let (tc, req_id) = base_tc_init(None);
+        let init_tok = reporter.add_tc(&tc);
+        (
+            TestBase {
+                ts,
+                vr: reporter,
+                tc,
+                req_id,
+            },
+            init_tok,
+        )
+    }
+
+    fn base_with_helper_init() -> (
+        TestBaseWithHelper<'static, ()>,
+        VerificationToken<StateNone>,
+    ) {
+        let (ts, mut reporter) = base_reporter_and_stamper();
+        let (tc, req_id) = base_tc_init(None);
+        let init_tok = reporter.add_tc(&tc);
+        let sender = TestSender::default();
+        let helper = VerificationReporterWithSender::new_from_reporter(reporter, Box::new(sender));
+        (
+            TestBaseWithHelper {
+                ts,
+                helper: helper,
+                tc,
+                req_id,
+            },
+            init_tok,
+        )
     }
 
     impl VerificationSender<()> for TestSender {
@@ -660,44 +739,46 @@ mod tests {
         }
     }
 
-    #[test]
-    pub fn test_basic_acceptance_success() {
-        let time_stamper = CdsShortTimeProvider::default();
-        let cfg = VerificationReporterCfg::new(time_stamper, 0x02);
-        let mut reporter = VerificationReporter::new(cfg);
-        let mut sph = SpHeader::tc(TEST_APID, 0x34, 0).unwrap();
-        let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-        let pus_tc = PusTc::new(&mut sph, tc_header, None, true);
-        let verif_token = reporter.add_tc(&pus_tc);
-        let req_id = RequestId::new(&pus_tc);
-        let mut stamp_buf = [0; 7];
-        time_stamper.write_to_bytes(&mut stamp_buf).unwrap();
-        let mut sender = TestSender::default();
-        reporter
-            .acceptance_success(verif_token, &mut sender, &stamp_buf)
-            .expect("Sending acceptance success failed");
+    fn acceptance_check(sender: &mut TestSender, req_id: &RequestId) {
+        let cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 1,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 0,
+            additional_data: None,
+            req_id: req_id.clone(),
+        };
         assert_eq!(sender.service_queue.len(), 1);
         let info = sender.service_queue.pop_front().unwrap();
-        assert_eq!(info.subservice, 1);
-        assert_eq!(info.time_stamp, [0; 7]);
-        assert_eq!(info.dest_id, 0);
-        assert_eq!(info.apid, TEST_APID);
-        assert_eq!(info.msg_counter, 0);
-        assert_eq!(info.additional_data, None);
-        assert_eq!(info.req_id, req_id);
+        assert_eq!(info, cmp_info);
+    }
+
+    #[test]
+    fn test_basic_acceptance_success() {
+        let (mut b, tok) = base_init();
+        let mut sender = TestSender::default();
+        b.vr.acceptance_success(tok, &mut sender, &EMPTY_STAMP)
+            .expect("Sending acceptance success failed");
+        acceptance_check(&mut sender, &b.req_id);
+    }
+
+    #[test]
+    fn test_basic_acceptance_success_with_helper() {
+        let (mut b, tok) = base_with_helper_init();
+        b.helper
+            .acceptance_success(tok, &EMPTY_STAMP)
+            .expect("Sending acceptance success failed");
+        let sender: &mut TestSender = b.helper.sender.downcast_mut().unwrap();
+        acceptance_check(sender, &b.req_id);
     }
 
     #[test]
     pub fn test_basic_acceptance_failure() {
-        let time_stamper = CdsShortTimeProvider::default();
-        let cfg = VerificationReporterCfg::new(time_stamper, 0x02);
-        let mut reporter = VerificationReporter::new(cfg);
+        let (time_stamper, mut reporter) = base_reporter_and_stamper();
+        let (tc, req_id) = base_tc_init(None);
         reporter.dest_id = 5;
-        let mut sph = SpHeader::tc(TEST_APID, 0x34, 0).unwrap();
-        let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-        let pus_tc = PusTc::new(&mut sph, tc_header, None, true);
-        let verif_token = reporter.add_tc(&pus_tc);
-        let req_id = RequestId::new(&pus_tc);
+        let verif_token = reporter.add_tc(&tc);
         let mut stamp_buf = [1, 2, 3, 4, 5, 6, 7];
         time_stamper.write_to_bytes(&mut stamp_buf).unwrap();
         let mut sender = TestSender::default();
@@ -706,14 +787,374 @@ mod tests {
         reporter
             .acceptance_failure(verif_token, &mut sender, fail_params)
             .expect("Sending acceptance success failed");
+        let cmp_info = TmInfo {
+            time_stamp: stamp_buf,
+            subservice: 2,
+            dest_id: 5,
+            apid: TEST_APID,
+            msg_counter: 0,
+            additional_data: Some([0, 2].to_vec()),
+            req_id,
+        };
         assert_eq!(sender.service_queue.len(), 1);
         let info = sender.service_queue.pop_front().unwrap();
-        assert_eq!(info.subservice, 2);
-        assert_eq!(info.time_stamp, stamp_buf);
-        assert_eq!(info.dest_id, 5);
-        assert_eq!(info.apid, TEST_APID);
-        assert_eq!(info.msg_counter, 0);
-        assert_eq!(info.additional_data, Some([0, 2].to_vec()));
-        assert_eq!(info.req_id, req_id);
+        assert_eq!(info, cmp_info);
+    }
+
+    #[test]
+    pub fn test_basic_acceptance_failure_with_fail_data() {
+        let (_, mut reporter) = base_reporter_and_stamper();
+        let (tc, req_id) = base_tc_init(None);
+        let verif_token = reporter.add_tc(&tc);
+        let mut sender = TestSender::default();
+        let fail_code = EcssEnumU8::new(10);
+        let fail_data = EcssEnumU32::new(12);
+        let mut fail_data_raw = [0; 4];
+        fail_data.to_bytes(&mut fail_data_raw).unwrap();
+        let fail_params = FailParams::new(&EMPTY_STAMP, &fail_code, Some(fail_data_raw.as_slice()));
+        reporter
+            .acceptance_failure(verif_token, &mut sender, fail_params)
+            .expect("Sending acceptance success failed");
+        let cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 2,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 0,
+            additional_data: Some([10, 0, 0, 0, 12].to_vec()),
+            req_id,
+        };
+        assert_eq!(sender.service_queue.len(), 1);
+        let info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+    }
+
+    #[test]
+    fn test_start_failure() {
+        let (_, mut reporter) = base_reporter_and_stamper();
+        let (tc, req_id) = base_tc_init(None);
+        let verif_token = reporter.add_tc(&tc);
+        let mut sender = TestSender::default();
+        let fail_code = EcssEnumU8::new(22);
+        let fail_data: i32 = -12;
+        let mut fail_data_raw = [0; 4];
+        fail_data_raw.copy_from_slice(fail_data.to_be_bytes().as_slice());
+        let fail_params = FailParams::new(&EMPTY_STAMP, &fail_code, Some(fail_data_raw.as_slice()));
+
+        let accepted_token = reporter
+            .acceptance_success(verif_token, &mut sender, &EMPTY_STAMP)
+            .expect("Sending acceptance success failed");
+        let empty = reporter
+            .start_failure(accepted_token, &mut sender, fail_params)
+            .expect("Start failure failure");
+        assert_eq!(empty, ());
+        assert_eq!(sender.service_queue.len(), 2);
+        let mut cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 1,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 0,
+            additional_data: None,
+            req_id,
+        };
+        let mut info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+
+        cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 4,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 1,
+            additional_data: Some([&[22], fail_data_raw.as_slice()].concat().to_vec()),
+            req_id,
+        };
+        info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+    }
+
+    #[test]
+    fn test_steps_success() {
+        let (_, mut reporter) = base_reporter_and_stamper();
+        let (tc, req_id) = base_tc_init(None);
+        let verif_token = reporter.add_tc(&tc);
+        let mut sender = TestSender::default();
+        let accepted_token = reporter
+            .acceptance_success(verif_token, &mut sender, &EMPTY_STAMP)
+            .expect("Sending acceptance success failed");
+        let started_token = reporter
+            .start_success(accepted_token, &mut sender, &[0, 1, 0, 1, 0, 1, 0])
+            .expect("Sending start success failed");
+        let mut empty = reporter
+            .step_success(
+                &started_token,
+                &mut sender,
+                &EMPTY_STAMP,
+                EcssEnumU8::new(0),
+            )
+            .expect("Sending step 0 success failed");
+        assert_eq!(empty, ());
+        empty = reporter
+            .step_success(
+                &started_token,
+                &mut sender,
+                &EMPTY_STAMP,
+                EcssEnumU8::new(1),
+            )
+            .expect("Sending step 1 success failed");
+        assert_eq!(empty, ());
+        let mut cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 1,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 0,
+            additional_data: None,
+            req_id,
+        };
+        let mut info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+        cmp_info = TmInfo {
+            time_stamp: [0, 1, 0, 1, 0, 1, 0],
+            subservice: 3,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 1,
+            additional_data: None,
+            req_id,
+        };
+        info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+        cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 5,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 2,
+            additional_data: Some([0].to_vec()),
+            req_id,
+        };
+        info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+        cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 5,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 3,
+            additional_data: Some([1].to_vec()),
+            req_id,
+        };
+        info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+    }
+
+    #[test]
+    fn test_step_failure() {
+        let (_, mut reporter) = base_reporter_and_stamper();
+        let (tc, req_id) = base_tc_init(None);
+        let verif_token = reporter.add_tc(&tc);
+        let mut sender = TestSender::default();
+        let fail_code = EcssEnumU32::new(0x1020);
+        let fail_data: f32 = -22.3232;
+        let mut fail_data_raw = [0; 4];
+        fail_data_raw.copy_from_slice(fail_data.to_be_bytes().as_slice());
+        let fail_step = EcssEnumU8::new(1);
+        let fail_params = FailParamsWithStep::new(
+            &EMPTY_STAMP,
+            &fail_step,
+            &fail_code,
+            Some(fail_data_raw.as_slice()),
+        );
+
+        let accepted_token = reporter
+            .acceptance_success(verif_token, &mut sender, &EMPTY_STAMP)
+            .expect("Sending acceptance success failed");
+        let started_token = reporter
+            .start_success(accepted_token, &mut sender, &[0, 1, 0, 1, 0, 1, 0])
+            .expect("Sending start success failed");
+        let mut empty = reporter
+            .step_success(
+                &started_token,
+                &mut sender,
+                &EMPTY_STAMP,
+                EcssEnumU8::new(0),
+            )
+            .expect("Sending completion success failed");
+        assert_eq!(empty, ());
+        empty = reporter
+            .step_failure(started_token, &mut sender, fail_params)
+            .expect("Step failure failed");
+        assert_eq!(empty, ());
+        assert_eq!(sender.service_queue.len(), 4);
+
+        let mut cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 1,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 0,
+            additional_data: None,
+            req_id,
+        };
+        let mut info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+
+        cmp_info = TmInfo {
+            time_stamp: [0, 1, 0, 1, 0, 1, 0],
+            subservice: 3,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 1,
+            additional_data: None,
+            req_id,
+        };
+        info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+
+        cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 5,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 2,
+            additional_data: Some([0].to_vec()),
+            req_id,
+        };
+        info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+
+        cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 6,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 3,
+            additional_data: Some(
+                [
+                    [1].as_slice(),
+                    &[0, 0, 0x10, 0x20],
+                    fail_data_raw.as_slice(),
+                ]
+                .concat()
+                .to_vec(),
+            ),
+            req_id,
+        };
+        info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+    }
+
+    #[test]
+    fn test_completion_failure() {
+        let (_, mut reporter) = base_reporter_and_stamper();
+        let (tc, req_id) = base_tc_init(None);
+        let verif_token = reporter.add_tc(&tc);
+        let mut sender = TestSender::default();
+        let fail_code = EcssEnumU32::new(0x1020);
+        let fail_params = FailParams::new(&EMPTY_STAMP, &fail_code, None);
+
+        let accepted_token = reporter
+            .acceptance_success(verif_token, &mut sender, &EMPTY_STAMP)
+            .expect("Sending acceptance success failed");
+        let started_token = reporter
+            .start_success(accepted_token, &mut sender, &[0, 1, 0, 1, 0, 1, 0])
+            .expect("Sending start success failed");
+        let empty = reporter
+            .completion_failure(started_token, &mut sender, fail_params)
+            .expect("Completion failure");
+        assert_eq!(empty, ());
+
+        assert_eq!(sender.service_queue.len(), 3);
+
+        let mut cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 1,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 0,
+            additional_data: None,
+            req_id,
+        };
+        let mut info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+
+        cmp_info = TmInfo {
+            time_stamp: [0, 1, 0, 1, 0, 1, 0],
+            subservice: 3,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 1,
+            additional_data: None,
+            req_id,
+        };
+        info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+
+        cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 8,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 2,
+            additional_data: Some([0, 0, 0x10, 0x20].to_vec()),
+            req_id,
+        };
+        info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+    }
+
+    #[test]
+    fn test_complete_success_sequence() {
+        let (_, mut reporter) = base_reporter_and_stamper();
+        let (tc, req_id) = base_tc_init(None);
+        let verif_token = reporter.add_tc(&tc);
+        let mut sender = TestSender::default();
+        let accepted_token = reporter
+            .acceptance_success(verif_token, &mut sender, &EMPTY_STAMP)
+            .expect("Sending acceptance success failed");
+        let started_token = reporter
+            .start_success(accepted_token, &mut sender, &[0, 1, 0, 1, 0, 1, 0])
+            .expect("Sending start success failed");
+        let empty = reporter
+            .completion_success(started_token, &mut sender, &EMPTY_STAMP)
+            .expect("Sending completion success failed");
+        assert_eq!(empty, ());
+        assert_eq!(sender.service_queue.len(), 3);
+        let cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 1,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 0,
+            additional_data: None,
+            req_id,
+        };
+        let mut info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+
+        let cmp_info = TmInfo {
+            time_stamp: [0, 1, 0, 1, 0, 1, 0],
+            subservice: 3,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 1,
+            additional_data: None,
+            req_id,
+        };
+        info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
+        let cmp_info = TmInfo {
+            time_stamp: EMPTY_STAMP,
+            subservice: 7,
+            dest_id: 0,
+            apid: TEST_APID,
+            msg_counter: 2,
+            additional_data: None,
+            req_id,
+        };
+        info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(info, cmp_info);
     }
 }
