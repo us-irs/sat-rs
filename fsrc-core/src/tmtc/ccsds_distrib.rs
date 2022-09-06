@@ -8,7 +8,7 @@
 //! pass raw or CCSDS packets to it. Upon receiving a packet, it performs the following steps:
 //!
 //! 1. It tries to identify the target Application Process Identifier (APID) based on the
-//!    respective CCSDS space packet header field. If that process fails, a [PacketError] is
+//!    respective CCSDS space packet header field. If that process fails, a [ByteConversionError] is
 //!    returned to the user
 //! 2. If a valid APID is found and matches one of the APIDs provided by
 //!    [CcsdsPacketHandler::valid_apids], it will pass the packet to the user provided

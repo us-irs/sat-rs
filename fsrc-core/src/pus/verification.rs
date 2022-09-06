@@ -1,3 +1,10 @@
+//! # PUS Verification Service 1 Module
+//!
+//! This module allows packaging and sending PUS Service 1 packets. It is conforming to section
+//! 8 of the PUS standard ECSS-E-ST-70-41C.
+//!
+//! # Example
+//! TODO: Cross Ref integration test which will be provided
 use crate::pool::{LocalPool, StoreAddr, StoreError};
 use alloc::boxed::Box;
 use alloc::sync::Arc;
@@ -9,7 +16,7 @@ use delegate::delegate;
 use downcast_rs::{impl_downcast, Downcast};
 use spacepackets::ecss::{EcssEnumeration, PusError};
 use spacepackets::tc::PusTc;
-use spacepackets::time::{CcsdsTimeProvider, TimestampError};
+use spacepackets::time::TimestampError;
 use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::{ByteConversionError, SizeMissmatch, SpHeader};
 use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
@@ -21,6 +28,8 @@ use std::sync::MutexGuard;
 #[cfg(feature = "std")]
 use std::sync::{mpsc, Mutex};
 
+/// This is a request identifier as specified in 5.4.11.2 c. of the PUS standard
+/// This field equivalent to the first two bytes of the CCSDS space packet header.
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub struct RequestId {
     version_number: u8,
@@ -51,6 +60,7 @@ impl RequestId {
     }
 }
 impl RequestId {
+    /// This allows extracting the request ID from a given PUS telecommand.
     pub fn new(tc: &PusTc) -> Self {
         RequestId {
             version_number: tc.ccsds_version(),
@@ -60,23 +70,36 @@ impl RequestId {
     }
 }
 
+/// Generic error type which is also able to wrap a user send error with the user supplied type E.
 #[derive(Debug, Clone)]
 pub enum VerificationError<E> {
+    /// Errors related to sending the verification telemetry to a TM recipient
     SendError(E),
+    /// Errors related to the time stamp format of the telemetry
     TimestampError(TimestampError),
+    /// Errors related to byte conversion, for example unsufficient buffer size for given data
     ByteConversionError(ByteConversionError),
+    /// Errors related to PUS packet format
     PusError(PusError),
 }
 
+/// If a verification operation fails, the passed token will be returned as well. This allows
+/// re-trying the operation at a later point.
 #[derive(Debug, Clone)]
 pub struct VerificationErrorWithToken<E, T>(VerificationError<E>, VerificationToken<T>);
 
+/// Generic trait for a user supplied sender object. This sender object is responsible for sending
+/// PUS Service 1 Verification Telemetry to a verification TM recipient. The [Downcast] trait
+/// is implemented to allow passing the sender as a boxed trait object and still retrieve the
+/// concrete type at a later point.
 pub trait VerificationSender<E>: Downcast {
     fn send_verification_tm(&mut self, tm: PusTm) -> Result<(), VerificationError<E>>;
 }
 
 impl_downcast!(VerificationSender<E>);
 
+/// Support token to allow type-state programming. This prevents calling the verification
+/// steps in an invalid order.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct VerificationToken<STATE> {
     state: PhantomData<STATE>,
@@ -102,26 +125,39 @@ impl<STATE> VerificationToken<STATE> {
 pub struct VerificationReporterCfg {
     pub apid: u16,
     pub dest_id: u16,
-    pub step_field_width: u8,
-    pub failure_code_field_width: u8,
+    pub step_field_width: usize,
+    pub fail_code_field_width: usize,
     pub max_fail_data_len: usize,
-    pub max_stamp_len: usize,
 }
 
 impl VerificationReporterCfg {
-    pub fn new(time_stamper: impl CcsdsTimeProvider, apid: u16) -> Self {
-        let max_stamp_len = time_stamper.len_as_bytes();
+    /// Create a new configuration for the verification reporter. This includes following parameters:
+    ///
+    /// 1. Destination ID and APID, which could remain constant after construction. These parameters
+    ///    can be tweaked in the reporter after construction.
+    /// 2. Maximum expected field sizes. The parameters of this configuration struct will be used
+    ///    to determine required maximum buffer sizes and there will be no addition allocation or
+    ///    configurable buffer parameters after [VerificationReporter] construction.
+    ///
+    /// This means the user has supply the maximum expected field sizes of verification messages
+    /// before constructing the reporter.
+    pub fn new(
+        apid: u16,
+        step_field_width: usize,
+        fail_code_field_width: usize,
+        max_fail_data_len: usize,
+    ) -> Self {
         Self {
             apid,
             dest_id: 0,
-            step_field_width: size_of::<u8>() as u8,
-            failure_code_field_width: size_of::<u16>() as u8,
-            max_fail_data_len: 2 * size_of::<u32>(),
-            max_stamp_len,
+            step_field_width,
+            fail_code_field_width,
+            max_fail_data_len,
         }
     }
 }
 
+/// Composite helper struct to pass failure parameters to the [VerificationReporter]
 pub struct FailParams<'a> {
     time_stamp: &'a [u8],
     failure_code: &'a dyn EcssEnumeration,
@@ -142,6 +178,7 @@ impl<'a> FailParams<'a> {
     }
 }
 
+/// Composite helper struct to pass step failure parameters to the [VerificationReporter]
 pub struct FailParamsWithStep<'a> {
     bp: FailParams<'a>,
     step: &'a dyn EcssEnumeration,
@@ -161,6 +198,8 @@ impl<'a> FailParamsWithStep<'a> {
     }
 }
 
+/// Primary verification handler. It provides an API to send PUS 1 verification telemetry packets
+/// and verify the various steps of telecommand handling as specified in the PUS standard.
 pub struct VerificationReporter {
     pub apid: u16,
     pub dest_id: u16,
@@ -178,7 +217,7 @@ impl VerificationReporter {
                 0;
                 RequestId::SIZE_AS_BYTES
                     + cfg.step_field_width as usize
-                    + cfg.failure_code_field_width as usize
+                    + cfg.fail_code_field_width as usize
                     + cfg.max_fail_data_len
             ],
         }
@@ -188,14 +227,19 @@ impl VerificationReporter {
         self.source_data_buf.capacity()
     }
 
+    /// Initialize verification handling by passing a TC reference. This returns a token required
+    /// to call the acceptance functions
     pub fn add_tc(&mut self, pus_tc: &PusTc) -> VerificationToken<StateNone> {
         self.add_tc_with_req_id(RequestId::new(pus_tc))
     }
 
+    /// Same as [Self::add_tc] but pass a request ID instead of the direct telecommand.
+    /// This can be useful if the executing thread does not have full access to the telecommand.
     pub fn add_tc_with_req_id(&mut self, req_id: RequestId) -> VerificationToken<StateNone> {
         VerificationToken::<StateNone>::new(req_id)
     }
 
+    /// Package and send a PUS TM\[1, 1\] packet, see 8.1.2.1 of the PUS standard
     pub fn acceptance_success<E>(
         &mut self,
         token: VerificationToken<StateNone>,
@@ -221,6 +265,7 @@ impl VerificationReporter {
         })
     }
 
+    /// Package and send a PUS TM\[1, 2\] packet, see 8.1.2.2 of the PUS standard
     pub fn acceptance_failure<E>(
         &mut self,
         token: VerificationToken<StateNone>,
@@ -237,6 +282,9 @@ impl VerificationReporter {
         Ok(())
     }
 
+    /// Package and send a PUS TM\[1, 3\] packet, see 8.1.2.3 of the PUS standard.
+    ///
+    /// Requires a token previously acquired by calling [Self::acceptance_success].
     pub fn start_success<E>(
         &mut self,
         token: VerificationToken<StateAccepted>,
@@ -262,6 +310,10 @@ impl VerificationReporter {
         })
     }
 
+    /// Package and send a PUS TM\[1, 4\] packet, see 8.1.2.4 of the PUS standard.
+    ///
+    /// Requires a token previously acquired by calling [Self::acceptance_success]. It consumes
+    /// the token because verification handling is done.
     pub fn start_failure<E>(
         &mut self,
         token: VerificationToken<StateAccepted>,
@@ -278,6 +330,9 @@ impl VerificationReporter {
         Ok(())
     }
 
+    /// Package and send a PUS TM\[1, 5\] packet, see 8.1.2.5 of the PUS standard.
+    ///
+    /// Requires a token previously acquired by calling [Self::start_success].
     pub fn step_success<E>(
         &mut self,
         token: &VerificationToken<StateStarted>,
@@ -291,6 +346,10 @@ impl VerificationReporter {
         Ok(())
     }
 
+    /// Package and send a PUS TM\[1, 6\] packet, see 8.1.2.6 of the PUS standard.
+    ///
+    /// Requires a token previously acquired by calling [Self::start_success]. It consumes the
+    /// token because verification handling is done.
     pub fn step_failure<E>(
         &mut self,
         token: VerificationToken<StateStarted>,
@@ -307,6 +366,10 @@ impl VerificationReporter {
         Ok(())
     }
 
+    /// Package and send a PUS TM\[1, 7\] packet, see 8.1.2.7 of the PUS standard.
+    ///
+    /// Requires a token previously acquired by calling [Self::start_success]. It consumes the
+    /// token because verification handling is done.
     pub fn completion_success<E>(
         &mut self,
         token: VerificationToken<StateStarted>,
@@ -329,6 +392,10 @@ impl VerificationReporter {
         Ok(())
     }
 
+    /// Package and send a PUS TM\[1, 8\] packet, see 8.1.2.8 of the PUS standard.
+    ///
+    /// Requires a token previously acquired by calling [Self::start_success]. It consumes the
+    /// token because verification handling is done.
     pub fn completion_failure<E>(
         &mut self,
         token: VerificationToken<StateStarted>,
@@ -458,6 +525,8 @@ impl VerificationReporter {
     }
 }
 
+/// Helper object which caches the sender passed as a trait object. Provides the same
+/// API as [VerificationReporter] but without the explicit sender arguments.
 pub struct VerificationReporterWithSender<E> {
     reporter: VerificationReporter,
     pub sender: Box<dyn VerificationSender<E>>,
@@ -625,7 +694,6 @@ mod tests {
     use alloc::vec::Vec;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration, PusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
-    use spacepackets::time::CdsShortTimeProvider;
     use spacepackets::tm::{PusTm, PusTmSecondaryHeaderT};
     use spacepackets::{ByteConversionError, CcsdsPacket, SpHeader};
     use std::collections::VecDeque;
@@ -712,7 +780,7 @@ mod tests {
     }
 
     fn base_reporter() -> VerificationReporter {
-        let cfg = VerificationReporterCfg::new(CdsShortTimeProvider::default(), TEST_APID);
+        let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8);
         VerificationReporter::new(cfg)
     }
 
