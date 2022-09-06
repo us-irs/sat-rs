@@ -63,7 +63,7 @@ impl RequestId {
 #[derive(Debug, Clone)]
 pub enum VerificationError<E> {
     SendError(E),
-    TimeStampError(TimestampError),
+    TimestampError(TimestampError),
     ByteConversionError(ByteConversionError),
     PusError(PusError),
 }
@@ -77,17 +77,17 @@ pub trait VerificationSender<E>: Downcast {
 
 impl_downcast!(VerificationSender<E>);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct VerificationToken<STATE> {
     state: PhantomData<STATE>,
     req_id: RequestId,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct StateNone;
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct StateAccepted;
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct StateStarted;
 
 impl<STATE> VerificationToken<STATE> {
@@ -182,6 +182,10 @@ impl VerificationReporter {
                     + cfg.max_fail_data_len
             ],
         }
+    }
+
+    pub fn allowed_source_data_len(&self) -> usize {
+        self.source_data_buf.capacity()
     }
 
     pub fn add_tc(&mut self, pus_tc: &PusTc) -> VerificationToken<StateNone> {
@@ -617,12 +621,13 @@ mod tests {
         VerificationSender, VerificationToken,
     };
     use alloc::boxed::Box;
+    use alloc::format;
     use alloc::vec::Vec;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration, PusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::time::CdsShortTimeProvider;
     use spacepackets::tm::{PusTm, PusTmSecondaryHeaderT};
-    use spacepackets::{CcsdsPacket, SpHeader};
+    use spacepackets::{ByteConversionError, CcsdsPacket, SpHeader};
     use std::collections::VecDeque;
 
     const TEST_APID: u16 = 0x02;
@@ -642,6 +647,45 @@ mod tests {
     #[derive(Default)]
     struct TestSender {
         pub service_queue: VecDeque<TmInfo>,
+    }
+
+    impl VerificationSender<()> for TestSender {
+        fn send_verification_tm(&mut self, tm: PusTm) -> Result<(), VerificationError<()>> {
+            assert_eq!(PusPacket::service(&tm), 1);
+            assert!(tm.source_data().is_some());
+            let mut time_stamp = [0; 7];
+            time_stamp.clone_from_slice(&tm.time_stamp()[0..7]);
+            let src_data = tm.source_data().unwrap();
+            assert!(src_data.len() >= 4);
+            let req_id = RequestId::from_bytes(&src_data[0..RequestId::SIZE_AS_BYTES]).unwrap();
+            let mut vec = None;
+            if src_data.len() > 4 {
+                let mut new_vec = Vec::new();
+                new_vec.extend_from_slice(&src_data[RequestId::SIZE_AS_BYTES..]);
+                vec = Some(new_vec);
+            }
+            self.service_queue.push_back(TmInfo {
+                subservice: PusPacket::subservice(&tm),
+                apid: tm.apid(),
+                msg_counter: tm.msg_counter(),
+                dest_id: tm.dest_id(),
+                time_stamp,
+                req_id,
+                additional_data: vec,
+            });
+            Ok(())
+        }
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    struct DummyError {}
+    #[derive(Default)]
+    struct FallibleSender {}
+
+    impl VerificationSender<DummyError> for FallibleSender {
+        fn send_verification_tm(&mut self, _: PusTm) -> Result<(), VerificationError<DummyError>> {
+            Err(VerificationError::SendError(DummyError {}))
+        }
     }
 
     struct TestBase<'a> {
@@ -704,34 +748,6 @@ mod tests {
         (TestBaseWithHelper { helper, tc }, init_tok)
     }
 
-    impl VerificationSender<()> for TestSender {
-        fn send_verification_tm(&mut self, tm: PusTm) -> Result<(), VerificationError<()>> {
-            assert_eq!(PusPacket::service(&tm), 1);
-            assert!(tm.source_data().is_some());
-            let mut time_stamp = [0; 7];
-            time_stamp.clone_from_slice(tm.time_stamp());
-            let src_data = tm.source_data().unwrap();
-            assert!(src_data.len() >= 4);
-            let req_id = RequestId::from_bytes(&src_data[0..RequestId::SIZE_AS_BYTES]).unwrap();
-            let mut vec = None;
-            if src_data.len() > 4 {
-                let mut new_vec = Vec::new();
-                new_vec.extend_from_slice(&src_data[RequestId::SIZE_AS_BYTES..]);
-                vec = Some(new_vec);
-            }
-            self.service_queue.push_back(TmInfo {
-                subservice: PusPacket::subservice(&tm),
-                apid: tm.apid(),
-                msg_counter: tm.msg_counter(),
-                dest_id: tm.dest_id(),
-                time_stamp,
-                req_id,
-                additional_data: vec,
-            });
-            Ok(())
-        }
-    }
-
     fn acceptance_check(sender: &mut TestSender, req_id: &RequestId) {
         let cmp_info = TmInfo {
             time_stamp: EMPTY_STAMP,
@@ -764,6 +780,23 @@ mod tests {
             .expect("Sending acceptance success failed");
         let sender: &mut TestSender = b.helper.sender.downcast_mut().unwrap();
         acceptance_check(sender, &tok.req_id);
+    }
+
+    #[test]
+    fn test_acceptance_send_fails() {
+        let (mut b, tok) = base_init(false);
+        let mut faulty_sender = FallibleSender::default();
+        let res =
+            b.vr.acceptance_success(tok, &mut faulty_sender, &EMPTY_STAMP);
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert_eq!(err.1, tok);
+        match err.0 {
+            VerificationError::SendError(e) => {
+                assert_eq!(e, DummyError {})
+            }
+            _ => panic!("{}", format!("Unexpected error {:?}", err.0)),
+        }
     }
 
     fn acceptance_fail_check(sender: &mut TestSender, req_id: RequestId, stamp_buf: [u8; 7]) {
@@ -806,6 +839,40 @@ mod tests {
             .expect("Sending acceptance success failed");
         let sender: &mut TestSender = b.helper.sender.downcast_mut().unwrap();
         acceptance_fail_check(sender, tok.req_id, stamp_buf);
+    }
+
+    #[test]
+    fn test_acceptance_fail_data_too_large() {
+        let (mut b, tok) = base_with_helper_init();
+        b.rep().dest_id = 5;
+        let stamp_buf = [1, 2, 3, 4, 5, 6, 7];
+        let fail_code = EcssEnumU16::new(2);
+        let fail_data: [u8; 16] = [0; 16];
+        // 4 req ID + 1 byte step + 2 byte error code + 8 byte fail data
+        assert_eq!(b.rep().allowed_source_data_len(), 15);
+        let fail_params =
+            FailParams::new(stamp_buf.as_slice(), &fail_code, Some(fail_data.as_slice()));
+        let res = b.helper.acceptance_failure(tok, fail_params);
+        assert!(res.is_err());
+        let err_with_token = res.unwrap_err();
+        assert_eq!(err_with_token.1, tok);
+        match err_with_token.0 {
+            VerificationError::ByteConversionError(e) => match e {
+                ByteConversionError::ToSliceTooSmall(missmatch) => {
+                    assert_eq!(
+                        missmatch.expected,
+                        fail_data.len() + RequestId::SIZE_AS_BYTES + fail_code.byte_width()
+                    );
+                    assert_eq!(missmatch.found, b.rep().allowed_source_data_len());
+                }
+                _ => {
+                    panic!("{}", format!("Unexpected error {:?}", e))
+                }
+            },
+            _ => {
+                panic!("{}", format!("Unexpected error {:?}", err_with_token.0))
+            }
+        }
     }
 
     #[test]
