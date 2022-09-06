@@ -26,11 +26,7 @@ use spacepackets::{ByteConversionError, SizeMissmatch, SpHeader};
 use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
 
 #[cfg(feature = "std")]
-use std::sync::mpsc::SendError;
-#[cfg(feature = "std")]
-use std::sync::MutexGuard;
-#[cfg(feature = "std")]
-use std::sync::{mpsc, Mutex};
+use std::sync::{mpsc, RwLock, RwLockWriteGuard};
 
 /// This is a request identifier as specified in 5.4.11.2 c. of the PUS standard
 /// This field equivalent to the first two bytes of the CCSDS space packet header.
@@ -42,12 +38,16 @@ pub struct RequestId {
 }
 
 impl RequestId {
-    const SIZE_AS_BYTES: usize = size_of::<u32>();
+    pub const SIZE_AS_BYTES: usize = size_of::<u32>();
+
+    pub fn raw(&self) -> u32 {
+        ((self.version_number as u32) << 29)
+            | ((self.packet_id.raw() as u32) << 16)
+            | self.psc.raw() as u32
+    }
 
     pub fn to_bytes(&self, buf: &mut [u8]) {
-        let raw = ((self.version_number as u32) << 29)
-            | ((self.packet_id.raw() as u32) << 16)
-            | self.psc.raw() as u32;
+        let raw = self.raw();
         buf.copy_from_slice(raw.to_be_bytes().as_slice());
     }
 
@@ -533,17 +533,20 @@ impl VerificationReporter {
 /// API as [VerificationReporter] but without the explicit sender arguments.
 pub struct VerificationReporterWithSender<E> {
     reporter: VerificationReporter,
-    pub sender: Box<dyn VerificationSender<E>>,
+    pub sender: Box<dyn VerificationSender<E> + Send>,
 }
 
 impl<E: 'static> VerificationReporterWithSender<E> {
-    pub fn new(cfg: VerificationReporterCfg, sender: Box<dyn VerificationSender<E>>) -> Self {
+    pub fn new(
+        cfg: VerificationReporterCfg,
+        sender: Box<dyn VerificationSender<E> + Send>,
+    ) -> Self {
         Self::new_from_reporter(VerificationReporter::new(cfg), sender)
     }
 
     pub fn new_from_reporter(
         reporter: VerificationReporter,
-        sender: Box<dyn VerificationSender<E>>,
+        sender: Box<dyn VerificationSender<E> + Send>,
     ) -> Self {
         Self { reporter, sender }
     }
@@ -632,13 +635,13 @@ impl<E: 'static> VerificationReporterWithSender<E> {
 #[cfg(feature = "std")]
 pub struct StdVerifSender {
     pub ignore_poison_error: bool,
-    tm_store: Arc<Mutex<LocalPool>>,
+    tm_store: Arc<RwLock<LocalPool>>,
     tx: mpsc::Sender<StoreAddr>,
 }
 
 #[cfg(feature = "std")]
 impl StdVerifSender {
-    pub fn new(tm_store: Arc<Mutex<LocalPool>>, tx: mpsc::Sender<StoreAddr>) -> Self {
+    pub fn new(tm_store: Arc<RwLock<LocalPool>>, tx: mpsc::Sender<StoreAddr>) -> Self {
         Self {
             ignore_poison_error: true,
             tx,
@@ -648,11 +651,16 @@ impl StdVerifSender {
 }
 
 #[cfg(feature = "std")]
+unsafe impl Sync for StdVerifSender {}
+#[cfg(feature = "std")]
+unsafe impl Send for StdVerifSender {}
+
+#[cfg(feature = "std")]
 #[derive(Debug, Eq, PartialEq)]
 pub enum StdVerifSenderError {
     PoisonError,
     StoreError(StoreError),
-    SendError(SendError<StoreAddr>),
+    RxDisconnected(StoreAddr),
 }
 
 #[cfg(feature = "std")]
@@ -661,17 +669,17 @@ impl VerificationSender<StdVerifSenderError> for StdVerifSender {
         &mut self,
         tm: PusTm,
     ) -> Result<(), VerificationError<StdVerifSenderError>> {
-        let operation = |mut mg: MutexGuard<LocalPool>| {
+        let operation = |mut mg: RwLockWriteGuard<LocalPool>| {
             let (addr, buf) = mg
                 .free_element(tm.len_packed())
                 .map_err(|e| VerificationError::SendError(StdVerifSenderError::StoreError(e)))?;
             tm.write_to(buf).map_err(VerificationError::PusError)?;
-            self.tx
-                .send(addr)
-                .map_err(|e| VerificationError::SendError(StdVerifSenderError::SendError(e)))?;
+            self.tx.send(addr).map_err(|_| {
+                VerificationError::SendError(StdVerifSenderError::RxDisconnected(addr))
+            })?;
             Ok(())
         };
-        match self.tm_store.lock() {
+        match self.tm_store.write() {
             Ok(lock) => operation(lock),
             Err(poison_error) => {
                 if self.ignore_poison_error {

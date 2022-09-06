@@ -195,7 +195,7 @@ impl LocalPool {
         }
         let addr = self.reserve(len)?;
         let raw_pos = self.raw_pos(&addr).unwrap();
-        let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..len];
+        let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + len];
         Ok((addr, block))
     }
 

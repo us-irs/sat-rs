@@ -10,11 +10,11 @@ const DUMMY_DATA: [u8; 4] = [0, 1, 2, 3];
 #[test]
 fn threaded_usage() {
     let pool_cfg = PoolCfg::new(vec![(16, 6), (32, 3), (8, 12)]);
-    let shared_dummy = Arc::new(RwLock::new(LocalPool::new(pool_cfg)));
-    let shared_clone = shared_dummy.clone();
+    let shared_pool = Arc::new(RwLock::new(LocalPool::new(pool_cfg)));
+    let shared_clone = shared_pool.clone();
     let (tx, rx): (Sender<StoreAddr>, Receiver<StoreAddr>) = mpsc::channel();
     let jh0 = thread::spawn(move || {
-        let mut dummy = shared_dummy.write().unwrap();
+        let mut dummy = shared_pool.write().unwrap();
         let addr = dummy.add(&DUMMY_DATA).expect("Writing data failed");
         tx.send(addr).expect("Sending store address failed");
     });
