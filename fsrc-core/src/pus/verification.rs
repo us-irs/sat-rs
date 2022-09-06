@@ -3,6 +3,10 @@
 //! This module allows packaging and sending PUS Service 1 packets. It is conforming to section
 //! 8 of the PUS standard ECSS-E-ST-70-41C.
 //!
+//! The core object to report TC verification progress is the [VerifictionReporter]. It exposes
+//! an API which uses type-state programming to avoid calling the verification steps in
+//! an invalid order.
+//! 
 //! # Example
 //! TODO: Cross Ref integration test which will be provided
 use crate::pool::{LocalPool, StoreAddr, StoreError};
