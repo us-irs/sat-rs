@@ -1,5 +1,3 @@
-extern crate core;
-
 use fsrc_core::pool::{LocalPool, PoolCfg};
 use fsrc_core::pus::verification::{
     CrossbeamVerifSender, FailParams, RequestId, VerificationReporterCfg,
