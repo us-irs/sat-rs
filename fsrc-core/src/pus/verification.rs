@@ -692,6 +692,8 @@ mod stdmod {
         base: StdSenderBase<mpsc::Sender<StoreAddr>>,
     }
 
+    /// Verification sender with a [mpsc::Sender] backend.
+    /// It implements the [VerificationSender] trait to be used as PUS Verification TM sender.
     impl StdVerifSender {
         pub fn new(tm_store: Arc<RwLock<LocalPool>>, tx: mpsc::Sender<StoreAddr>) -> Self {
             Self {
@@ -717,6 +719,8 @@ mod stdmod {
         }
     }
 
+    /// Verification sender with a [crossbeam_channel::Sender] backend.
+    /// It implements the [VerificationSender] trait to be used as PUS Verification TM sender
     pub struct CrossbeamVerifSender {
         base: StdSenderBase<crossbeam_channel::Sender<StoreAddr>>,
     }
