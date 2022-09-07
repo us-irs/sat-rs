@@ -66,23 +66,32 @@ fn test_shared_reporter() {
             tc_buf[0..tc_len].copy_from_slice(buf);
         }
         let (_tc, _) = PusTc::new_from_raw_slice(&tc_buf[0..tc_len]).unwrap();
-        let mut mg = reporter_0.lock().expect("Locking mutex failed");
-        let token = mg.add_tc_with_req_id(req_id_0);
-        let accepted_token = mg
-            .acceptance_success(token, &mut sender_0, &FIXED_STAMP)
-            .expect("Acceptance success failed");
+        let accepted_token;
+        {
+            let mut mg = reporter_0.lock().expect("Locking mutex failed");
+            let token = mg.add_tc_with_req_id(req_id_0);
+            accepted_token = mg
+                .acceptance_success(token, &mut sender_0, &FIXED_STAMP)
+                .expect("Acceptance success failed");
+        }
         // Do some start handling here
-        let started_token = mg
-            .start_success(accepted_token, &mut sender_0, &FIXED_STAMP)
+        let started_token;
+        {
+            let mut mg = reporter_0.lock().expect("Locking mutex failed");
+            started_token = mg
+                .start_success(accepted_token, &mut sender_0, &FIXED_STAMP)
+                .expect("Start success failed");
+            // Do some step handling here
+            mg.step_success(
+                &started_token,
+                &mut sender_0,
+                &FIXED_STAMP,
+                EcssEnumU8::new(0),
+            )
             .expect("Start success failed");
-        mg.step_success(
-            &started_token,
-            &mut sender_0,
-            &FIXED_STAMP,
-            EcssEnumU8::new(0),
-        )
-        .expect("Start success failed");
-        // Do some step handling here
+        }
+        // Finish up
+        let mut mg = reporter_0.lock().expect("Locking mutex failed");
         mg.step_success(
             &started_token,
             &mut sender_0,
@@ -130,13 +139,14 @@ fn test_shared_reporter() {
             let verif_addr = rx
                 .recv_timeout(Duration::from_millis(50))
                 .expect("Packet reception timeout");
-            let mut rg = shared_tm_pool.write().expect("Error locking shared pool");
-            let store_guard = rg.read_with_guard(verif_addr);
-            let slice = store_guard.read().expect("Error reading TM slice");
-            let tm_len = slice.len();
-            tm_buf[0..tm_len].copy_from_slice(slice);
-            drop(store_guard);
-            drop(rg);
+            let tm_len;
+            {
+                let mut rg = shared_tm_pool.write().expect("Error locking shared pool");
+                let store_guard = rg.read_with_guard(verif_addr);
+                let slice = store_guard.read().expect("Error reading TM slice");
+                tm_len = slice.len();
+                tm_buf[0..tm_len].copy_from_slice(slice);
+            }
             let (pus_tm, _) = PusTm::new_from_raw_slice(&tm_buf[0..tm_len], 7)
                 .expect("Error reading verification TM");
             let req_id = RequestId::from_bytes(
