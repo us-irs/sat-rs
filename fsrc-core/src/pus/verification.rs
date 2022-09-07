@@ -9,11 +9,10 @@
 //!
 //! # Example
 //! TODO: Cross Ref integration test which will be provided
-use crate::pool::{LocalPool, StoreAddr, StoreError};
 use alloc::boxed::Box;
-use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::mem::size_of;
 use delegate::delegate;
@@ -26,15 +25,30 @@ use spacepackets::{ByteConversionError, SizeMissmatch, SpHeader};
 use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
 
 #[cfg(feature = "std")]
-use std::sync::{mpsc, RwLock, RwLockWriteGuard};
+pub use stdmod::{CrossbeamVerifSender, StdVerifSender, StdVerifSenderError};
 
 /// This is a request identifier as specified in 5.4.11.2 c. of the PUS standard
 /// This field equivalent to the first two bytes of the CCSDS space packet header.
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+#[derive(Debug, Eq, Copy, Clone)]
 pub struct RequestId {
     version_number: u8,
     packet_id: PacketId,
     psc: PacketSequenceCtrl,
+}
+
+impl Hash for RequestId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.raw().hash(state);
+    }
+}
+
+// Implement manually to satisfy derive_hash_xor_eq lint
+impl PartialEq for RequestId {
+    fn eq(&self, other: &Self) -> bool {
+        self.version_number == other.version_number
+            && self.packet_id == other.packet_id
+            && self.psc == other.psc
+    }
 }
 
 impl RequestId {
@@ -96,7 +110,7 @@ pub struct VerificationErrorWithToken<E, T>(VerificationError<E>, VerificationTo
 /// PUS Service 1 Verification Telemetry to a verification TM recipient. The [Downcast] trait
 /// is implemented to allow passing the sender as a boxed trait object and still retrieve the
 /// concrete type at a later point.
-pub trait VerificationSender<E>: Downcast {
+pub trait VerificationSender<E>: Downcast + Send {
     fn send_verification_tm(&mut self, tm: PusTm) -> Result<(), VerificationError<E>>;
 }
 
@@ -123,6 +137,10 @@ impl<STATE> VerificationToken<STATE> {
             state: PhantomData,
             req_id,
         }
+    }
+
+    pub fn req_id(&self) -> RequestId {
+        self.req_id
     }
 }
 
@@ -533,20 +551,17 @@ impl VerificationReporter {
 /// API as [VerificationReporter] but without the explicit sender arguments.
 pub struct VerificationReporterWithSender<E> {
     reporter: VerificationReporter,
-    pub sender: Box<dyn VerificationSender<E> + Send>,
+    pub sender: Box<dyn VerificationSender<E>>,
 }
 
 impl<E: 'static> VerificationReporterWithSender<E> {
-    pub fn new(
-        cfg: VerificationReporterCfg,
-        sender: Box<dyn VerificationSender<E> + Send>,
-    ) -> Self {
+    pub fn new(cfg: VerificationReporterCfg, sender: Box<dyn VerificationSender<E>>) -> Self {
         Self::new_from_reporter(VerificationReporter::new(cfg), sender)
     }
 
     pub fn new_from_reporter(
         reporter: VerificationReporter,
-        sender: Box<dyn VerificationSender<E> + Send>,
+        sender: Box<dyn VerificationSender<E>>,
     ) -> Self {
         Self { reporter, sender }
     }
@@ -633,61 +648,127 @@ impl<E: 'static> VerificationReporterWithSender<E> {
 }
 
 #[cfg(feature = "std")]
-pub struct StdVerifSender {
-    pub ignore_poison_error: bool,
-    tm_store: Arc<RwLock<LocalPool>>,
-    tx: mpsc::Sender<StoreAddr>,
-}
+mod stdmod {
+    use crate::pool::{LocalPool, StoreAddr, StoreError};
+    use crate::pus::verification::{VerificationError, VerificationSender};
+    use delegate::delegate;
+    use spacepackets::tm::PusTm;
+    use std::sync::{mpsc, Arc, RwLock, RwLockWriteGuard};
 
-#[cfg(feature = "std")]
-impl StdVerifSender {
-    pub fn new(tm_store: Arc<RwLock<LocalPool>>, tx: mpsc::Sender<StoreAddr>) -> Self {
-        Self {
-            ignore_poison_error: true,
-            tx,
-            tm_store,
+    #[derive(Debug, Eq, PartialEq)]
+    pub enum StdVerifSenderError {
+        PoisonError,
+        StoreError(StoreError),
+        RxDisconnected(StoreAddr),
+    }
+
+    trait SendBackend: Send {
+        fn send(&self, addr: StoreAddr) -> Result<(), StoreAddr>;
+    }
+
+    struct StdSenderBase<S> {
+        pub ignore_poison_error: bool,
+        tm_store: Arc<RwLock<LocalPool>>,
+        tx: S,
+    }
+
+    impl<S: SendBackend> StdSenderBase<S> {
+        pub fn new(tm_store: Arc<RwLock<LocalPool>>, tx: S) -> Self {
+            Self {
+                ignore_poison_error: false,
+                tm_store,
+                tx,
+            }
         }
     }
-}
 
-#[cfg(feature = "std")]
-unsafe impl Sync for StdVerifSender {}
-#[cfg(feature = "std")]
-unsafe impl Send for StdVerifSender {}
+    impl SendBackend for mpsc::Sender<StoreAddr> {
+        fn send(&self, addr: StoreAddr) -> Result<(), StoreAddr> {
+            self.send(addr).map_err(|_| addr)
+        }
+    }
 
-#[cfg(feature = "std")]
-#[derive(Debug, Eq, PartialEq)]
-pub enum StdVerifSenderError {
-    PoisonError,
-    StoreError(StoreError),
-    RxDisconnected(StoreAddr),
-}
+    pub struct StdVerifSender {
+        base: StdSenderBase<mpsc::Sender<StoreAddr>>,
+    }
 
-#[cfg(feature = "std")]
-impl VerificationSender<StdVerifSenderError> for StdVerifSender {
-    fn send_verification_tm(
-        &mut self,
-        tm: PusTm,
-    ) -> Result<(), VerificationError<StdVerifSenderError>> {
-        let operation = |mut mg: RwLockWriteGuard<LocalPool>| {
-            let (addr, buf) = mg
-                .free_element(tm.len_packed())
-                .map_err(|e| VerificationError::SendError(StdVerifSenderError::StoreError(e)))?;
-            tm.write_to(buf).map_err(VerificationError::PusError)?;
-            self.tx.send(addr).map_err(|_| {
-                VerificationError::SendError(StdVerifSenderError::RxDisconnected(addr))
-            })?;
-            Ok(())
-        };
-        match self.tm_store.write() {
-            Ok(lock) => operation(lock),
-            Err(poison_error) => {
-                if self.ignore_poison_error {
-                    operation(poison_error.into_inner())
-                } else {
-                    Err(VerificationError::SendError(
-                        StdVerifSenderError::PoisonError,
-                    ))
+    impl StdVerifSender {
+        pub fn new(tm_store: Arc<RwLock<LocalPool>>, tx: mpsc::Sender<StoreAddr>) -> Self {
+            Self {
+                base: StdSenderBase::new(tm_store, tx),
+            }
+        }
+    }
+
+    //noinspection RsTraitImplementation
+    impl VerificationSender<StdVerifSenderError> for StdVerifSender {
+        delegate!(
+            to self.base {
+                fn send_verification_tm(&mut self, tm: PusTm) -> Result<(), VerificationError<StdVerifSenderError>>;
+            }
+        );
+    }
+    unsafe impl Sync for StdVerifSender {}
+    unsafe impl Send for StdVerifSender {}
+
+    impl SendBackend for crossbeam_channel::Sender<StoreAddr> {
+        fn send(&self, addr: StoreAddr) -> Result<(), StoreAddr> {
+            self.send(addr).map_err(|_| addr)
+        }
+    }
+
+    pub struct CrossbeamVerifSender {
+        base: StdSenderBase<crossbeam_channel::Sender<StoreAddr>>,
+    }
+
+    impl CrossbeamVerifSender {
+        pub fn new(
+            tm_store: Arc<RwLock<LocalPool>>,
+            tx: crossbeam_channel::Sender<StoreAddr>,
+        ) -> Self {
+            Self {
+                base: StdSenderBase::new(tm_store, tx),
+            }
+        }
+    }
+
+    //noinspection RsTraitImplementation
+    impl VerificationSender<StdVerifSenderError> for CrossbeamVerifSender {
+        delegate!(
+            to self.base {
+                fn send_verification_tm(&mut self, tm: PusTm) -> Result<(), VerificationError<StdVerifSenderError>>;
+            }
+        );
+    }
+
+    unsafe impl Sync for CrossbeamVerifSender {}
+    unsafe impl Send for CrossbeamVerifSender {}
+
+    impl<S: SendBackend + 'static> VerificationSender<StdVerifSenderError> for StdSenderBase<S> {
+        fn send_verification_tm(
+            &mut self,
+            tm: PusTm,
+        ) -> Result<(), VerificationError<StdVerifSenderError>> {
+            let operation = |mut mg: RwLockWriteGuard<LocalPool>| {
+                let (addr, buf) = mg.free_element(tm.len_packed()).map_err(|e| {
+                    VerificationError::SendError(StdVerifSenderError::StoreError(e))
+                })?;
+                tm.write_to(buf).map_err(VerificationError::PusError)?;
+                self.tx.send(addr).map_err(|_| {
+                    VerificationError::SendError(StdVerifSenderError::RxDisconnected(addr))
+                })?;
+                Ok(())
+            };
+            match self.tm_store.write() {
+                Ok(lock) => operation(lock),
+                Err(poison_error) => {
+                    if self.ignore_poison_error {
+                        operation(poison_error.into_inner())
+                    } else {
+                        Err(VerificationError::SendError(
+                            StdVerifSenderError::PoisonError,
+                        ))
+                    }
                 }
             }
         }

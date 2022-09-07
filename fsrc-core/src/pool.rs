@@ -87,6 +87,7 @@ type NumBlocks = u16;
 ///
 /// * `cfg`: Vector of tuples which represent a subpool. The first entry in the tuple specifies the
 ///       number of memory blocks in the subpool, the second entry the size of the blocks
+#[derive(Clone)]
 pub struct PoolCfg {
     cfg: Vec<(NumBlocks, usize)>,
 }

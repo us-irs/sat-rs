@@ -1,13 +1,13 @@
 use fsrc_core::pool::{LocalPool, PoolCfg};
 use fsrc_core::pus::verification::{
-    FailParams, RequestId, StdVerifSender, VerificationReporter, VerificationReporterCfg,
+    CrossbeamVerifSender, FailParams, RequestId, VerificationReporter, VerificationReporterCfg,
 };
+use hashbrown::HashMap;
 use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket};
 use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
 use spacepackets::tm::PusTm;
 use spacepackets::SpHeader;
-use std::sync::atomic::{AtomicU16, Ordering};
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 
 const TEST_APID: u16 = 0x03;
@@ -16,28 +16,55 @@ const PACKETS_SENT: u8 = 8;
 
 #[test]
 fn test_shared_reporter() {
-    let seq_counter_0 = Arc::new(AtomicU16::new(0));
-    let seq_counter_1 = seq_counter_0.clone();
     let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8);
     // Shared pool object to store the verification PUS telemetry
     let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
-    let shared_pool = Arc::new(RwLock::new(LocalPool::new(pool_cfg)));
-    let (tx, rx) = mpsc::channel();
-    let mut sender_0 = StdVerifSender::new(shared_pool.clone(), tx.clone());
-    let mut sender_1 = StdVerifSender::new(shared_pool.clone(), tx);
+    let shared_tm_pool = Arc::new(RwLock::new(LocalPool::new(pool_cfg.clone())));
+    let shared_tc_pool_0 = Arc::new(RwLock::new(LocalPool::new(pool_cfg)));
+    let shared_tc_pool_1 = shared_tc_pool_0.clone();
+    let (tx, rx) = crossbeam_channel::bounded(5);
+    let mut sender_0 = CrossbeamVerifSender::new(shared_tm_pool.clone(), tx.clone());
+    let mut sender_1 = CrossbeamVerifSender::new(shared_tm_pool.clone(), tx);
     let reporter_0 = Arc::new(Mutex::new(VerificationReporter::new(cfg)));
     let reporter_1 = reporter_0.clone();
 
-    let verif_sender_0 = thread::spawn(move || {
-        let mut sph =
-            SpHeader::tc(TEST_APID, seq_counter_0.fetch_add(1, Ordering::SeqCst), 0).unwrap();
+    let (tx_tc_0, rx_tc_0) = crossbeam_channel::bounded(3);
+    let (tx_tc_1, rx_tc_1) = crossbeam_channel::bounded(3);
+    {
+        let mut tc_guard = shared_tc_pool_0.write().unwrap();
+        let mut sph = SpHeader::tc(TEST_APID, 0, 0).unwrap();
         let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-        let pus_tc = PusTc::new(&mut sph, tc_header, None, true);
+        let pus_tc_0 = PusTc::new(&mut sph, tc_header, None, true);
+        let (addr, mut buf) = tc_guard.free_element(pus_tc_0.len_packed()).unwrap();
+        pus_tc_0.write_to(&mut buf).unwrap();
+        tx_tc_0.send(addr).unwrap();
+        let mut sph = SpHeader::tc(TEST_APID, 1, 0).unwrap();
+        let tc_header = PusTcSecondaryHeader::new_simple(5, 1);
+        let pus_tc_1 = PusTc::new(&mut sph, tc_header, None, true);
+        let (addr, mut buf) = tc_guard.free_element(pus_tc_0.len_packed()).unwrap();
+        pus_tc_1.write_to(&mut buf).unwrap();
+        tx_tc_1.send(addr).unwrap();
+    }
+
+    let verif_sender_0 = thread::spawn(move || {
+        let mut tc_buf: [u8; 1024] = [0; 1024];
+        let tc_addr = rx_tc_1.recv().unwrap();
+        let tc_len;
+        {
+            let mut tc_guard = shared_tc_pool_0.write().unwrap();
+            let pg = tc_guard.read_with_guard(tc_addr);
+            let buf = pg.read().unwrap();
+            tc_len = buf.len();
+            tc_buf[0..tc_len].copy_from_slice(buf);
+        }
+        let (tc, _) = PusTc::new_from_raw_slice(&tc_buf[0..tc_len]).unwrap();
+        let req_id = RequestId::new(&tc);
         let mut mg = reporter_0.lock().unwrap();
-        let token = mg.add_tc(&pus_tc);
+        let token = mg.add_tc_with_req_id(req_id);
         let accepted_token = mg
             .acceptance_success(token, &mut sender_0, &FIXED_STAMP)
             .expect("Acceptance success failed");
+        // Do some start handling here
         let started_token = mg
             .start_success(accepted_token, &mut sender_0, &FIXED_STAMP)
             .expect("Start success failed");
@@ -48,6 +75,7 @@ fn test_shared_reporter() {
             EcssEnumU8::new(0),
         )
         .expect("Start success failed");
+        // Do some step handling here
         mg.step_success(
             &started_token,
             &mut sender_0,
@@ -60,12 +88,19 @@ fn test_shared_reporter() {
     });
 
     let verif_sender_1 = thread::spawn(move || {
-        let mut sph =
-            SpHeader::tc(TEST_APID, seq_counter_1.fetch_add(1, Ordering::SeqCst), 0).unwrap();
-        let tc_header = PusTcSecondaryHeader::new_simple(5, 1);
-        let pus_tc = PusTc::new(&mut sph, tc_header, None, true);
+        let mut tc_buf: [u8; 1024] = [0; 1024];
+        let tc_addr = rx_tc_0.recv().unwrap();
+        let tc_len;
+        {
+            let mut tc_guard = shared_tc_pool_1.write().unwrap();
+            let pg = tc_guard.read_with_guard(tc_addr);
+            let buf = pg.read().unwrap();
+            tc_len = buf.len();
+            tc_buf[0..tc_len].copy_from_slice(buf);
+        }
+        let (tc, _) = PusTc::new_from_raw_slice(&tc_buf[0..tc_len]).unwrap();
         let mut mg = reporter_1.lock().unwrap();
-        let token = mg.add_tc(&pus_tc);
+        let token = mg.add_tc(&tc);
         let accepted_token = mg
             .acceptance_success(token, &mut sender_1, &FIXED_STAMP)
             .expect("Acceptance success failed");
@@ -81,9 +116,10 @@ fn test_shared_reporter() {
     let verif_receiver = thread::spawn(move || {
         let mut packet_counter = 0;
         let mut tm_buf: [u8; 1024] = [0; 1024];
+        let mut verif_map = HashMap::new();
         while packet_counter < PACKETS_SENT {
             let verif_addr = rx.recv().expect("Error receiving verification packet");
-            let mut rg = shared_pool.write().expect("Error locking shared pool");
+            let mut rg = shared_tm_pool.write().expect("Error locking shared pool");
             let store_guard = rg.read_with_guard(verif_addr);
             let slice = store_guard.read().expect("Error reading TM slice");
             let tm_len = slice.len();
@@ -96,13 +132,28 @@ fn test_shared_reporter() {
                 &pus_tm.source_data().expect("Invalid TM source data")[0..RequestId::SIZE_AS_BYTES],
             )
             .unwrap();
-            println!(
-                "Received PUS Verification TM[{},{}] for request ID {:#08x}",
-                pus_tm.service(),
-                pus_tm.subservice(),
-                req_id.raw()
-            );
+            if !verif_map.contains_key(&req_id) {
+                let mut content = Vec::new();
+                content.push(pus_tm.subservice());
+                verif_map.insert(req_id, content);
+            } else {
+                let content = verif_map.get_mut(&req_id).unwrap();
+                content.push(pus_tm.subservice())
+            }
             packet_counter += 1;
+        }
+        for (_req_id, content) in verif_map {
+            if content.len() == 3 {
+                assert_eq!(content[0], 1);
+                assert_eq!(content[1], 3);
+                assert_eq!(content[2], 8);
+            } else {
+                assert_eq!(content[0], 1);
+                assert_eq!(content[1], 3);
+                assert_eq!(content[2], 5);
+                assert_eq!(content[3], 5);
+                assert_eq!(content[4], 7);
+            }
         }
     });
     verif_sender_0.join().expect("Joining thread 0 failed");
