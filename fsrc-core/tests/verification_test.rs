@@ -52,7 +52,6 @@ fn test_shared_reporter() {
         pus_tc_1.write_to(&mut buf).unwrap();
         tx_tc_1.send(addr).unwrap();
     }
-
     let verif_sender_0 = thread::spawn(move || {
         let mut tc_buf: [u8; 1024] = [0; 1024];
         let tc_addr = rx_tc_0
@@ -67,7 +66,7 @@ fn test_shared_reporter() {
             tc_buf[0..tc_len].copy_from_slice(buf);
         }
         let (_tc, _) = PusTc::new_from_raw_slice(&tc_buf[0..tc_len]).unwrap();
-        let mut mg = reporter_0.lock().unwrap();
+        let mut mg = reporter_0.lock().expect("Locking mutex failed");
         let token = mg.add_tc_with_req_id(req_id_0);
         let accepted_token = mg
             .acceptance_success(token, &mut sender_0, &FIXED_STAMP)
@@ -109,7 +108,7 @@ fn test_shared_reporter() {
             tc_buf[0..tc_len].copy_from_slice(buf);
         }
         let (tc, _) = PusTc::new_from_raw_slice(&tc_buf[0..tc_len]).unwrap();
-        let mut mg = reporter_1.lock().unwrap();
+        let mut mg = reporter_1.lock().expect("Locking reporter failed");
         let token = mg.add_tc(&tc);
         let accepted_token = mg
             .acceptance_success(token, &mut sender_1, &FIXED_STAMP)
@@ -129,7 +128,7 @@ fn test_shared_reporter() {
         let mut verif_map = HashMap::new();
         while packet_counter < PACKETS_SENT {
             let verif_addr = rx
-                .recv_timeout(Duration::from_millis(30))
+                .recv_timeout(Duration::from_millis(50))
                 .expect("Packet reception timeout");
             let mut rg = shared_tm_pool.write().expect("Error locking shared pool");
             let store_guard = rg.read_with_guard(verif_addr);
@@ -155,11 +154,11 @@ fn test_shared_reporter() {
             packet_counter += 1;
         }
         for (req_id, content) in verif_map {
-            if req_id == req_id_0 {
+            if req_id == req_id_1 {
                 assert_eq!(content[0], 1);
                 assert_eq!(content[1], 3);
                 assert_eq!(content[2], 8);
-            } else if req_id == req_id_1 {
+            } else if req_id == req_id_0 {
                 assert_eq!(content[0], 1);
                 assert_eq!(content[1], 3);
                 assert_eq!(content[2], 5);
@@ -172,5 +171,5 @@ fn test_shared_reporter() {
     });
     verif_sender_0.join().expect("Joining thread 0 failed");
     verif_sender_1.join().expect("Joining thread 1 failed");
-    verif_receiver.join().expect("Joining thread 2 failed")
+    verif_receiver.join().expect("Joining thread 2 failed");
 }
