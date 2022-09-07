@@ -7,8 +7,67 @@
 //! an API which uses type-state programming to avoid calling the verification steps in
 //! an invalid order.
 //!
-//! # Example
-//! TODO: Cross Ref integration test which will be provided
+//! # Examples
+//!
+//! ```
+//! use std::sync::{Arc, RwLock};
+//! use std::time::Duration;
+//! use fsrc_core::pool::{LocalPool, PoolCfg};
+//! use fsrc_core::pus::verification::{CrossbeamVerifSender, VerificationReporterCfg, VerificationReporterWithSender};
+//! use spacepackets::ecss::PusPacket;
+//! use spacepackets::SpHeader;
+//! use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
+//! use spacepackets::tm::PusTm;
+//!
+//! const EMPTY_STAMP: [u8; 7] = [0; 7];
+//! const TEST_APID: u16 = 0x02;
+//!
+//! let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
+//! let shared_tm_pool = Arc::new(RwLock::new(LocalPool::new(pool_cfg.clone())));
+//! let (verif_tx, verif_rx) = crossbeam_channel::bounded(10);
+//! let sender = CrossbeamVerifSender::new(shared_tm_pool.clone(), verif_tx);
+//! let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8);
+//! let mut  reporter = VerificationReporterWithSender::new(cfg , Box::new(sender));
+//!
+//! let mut sph = SpHeader::tc(TEST_APID, 0, 0).unwrap();
+//! let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
+//! let pus_tc_0 = PusTc::new(&mut sph, tc_header, None, true);
+//! let init_token = reporter.add_tc(&pus_tc_0);
+//!
+//! // Complete success sequence for a telecommand
+//! let accepted_token = reporter.acceptance_success(init_token, &EMPTY_STAMP).unwrap();
+//! let started_token = reporter.start_success(accepted_token, &EMPTY_STAMP).unwrap();
+//! reporter.completion_success(started_token, &EMPTY_STAMP).unwrap();
+//!
+//! // Verify it arrives correctly on receiver end
+//! let mut tm_buf: [u8; 1024] = [0; 1024];
+//! let mut packet_idx = 0;
+//! while packet_idx < 3 {
+//!     let addr = verif_rx.recv_timeout(Duration::from_millis(10)).unwrap();
+//!     let tm_len;
+//!     {
+//!         let mut rg = shared_tm_pool.write().expect("Error locking shared pool");
+//!         let store_guard = rg.read_with_guard(addr);
+//!         let slice = store_guard.read().expect("Error reading TM slice");
+//!         tm_len = slice.len();
+//!         tm_buf[0..tm_len].copy_from_slice(slice);
+//!     }
+//!     let (pus_tm, _) = PusTm::new_from_raw_slice(&tm_buf[0..tm_len], 7)
+//!        .expect("Error reading verification TM");
+//!     if packet_idx == 0 {
+//!         assert_eq!(pus_tm.subservice(), 1);
+//!     } else if packet_idx == 1 {
+//!         assert_eq!(pus_tm.subservice(), 3);
+//!     } else if packet_idx == 2 {
+//!         assert_eq!(pus_tm.subservice(), 7);
+//!     }
+//!     packet_idx += 1;
+//! }
+//! ```
+//!
+//! The [integration test](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/obsw-client-example/fsrc-core/tests/verification_test.rs)
+//! for the verification module contains examples how this module could be used in a more complex
+//! context involving multiple threads
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
