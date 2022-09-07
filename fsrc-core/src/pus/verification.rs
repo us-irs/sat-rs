@@ -754,6 +754,7 @@ mod stdmod {
                     VerificationError::SendError(StdVerifSenderError::StoreError(e))
                 })?;
                 tm.write_to(buf).map_err(VerificationError::PusError)?;
+                drop(mg);
                 self.tx.send(addr).map_err(|_| {
                     VerificationError::SendError(StdVerifSenderError::RxDisconnected(addr))
                 })?;
