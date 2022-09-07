@@ -11,6 +11,7 @@ use spacepackets::tm::PusTm;
 use spacepackets::SpHeader;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
+use std::time::Duration;
 
 const TEST_APID: u16 = 0x03;
 const FIXED_STAMP: [u8; 7] = [0; 7];
@@ -54,7 +55,9 @@ fn test_shared_reporter() {
 
     let verif_sender_0 = thread::spawn(move || {
         let mut tc_buf: [u8; 1024] = [0; 1024];
-        let tc_addr = rx_tc_0.recv().unwrap();
+        let tc_addr = rx_tc_0
+            .recv_timeout(Duration::from_millis(20))
+            .expect("Receive timeout");
         let tc_len;
         {
             let mut tc_guard = shared_tc_pool_0.write().unwrap();
@@ -94,7 +97,9 @@ fn test_shared_reporter() {
 
     let verif_sender_1 = thread::spawn(move || {
         let mut tc_buf: [u8; 1024] = [0; 1024];
-        let tc_addr = rx_tc_1.recv().unwrap();
+        let tc_addr = rx_tc_1
+            .recv_timeout(Duration::from_millis(20))
+            .expect("Receive timeout");
         let tc_len;
         {
             let mut tc_guard = shared_tc_pool_1.write().unwrap();
@@ -123,7 +128,9 @@ fn test_shared_reporter() {
         let mut tm_buf: [u8; 1024] = [0; 1024];
         let mut verif_map = HashMap::new();
         while packet_counter < PACKETS_SENT {
-            let verif_addr = rx.recv().expect("Error receiving verification packet");
+            let verif_addr = rx
+                .recv_timeout(Duration::from_millis(30))
+                .expect("Packet reception timeout");
             let mut rg = shared_tm_pool.write().expect("Error locking shared pool");
             let store_guard = rg.read_with_guard(verif_addr);
             let slice = store_guard.read().expect("Error reading TM slice");
