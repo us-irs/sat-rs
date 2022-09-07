@@ -1,3 +1,5 @@
+extern crate core;
+
 use fsrc_core::pool::{LocalPool, PoolCfg};
 use fsrc_core::pus::verification::{
     CrossbeamVerifSender, FailParams, RequestId, VerificationReporter, VerificationReporterCfg,
@@ -27,6 +29,8 @@ fn test_shared_reporter() {
     let mut sender_1 = CrossbeamVerifSender::new(shared_tm_pool.clone(), tx);
     let reporter_0 = Arc::new(Mutex::new(VerificationReporter::new(cfg)));
     let reporter_1 = reporter_0.clone();
+    let req_id_0;
+    let req_id_1;
 
     let (tx_tc_0, rx_tc_0) = crossbeam_channel::bounded(3);
     let (tx_tc_1, rx_tc_1) = crossbeam_channel::bounded(3);
@@ -35,12 +39,14 @@ fn test_shared_reporter() {
         let mut sph = SpHeader::tc(TEST_APID, 0, 0).unwrap();
         let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
         let pus_tc_0 = PusTc::new(&mut sph, tc_header, None, true);
+        req_id_0 = RequestId::new(&pus_tc_0);
         let (addr, mut buf) = tc_guard.free_element(pus_tc_0.len_packed()).unwrap();
         pus_tc_0.write_to(&mut buf).unwrap();
         tx_tc_0.send(addr).unwrap();
         let mut sph = SpHeader::tc(TEST_APID, 1, 0).unwrap();
         let tc_header = PusTcSecondaryHeader::new_simple(5, 1);
         let pus_tc_1 = PusTc::new(&mut sph, tc_header, None, true);
+        req_id_1 = RequestId::new(&pus_tc_1);
         let (addr, mut buf) = tc_guard.free_element(pus_tc_0.len_packed()).unwrap();
         pus_tc_1.write_to(&mut buf).unwrap();
         tx_tc_1.send(addr).unwrap();
@@ -48,7 +54,7 @@ fn test_shared_reporter() {
 
     let verif_sender_0 = thread::spawn(move || {
         let mut tc_buf: [u8; 1024] = [0; 1024];
-        let tc_addr = rx_tc_1.recv().unwrap();
+        let tc_addr = rx_tc_0.recv().unwrap();
         let tc_len;
         {
             let mut tc_guard = shared_tc_pool_0.write().unwrap();
@@ -57,10 +63,9 @@ fn test_shared_reporter() {
             tc_len = buf.len();
             tc_buf[0..tc_len].copy_from_slice(buf);
         }
-        let (tc, _) = PusTc::new_from_raw_slice(&tc_buf[0..tc_len]).unwrap();
-        let req_id = RequestId::new(&tc);
+        let (_tc, _) = PusTc::new_from_raw_slice(&tc_buf[0..tc_len]).unwrap();
         let mut mg = reporter_0.lock().unwrap();
-        let token = mg.add_tc_with_req_id(req_id);
+        let token = mg.add_tc_with_req_id(req_id_0);
         let accepted_token = mg
             .acceptance_success(token, &mut sender_0, &FIXED_STAMP)
             .expect("Acceptance success failed");
@@ -89,7 +94,7 @@ fn test_shared_reporter() {
 
     let verif_sender_1 = thread::spawn(move || {
         let mut tc_buf: [u8; 1024] = [0; 1024];
-        let tc_addr = rx_tc_0.recv().unwrap();
+        let tc_addr = rx_tc_1.recv().unwrap();
         let tc_len;
         {
             let mut tc_guard = shared_tc_pool_1.write().unwrap();
@@ -142,17 +147,19 @@ fn test_shared_reporter() {
             }
             packet_counter += 1;
         }
-        for (_req_id, content) in verif_map {
-            if content.len() == 3 {
+        for (req_id, content) in verif_map {
+            if req_id == req_id_0 {
                 assert_eq!(content[0], 1);
                 assert_eq!(content[1], 3);
                 assert_eq!(content[2], 8);
-            } else {
+            } else if req_id == req_id_1 {
                 assert_eq!(content[0], 1);
                 assert_eq!(content[1], 3);
                 assert_eq!(content[2], 5);
                 assert_eq!(content[3], 5);
                 assert_eq!(content[4], 7);
+            } else {
+                panic!("Unexpected request ID {:?}", req_id);
             }
         }
     });
