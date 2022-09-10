@@ -166,6 +166,12 @@ pub enum VerificationError<E> {
     PusError(PusError),
 }
 
+impl<E> From<ByteConversionError> for VerificationError<E> {
+    fn from(e: ByteConversionError) -> Self {
+        VerificationError::ByteConversionError(e)
+    }
+}
+
 /// If a verification operation fails, the passed token will be returned as well. This allows
 /// re-trying the operation at a later point.
 #[derive(Debug, Clone)]
@@ -556,12 +562,9 @@ impl VerificationReporter {
                 .unwrap();
             idx += step.byte_width() as usize;
         }
-        params
-            .failure_code
-            .to_bytes(
-                &mut self.source_data_buf[idx..idx + params.failure_code.byte_width() as usize],
-            )
-            .map_err(|e| VerificationError::<E>::ByteConversionError(e))?;
+        params.failure_code.to_bytes(
+            &mut self.source_data_buf[idx..idx + params.failure_code.byte_width() as usize],
+        )?;
         idx += params.failure_code.byte_width() as usize;
         if let Some(failure_data) = params.failure_data {
             self.source_data_buf[idx..idx + failure_data.len()].copy_from_slice(failure_data);
@@ -732,6 +735,18 @@ mod stdmod {
         RxDisconnected(StoreAddr),
     }
 
+    impl From<StoreError> for StdVerifSenderError {
+        fn from(e: StoreError) -> Self {
+            StdVerifSenderError::StoreError(e)
+        }
+    }
+
+    impl From<StoreError> for VerificationError<StdVerifSenderError> {
+        fn from(e: StoreError) -> Self {
+            VerificationError::SendError(e.into())
+        }
+    }
+
     trait SendBackend: Send {
         fn send(&self, addr: StoreAddr) -> Result<(), StoreAddr>;
     }
@@ -824,9 +839,7 @@ mod stdmod {
             tm: PusTm,
         ) -> Result<(), VerificationError<StdVerifSenderError>> {
             let operation = |mut mg: RwLockWriteGuard<ShareablePoolProvider>| {
-                let (addr, buf) = mg.free_element(tm.len_packed()).map_err(|e| {
-                    VerificationError::SendError(StdVerifSenderError::StoreError(e))
-                })?;
+                let (addr, buf) = mg.free_element(tm.len_packed())?;
                 tm.write_to(buf).map_err(VerificationError::PusError)?;
                 drop(mg);
                 self.tx.send(addr).map_err(|_| {
