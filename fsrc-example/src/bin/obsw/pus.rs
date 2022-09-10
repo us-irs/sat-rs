@@ -4,6 +4,7 @@ use fsrc_core::pus::verification::SharedStdVerifReporterWithSender;
 use fsrc_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use fsrc_core::tmtc::PusServiceProvider;
 use spacepackets::tc::{PusTc, PusTcSecondaryHeaderT};
+use spacepackets::time::{CdsShortTimeProvider, TimeWriter};
 use spacepackets::SpHeader;
 use std::sync::mpsc;
 
@@ -12,6 +13,8 @@ pub struct PusReceiver {
     pub tm_tx: mpsc::Sender<StoreAddr>,
     pub tm_store: TmStore,
     pub verif_reporter: SharedStdVerifReporterWithSender,
+    stamper: CdsShortTimeProvider,
+    time_stamp: [u8; 7],
 }
 
 impl PusReceiver {
@@ -26,6 +29,8 @@ impl PusReceiver {
             tm_tx,
             tm_store,
             verif_reporter,
+            stamper: CdsShortTimeProvider::default(),
+            time_stamp: [0; 7],
         }
     }
 }
@@ -39,6 +44,21 @@ impl PusServiceProvider for PusReceiver {
         _header: &SpHeader,
         pus_tc: &PusTc,
     ) -> Result<(), Self::Error> {
+        let mut reporter = self
+            .verif_reporter
+            .lock()
+            .expect("Locking Verification Reporter failed");
+        let init_token = reporter.add_tc(pus_tc);
+        self.stamper
+            .update_from_now()
+            .expect("Updating time for time stamp failed");
+        self.stamper
+            .write_to_bytes(&mut self.time_stamp)
+            .expect("Writing time stamp failed");
+        let _accepted_token = reporter
+            .acceptance_success(init_token, &self.time_stamp)
+            .expect("Acceptance success failure");
+        drop(reporter);
         if service == 17 {
             self.handle_test_service(pus_tc);
         }
