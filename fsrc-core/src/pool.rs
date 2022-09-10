@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```
-//! use fsrc_core::pool::{LocalPool, PoolCfg};
+//! use fsrc_core::pool::{LocalPool, PoolCfg, PoolProvider};
 //!
 //! // 4 buckets of 4 bytes, 2 of 8 bytes and 1 of 16 bytes
 //! let pool_cfg = PoolCfg::new(vec![(4, 4), (2, 8), (1, 16)]);
@@ -78,8 +78,17 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use delegate::delegate;
+#[cfg(feature = "std")]
+use std::boxed::Box;
+#[cfg(feature = "std")]
+use std::sync::{Arc, RwLock};
 
 type NumBlocks = u16;
+
+#[cfg(feature = "std")]
+pub type ShareablePoolProvider = Box<dyn PoolProvider + Send + Sync>;
+#[cfg(feature = "std")]
+pub type SharedPool = Arc<RwLock<ShareablePoolProvider>>;
 
 /// Configuration structure of the [local pool][LocalPool]
 ///
@@ -151,10 +160,52 @@ pub enum StoreError {
     InternalError(String),
 }
 
+pub trait PoolProvider {
+    /// Add new data to the pool. The provider should attempt to reserve a memory block with the
+    /// appropriate size and then copy the given data to the block. Yields a [StoreAddr] which can
+    /// be used to access the data stored in the pool
+    fn add(&mut self, data: &[u8]) -> Result<StoreAddr, StoreError>;
+
+    /// The provider should attempt to reserve a free memory block with the appropriate size and
+    /// then return a mutable reference to it. Yields a [StoreAddr] which can be used to access
+    /// the data stored in the pool
+    fn free_element(&mut self, len: usize) -> Result<(StoreAddr, &mut [u8]), StoreError>;
+
+    /// Modify data added previously using a given [StoreAddr] by yielding a mutable reference
+    /// to it
+    fn modify(&mut self, addr: &StoreAddr) -> Result<&mut [u8], StoreError>;
+
+    /// This function behaves like [Self::modify], but consumes the provided address and returns a
+    /// RAII conformant guard object.
+    ///
+    /// Unless the guard [PoolRwGuard::release] method is called, the data for the
+    /// given address will be deleted automatically when the guard is dropped.
+    /// This can prevent memory leaks. Users can read (and modify) the data and release the guard
+    /// if the data in the store is valid for further processing. If the data is faulty, no
+    /// manual deletion is necessary when returning from a processing function prematurely.
+    fn modify_with_guard(&mut self, addr: StoreAddr) -> PoolRwGuard;
+
+    /// Read data by yielding a read-only reference given a [StoreAddr]
+    fn read(&self, addr: &StoreAddr) -> Result<&[u8], StoreError>;
+
+    /// This function behaves like [Self::read], but consumes the provided address and returns a
+    /// RAII conformant guard object.
+    ///
+    /// Unless the guard [PoolRwGuard::release] method is called, the data for the
+    /// given address will be deleted automatically when the guard is dropped.
+    /// This can prevent memory leaks. Users can read the data and release the guard
+    /// if the data in the store is valid for further processing. If the data is faulty, no
+    /// manual deletion is necessary when returning from a processing function prematurely.
+    fn read_with_guard(&mut self, addr: StoreAddr) -> PoolGuard;
+
+    /// Delete data inside the pool given a [StoreAddr]
+    fn delete(&mut self, addr: StoreAddr) -> Result<(), StoreError>;
+    fn has_element_at(&self, addr: &StoreAddr) -> Result<bool, StoreError>;
+}
+
 impl LocalPool {
     const STORE_FREE: PoolSize = PoolSize::MAX;
     const MAX_SIZE: PoolSize = Self::STORE_FREE - 1;
-
     /// Create a new local pool from the [given configuration][PoolCfg]. This function will sanitize
     /// the given configuration as well.
     pub fn new(mut cfg: PoolCfg) -> LocalPool {
@@ -173,96 +224,6 @@ impl LocalPool {
                 .push(vec![Self::STORE_FREE; next_sizes_list_len]);
         }
         local_pool
-    }
-
-    /// Add new data to the pool. It will attempt to reserve a memory block with the appropriate
-    /// size and then copy the given data to the block. Yields a [StoreAddr] which can be used
-    /// to access the data stored in the pool
-    pub fn add(&mut self, data: &[u8]) -> Result<StoreAddr, StoreError> {
-        let data_len = data.len();
-        if data_len > Self::MAX_SIZE {
-            return Err(StoreError::DataTooLarge(data_len));
-        }
-        let addr = self.reserve(data_len)?;
-        self.write(&addr, data)?;
-        Ok(addr)
-    }
-
-    /// Reserves a free memory block with the appropriate size and returns a mutable reference
-    /// to it. Yields a [StoreAddr] which can be used to access the data stored in the pool
-    pub fn free_element(&mut self, len: usize) -> Result<(StoreAddr, &mut [u8]), StoreError> {
-        if len > Self::MAX_SIZE {
-            return Err(StoreError::DataTooLarge(len));
-        }
-        let addr = self.reserve(len)?;
-        let raw_pos = self.raw_pos(&addr).unwrap();
-        let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + len];
-        Ok((addr, block))
-    }
-
-    /// Modify data added previously using a given [StoreAddr] by yielding a mutable reference
-    /// to it
-    pub fn modify(&mut self, addr: &StoreAddr) -> Result<&mut [u8], StoreError> {
-        let curr_size = self.addr_check(addr)?;
-        let raw_pos = self.raw_pos(addr).unwrap();
-        let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..curr_size];
-        Ok(block)
-    }
-
-    /// This function behaves like [Self::modify], but consumes the provided address and returns a
-    /// RAII conformant guard object.
-    ///
-    /// Unless the guard [PoolRwGuard::release] method is called, the data for the
-    /// given address will be deleted automatically when the guard is dropped.
-    /// This can prevent memory leaks. Users can read (and modify) the data and release the guard
-    /// if the data in the store is valid for further processing. If the data is faulty, no
-    /// manual deletion is necessary when returning from a processing function prematurely.
-    pub fn modify_with_guard(&mut self, addr: StoreAddr) -> PoolRwGuard {
-        PoolRwGuard::new(self, addr)
-    }
-
-    /// Read data by yielding a read-only reference given a [StoreAddr]
-    pub fn read(&self, addr: &StoreAddr) -> Result<&[u8], StoreError> {
-        let curr_size = self.addr_check(addr)?;
-        let raw_pos = self.raw_pos(addr).unwrap();
-        let block = &self.pool.get(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + curr_size];
-        Ok(block)
-    }
-
-    /// This function behaves like [Self::read], but consumes the provided address and returns a
-    /// RAII conformant guard object.
-    ///
-    /// Unless the guard [PoolRwGuard::release] method is called, the data for the
-    /// given address will be deleted automatically when the guard is dropped.
-    /// This can prevent memory leaks. Users can read the data and release the guard
-    /// if the data in the store is valid for further processing. If the data is faulty, no
-    /// manual deletion is necessary when returning from a processing function prematurely.
-    pub fn read_with_guard(&mut self, addr: StoreAddr) -> PoolGuard {
-        PoolGuard::new(self, addr)
-    }
-
-    /// Delete data inside the pool given a [StoreAddr]
-    pub fn delete(&mut self, addr: StoreAddr) -> Result<(), StoreError> {
-        self.addr_check(&addr)?;
-        let block_size = self.pool_cfg.cfg.get(addr.pool_idx as usize).unwrap().1;
-        let raw_pos = self.raw_pos(&addr).unwrap();
-        let block =
-            &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + block_size];
-        let size_list = self.sizes_lists.get_mut(addr.pool_idx as usize).unwrap();
-        size_list[addr.packet_idx as usize] = Self::STORE_FREE;
-        block.fill(0);
-        Ok(())
-    }
-
-    pub fn has_element_at(&self, addr: &StoreAddr) -> Result<bool, StoreError> {
-        self.validate_addr(addr)?;
-        let pool_idx = addr.pool_idx as usize;
-        let size_list = self.sizes_lists.get(pool_idx).unwrap();
-        let curr_size = size_list[addr.packet_idx as usize];
-        if curr_size == Self::STORE_FREE {
-            return Ok(false);
-        }
-        Ok(true)
     }
 
     fn addr_check(&self, addr: &StoreAddr) -> Result<usize, StoreError> {
@@ -355,6 +316,73 @@ impl LocalPool {
     }
 }
 
+impl PoolProvider for LocalPool {
+    fn add(&mut self, data: &[u8]) -> Result<StoreAddr, StoreError> {
+        let data_len = data.len();
+        if data_len > Self::MAX_SIZE {
+            return Err(StoreError::DataTooLarge(data_len));
+        }
+        let addr = self.reserve(data_len)?;
+        self.write(&addr, data)?;
+        Ok(addr)
+    }
+
+    fn free_element(&mut self, len: usize) -> Result<(StoreAddr, &mut [u8]), StoreError> {
+        if len > Self::MAX_SIZE {
+            return Err(StoreError::DataTooLarge(len));
+        }
+        let addr = self.reserve(len)?;
+        let raw_pos = self.raw_pos(&addr).unwrap();
+        let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + len];
+        Ok((addr, block))
+    }
+
+    fn modify(&mut self, addr: &StoreAddr) -> Result<&mut [u8], StoreError> {
+        let curr_size = self.addr_check(addr)?;
+        let raw_pos = self.raw_pos(addr).unwrap();
+        let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..curr_size];
+        Ok(block)
+    }
+
+    fn modify_with_guard(&mut self, addr: StoreAddr) -> PoolRwGuard {
+        PoolRwGuard::new(self, addr)
+    }
+
+    fn read(&self, addr: &StoreAddr) -> Result<&[u8], StoreError> {
+        let curr_size = self.addr_check(addr)?;
+        let raw_pos = self.raw_pos(addr).unwrap();
+        let block = &self.pool.get(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + curr_size];
+        Ok(block)
+    }
+
+    fn read_with_guard(&mut self, addr: StoreAddr) -> PoolGuard {
+        PoolGuard::new(self, addr)
+    }
+
+    fn delete(&mut self, addr: StoreAddr) -> Result<(), StoreError> {
+        self.addr_check(&addr)?;
+        let block_size = self.pool_cfg.cfg.get(addr.pool_idx as usize).unwrap().1;
+        let raw_pos = self.raw_pos(&addr).unwrap();
+        let block =
+            &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + block_size];
+        let size_list = self.sizes_lists.get_mut(addr.pool_idx as usize).unwrap();
+        size_list[addr.packet_idx as usize] = Self::STORE_FREE;
+        block.fill(0);
+        Ok(())
+    }
+
+    fn has_element_at(&self, addr: &StoreAddr) -> Result<bool, StoreError> {
+        self.validate_addr(addr)?;
+        let pool_idx = addr.pool_idx as usize;
+        let size_list = self.sizes_lists.get(pool_idx).unwrap();
+        let curr_size = size_list[addr.packet_idx as usize];
+        if curr_size == Self::STORE_FREE {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+}
+
 pub struct PoolGuard<'a> {
     pool: &'a mut LocalPool,
     pub addr: StoreAddr,
@@ -418,7 +446,8 @@ impl<'a> PoolRwGuard<'a> {
 #[cfg(test)]
 mod tests {
     use crate::pool::{
-        LocalPool, PoolCfg, PoolGuard, PoolRwGuard, StoreAddr, StoreError, StoreIdError,
+        LocalPool, PoolCfg, PoolGuard, PoolProvider, PoolRwGuard, StoreAddr, StoreError,
+        StoreIdError,
     };
     use std::vec;
 

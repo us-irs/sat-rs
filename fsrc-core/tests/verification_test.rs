@@ -1,4 +1,4 @@
-use fsrc_core::pool::{LocalPool, PoolCfg};
+use fsrc_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
 use fsrc_core::pus::verification::{
     CrossbeamVerifSender, FailParams, RequestId, VerificationReporterCfg,
     VerificationReporterWithSender,
@@ -28,7 +28,8 @@ fn test_shared_reporter() {
     let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8);
     // Shared pool object to store the verification PUS telemetry
     let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
-    let shared_tm_pool = Arc::new(RwLock::new(LocalPool::new(pool_cfg.clone())));
+    let shared_tm_pool: SharedPool =
+        Arc::new(RwLock::new(Box::new(LocalPool::new(pool_cfg.clone()))));
     let shared_tc_pool_0 = Arc::new(RwLock::new(LocalPool::new(pool_cfg)));
     let shared_tc_pool_1 = shared_tc_pool_0.clone();
     let (tx, rx) = crossbeam_channel::bounded(5);

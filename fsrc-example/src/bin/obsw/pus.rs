@@ -1,23 +1,31 @@
-use crate::TmStore;
+use crate::tmtc::TmStore;
 use fsrc_core::pool::StoreAddr;
+use fsrc_core::pus::verification::SharedStdVerifReporterWithSender;
 use fsrc_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use fsrc_core::tmtc::PusServiceProvider;
 use spacepackets::tc::{PusTc, PusTcSecondaryHeaderT};
 use spacepackets::SpHeader;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::mpsc;
 
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
     pub tm_tx: mpsc::Sender<StoreAddr>,
-    pub tm_store: Arc<Mutex<TmStore>>,
+    pub tm_store: TmStore,
+    pub verif_reporter: SharedStdVerifReporterWithSender,
 }
 
 impl PusReceiver {
-    pub fn new(apid: u16, tm_tx: mpsc::Sender<StoreAddr>, tm_store: Arc<Mutex<TmStore>>) -> Self {
+    pub fn new(
+        apid: u16,
+        tm_tx: mpsc::Sender<StoreAddr>,
+        tm_store: TmStore,
+        verif_reporter: SharedStdVerifReporterWithSender,
+    ) -> Self {
         Self {
             tm_helper: PusTmWithCdsShortHelper::new(apid),
             tm_tx,
             tm_store,
+            verif_reporter,
         }
     }
 }
@@ -44,11 +52,7 @@ impl PusReceiver {
             println!("Received PUS ping command TC[17,1]");
             println!("Sending ping reply PUS TM[17,2]");
             let ping_reply = self.tm_helper.create_pus_tm_timestamp_now(17, 2, None);
-            let addr = self
-                .tm_store
-                .lock()
-                .expect("Locking TM store failed")
-                .add_pus_tm(&ping_reply);
+            let addr = self.tm_store.add_pus_tm(&ping_reply);
             self.tm_tx
                 .send(addr)
                 .expect("Sending TM to TM funnel failed");

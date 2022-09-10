@@ -15,7 +15,7 @@
 //! ```
 //! use std::sync::{Arc, RwLock};
 //! use std::time::Duration;
-//! use fsrc_core::pool::{LocalPool, PoolCfg};
+//! use fsrc_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
 //! use fsrc_core::pus::verification::{CrossbeamVerifSender, VerificationReporterCfg, VerificationReporterWithSender};
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
@@ -26,7 +26,7 @@
 //! const TEST_APID: u16 = 0x02;
 //!
 //! let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
-//! let shared_tm_pool = Arc::new(RwLock::new(LocalPool::new(pool_cfg.clone())));
+//! let shared_tm_pool: SharedPool = Arc::new(RwLock::new(Box::new(LocalPool::new(pool_cfg.clone()))));
 //! let (verif_tx, verif_rx) = crossbeam_channel::bounded(10);
 //! let sender = CrossbeamVerifSender::new(shared_tm_pool.clone(), verif_tx);
 //! let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8);
@@ -87,7 +87,10 @@ use spacepackets::{ByteConversionError, SizeMissmatch, SpHeader};
 use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
 
 #[cfg(feature = "std")]
-pub use stdmod::{CrossbeamVerifSender, StdVerifSender, StdVerifSenderError};
+pub use stdmod::{
+    CrossbeamVerifSender, MpscVerifSender, SharedStdVerifReporterWithSender,
+    StdVerifReporterWithSender, StdVerifSenderError,
+};
 
 /// This is a request identifier as specified in 5.4.11.2 c. of the PUS standard
 /// This field equivalent to the first two bytes of the CCSDS space packet header.
@@ -711,11 +714,16 @@ impl<E: 'static> VerificationReporterWithSender<E> {
 
 #[cfg(feature = "std")]
 mod stdmod {
-    use crate::pool::{LocalPool, StoreAddr, StoreError};
-    use crate::pus::verification::{VerificationError, VerificationSender};
+    use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr, StoreError};
+    use crate::pus::verification::{
+        VerificationError, VerificationReporterWithSender, VerificationSender,
+    };
     use delegate::delegate;
     use spacepackets::tm::PusTm;
-    use std::sync::{mpsc, Arc, RwLock, RwLockWriteGuard};
+    use std::sync::{mpsc, Arc, Mutex, RwLockWriteGuard};
+
+    pub type StdVerifReporterWithSender = VerificationReporterWithSender<StdVerifSenderError>;
+    pub type SharedStdVerifReporterWithSender = Arc<Mutex<StdVerifReporterWithSender>>;
 
     #[derive(Debug, Eq, PartialEq)]
     pub enum StdVerifSenderError {
@@ -730,12 +738,12 @@ mod stdmod {
 
     struct StdSenderBase<S> {
         pub ignore_poison_error: bool,
-        tm_store: Arc<RwLock<LocalPool>>,
+        tm_store: SharedPool,
         tx: S,
     }
 
     impl<S: SendBackend> StdSenderBase<S> {
-        pub fn new(tm_store: Arc<RwLock<LocalPool>>, tx: S) -> Self {
+        pub fn new(tm_store: SharedPool, tx: S) -> Self {
             Self {
                 ignore_poison_error: false,
                 tm_store,
@@ -744,20 +752,23 @@ mod stdmod {
         }
     }
 
+    unsafe impl<S: Sync> Sync for StdSenderBase<S> {}
+    unsafe impl<S: Send> Send for StdSenderBase<S> {}
+
     impl SendBackend for mpsc::Sender<StoreAddr> {
         fn send(&self, addr: StoreAddr) -> Result<(), StoreAddr> {
             self.send(addr).map_err(|_| addr)
         }
     }
 
-    pub struct StdVerifSender {
+    pub struct MpscVerifSender {
         base: StdSenderBase<mpsc::Sender<StoreAddr>>,
     }
 
     /// Verification sender with a [mpsc::Sender] backend.
     /// It implements the [VerificationSender] trait to be used as PUS Verification TM sender.
-    impl StdVerifSender {
-        pub fn new(tm_store: Arc<RwLock<LocalPool>>, tx: mpsc::Sender<StoreAddr>) -> Self {
+    impl MpscVerifSender {
+        pub fn new(tm_store: SharedPool, tx: mpsc::Sender<StoreAddr>) -> Self {
             Self {
                 base: StdSenderBase::new(tm_store, tx),
             }
@@ -765,15 +776,15 @@ mod stdmod {
     }
 
     //noinspection RsTraitImplementation
-    impl VerificationSender<StdVerifSenderError> for StdVerifSender {
+    impl VerificationSender<StdVerifSenderError> for MpscVerifSender {
         delegate!(
             to self.base {
                 fn send_verification_tm(&mut self, tm: PusTm) -> Result<(), VerificationError<StdVerifSenderError>>;
             }
         );
     }
-    unsafe impl Sync for StdVerifSender {}
-    unsafe impl Send for StdVerifSender {}
+    unsafe impl Sync for MpscVerifSender {}
+    unsafe impl Send for MpscVerifSender {}
 
     impl SendBackend for crossbeam_channel::Sender<StoreAddr> {
         fn send(&self, addr: StoreAddr) -> Result<(), StoreAddr> {
@@ -788,10 +799,7 @@ mod stdmod {
     }
 
     impl CrossbeamVerifSender {
-        pub fn new(
-            tm_store: Arc<RwLock<LocalPool>>,
-            tx: crossbeam_channel::Sender<StoreAddr>,
-        ) -> Self {
+        pub fn new(tm_store: SharedPool, tx: crossbeam_channel::Sender<StoreAddr>) -> Self {
             Self {
                 base: StdSenderBase::new(tm_store, tx),
             }
@@ -815,7 +823,7 @@ mod stdmod {
             &mut self,
             tm: PusTm,
         ) -> Result<(), VerificationError<StdVerifSenderError>> {
-            let operation = |mut mg: RwLockWriteGuard<LocalPool>| {
+            let operation = |mut mg: RwLockWriteGuard<ShareablePoolProvider>| {
                 let (addr, buf) = mg.free_element(tm.len_packed()).map_err(|e| {
                     VerificationError::SendError(StdVerifSenderError::StoreError(e))
                 })?;

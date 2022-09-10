@@ -27,10 +27,7 @@ impl FieldDataProvider for FixedFieldDataWrapper {
 type FieldDataTraitObj = Box<dyn FieldDataProvider>;
 
 fn main() {
-    let (s0, r0): (
-        Sender<FieldDataTraitObj>,
-        Receiver<FieldDataTraitObj>,
-    ) = bounded(5);
+    let (s0, r0): (Sender<FieldDataTraitObj>, Receiver<FieldDataTraitObj>) = bounded(5);
     let data_wrapper = FixedFieldDataWrapper::from_two_u32(2, 3);
     s0.send(Box::new(data_wrapper)).unwrap();
     let jh0 = thread::spawn(move || {

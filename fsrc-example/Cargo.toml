@@ -6,6 +6,7 @@ authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
 
 [dependencies]
 crossbeam-channel = "0.5"
+delegate = "0.8"
 
 [dependencies.spacepackets]
 path = "../spacepackets"

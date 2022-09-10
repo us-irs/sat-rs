@@ -203,6 +203,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "delegate"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "082a24a9967533dc5d743c602157637116fc1b52806d694a5a45e6f32567fcdd"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "downcast-rs"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -224,7 +235,7 @@ version = "0.1.0"
 dependencies = [
  "bus",
  "crossbeam-channel",
- "delegate",
+ "delegate 0.8.0",
  "downcast-rs",
  "hashbrown",
  "num-traits",
@@ -241,6 +252,7 @@ name = "fsrc-example"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
+ "delegate 0.8.0",
  "fsrc-core",
  "spacepackets",
 ]
@@ -573,7 +585,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "crc",
- "delegate",
+ "delegate 0.7.0",
  "num-traits",
  "postcard",
  "serde",
