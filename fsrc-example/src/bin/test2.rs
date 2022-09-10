@@ -49,7 +49,7 @@
 // }
 //
 fn main() {
-//     let shared_foo = Arc::new(Mutex::new(Box::new(Foo::default())));
-//     uses_shared_foo_concrete(shared_foo.clone());
-//     // uses_shared_foo_boxed_trait_obj(shared_foo);
+    //     let shared_foo = Arc::new(Mutex::new(Box::new(Foo::default())));
+    //     uses_shared_foo_concrete(shared_foo.clone());
+    //     // uses_shared_foo_boxed_trait_obj(shared_foo);
 }
