@@ -18,7 +18,9 @@ fn main() {
         "Packing and sending PUS ping command TC[17,1] with request ID {}",
         tc_req_id
     );
-    let size = pus_tc.write_to(&mut buf).expect("Creating PUS TC failed");
+    let size = pus_tc
+        .write_to_bytes(&mut buf)
+        .expect("Creating PUS TC failed");
     client
         .send_to(&buf[0..size], &addr)
         .expect(&*format!("Sending to {:?} failed", addr));

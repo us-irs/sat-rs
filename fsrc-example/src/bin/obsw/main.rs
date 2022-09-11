@@ -39,7 +39,7 @@ fn main() {
     let (tm_funnel_tx, tm_funnel_rx) = mpsc::channel();
     let (tm_server_tx, tm_server_rx) = mpsc::channel();
     let sender = MpscVerifSender::new(tm_store.clone(), tm_funnel_tx.clone());
-    let verif_cfg = VerificationReporterCfg::new(PUS_APID, 1, 2, 8);
+    let verif_cfg = VerificationReporterCfg::new(PUS_APID, 1, 2, 8).unwrap();
     let reporter_with_sender_0 = Arc::new(Mutex::new(VerificationReporterWithSender::new(
         verif_cfg,
         Box::new(sender),

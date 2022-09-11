@@ -47,7 +47,7 @@
 //! let mut pus_tc = PusTc::new_simple(&mut space_packet_header, 17, 1, None, true);
 //! let mut test_buf: [u8; 32] = [0; 32];
 //! let mut size = pus_tc
-//!     .write_to(test_buf.as_mut_slice())
+//!     .write_to_bytes(test_buf.as_mut_slice())
 //!     .expect("Error writing TC to buffer");
 //! let tc_slice = &test_buf[0..size];
 //!

@@ -24,7 +24,7 @@ impl TmStore {
         let mut pg = self.pool.write().expect("Error locking TM store");
         let (addr, buf) = pg.free_element(pus_tm.len_packed()).expect("Store error");
         pus_tm
-            .write_to(buf)
+            .write_to_bytes(buf)
             .expect("Writing PUS TM to store failed");
         addr
     }
