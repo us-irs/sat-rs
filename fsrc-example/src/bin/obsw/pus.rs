@@ -1,6 +1,8 @@
 use crate::tmtc::TmStore;
 use fsrc_core::pool::StoreAddr;
-use fsrc_core::pus::verification::SharedStdVerifReporterWithSender;
+use fsrc_core::pus::verification::{
+    SharedStdVerifReporterWithSender, StateAccepted, VerificationToken,
+};
 use fsrc_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use fsrc_core::tmtc::PusServiceProvider;
 use spacepackets::tc::{PusTc, PusTcSecondaryHeaderT};
@@ -55,27 +57,37 @@ impl PusServiceProvider for PusReceiver {
         self.stamper
             .write_to_bytes(&mut self.time_stamp)
             .expect("Writing time stamp failed");
-        let _accepted_token = reporter
+        let accepted_token = reporter
             .acceptance_success(init_token, &self.time_stamp)
             .expect("Acceptance success failure");
         drop(reporter);
         if service == 17 {
-            self.handle_test_service(pus_tc);
+            self.handle_test_service(pus_tc, accepted_token);
         }
         Ok(())
     }
 }
 
 impl PusReceiver {
-    fn handle_test_service(&mut self, pus_tc: &PusTc) {
+    fn handle_test_service(&mut self, pus_tc: &PusTc, token: VerificationToken<StateAccepted>) {
         if pus_tc.subservice() == 1 {
             println!("Received PUS ping command TC[17,1]");
             println!("Sending ping reply PUS TM[17,2]");
             let ping_reply = self.tm_helper.create_pus_tm_timestamp_now(17, 2, None);
             let addr = self.tm_store.add_pus_tm(&ping_reply);
+            let mut reporter = self
+                .verif_reporter
+                .lock()
+                .expect("Error locking verification reporter");
+            let start_token = reporter
+                .start_success(token, &self.time_stamp)
+                .expect("Error sending start success");
             self.tm_tx
                 .send(addr)
                 .expect("Sending TM to TM funnel failed");
+            reporter
+                .completion_success(start_token, &self.time_stamp)
+                .expect("Error sending completion success");
         }
     }
 }

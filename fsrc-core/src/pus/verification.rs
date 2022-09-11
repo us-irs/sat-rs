@@ -74,6 +74,7 @@
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::fmt::{Display, Formatter};
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::mem::size_of;
@@ -99,6 +100,12 @@ pub struct RequestId {
     version_number: u8,
     packet_id: PacketId,
     psc: PacketSequenceCtrl,
+}
+
+impl Display for RequestId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Request ID {:#08x}", self.raw())
+    }
 }
 
 impl Hash for RequestId {
