@@ -87,7 +87,7 @@ fn core_tc_handling(udp_tmtc_server: &mut UdpTmtcServer) -> bool {
                 println!("IO error {e}");
                 false
             }
-            ReceiveResult::WouldBlock => false,
+            ReceiveResult::NothingReceived => false,
         },
     }
 }
