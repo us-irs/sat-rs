@@ -23,6 +23,7 @@ pub mod hal;
 pub mod objects;
 #[cfg(feature = "alloc")]
 pub mod pool;
+pub mod pus;
 pub mod tmtc;
 
 extern crate downcast_rs;

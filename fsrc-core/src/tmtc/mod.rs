@@ -6,6 +6,7 @@
 //! Application Process ID (APID) or the ECSS PUS service type. This allows for fast packet
 //! routing without the overhead and complication of using message queues. However, it also requires
 use crate::error::{FsrcErrorRaw, FsrcGroupIds};
+use downcast_rs::{impl_downcast, Downcast};
 use spacepackets::tc::PusTc;
 use spacepackets::SpHeader;
 
@@ -13,6 +14,10 @@ use spacepackets::SpHeader;
 pub mod ccsds_distrib;
 #[cfg(feature = "alloc")]
 pub mod pus_distrib;
+pub mod tm_helper;
+
+pub use ccsds_distrib::{CcsdsDistributor, CcsdsError, CcsdsPacketHandler};
+pub use pus_distrib::{PusDistributor, PusServiceProvider};
 
 const _RAW_PACKET_ERROR: &str = "raw-tmtc";
 const _CCSDS_ERROR: &str = "ccsds-tmtc";
@@ -39,10 +44,12 @@ const _FROM_BYTES_ZEROCOPY_ERROR: FsrcErrorRaw = FsrcErrorRaw::new(
 /// This trait is implemented by both the [crate::tmtc::pus_distrib::PusDistributor] and the
 /// [crate::tmtc::ccsds_distrib::CcsdsDistributor]  which allows to pass the respective packets in
 /// raw byte format into them.
-pub trait ReceivesTc {
+pub trait ReceivesTc: Downcast {
     type Error;
     fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error>;
 }
+
+impl_downcast!(ReceivesTc assoc Error);
 
 /// Generic trait for object which can receive CCSDS space packets, for fsrc-example ECSS PUS packets
 /// for CCSDS File Delivery Protocol (CFDP) packets.

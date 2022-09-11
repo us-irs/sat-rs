@@ -2,23 +2,23 @@
 //!
 //! The routing components consist of two core components:
 //!  1. [CcsdsDistributor] component which dispatches received packets to a user-provided handler
-//!  2. [ApidPacketHandler] trait which should be implemented by the user-provided packet handler.
+//!  2. [CcsdsPacketHandler] trait which should be implemented by the user-provided packet handler.
 //!
 //! The [CcsdsDistributor] implements the [ReceivesCcsdsTc] and [ReceivesTc] trait which allows to
 //! pass raw or CCSDS packets to it. Upon receiving a packet, it performs the following steps:
 //!
 //! 1. It tries to identify the target Application Process Identifier (APID) based on the
-//!    respective CCSDS space packet header field. If that process fails, a [PacketError] is
+//!    respective CCSDS space packet header field. If that process fails, a [ByteConversionError] is
 //!    returned to the user
 //! 2. If a valid APID is found and matches one of the APIDs provided by
-//!    [ApidPacketHandler::valid_apids], it will pass the packet to the user provided
-//!    [ApidPacketHandler::handle_known_apid] function. If no valid APID is found, the packet
-//!    will be passed to the [ApidPacketHandler::handle_unknown_apid] function.
+//!    [CcsdsPacketHandler::valid_apids], it will pass the packet to the user provided
+//!    [CcsdsPacketHandler::handle_known_apid] function. If no valid APID is found, the packet
+//!    will be passed to the [CcsdsPacketHandler::handle_unknown_apid] function.
 //!
 //! # Example
 //!
 //! ```rust
-//! use fsrc_core::tmtc::ccsds_distrib::{ApidPacketHandler, CcsdsDistributor};
+//! use fsrc_core::tmtc::ccsds_distrib::{CcsdsPacketHandler, CcsdsDistributor};
 //! use fsrc_core::tmtc::ReceivesTc;
 //! use spacepackets::{CcsdsPacket, SpHeader};
 //! use spacepackets::tc::PusTc;
@@ -33,7 +33,7 @@
 //!     fn mutable_foo(&mut self) {}
 //! }
 //!
-//! impl ApidPacketHandler for ConcreteApidHandler {
+//! impl CcsdsPacketHandler for ConcreteApidHandler {
 //!     type Error = ();
 //!     fn valid_apids(&self) -> &'static [u16] { &[0x002] }
 //!     fn handle_known_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) -> Result<(), Self::Error> {
@@ -87,7 +87,7 @@
 use crate::tmtc::{ReceivesCcsdsTc, ReceivesTc};
 use alloc::boxed::Box;
 use downcast_rs::Downcast;
-use spacepackets::{CcsdsPacket, PacketError, SpHeader};
+use spacepackets::{ByteConversionError, CcsdsPacket, SizeMissmatch, SpHeader};
 
 /// Generic trait for a handler or dispatcher object handling CCSDS packets.
 ///
@@ -99,7 +99,7 @@ use spacepackets::{CcsdsPacket, PacketError, SpHeader};
 /// This trait automatically implements the [downcast_rs::Downcast] to allow a more convenient API
 /// to cast trait objects back to their concrete type after the handler was passed to the
 /// distributor.
-pub trait ApidPacketHandler: Downcast {
+pub trait CcsdsPacketHandler: Downcast {
     type Error;
 
     fn valid_apids(&self) -> &'static [u16];
@@ -112,20 +112,20 @@ pub trait ApidPacketHandler: Downcast {
     ) -> Result<(), Self::Error>;
 }
 
-downcast_rs::impl_downcast!(ApidPacketHandler assoc Error);
+downcast_rs::impl_downcast!(CcsdsPacketHandler assoc Error);
 
 /// The CCSDS distributor dispatches received CCSDS packets to a user provided packet handler.
 pub struct CcsdsDistributor<E> {
     /// User provided APID handler stored as a generic trait object.
     /// It can be cast back to the original concrete type using the [Self::apid_handler_ref] or
     /// the [Self::apid_handler_mut] method.
-    pub apid_handler: Box<dyn ApidPacketHandler<Error = E>>,
+    pub apid_handler: Box<dyn CcsdsPacketHandler<Error = E>>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CcsdsError<E> {
     CustomError(E),
-    PacketError(PacketError),
+    PacketError(ByteConversionError),
 }
 
 impl<E: 'static> ReceivesCcsdsTc for CcsdsDistributor<E> {
@@ -140,26 +140,34 @@ impl<E: 'static> ReceivesTc for CcsdsDistributor<E> {
     type Error = CcsdsError<E>;
 
     fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
+        if tc_raw.len() < 7 {
+            return Err(CcsdsError::PacketError(
+                ByteConversionError::FromSliceTooSmall(SizeMissmatch {
+                    found: tc_raw.len(),
+                    expected: 7,
+                }),
+            ));
+        }
         let sp_header = SpHeader::from_raw_slice(tc_raw).map_err(|e| CcsdsError::PacketError(e))?;
         self.dispatch_ccsds(&sp_header, tc_raw)
     }
 }
 
 impl<E: 'static> CcsdsDistributor<E> {
-    pub fn new(apid_handler: Box<dyn ApidPacketHandler<Error = E>>) -> Self {
+    pub fn new(apid_handler: Box<dyn CcsdsPacketHandler<Error = E>>) -> Self {
         CcsdsDistributor { apid_handler }
     }
 
     /// This function can be used to retrieve a reference to the concrete instance of the APID
     /// handler after it was passed to the distributor. See the
     /// [module documentation][crate::tmtc::ccsds_distrib] for an fsrc-example.
-    pub fn apid_handler_ref<T: ApidPacketHandler<Error = E>>(&self) -> Option<&T> {
+    pub fn apid_handler_ref<T: CcsdsPacketHandler<Error = E>>(&self) -> Option<&T> {
         self.apid_handler.downcast_ref::<T>()
     }
 
     /// This function can be used to retrieve a mutable reference to the concrete instance of the
     /// APID handler after it was passed to the distributor.
-    pub fn apid_handler_mut<T: ApidPacketHandler<Error = E>>(&mut self) -> Option<&mut T> {
+    pub fn apid_handler_mut<T: CcsdsPacketHandler<Error = E>>(&mut self) -> Option<&mut T> {
         self.apid_handler.downcast_mut::<T>()
     }
 
@@ -183,7 +191,7 @@ impl<E: 'static> CcsdsDistributor<E> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::tmtc::ccsds_distrib::{ApidPacketHandler, CcsdsDistributor};
+    use crate::tmtc::ccsds_distrib::{CcsdsDistributor, CcsdsPacketHandler};
     use spacepackets::tc::PusTc;
     use spacepackets::CcsdsPacket;
     use std::collections::VecDeque;
@@ -209,7 +217,7 @@ pub(crate) mod tests {
         pub unknown_packet_queue: VecDeque<(u16, Vec<u8>)>,
     }
 
-    impl ApidPacketHandler for BasicApidHandlerSharedQueue {
+    impl CcsdsPacketHandler for BasicApidHandlerSharedQueue {
         type Error = ();
         fn valid_apids(&self) -> &'static [u16] {
             &[0x000, 0x002]
@@ -244,7 +252,7 @@ pub(crate) mod tests {
         }
     }
 
-    impl ApidPacketHandler for BasicApidHandlerOwnedQueue {
+    impl CcsdsPacketHandler for BasicApidHandlerOwnedQueue {
         type Error = ();
 
         fn valid_apids(&self) -> &'static [u16] {
