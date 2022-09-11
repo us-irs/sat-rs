@@ -83,7 +83,7 @@ fn core_tc_handling(udp_tmtc_server: &mut UdpTmtcServer) -> bool {
                     true
                 }
             },
-            ReceiveResult::OtherIoError(e) => {
+            ReceiveResult::IoError(e) => {
                 println!("IO error {e}");
                 false
             }
