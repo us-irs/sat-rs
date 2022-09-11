@@ -104,7 +104,7 @@ pub struct RequestId {
 
 impl Display for RequestId {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        write!(f, "Request ID {:#08x}", self.raw())
+        write!(f, "{:#08x}", self.raw())
     }
 }
 
