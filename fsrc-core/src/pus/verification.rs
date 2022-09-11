@@ -68,7 +68,7 @@
 //! }
 //! ```
 //!
-//! The [integration test](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/obsw-client-example/fsrc-core/tests/verification_test.rs)
+//! The [integration test](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-core/tests/verification_test.rs)
 //! for the verification module contains examples how this module could be used in a more complex
 //! context involving multiple threads
 use alloc::boxed::Box;
