@@ -92,6 +92,24 @@ pub use stdmod::{
     StdVerifReporterWithSender, StdVerifSenderError,
 };
 
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+pub enum Subservices {
+    TmAcceptanceSuccess = 1,
+    TmAcceptanceFailure = 2,
+    TmStartSuccess = 3,
+    TmStartFailure = 4,
+    TmStepSuccess = 5,
+    TmStepFailure = 6,
+    TmCompletionSuccess = 7,
+    TmCompletionFailure = 8,
+}
+
+impl From<Subservices> for u8 {
+    fn from(enumeration: Subservices) -> Self {
+        enumeration as u8
+    }
+}
+
 /// This is a request identifier as specified in 5.4.11.2 c. of the PUS standard
 /// This field equivalent to the first two bytes of the CCSDS space packet header.
 #[derive(Debug, Eq, Copy, Clone)]
@@ -294,8 +312,7 @@ impl VerificationReporterBasic {
         let tm = self
             .create_pus_verif_success_tm(
                 buf,
-                1,
-                1,
+                Subservices::TmAcceptanceSuccess.into(),
                 &token.req_id,
                 time_stamp,
                 None::<&dyn EcssEnumeration>,
@@ -322,8 +339,7 @@ impl VerificationReporterBasic {
         let tm = self
             .create_pus_verif_fail_tm(
                 buf,
-                1,
-                2,
+                Subservices::TmAcceptanceFailure.into(),
                 &token.req_id,
                 None::<&dyn EcssEnumeration>,
                 &params,
@@ -349,8 +365,7 @@ impl VerificationReporterBasic {
         let tm = self
             .create_pus_verif_success_tm(
                 buf,
-                1,
-                3,
+                Subservices::TmStartSuccess.into(),
                 &token.req_id,
                 time_stamp,
                 None::<&dyn EcssEnumeration>,
@@ -380,8 +395,7 @@ impl VerificationReporterBasic {
         let tm = self
             .create_pus_verif_fail_tm(
                 buf,
-                1,
-                4,
+                Subservices::TmStartFailure.into(),
                 &token.req_id,
                 None::<&dyn EcssEnumeration>,
                 &params,
@@ -405,8 +419,13 @@ impl VerificationReporterBasic {
         time_stamp: &[u8],
         step: impl EcssEnumeration,
     ) -> Result<(), EcssTmError<E>> {
-        let tm =
-            self.create_pus_verif_success_tm(buf, 1, 5, &token.req_id, time_stamp, Some(&step))?;
+        let tm = self.create_pus_verif_success_tm(
+            buf,
+            Subservices::TmStepSuccess.into(),
+            &token.req_id,
+            time_stamp,
+            Some(&step),
+        )?;
         sender.send_tm(tm)?;
         self.msg_count += 1;
         Ok(())
@@ -424,7 +443,13 @@ impl VerificationReporterBasic {
         params: FailParamsWithStep,
     ) -> Result<(), VerificationErrorWithToken<E, StateStarted>> {
         let tm = self
-            .create_pus_verif_fail_tm(buf, 1, 6, &token.req_id, Some(params.step), &params.bp)
+            .create_pus_verif_fail_tm(
+                buf,
+                Subservices::TmStepFailure.into(),
+                &token.req_id,
+                Some(params.step),
+                &params.bp,
+            )
             .map_err(|e| VerificationErrorWithToken(e, token))?;
         sender
             .send_tm(tm)
@@ -447,8 +472,7 @@ impl VerificationReporterBasic {
         let tm = self
             .create_pus_verif_success_tm(
                 buf,
-                1,
-                7,
+                Subservices::TmCompletionSuccess.into(),
                 &token.req_id,
                 time_stamp,
                 None::<&dyn EcssEnumeration>,
@@ -475,8 +499,7 @@ impl VerificationReporterBasic {
         let tm = self
             .create_pus_verif_fail_tm(
                 buf,
-                1,
-                8,
+                Subservices::TmCompletionFailure.into(),
                 &token.req_id,
                 None::<&dyn EcssEnumeration>,
                 &params,
@@ -492,7 +515,6 @@ impl VerificationReporterBasic {
     fn create_pus_verif_success_tm<'a, E>(
         &'a mut self,
         buf: &'a mut [u8],
-        service: u8,
         subservice: u8,
         req_id: &RequestId,
         time_stamp: &'a [u8],
@@ -514,7 +536,6 @@ impl VerificationReporterBasic {
         let mut sp_header = SpHeader::tm(self.apid(), 0, 0).unwrap();
         Ok(self.create_pus_verif_tm_base(
             buf,
-            service,
             subservice,
             &mut sp_header,
             time_stamp,
@@ -525,7 +546,6 @@ impl VerificationReporterBasic {
     fn create_pus_verif_fail_tm<'a, E>(
         &'a mut self,
         buf: &'a mut [u8],
-        service: u8,
         subservice: u8,
         req_id: &RequestId,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
@@ -559,7 +579,6 @@ impl VerificationReporterBasic {
         let mut sp_header = SpHeader::tm(self.apid(), 0, 0).unwrap();
         Ok(self.create_pus_verif_tm_base(
             buf,
-            service,
             subservice,
             &mut sp_header,
             params.time_stamp,
@@ -570,19 +589,13 @@ impl VerificationReporterBasic {
     fn create_pus_verif_tm_base<'a>(
         &'a mut self,
         buf: &'a mut [u8],
-        service: u8,
         subservice: u8,
         sp_header: &mut SpHeader,
         time_stamp: &'a [u8],
         source_data_len: usize,
     ) -> PusTm {
-        let tm_sec_header = PusTmSecondaryHeader::new(
-            service,
-            subservice,
-            self.msg_count,
-            self.dest_id,
-            time_stamp,
-        );
+        let tm_sec_header =
+            PusTmSecondaryHeader::new(1, subservice, self.msg_count, self.dest_id, time_stamp);
         PusTm::new(
             sp_header,
             tm_sec_header,
