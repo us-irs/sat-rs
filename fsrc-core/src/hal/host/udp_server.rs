@@ -16,7 +16,42 @@ use std::vec::Vec;
 ///
 /// # Examples
 ///
-/// The [fsrc-example crate](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-example) server code includes
+/// ```
+/// use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+/// use fsrc_core::hal::host::udp_server::UdpTcServer;
+/// use fsrc_core::tmtc::ReceivesTc;
+/// use spacepackets::SpHeader;
+/// use spacepackets::tc::PusTc;
+///
+/// #[derive (Default)]
+/// struct PingReceiver {}
+/// impl ReceivesTc for PingReceiver {
+///    type Error = ();
+///    fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
+///         assert_eq!(tc_raw.len(), 13);
+///         Ok(())
+///     }
+/// }
+///
+/// let mut buf = [0; 32];
+/// let dest_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 7777);
+/// let ping_receiver = PingReceiver::default();
+/// let mut udp_tc_server = UdpTcServer::new(dest_addr, 2048, Box::new(ping_receiver))
+///       .expect("Creating UDP TMTC server failed");
+/// let mut sph = SpHeader::tc(0x02, 0, 0).unwrap();
+/// let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
+/// let len = pus_tc
+///     .write_to(&mut buf)
+///     .expect("Error writing PUS TC packet");
+/// assert_eq!(len, 13);
+/// let client = UdpSocket::bind("127.0.0.1:7778").expect("Connecting to UDP server failed");
+/// client
+///     .send_to(&buf[0..len], dest_addr)
+///     .expect("Error sending PUS TC via UDP");
+/// ```
+///
+/// The [fsrc-example crate](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-example)
+/// server code also includes
 /// [example code](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-example/src/bin/obsw/tmtc.rs)
 /// on how to use this TC server. It uses the server to receive PUS telecommands on a specific port
 /// and then forwards them to a generic CCSDS packet receiver.
@@ -40,7 +75,7 @@ impl<E> From<Error> for ReceiveResult<E> {
     }
 }
 
-impl<E: PartialEq + Eq> PartialEq<Self> for ReceiveResult<E> {
+impl<E: PartialEq> PartialEq for ReceiveResult<E> {
     fn eq(&self, other: &Self) -> bool {
         use ReceiveResult::*;
         match (self, other) {
