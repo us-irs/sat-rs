@@ -6,7 +6,7 @@
 //! embedded environments. The pool implementation will also track the size of the data stored
 //! inside it.
 //!
-//! Transaction with the [pool][LocalPool] are done using a special [address][StoreAddr] type.
+//! Transactions with the [pool][LocalPool] are done using a special [address][StoreAddr] type.
 //! Adding any data to the pool will yield a store address. Modification and read operations are
 //! done using a reference to a store address. Deletion will consume the store address.
 //!

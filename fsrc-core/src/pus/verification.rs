@@ -10,7 +10,7 @@
 //! # Examples
 //!
 //! Basic single-threaded example where a full success sequence for a given ping telecommand is
-//! executed. Note that the verification port could also be done in a separate thread.
+//! executed. Note that the verification part could also be done in a separate thread.
 //!
 //! ```
 //! use std::sync::{Arc, RwLock};
