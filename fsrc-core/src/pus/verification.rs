@@ -55,7 +55,7 @@
 //!         tm_len = slice.len();
 //!         tm_buf[0..tm_len].copy_from_slice(slice);
 //!     }
-//!     let (pus_tm, _) = PusTm::new_from_raw_slice(&tm_buf[0..tm_len], 7)
+//!     let (pus_tm, _) = PusTm::from_bytes(&tm_buf[0..tm_len], 7)
 //!        .expect("Error reading verification TM");
 //!     if packet_idx == 0 {
 //!         assert_eq!(pus_tm.subservice(), 1);

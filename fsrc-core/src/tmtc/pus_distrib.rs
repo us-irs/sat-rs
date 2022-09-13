@@ -99,7 +99,7 @@ impl<E: 'static> ReceivesTc for PusDistributor<E> {
     fn pass_tc(&mut self, tm_raw: &[u8]) -> Result<(), Self::Error> {
         // Convert to ccsds and call pass_ccsds
         let sp_header = SpHeader::from_raw_slice(tm_raw)
-            .map_err(|e| PusDistribError::PusError(PusError::PacketError(e)))?;
+            .map_err(|e| PusDistribError::PusError(PusError::ByteConversionError(e)))?;
         self.pass_ccsds(&sp_header, tm_raw)
     }
 }
@@ -107,8 +107,7 @@ impl<E: 'static> ReceivesTc for PusDistributor<E> {
 impl<E: 'static> ReceivesCcsdsTc for PusDistributor<E> {
     type Error = PusDistribError<E>;
     fn pass_ccsds(&mut self, header: &SpHeader, tm_raw: &[u8]) -> Result<(), Self::Error> {
-        let (tc, _) =
-            PusTc::new_from_raw_slice(tm_raw).map_err(|e| PusDistribError::PusError(e))?;
+        let (tc, _) = PusTc::from_bytes(tm_raw).map_err(|e| PusDistribError::PusError(e))?;
         self.pass_pus_tc(header, &tc)
     }
 }
