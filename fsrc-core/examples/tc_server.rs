@@ -4,6 +4,16 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::thread;
 
 fn main() {
+    if cfg!(tcp) {
+        tcp();
+    } else {
+        upd();
+    };
+
+}
+
+fn udp() {
+    
     let server_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 7301);
     let socket = UdpSocket::bind(&server_addr.clone()).expect("Error opening UDP socket");
     let mut recv_buf = [0; 1024];
