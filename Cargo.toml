@@ -3,4 +3,5 @@
 members = [
     "fsrc-core",
     "spacepackets",
+    "fsrc-example"
 ]

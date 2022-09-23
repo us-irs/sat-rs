@@ -1,11 +1,10 @@
 //! Event support module
-use num::pow;
 
 pub type GroupId = u16;
 pub type UniqueId = u16;
 pub type EventRaw = u32;
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Severity {
     INFO = 1,
     LOW = 2,
@@ -27,7 +26,7 @@ impl TryFrom<u8> for Severity {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Event {
     severity: Severity,
     group_id: GroupId,
@@ -47,7 +46,7 @@ impl Event {
     /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
     ///       raw event ID
     pub fn new(severity: Severity, group_id: GroupId, unique_id: UniqueId) -> Option<Event> {
-        if group_id > (pow::pow(2u8 as u16, 13) - 1) {
+        if group_id > (2u16.pow(13) - 1) {
             return None;
         }
         Some(Event {
