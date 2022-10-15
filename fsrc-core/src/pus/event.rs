@@ -179,10 +179,10 @@ mod allocvec {
     }
 
     impl EventReporter {
-        pub fn new(apid: u16, max_event_id_and_aux_data: usize) -> Option<Self> {
+        pub fn new(apid: u16, max_event_id_and_aux_data_size: usize) -> Option<Self> {
             let reporter = EventReporterBase::new(apid)?;
             Some(Self {
-                source_data_buf: vec![0; max_event_id_and_aux_data],
+                source_data_buf: vec![0; max_event_id_and_aux_data_size],
                 reporter,
             })
         }
@@ -249,5 +249,18 @@ mod allocvec {
                 aux_data,
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EXAMPLE_APID: u16 = 0xee;
+
+    #[test]
+    fn basic_event_generation() {
+        let _reporter = EventReporter::new(EXAMPLE_APID, 16);
+        //reporter.
     }
 }

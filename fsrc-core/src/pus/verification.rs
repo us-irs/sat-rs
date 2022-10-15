@@ -191,16 +191,16 @@ pub struct VerificationToken<STATE> {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum StateNone {}
+pub struct StateNone;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum StateAccepted {}
+pub struct StateAccepted;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum StateStarted {}
+pub struct StateStarted;
 
 pub enum StateToken {
     None(StateNone),
     Accepted(StateAccepted),
-    Started(StateStarted)
+    Started(StateStarted),
 }
 
 impl<STATE> VerificationToken<STATE> {
@@ -1066,6 +1066,7 @@ mod stdmod {
 
 #[cfg(test)]
 mod tests {
+    use crate::pus::tests::{TestSender, TmInfo};
     use crate::pus::verification::{
         EcssTmError, EcssTmSender, FailParams, FailParamsWithStep, RequestId, StateNone,
         VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
@@ -1073,59 +1074,13 @@ mod tests {
     };
     use alloc::boxed::Box;
     use alloc::format;
-    use alloc::vec::Vec;
-    use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration, PusPacket};
+    use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
-    use spacepackets::tm::{PusTm, PusTmSecondaryHeaderT};
-    use spacepackets::{ByteConversionError, CcsdsPacket, SpHeader};
-    use std::collections::VecDeque;
+    use spacepackets::tm::PusTm;
+    use spacepackets::{ByteConversionError, SpHeader};
 
     const TEST_APID: u16 = 0x02;
     const EMPTY_STAMP: [u8; 7] = [0; 7];
-
-    #[derive(Debug, Eq, PartialEq)]
-    struct TmInfo {
-        pub subservice: u8,
-        pub apid: u16,
-        pub msg_counter: u16,
-        pub dest_id: u16,
-        pub time_stamp: [u8; 7],
-        pub req_id: RequestId,
-        pub additional_data: Option<Vec<u8>>,
-    }
-
-    #[derive(Default)]
-    struct TestSender {
-        pub service_queue: VecDeque<TmInfo>,
-    }
-
-    impl EcssTmSender<()> for TestSender {
-        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<()>> {
-            assert_eq!(PusPacket::service(&tm), 1);
-            assert!(tm.source_data().is_some());
-            let mut time_stamp = [0; 7];
-            time_stamp.clone_from_slice(&tm.time_stamp()[0..7]);
-            let src_data = tm.source_data().unwrap();
-            assert!(src_data.len() >= 4);
-            let req_id = RequestId::from_bytes(&src_data[0..RequestId::SIZE_AS_BYTES]).unwrap();
-            let mut vec = None;
-            if src_data.len() > 4 {
-                let mut new_vec = Vec::new();
-                new_vec.extend_from_slice(&src_data[RequestId::SIZE_AS_BYTES..]);
-                vec = Some(new_vec);
-            }
-            self.service_queue.push_back(TmInfo {
-                subservice: PusPacket::subservice(&tm),
-                apid: tm.apid(),
-                msg_counter: tm.msg_counter(),
-                dest_id: tm.dest_id(),
-                time_stamp,
-                req_id,
-                additional_data: vec,
-            });
-            Ok(())
-        }
-    }
 
     #[derive(Debug, Copy, Clone, Eq, PartialEq)]
     struct DummyError {}
