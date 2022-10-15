@@ -191,11 +191,17 @@ pub struct VerificationToken<STATE> {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct StateNone;
+pub enum StateNone {}
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct StateAccepted;
+pub enum StateAccepted {}
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct StateStarted;
+pub enum StateStarted {}
+
+pub enum StateToken {
+    None(StateNone),
+    Accepted(StateAccepted),
+    Started(StateStarted)
+}
 
 impl<STATE> VerificationToken<STATE> {
     fn new(req_id: RequestId) -> VerificationToken<StateNone> {
