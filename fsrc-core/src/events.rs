@@ -1,7 +1,7 @@
 //! Event support module
 
-use spacepackets::{ByteConversionError, SizeMissmatch};
 use spacepackets::ecss::EcssEnumeration;
+use spacepackets::{ByteConversionError, SizeMissmatch};
 
 pub type GroupId = u16;
 pub type UniqueId = u16;
@@ -96,17 +96,18 @@ impl TryFrom<EventRaw> for Event {
 
 impl EcssEnumeration for Event {
     fn pfc(&self) -> u8 {
-       32
+        32
     }
 
     fn write_to_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError> {
         if buf.len() < self.byte_width() {
             return Err(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
                 found: buf.len(),
-                expected: self.byte_width()
-            }))
+                expected: self.byte_width(),
+            }));
         }
-        Ok(buf.copy_from_slice(self.raw().to_be_bytes().as_slice()))
+        buf.copy_from_slice(self.raw().to_be_bytes().as_slice());
+        Ok(())
     }
 }
 

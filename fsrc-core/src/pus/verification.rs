@@ -1066,7 +1066,7 @@ mod stdmod {
 
 #[cfg(test)]
 mod tests {
-    use crate::pus::tests::{TestSender, TmInfo};
+    use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
         EcssTmError, EcssTmSender, FailParams, FailParamsWithStep, RequestId, StateNone,
         VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
@@ -1074,13 +1074,51 @@ mod tests {
     };
     use alloc::boxed::Box;
     use alloc::format;
-    use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration};
+    use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration, PusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::tm::PusTm;
     use spacepackets::{ByteConversionError, SpHeader};
+    use std::collections::VecDeque;
+    use std::vec::Vec;
 
     const TEST_APID: u16 = 0x02;
     const EMPTY_STAMP: [u8; 7] = [0; 7];
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct TmInfo {
+        pub common: CommonTmInfo,
+        pub req_id: RequestId,
+        pub additional_data: Option<Vec<u8>>,
+    }
+
+    #[derive(Default)]
+    struct TestSender {
+        pub service_queue: VecDeque<TmInfo>,
+    }
+
+    impl EcssTmSender<()> for TestSender {
+        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<()>> {
+            assert_eq!(PusPacket::service(&tm), 1);
+            assert!(tm.source_data().is_some());
+            let mut time_stamp = [0; 7];
+            time_stamp.clone_from_slice(&tm.time_stamp()[0..7]);
+            let src_data = tm.source_data().unwrap();
+            assert!(src_data.len() >= 4);
+            let req_id = RequestId::from_bytes(&src_data[0..RequestId::SIZE_AS_BYTES]).unwrap();
+            let mut vec = None;
+            if src_data.len() > 4 {
+                let mut new_vec = Vec::new();
+                new_vec.extend_from_slice(&src_data[RequestId::SIZE_AS_BYTES..]);
+                vec = Some(new_vec);
+            }
+            self.service_queue.push_back(TmInfo {
+                common: CommonTmInfo::new_from_tm(&tm),
+                req_id,
+                additional_data: vec,
+            });
+            Ok(())
+        }
+    }
 
     #[derive(Debug, Copy, Clone, Eq, PartialEq)]
     struct DummyError {}
@@ -1155,11 +1193,13 @@ mod tests {
 
     fn acceptance_check(sender: &mut TestSender, req_id: &RequestId) {
         let cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 1,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 0,
+            common: CommonTmInfo {
+                subservice: 1,
+                apid: TEST_APID,
+                msg_counter: 0,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: None,
             req_id: req_id.clone(),
         };
@@ -1214,11 +1254,13 @@ mod tests {
 
     fn acceptance_fail_check(sender: &mut TestSender, req_id: RequestId, stamp_buf: [u8; 7]) {
         let cmp_info = TmInfo {
-            time_stamp: stamp_buf,
-            subservice: 2,
-            dest_id: 5,
-            apid: TEST_APID,
-            msg_counter: 0,
+            common: CommonTmInfo {
+                subservice: 2,
+                apid: TEST_APID,
+                msg_counter: 0,
+                dest_id: 5,
+                time_stamp: stamp_buf,
+            },
             additional_data: Some([0, 2].to_vec()),
             req_id,
         };
@@ -1300,11 +1342,13 @@ mod tests {
         b.vr.acceptance_failure(tok, &mut sender, fail_params)
             .expect("Sending acceptance success failed");
         let cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 2,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 0,
+            common: CommonTmInfo {
+                subservice: 2,
+                apid: TEST_APID,
+                msg_counter: 0,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: Some([10, 0, 0, 0, 12].to_vec()),
             req_id: tok.req_id,
         };
@@ -1316,11 +1360,13 @@ mod tests {
     fn start_fail_check(sender: &mut TestSender, req_id: RequestId, fail_data_raw: [u8; 4]) {
         assert_eq!(sender.service_queue.len(), 2);
         let mut cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 1,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 0,
+            common: CommonTmInfo {
+                subservice: 1,
+                apid: TEST_APID,
+                msg_counter: 0,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: None,
             req_id,
         };
@@ -1328,11 +1374,13 @@ mod tests {
         assert_eq!(info, cmp_info);
 
         cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 4,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 1,
+            common: CommonTmInfo {
+                subservice: 4,
+                apid: TEST_APID,
+                msg_counter: 1,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: Some([&[22], fail_data_raw.as_slice()].concat().to_vec()),
             req_id,
         };
@@ -1384,44 +1432,52 @@ mod tests {
 
     fn step_success_check(sender: &mut TestSender, req_id: RequestId) {
         let mut cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 1,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 0,
+            common: CommonTmInfo {
+                subservice: 1,
+                apid: TEST_APID,
+                msg_counter: 0,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: None,
             req_id,
         };
         let mut info = sender.service_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
         cmp_info = TmInfo {
-            time_stamp: [0, 1, 0, 1, 0, 1, 0],
-            subservice: 3,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 1,
+            common: CommonTmInfo {
+                subservice: 3,
+                apid: TEST_APID,
+                msg_counter: 1,
+                dest_id: 0,
+                time_stamp: [0, 1, 0, 1, 0, 1, 0],
+            },
             additional_data: None,
             req_id,
         };
         info = sender.service_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
         cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 5,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 2,
+            common: CommonTmInfo {
+                subservice: 5,
+                apid: TEST_APID,
+                msg_counter: 2,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: Some([0].to_vec()),
             req_id,
         };
         info = sender.service_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
         cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 5,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 3,
+            common: CommonTmInfo {
+                subservice: 5,
+                apid: TEST_APID,
+                msg_counter: 3,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: Some([1].to_vec()),
             req_id,
         };
@@ -1493,11 +1549,13 @@ mod tests {
     fn check_step_failure(sender: &mut TestSender, req_id: RequestId, fail_data_raw: [u8; 4]) {
         assert_eq!(sender.service_queue.len(), 4);
         let mut cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 1,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 0,
+            common: CommonTmInfo {
+                subservice: 1,
+                apid: TEST_APID,
+                msg_counter: 0,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: None,
             req_id,
         };
@@ -1505,11 +1563,13 @@ mod tests {
         assert_eq!(info, cmp_info);
 
         cmp_info = TmInfo {
-            time_stamp: [0, 1, 0, 1, 0, 1, 0],
-            subservice: 3,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 1,
+            common: CommonTmInfo {
+                subservice: 3,
+                apid: TEST_APID,
+                msg_counter: 1,
+                dest_id: 0,
+                time_stamp: [0, 1, 0, 1, 0, 1, 0],
+            },
             additional_data: None,
             req_id,
         };
@@ -1517,11 +1577,13 @@ mod tests {
         assert_eq!(info, cmp_info);
 
         cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 5,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 2,
+            common: CommonTmInfo {
+                subservice: 5,
+                apid: TEST_APID,
+                msg_counter: 2,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: Some([0].to_vec()),
             req_id,
         };
@@ -1529,11 +1591,13 @@ mod tests {
         assert_eq!(info, cmp_info);
 
         cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 6,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 3,
+            common: CommonTmInfo {
+                subservice: 6,
+                apid: TEST_APID,
+                msg_counter: 3,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: Some(
                 [
                     [1].as_slice(),
@@ -1630,11 +1694,13 @@ mod tests {
         assert_eq!(sender.service_queue.len(), 3);
 
         let mut cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 1,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 0,
+            common: CommonTmInfo {
+                subservice: 1,
+                apid: TEST_APID,
+                msg_counter: 0,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: None,
             req_id,
         };
@@ -1642,11 +1708,13 @@ mod tests {
         assert_eq!(info, cmp_info);
 
         cmp_info = TmInfo {
-            time_stamp: [0, 1, 0, 1, 0, 1, 0],
-            subservice: 3,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 1,
+            common: CommonTmInfo {
+                subservice: 3,
+                apid: TEST_APID,
+                msg_counter: 1,
+                dest_id: 0,
+                time_stamp: [0, 1, 0, 1, 0, 1, 0],
+            },
             additional_data: None,
             req_id,
         };
@@ -1654,11 +1722,13 @@ mod tests {
         assert_eq!(info, cmp_info);
 
         cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 8,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 2,
+            common: CommonTmInfo {
+                subservice: 8,
+                apid: TEST_APID,
+                msg_counter: 2,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: Some([0, 0, 0x10, 0x20].to_vec()),
             req_id,
         };
@@ -1714,11 +1784,13 @@ mod tests {
     fn completion_success_check(sender: &mut TestSender, req_id: RequestId) {
         assert_eq!(sender.service_queue.len(), 3);
         let cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 1,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 0,
+            common: CommonTmInfo {
+                subservice: 1,
+                apid: TEST_APID,
+                msg_counter: 0,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: None,
             req_id,
         };
@@ -1726,22 +1798,26 @@ mod tests {
         assert_eq!(info, cmp_info);
 
         let cmp_info = TmInfo {
-            time_stamp: [0, 1, 0, 1, 0, 1, 0],
-            subservice: 3,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 1,
+            common: CommonTmInfo {
+                subservice: 3,
+                apid: TEST_APID,
+                msg_counter: 1,
+                dest_id: 0,
+                time_stamp: [0, 1, 0, 1, 0, 1, 0],
+            },
             additional_data: None,
             req_id,
         };
         info = sender.service_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
         let cmp_info = TmInfo {
-            time_stamp: EMPTY_STAMP,
-            subservice: 7,
-            dest_id: 0,
-            apid: TEST_APID,
-            msg_counter: 2,
+            common: CommonTmInfo {
+                subservice: 7,
+                apid: TEST_APID,
+                msg_counter: 2,
+                dest_id: 0,
+                time_stamp: EMPTY_STAMP,
+            },
             additional_data: None,
             req_id,
         };

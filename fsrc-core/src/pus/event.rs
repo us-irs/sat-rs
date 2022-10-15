@@ -255,12 +255,44 @@ mod allocvec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::{Event, Severity};
+    use crate::pus::tests::CommonTmInfo;
+    use std::collections::VecDeque;
 
     const EXAMPLE_APID: u16 = 0xee;
+    const EXAMPLE_GROUP_ID: u16 = 2;
+    const EXAMPLE_EVENT_ID: u16 = 1;
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct TmInfo {
+        pub common: CommonTmInfo,
+    }
+
+    #[derive(Default)]
+    struct TestSender {
+        pub service_queue: VecDeque<TmInfo>,
+    }
+
+    impl EcssTmSender<()> for TestSender {
+        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<()>> {
+            self.service_queue.push_back(TmInfo {
+                common: CommonTmInfo::new_from_tm(&tm),
+            });
+            Ok(())
+        }
+    }
 
     #[test]
     fn basic_event_generation() {
-        let _reporter = EventReporter::new(EXAMPLE_APID, 16);
-        //reporter.
+        let mut sender = TestSender::default();
+        let reporter = EventReporter::new(EXAMPLE_APID, 16);
+        assert!(reporter.is_some());
+        let mut reporter = reporter.unwrap();
+        let time_stamp_empty: [u8; 7] = [0; 7];
+        let event = Event::new(Severity::INFO, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID)
+            .expect("Error creating example event");
+        reporter
+            .event_info(&mut sender, &time_stamp_empty, event, None)
+            .expect("Error reporting info event");
     }
 }

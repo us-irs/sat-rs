@@ -55,55 +55,29 @@ pub(crate) fn source_buffer_large_enough<E>(cap: usize, len: usize) -> Result<()
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::pus::verification::RequestId;
-    use crate::pus::{EcssTmError, EcssTmSender};
-    use alloc::vec::Vec;
-    use spacepackets::ecss::PusPacket;
     use spacepackets::tm::{PusTm, PusTmSecondaryHeaderT};
     use spacepackets::CcsdsPacket;
-    use std::collections::VecDeque;
 
     #[derive(Debug, Eq, PartialEq)]
-    pub(crate) struct TmInfo {
+    pub(crate) struct CommonTmInfo {
         pub subservice: u8,
         pub apid: u16,
         pub msg_counter: u16,
         pub dest_id: u16,
         pub time_stamp: [u8; 7],
-        pub req_id: RequestId,
-        pub additional_data: Option<Vec<u8>>,
     }
 
-    #[derive(Default)]
-    pub(crate) struct TestSender {
-        pub service_queue: VecDeque<TmInfo>,
-    }
-
-    impl EcssTmSender<()> for TestSender {
-        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<()>> {
-            assert_eq!(PusPacket::service(&tm), 1);
-            assert!(tm.source_data().is_some());
+    impl CommonTmInfo {
+        pub fn new_from_tm(tm: &PusTm) -> Self {
             let mut time_stamp = [0; 7];
             time_stamp.clone_from_slice(&tm.time_stamp()[0..7]);
-            let src_data = tm.source_data().unwrap();
-            assert!(src_data.len() >= 4);
-            let req_id = RequestId::from_bytes(&src_data[0..RequestId::SIZE_AS_BYTES]).unwrap();
-            let mut vec = None;
-            if src_data.len() > 4 {
-                let mut new_vec = Vec::new();
-                new_vec.extend_from_slice(&src_data[RequestId::SIZE_AS_BYTES..]);
-                vec = Some(new_vec);
-            }
-            self.service_queue.push_back(TmInfo {
-                subservice: PusPacket::subservice(&tm),
+            Self {
+                subservice: tm.subservice(),
                 apid: tm.apid(),
                 msg_counter: tm.msg_counter(),
                 dest_id: tm.dest_id(),
                 time_stamp,
-                req_id,
-                additional_data: vec,
-            });
-            Ok(())
+            }
         }
     }
 }
