@@ -257,6 +257,7 @@ mod tests {
     use super::*;
     use crate::events::{Event, Severity};
     use crate::pus::tests::CommonTmInfo;
+    use std::vec::Vec;
     use std::collections::VecDeque;
 
     const EXAMPLE_APID: u16 = 0xee;
@@ -269,6 +270,7 @@ mod tests {
     struct TmInfo {
         pub common: CommonTmInfo,
         pub event: Event,
+        pub aux_data: Vec<u8>
     }
 
     #[derive(Default)]
@@ -284,9 +286,14 @@ mod tests {
             let event = Event::try_from(u32::from_be_bytes(src_data[0..4].try_into().unwrap()));
             assert!(event.is_ok());
             let event = event.unwrap();
+            let mut aux_data = Vec::new();
+            if src_data.len() > 4 {
+                aux_data.extend_from_slice(&src_data[4..]);
+            }
             self.service_queue.push_back(TmInfo {
                 common: CommonTmInfo::new_from_tm(&tm),
                 event,
+                aux_data
             });
             Ok(())
         }
@@ -307,37 +314,42 @@ mod tests {
         time_stamp: &[u8],
         event: Event,
         severity: Severity,
+        aux_data: Option<&[u8]>
     ) {
         match severity {
             Severity::INFO => {
                 reporter
-                    .event_info(sender, time_stamp, event, None)
+                    .event_info(sender, time_stamp, event, aux_data)
                     .expect("Error reporting info event");
             }
             Severity::LOW => {
                 reporter
-                    .event_low_severity(sender, time_stamp, event, None)
+                    .event_low_severity(sender, time_stamp, event, aux_data)
                     .expect("Error reporting low event");
             }
             Severity::MEDIUM => {
                 reporter
-                    .event_medium_severity(sender, time_stamp, event, None)
+                    .event_medium_severity(sender, time_stamp, event, aux_data)
                     .expect("Error reporting medium event");
             }
             Severity::HIGH => {
                 reporter
-                    .event_high_severity(sender, time_stamp, event, None)
+                    .event_high_severity(sender, time_stamp, event, aux_data)
                     .expect("Error reporting high event");
             }
         }
     }
 
-    fn basic_event_test(severity: Severity) {
+    fn basic_event_test(max_event_aux_data_buf: usize, severity: Severity, error_data: Option<&[u8]>) {
         let mut sender = TestSender::default();
-        let reporter = EventReporter::new(EXAMPLE_APID, 16);
+        let reporter = EventReporter::new(EXAMPLE_APID,  max_event_aux_data_buf);
         assert!(reporter.is_some());
         let mut reporter = reporter.unwrap();
         let time_stamp_empty: [u8; 7] = [0; 7];
+        let mut error_copy = Vec::new();
+        if let Some(err_data) = error_data {
+           error_copy.extend_from_slice(err_data);
+        }
         let event = Event::new(severity, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
             .expect("Error creating example event");
         report_basic_event(
@@ -346,6 +358,7 @@ mod tests {
             &time_stamp_empty,
             event,
             severity,
+            error_data
         );
         assert_eq!(sender.service_queue.len(), 1);
         let tm_info = sender.service_queue.pop_front().unwrap();
@@ -358,25 +371,32 @@ mod tests {
         assert_eq!(tm_info.common.msg_counter, 0);
         assert_eq!(tm_info.common.apid, EXAMPLE_APID);
         assert_eq!(tm_info.event, event);
+        assert_eq!(tm_info.aux_data, error_copy);
     }
 
     #[test]
     fn basic_info_event_generation() {
-        basic_event_test(Severity::INFO);
+        basic_event_test(4, Severity::INFO, None);
     }
 
     #[test]
     fn basic_low_severity_event() {
-        basic_event_test(Severity::LOW);
+        basic_event_test(4, Severity::LOW, None);
     }
 
     #[test]
     fn basic_medium_severity_event() {
-        basic_event_test(Severity::MEDIUM);
+        basic_event_test(4, Severity::MEDIUM, None);
     }
 
     #[test]
     fn basic_high_severity_event() {
-        basic_event_test(Severity::HIGH);
+        basic_event_test(4, Severity::HIGH, None);
+    }
+
+    #[test]
+    fn event_with_info_string() {
+        let info_string = "Test Information";
+        basic_event_test(32, Severity::INFO, Some(info_string.as_bytes()));
     }
 }
