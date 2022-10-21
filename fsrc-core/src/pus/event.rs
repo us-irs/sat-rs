@@ -261,11 +261,14 @@ mod tests {
 
     const EXAMPLE_APID: u16 = 0xee;
     const EXAMPLE_GROUP_ID: u16 = 2;
-    const EXAMPLE_EVENT_ID: u16 = 1;
+    const EXAMPLE_EVENT_ID_0: u16 = 1;
+    #[allow(dead_code)]
+    const EXAMPLE_EVENT_ID_1: u16 = 2;
 
     #[derive(Debug, Eq, PartialEq)]
     struct TmInfo {
         pub common: CommonTmInfo,
+        pub event: Event,
     }
 
     #[derive(Default)]
@@ -275,24 +278,104 @@ mod tests {
 
     impl EcssTmSender<()> for TestSender {
         fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<()>> {
+            assert!(tm.source_data().is_some());
+            let src_data = tm.source_data().unwrap();
+            assert!(src_data.len() >= 4);
+            let event = Event::try_from(u32::from_be_bytes(src_data[0..4].try_into().unwrap()));
+            assert!(event.is_ok());
+            let event = event.unwrap();
             self.service_queue.push_back(TmInfo {
                 common: CommonTmInfo::new_from_tm(&tm),
+                event,
             });
             Ok(())
         }
     }
 
-    #[test]
-    fn basic_event_generation() {
+    fn severity_to_subservice(severity: Severity) -> Subservices {
+        match severity {
+            Severity::INFO => Subservices::TmInfoReport,
+            Severity::LOW => Subservices::TmLowSeverityReport,
+            Severity::MEDIUM => Subservices::TmMediumSeverityReport,
+            Severity::HIGH => Subservices::TmHighSeverityReport,
+        }
+    }
+
+    fn report_basic_event(
+        reporter: &mut EventReporter,
+        sender: &mut TestSender,
+        time_stamp: &[u8],
+        event: Event,
+        severity: Severity,
+    ) {
+        match severity {
+            Severity::INFO => {
+                reporter
+                    .event_info(sender, time_stamp, event, None)
+                    .expect("Error reporting info event");
+            }
+            Severity::LOW => {
+                reporter
+                    .event_low_severity(sender, time_stamp, event, None)
+                    .expect("Error reporting low event");
+            }
+            Severity::MEDIUM => {
+                reporter
+                    .event_medium_severity(sender, time_stamp, event, None)
+                    .expect("Error reporting medium event");
+            }
+            Severity::HIGH => {
+                reporter
+                    .event_high_severity(sender, time_stamp, event, None)
+                    .expect("Error reporting high event");
+            }
+        }
+    }
+
+    fn basic_event_test(severity: Severity) {
         let mut sender = TestSender::default();
         let reporter = EventReporter::new(EXAMPLE_APID, 16);
         assert!(reporter.is_some());
         let mut reporter = reporter.unwrap();
         let time_stamp_empty: [u8; 7] = [0; 7];
-        let event = Event::new(Severity::INFO, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID)
+        let event = Event::new(severity, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
             .expect("Error creating example event");
-        reporter
-            .event_info(&mut sender, &time_stamp_empty, event, None)
-            .expect("Error reporting info event");
+        report_basic_event(
+            &mut reporter,
+            &mut sender,
+            &time_stamp_empty,
+            event,
+            severity,
+        );
+        assert_eq!(sender.service_queue.len(), 1);
+        let tm_info = sender.service_queue.pop_front().unwrap();
+        assert_eq!(
+            tm_info.common.subservice,
+            severity_to_subservice(severity) as u8
+        );
+        assert_eq!(tm_info.common.dest_id, 0);
+        assert_eq!(tm_info.common.time_stamp, time_stamp_empty);
+        assert_eq!(tm_info.common.msg_counter, 0);
+        assert_eq!(tm_info.common.apid, EXAMPLE_APID);
+        assert_eq!(tm_info.event, event);
+    }
+    #[test]
+    fn basic_info_event_generation() {
+        basic_event_test(Severity::INFO);
+    }
+
+    #[test]
+    fn basic_low_severity_event() {
+        basic_event_test(Severity::LOW);
+    }
+
+    #[test]
+    fn basic_medium_severity_event() {
+        basic_event_test(Severity::MEDIUM);
+    }
+
+    #[test]
+    fn basic_high_severity_event() {
+        basic_event_test(Severity::HIGH);
     }
 }
