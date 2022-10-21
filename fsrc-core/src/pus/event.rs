@@ -359,6 +359,7 @@ mod tests {
         assert_eq!(tm_info.common.apid, EXAMPLE_APID);
         assert_eq!(tm_info.event, event);
     }
+
     #[test]
     fn basic_info_event_generation() {
         basic_event_test(Severity::INFO);
