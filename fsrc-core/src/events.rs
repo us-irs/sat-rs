@@ -98,11 +98,10 @@ impl TryFrom<EventRaw> for Event {
 pub struct EventSmall {
     severity: Severity,
     group_id: u8,
-    unique_id: u8
+    unique_id: u8,
 }
 
 impl EventSmall {
-
     /// Generate an event. The raw representation of an event has 32 bits.
     /// If the passed group ID is invalid (too large), None wil be returned
     ///
