@@ -48,11 +48,11 @@ impl Event {
     ///        next 13 bits after the severity. Therefore, the size is limited by dec 8191 hex 0x1FFF.
     /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
     ///       raw event ID
-    pub fn new(severity: Severity, group_id: GroupId, unique_id: UniqueId) -> Option<Event> {
+    pub fn new(severity: Severity, group_id: GroupId, unique_id: UniqueId) -> Option<Self> {
         if group_id > (2u16.pow(13) - 1) {
             return None;
         }
-        Some(Event {
+        Some(Self {
             severity,
             group_id,
             unique_id,
@@ -94,6 +94,57 @@ impl TryFrom<EventRaw> for Event {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct EventSmall {
+    severity: Severity,
+    group_id: u8,
+    unique_id: u8
+}
+
+impl EventSmall {
+
+    /// Generate an event. The raw representation of an event has 32 bits.
+    /// If the passed group ID is invalid (too large), None wil be returned
+    ///
+    /// # Parameter
+    ///
+    /// * `severity`: Each event has a [severity][Severity]. The raw value of the severity will
+    ///        be stored inside the uppermost 3 bits of the raw event ID
+    /// * `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
+    ///        next 13 bits after the severity. Therefore, the size is limited by dec 8191 hex 0x1FFF.
+    /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
+    ///       raw event ID
+    pub fn new(severity: Severity, group_id: u8, unique_id: u8) -> Option<Self> {
+        if group_id > (2u8.pow(5) - 1) {
+            return None;
+        }
+        Some(Self {
+            severity,
+            group_id,
+            unique_id,
+        })
+    }
+
+    /// Retrieve the severity of an event. Returns None if that severity bit field of the raw event
+    /// ID is invalid
+    pub fn severity(&self) -> Severity {
+        self.severity
+    }
+
+    pub fn group_id(&self) -> u8 {
+        self.group_id
+    }
+
+    pub fn unique_id(&self) -> u8 {
+        self.unique_id
+    }
+
+    pub fn raw(&self) -> u16 {
+        (((self.severity as u16) << 12) as u16
+            | ((self.group_id as u16) << 8) as u32
+            | self.unique_id as u16) as u16
+    }
+}
 impl EcssEnumeration for Event {
     fn pfc(&self) -> u8 {
         32
