@@ -254,6 +254,7 @@ dependencies = [
  "delegate 0.8.0",
  "fsrc-core",
  "spacepackets",
+ "zerocopy",
 ]
 
 [[package]]
