@@ -257,8 +257,9 @@ mod tests {
     use super::*;
     use crate::events::{Event, Severity};
     use crate::pus::tests::CommonTmInfo;
-    use std::vec::Vec;
+    use spacepackets::ByteConversionError;
     use std::collections::VecDeque;
+    use std::vec::Vec;
 
     const EXAMPLE_APID: u16 = 0xee;
     const EXAMPLE_GROUP_ID: u16 = 2;
@@ -270,7 +271,7 @@ mod tests {
     struct TmInfo {
         pub common: CommonTmInfo,
         pub event: Event,
-        pub aux_data: Vec<u8>
+        pub aux_data: Vec<u8>,
     }
 
     #[derive(Default)]
@@ -293,7 +294,7 @@ mod tests {
             self.service_queue.push_back(TmInfo {
                 common: CommonTmInfo::new_from_tm(&tm),
                 event,
-                aux_data
+                aux_data,
             });
             Ok(())
         }
@@ -314,7 +315,7 @@ mod tests {
         time_stamp: &[u8],
         event: Event,
         severity: Severity,
-        aux_data: Option<&[u8]>
+        aux_data: Option<&[u8]>,
     ) {
         match severity {
             Severity::INFO => {
@@ -340,15 +341,19 @@ mod tests {
         }
     }
 
-    fn basic_event_test(max_event_aux_data_buf: usize, severity: Severity, error_data: Option<&[u8]>) {
+    fn basic_event_test(
+        max_event_aux_data_buf: usize,
+        severity: Severity,
+        error_data: Option<&[u8]>,
+    ) {
         let mut sender = TestSender::default();
-        let reporter = EventReporter::new(EXAMPLE_APID,  max_event_aux_data_buf);
+        let reporter = EventReporter::new(EXAMPLE_APID, max_event_aux_data_buf);
         assert!(reporter.is_some());
         let mut reporter = reporter.unwrap();
         let time_stamp_empty: [u8; 7] = [0; 7];
         let mut error_copy = Vec::new();
         if let Some(err_data) = error_data {
-           error_copy.extend_from_slice(err_data);
+            error_copy.extend_from_slice(err_data);
         }
         let event = Event::new(severity, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
             .expect("Error creating example event");
@@ -358,7 +363,7 @@ mod tests {
             &time_stamp_empty,
             event,
             severity,
-            error_data
+            error_data,
         );
         assert_eq!(sender.service_queue.len(), 1);
         let tm_info = sender.service_queue.pop_front().unwrap();
@@ -398,5 +403,44 @@ mod tests {
     fn event_with_info_string() {
         let info_string = "Test Information";
         basic_event_test(32, Severity::INFO, Some(info_string.as_bytes()));
+    }
+
+    #[test]
+    fn low_severity_with_raw_err_data() {
+        let raw_err_param: i32 = -1;
+        let raw_err = raw_err_param.to_be_bytes();
+        basic_event_test(8, Severity::LOW, Some(&raw_err))
+    }
+
+    fn check_buf_too_small(
+        reporter: &mut EventReporter,
+        sender: &mut TestSender,
+        expected_found_len: usize,
+    ) {
+        let time_stamp_empty: [u8; 7] = [0; 7];
+        let event = Event::new(Severity::INFO, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
+            .expect("Error creating example event");
+        let err = reporter.event_info(sender, &time_stamp_empty, event, None);
+        assert!(err.is_err());
+        let err = err.unwrap_err();
+        if let EcssTmError::ByteConversionError(ByteConversionError::ToSliceTooSmall(missmatch)) =
+            err
+        {
+            assert_eq!(missmatch.expected, 4);
+            assert_eq!(missmatch.found, expected_found_len);
+        } else {
+            panic!("Unexpected error {:?}", err);
+        }
+    }
+
+    #[test]
+    fn insufficient_buffer() {
+        let mut sender = TestSender::default();
+        for i in 0..3 {
+            let reporter = EventReporter::new(EXAMPLE_APID, i);
+            assert!(reporter.is_some());
+            let mut reporter = reporter.unwrap();
+            check_buf_too_small(&mut reporter, &mut sender, i);
+        }
     }
 }

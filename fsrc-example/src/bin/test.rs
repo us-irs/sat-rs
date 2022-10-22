@@ -1,6 +1,7 @@
+#![allow(dead_code)]
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::thread;
-use zerocopy::{FromBytes, AsBytes, Unaligned, U16, NetworkEndian};
+use zerocopy::{AsBytes, FromBytes, NetworkEndian, Unaligned, U16};
 
 trait FieldDataProvider: Send {
     fn get_data(&self) -> &[u8];
@@ -29,14 +30,14 @@ type FieldDataTraitObj = Box<dyn FieldDataProvider>;
 
 struct ExampleMgmSet {
     mgm_vec: [f32; 3],
-    temperature: u16
+    temperature: u16,
 }
 
 #[derive(FromBytes, AsBytes, Unaligned)]
 #[repr(C)]
 struct ExampleMgmSetZc {
     mgm_vec: [u8; 12],
-    temperatur: U16<NetworkEndian>
+    temperatur: U16<NetworkEndian>,
 }
 
 fn main() {
