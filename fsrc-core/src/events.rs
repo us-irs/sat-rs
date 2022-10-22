@@ -7,7 +7,7 @@ pub type GroupId = u16;
 pub type UniqueId = u16;
 pub type EventRaw = u32;
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub enum Severity {
     INFO = 1,
     LOW = 2,
@@ -29,7 +29,7 @@ impl TryFrom<u8> for Severity {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Event {
     severity: Severity,
     group_id: GroupId,

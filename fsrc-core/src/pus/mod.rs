@@ -10,6 +10,7 @@ use spacepackets::tm::PusTm;
 use spacepackets::{ByteConversionError, SizeMissmatch};
 
 pub mod event;
+pub mod event_man;
 pub mod verification;
 
 /// Generic error type which is also able to wrap a user send error with the user supplied type E.

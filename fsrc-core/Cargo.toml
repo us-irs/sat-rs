@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 delegate = "0.8"
 hashbrown = "0.12"
+heapless = "0.7"
 
 [dependencies.num-traits]
 version = "0.2"
@@ -40,4 +41,4 @@ version = "1.0"
 default = ["std"]
 std = ["downcast-rs/std", "alloc", "bus", "postcard/use-std", "crossbeam-channel/std"]
 alloc = []
-
+heapless = []
