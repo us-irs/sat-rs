@@ -1,5 +1,7 @@
+#![allow(dead_code)]
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::thread;
+use zerocopy::{AsBytes, FromBytes, NetworkEndian, Unaligned, U16};
 
 trait FieldDataProvider: Send {
     fn get_data(&self) -> &[u8];
@@ -25,6 +27,18 @@ impl FieldDataProvider for FixedFieldDataWrapper {
 }
 
 type FieldDataTraitObj = Box<dyn FieldDataProvider>;
+
+struct ExampleMgmSet {
+    mgm_vec: [f32; 3],
+    temperature: u16,
+}
+
+#[derive(FromBytes, AsBytes, Unaligned)]
+#[repr(C)]
+struct ExampleMgmSetZc {
+    mgm_vec: [u8; 12],
+    temperatur: U16<NetworkEndian>,
+}
 
 fn main() {
     let (s0, r0): (Sender<FieldDataTraitObj>, Receiver<FieldDataTraitObj>) = bounded(5);

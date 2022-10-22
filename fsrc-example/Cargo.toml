@@ -7,6 +7,7 @@ authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
 [dependencies]
 crossbeam-channel = "0.5"
 delegate = "0.8"
+zerocopy = "0.6"
 
 [dependencies.spacepackets]
 path = "../spacepackets"

@@ -18,7 +18,9 @@ fn main() {
         "Packing and sending PUS ping command TC[17,1] with request ID {}",
         tc_req_id
     );
-    let size = pus_tc.write_to(&mut buf).expect("Creating PUS TC failed");
+    let size = pus_tc
+        .write_to_bytes(&mut buf)
+        .expect("Creating PUS TC failed");
     client
         .send_to(&buf[0..size], &addr)
         .expect(&*format!("Sending to {:?} failed", addr));
@@ -29,8 +31,7 @@ fn main() {
         let res = client.recv(&mut buf);
         match res {
             Ok(_len) => {
-                let (pus_tm, size) =
-                    PusTm::new_from_raw_slice(&buf, 7).expect("Parsing PUS TM failed");
+                let (pus_tm, size) = PusTm::from_bytes(&buf, 7).expect("Parsing PUS TM failed");
                 if pus_tm.service() == 17 && pus_tm.subservice() == 2 {
                     println!("Received PUS Ping Reply TM[17,2]")
                 } else if pus_tm.service() == 1 {

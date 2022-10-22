@@ -1,10 +1,13 @@
 //! Event support module
 
+use spacepackets::ecss::EcssEnumeration;
+use spacepackets::{ByteConversionError, SizeMissmatch};
+
 pub type GroupId = u16;
 pub type UniqueId = u16;
 pub type EventRaw = u32;
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub enum Severity {
     INFO = 1,
     LOW = 2,
@@ -26,7 +29,7 @@ impl TryFrom<u8> for Severity {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Event {
     severity: Severity,
     group_id: GroupId,
@@ -88,6 +91,23 @@ impl TryFrom<EventRaw> for Event {
         let group_id = ((raw >> 16) & 0x1FFF) as u16;
         let unique_id = (raw & 0xFFFF) as u16;
         Event::new(severity.unwrap(), group_id, unique_id).ok_or(())
+    }
+}
+
+impl EcssEnumeration for Event {
+    fn pfc(&self) -> u8 {
+        32
+    }
+
+    fn write_to_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError> {
+        if buf.len() < self.byte_width() {
+            return Err(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
+                found: buf.len(),
+                expected: self.byte_width(),
+            }));
+        }
+        buf.copy_from_slice(self.raw().to_be_bytes().as_slice());
+        Ok(())
     }
 }
 

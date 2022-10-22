@@ -58,7 +58,7 @@
 //! let mut pus_tc = PusTc::new_simple(&mut space_packet_header, 17, 1, None, true);
 //! let mut test_buf: [u8; 32] = [0; 32];
 //! let mut size = pus_tc
-//!     .write_to(test_buf.as_mut_slice())
+//!     .write_to_bytes(test_buf.as_mut_slice())
 //!     .expect("Error writing TC to buffer");
 //! let tc_slice = &test_buf[0..size];
 //! ccsds_distributor.pass_tc(&tc_slice).expect("Passing TC slice failed");
@@ -66,7 +66,7 @@
 //! // Now pass a packet with an unknown APID to the distributor
 //! pus_tc.set_apid(0x003);
 //! size = pus_tc
-//!     .write_to(test_buf.as_mut_slice())
+//!     .write_to_bytes(test_buf.as_mut_slice())
 //!     .expect("Error writing TC to buffer");
 //! let tc_slice = &test_buf[0..size];
 //! ccsds_distributor.pass_tc(&tc_slice).expect("Passing TC slice failed");
@@ -201,7 +201,9 @@ pub(crate) mod tests {
     pub fn generate_ping_tc(buf: &mut [u8]) -> &[u8] {
         let mut sph = SpHeader::tc(0x002, 0x34, 0).unwrap();
         let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
-        let size = pus_tc.write_to(buf).expect("Error writing TC to buffer");
+        let size = pus_tc
+            .write_to_bytes(buf)
+            .expect("Error writing TC to buffer");
         assert_eq!(size, 13);
         &buf[0..size]
     }
@@ -314,7 +316,7 @@ pub(crate) mod tests {
         let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
         let mut test_buf: [u8; 32] = [0; 32];
         pus_tc
-            .write_to(test_buf.as_mut_slice())
+            .write_to_bytes(test_buf.as_mut_slice())
             .expect("Error writing TC to buffer");
         ccsds_distrib.pass_tc(&test_buf).expect("Passing TC failed");
         let recvd = unknown_packet_queue.lock().unwrap().pop_front();

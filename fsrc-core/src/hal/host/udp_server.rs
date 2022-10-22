@@ -41,7 +41,7 @@ use std::vec::Vec;
 /// let mut sph = SpHeader::tc(0x02, 0, 0).unwrap();
 /// let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
 /// let len = pus_tc
-///     .write_to(&mut buf)
+///     .write_to_bytes(&mut buf)
 ///     .expect("Error writing PUS TC packet");
 /// assert_eq!(len, 13);
 /// let client = UdpSocket::bind("127.0.0.1:7778").expect("Connecting to UDP server failed");
@@ -166,7 +166,7 @@ mod tests {
         let mut sph = SpHeader::tc(0x02, 0, 0).unwrap();
         let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
         let len = pus_tc
-            .write_to(&mut buf)
+            .write_to_bytes(&mut buf)
             .expect("Error writing PUS TC packet");
         let client = UdpSocket::bind("127.0.0.1:7778").expect("Connecting to UDP server failed");
         client

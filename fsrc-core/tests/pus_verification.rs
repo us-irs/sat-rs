@@ -25,7 +25,7 @@ const PACKETS_SENT: u8 = 8;
 ///    threads have sent the correct expected verification reports
 #[test]
 fn test_shared_reporter() {
-    let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8);
+    let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
     // Shared pool object to store the verification PUS telemetry
     let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
     let shared_tm_pool: SharedPool =
@@ -53,14 +53,14 @@ fn test_shared_reporter() {
         let pus_tc_0 = PusTc::new(&mut sph, tc_header, None, true);
         req_id_0 = RequestId::new(&pus_tc_0);
         let (addr, mut buf) = tc_guard.free_element(pus_tc_0.len_packed()).unwrap();
-        pus_tc_0.write_to(&mut buf).unwrap();
+        pus_tc_0.write_to_bytes(&mut buf).unwrap();
         tx_tc_0.send(addr).unwrap();
         let mut sph = SpHeader::tc(TEST_APID, 1, 0).unwrap();
         let tc_header = PusTcSecondaryHeader::new_simple(5, 1);
         let pus_tc_1 = PusTc::new(&mut sph, tc_header, None, true);
         req_id_1 = RequestId::new(&pus_tc_1);
         let (addr, mut buf) = tc_guard.free_element(pus_tc_0.len_packed()).unwrap();
-        pus_tc_1.write_to(&mut buf).unwrap();
+        pus_tc_1.write_to_bytes(&mut buf).unwrap();
         tx_tc_1.send(addr).unwrap();
     }
     let verif_sender_0 = thread::spawn(move || {
@@ -76,7 +76,7 @@ fn test_shared_reporter() {
             tc_len = buf.len();
             tc_buf[0..tc_len].copy_from_slice(buf);
         }
-        let (_tc, _) = PusTc::new_from_raw_slice(&tc_buf[0..tc_len]).unwrap();
+        let (_tc, _) = PusTc::from_bytes(&tc_buf[0..tc_len]).unwrap();
         let accepted_token;
         {
             let mut mg = reporter_with_sender_0.lock().expect("Locking mutex failed");
@@ -117,7 +117,7 @@ fn test_shared_reporter() {
             tc_len = buf.len();
             tc_buf[0..tc_len].copy_from_slice(buf);
         }
-        let (tc, _) = PusTc::new_from_raw_slice(&tc_buf[0..tc_len]).unwrap();
+        let (tc, _) = PusTc::from_bytes(&tc_buf[0..tc_len]).unwrap();
         let mut mg = reporter_with_sender_1
             .lock()
             .expect("Locking reporter failed");
@@ -150,8 +150,8 @@ fn test_shared_reporter() {
                 tm_len = slice.len();
                 tm_buf[0..tm_len].copy_from_slice(slice);
             }
-            let (pus_tm, _) = PusTm::new_from_raw_slice(&tm_buf[0..tm_len], 7)
-                .expect("Error reading verification TM");
+            let (pus_tm, _) =
+                PusTm::from_bytes(&tm_buf[0..tm_len], 7).expect("Error reading verification TM");
             let req_id = RequestId::from_bytes(
                 &pus_tm.source_data().expect("Invalid TM source data")[0..RequestId::SIZE_AS_BYTES],
             )
