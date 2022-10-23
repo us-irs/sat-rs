@@ -200,8 +200,7 @@ impl Event {
         })
     }
 
-    /// Const version of [new], but panics on invalid input which is invalid group ID
-    /// values
+    /// Const version of [new], but panics on invalid group ID input values.
     pub const fn const_new(
         severity: Severity,
         group_id: <Self as EventProvider>::GroupId,
