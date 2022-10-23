@@ -18,7 +18,7 @@ pub enum Severity {
     HIGH = 3,
 }
 
-pub trait EventProvider: PartialEq + Eq + Copy + Clone + Hash {
+pub trait EventProvider: EcssEnumeration + PartialEq + Eq + Copy + Clone + Hash {
     type Raw;
     type GroupId;
     type UniqueId;

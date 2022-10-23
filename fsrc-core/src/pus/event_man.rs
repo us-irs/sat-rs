@@ -1,6 +1,9 @@
 use crate::events::EventProvider;
+use alloc::boxed::Box;
 use hashbrown::HashSet;
 
+use crate::pus::event::EventReporter;
+use crate::pus::{EcssTmError, EcssTmSender};
 #[cfg(feature = "heapless")]
 pub use heapless_mod::*;
 
@@ -84,4 +87,24 @@ pub mod heapless_mod {
     }
 }
 
-pub struct PusEventManager {}
+pub struct PusEventManager<BackendError, Provider: EventProvider> {
+    reporter: EventReporter,
+    backend: Box<dyn PusEventMgmtBackendProvider<Provider, Error = BackendError>>,
+}
+
+impl<BackendError, Provider: EventProvider> PusEventManager<BackendError, Provider> {
+    pub fn handle_event<E>(
+        &mut self,
+        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        time_stamp: &[u8],
+        event: Provider,
+        aux_data: Option<&[u8]>,
+    ) -> Result<bool, EcssTmError<E>> {
+        if !self.backend.event_enabled(&event) {
+            return Ok(false);
+        }
+        self.reporter
+            .event_info(sender, time_stamp, event, aux_data)
+            .map(|_| true)
+    }
+}
