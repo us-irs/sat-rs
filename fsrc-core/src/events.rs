@@ -9,10 +9,10 @@ pub type EventRaw = u32;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub enum Severity {
-    INFO = 1,
-    LOW = 2,
-    MEDIUM = 3,
-    HIGH = 4,
+    INFO = 0,
+    LOW = 1,
+    MEDIUM = 2,
+    HIGH = 3,
 }
 
 impl TryFrom<u8> for Severity {
@@ -49,7 +49,7 @@ impl Event {
     /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
     ///       raw event ID
     pub fn new(severity: Severity, group_id: GroupId, unique_id: UniqueId) -> Option<Self> {
-        if group_id > (2u16.pow(13) - 1) {
+        if group_id > (2u16.pow(14) - 1) {
             return None;
         }
         Some(Self {
@@ -74,7 +74,7 @@ impl Event {
     }
 
     pub fn raw(&self) -> EventRaw {
-        (((self.severity as u32) << 29) as u32
+        (((self.severity as u32) << 30) as u32
             | ((self.group_id as u32) << 16) as u32
             | self.unique_id as u32) as EventRaw
     }
@@ -84,11 +84,11 @@ impl TryFrom<EventRaw> for Event {
     type Error = ();
 
     fn try_from(raw: u32) -> Result<Self, Self::Error> {
-        let severity: Option<Severity> = (((raw >> 29) & 0b111) as u8).try_into().ok();
+        let severity: Option<Severity> = (((raw >> 30) & 0b11) as u8).try_into().ok();
         if severity.is_none() {
             return Err(());
         }
-        let group_id = ((raw >> 16) & 0x1FFF) as u16;
+        let group_id = ((raw >> 16) & 0x3FFF) as u16;
         let unique_id = (raw & 0xFFFF) as u16;
         Event::new(severity.unwrap(), group_id, unique_id).ok_or(())
     }
@@ -140,7 +140,7 @@ impl EventSmall {
 
     pub fn raw(&self) -> u16 {
         (((self.severity as u16) << 12) as u16
-            | ((self.group_id as u16) << 8) as u32
+            | ((self.group_id as u16) << 8) as u16
             | self.unique_id as u16) as u16
     }
 }
@@ -174,7 +174,7 @@ mod tests {
         assert_eq!(event.group_id(), 0);
 
         let raw_event = event.raw();
-        assert_eq!(raw_event, 0x20000000);
+        assert_eq!(raw_event, 0x00000000);
         let conv_from_raw = Event::try_from(raw_event);
         assert!(conv_from_raw.is_ok());
         let opt_event = conv_from_raw.ok();
@@ -184,19 +184,19 @@ mod tests {
         assert_eq!(event.unique_id(), 0);
         assert_eq!(event.group_id(), 0);
 
-        let event = Event::new(Severity::HIGH, 0x1FFF, 0xFFFF).unwrap();
+        let event = Event::new(Severity::HIGH, 0x3FFF, 0xFFFF).unwrap();
         assert_eq!(event.severity(), Severity::HIGH);
-        assert_eq!(event.group_id(), 0x1FFF);
+        assert_eq!(event.group_id(), 0x3FFF);
         assert_eq!(event.unique_id(), 0xFFFF);
         let raw_event = event.raw();
-        assert_eq!(raw_event, 0x9FFFFFFF);
+        assert_eq!(raw_event, 0xFFFFFFFF);
         let conv_from_raw = Event::try_from(raw_event);
         assert!(conv_from_raw.is_ok());
         let opt_event = conv_from_raw.ok();
         assert!(opt_event.is_some());
         let event = opt_event.unwrap();
         assert_eq!(event.severity(), Severity::HIGH);
-        assert_eq!(event.group_id(), 0x1FFF);
+        assert_eq!(event.group_id(), 0x3FFF);
         assert_eq!(event.unique_id(), 0xFFFF);
     }
 }
