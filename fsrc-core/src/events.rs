@@ -1,6 +1,7 @@
 //! Event support module
 
 use core::hash::Hash;
+use delegate::delegate;
 use spacepackets::ecss::{EcssEnumeration, ToBeBytes};
 use spacepackets::{ByteConversionError, SizeMissmatch};
 use std::marker::PhantomData;
@@ -18,7 +19,34 @@ pub enum Severity {
     HIGH = 3,
 }
 
-pub trait EventProvider: EcssEnumeration + PartialEq + Eq + Copy + Clone + Hash {
+pub trait HasSeverity {
+    const SEVERITY: Severity;
+}
+#[derive(Debug, PartialEq, Eq)]
+pub struct SeverityInfo {}
+impl HasSeverity for SeverityInfo {
+    const SEVERITY: Severity = Severity::INFO;
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct SeverityLow {}
+impl HasSeverity for SeverityLow {
+    const SEVERITY: Severity = Severity::LOW;
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct SeverityMedium {}
+impl HasSeverity for SeverityMedium {
+    const SEVERITY: Severity = Severity::MEDIUM;
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct SeverityHigh {}
+impl HasSeverity for SeverityHigh {
+    const SEVERITY: Severity = Severity::HIGH;
+}
+
+pub trait GenericEvent: EcssEnumeration {
     type Raw;
     type GroupId;
     type UniqueId;
@@ -149,43 +177,78 @@ macro_rules! event_provider_impl {
         }
     };
 }
+
+macro_rules! impl_event_provider {
+    ($BaseIdent: ident, $TypedIdent: ident, $raw: ty, $gid: ty, $uid: ty) => {
+        impl GenericEvent for $BaseIdent {
+            type Raw = $raw;
+            type GroupId = $gid;
+            type UniqueId = $uid;
+
+            event_provider_impl!();
+
+            fn raw_as_largest_type(&self) -> LargestEventRaw {
+                self.raw().into()
+            }
+
+            fn group_id_as_largest_type(&self) -> LargestGroupIdRaw {
+                self.group_id().into()
+            }
+        }
+
+        impl<SEVERITY: HasSeverity> GenericEvent for $TypedIdent<SEVERITY> {
+            type Raw = $raw;
+            type GroupId = $gid;
+            type UniqueId = $uid;
+
+            delegate!(to self.event {
+                fn raw(&self) -> Self::Raw;
+                fn severity(&self) -> Severity;
+                fn group_id(&self) -> Self::GroupId;
+                fn unique_id(&self) -> Self::UniqueId;
+                fn raw_as_largest_type(&self) -> LargestEventRaw;
+                fn group_id_as_largest_type(&self) -> LargestGroupIdRaw;
+            });
+        }
+    }
+}
+
+macro_rules! try_from_impls {
+    ($SevIdent: ident, $severity: path, $raw: ty, $TypedSevIdent: ident) => {
+        impl TryFrom<$raw> for $TypedSevIdent<$SevIdent> {
+            type Error = Severity;
+
+            fn try_from(raw: $raw) -> Result<Self, Self::Error> {
+                Self::try_from_generic($severity, raw)
+            }
+        }
+    };
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Event {
+pub struct EventU32 {
     base: EventBase<u32, u16, u16>,
 }
 
-impl EventProvider for Event {
-    type Raw = u32;
-    type GroupId = u16;
-    type UniqueId = u16;
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct EventU32TypedSev<SEVERITY> {
+    event: EventU32,
+    phantom: PhantomData<SEVERITY>,
+}
 
-    event_provider_impl!();
-
-    fn raw_as_largest_type(&self) -> LargestEventRaw {
-        self.raw()
-    }
-
-    fn group_id_as_largest_type(&self) -> LargestGroupIdRaw {
-        self.group_id()
+impl<SEVERITY: HasSeverity> From<EventU32TypedSev<SEVERITY>> for EventU32 {
+    fn from(e: EventU32TypedSev<SEVERITY>) -> Self {
+        Self { base: e.event.base }
     }
 }
 
-impl Event {
-    /// Generate an event. The raw representation of an event has 32 bits.
-    /// If the passed group ID is invalid (too large), None wil be returned
-    ///
-    /// # Parameter
-    ///
-    /// * `severity`: Each event has a [severity][Severity]. The raw value of the severity will
-    ///        be stored inside the uppermost 2 bits of the raw event ID
-    /// * `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
-    ///        next 14 bits after the severity. Therefore, the size is limited by dec 16383 hex 0x3FFF.
-    /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
-    ///       raw event ID
+impl_event_provider!(EventU32, EventU32TypedSev, u32, u16, u16);
+
+impl EventU32 {
     pub fn new(
         severity: Severity,
-        group_id: <Self as EventProvider>::GroupId,
-        unique_id: <Self as EventProvider>::UniqueId,
+        group_id: <Self as GenericEvent>::GroupId,
+        unique_id: <Self as GenericEvent>::UniqueId,
     ) -> Option<Self> {
         if group_id > (2u16.pow(14) - 1) {
             return None;
@@ -199,12 +262,10 @@ impl Event {
             },
         })
     }
-
-    /// Const version of [new], but panics on invalid group ID input values.
     pub const fn const_new(
         severity: Severity,
-        group_id: <Self as EventProvider>::GroupId,
-        unique_id: <Self as EventProvider>::UniqueId,
+        group_id: <Self as GenericEvent>::GroupId,
+        unique_id: <Self as GenericEvent>::UniqueId,
     ) -> Self {
         if group_id > (2u16.pow(14) - 1) {
             panic!("Group ID too large");
@@ -220,7 +281,54 @@ impl Event {
     }
 }
 
-impl From<u32> for Event {
+impl<SEVERITY: HasSeverity> EventU32TypedSev<SEVERITY> {
+    /// Generate an event. The raw representation of an event has 32 bits.
+    /// If the passed group ID is invalid (too large), None wil be returned
+    ///
+    /// # Parameter
+    ///
+    /// * `severity`: Each event has a [severity][Severity]. The raw value of the severity will
+    ///        be stored inside the uppermost 2 bits of the raw event ID
+    /// * `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
+    ///        next 14 bits after the severity. Therefore, the size is limited by dec 16383 hex 0x3FFF.
+    /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
+    ///       raw event ID
+    pub fn new(
+        group_id: <Self as GenericEvent>::GroupId,
+        unique_id: <Self as GenericEvent>::UniqueId,
+    ) -> Option<Self> {
+        let event = EventU32::new(SEVERITY::SEVERITY, group_id, unique_id)?;
+        Some(Self {
+            event,
+            phantom: PhantomData,
+        })
+    }
+
+    /// Const version of [new], but panics on invalid group ID input values.
+    pub const fn const_new(
+        group_id: <Self as GenericEvent>::GroupId,
+        unique_id: <Self as GenericEvent>::UniqueId,
+    ) -> Self {
+        let event = EventU32::const_new(SEVERITY::SEVERITY, group_id, unique_id);
+        Self {
+            event,
+            phantom: PhantomData,
+        }
+    }
+
+    fn try_from_generic(expected: Severity, raw: u32) -> Result<Self, Severity> {
+        let severity = Severity::try_from(((raw >> 30) & 0b11) as u8).unwrap();
+        if severity != expected {
+            return Err(severity);
+        }
+        Ok(Self::const_new(
+            ((raw >> 16) & 0x3FFF) as u16,
+            (raw & 0xFFFF) as u16,
+        ))
+    }
+}
+
+impl From<u32> for EventU32 {
     fn from(raw: u32) -> Self {
         // Severity conversion from u8 should never fail
         let severity = Severity::try_from(((raw >> 30) & 0b11) as u8).unwrap();
@@ -231,7 +339,12 @@ impl From<u32> for Event {
     }
 }
 
-impl EcssEnumeration for Event {
+try_from_impls!(SeverityInfo, Severity::INFO, u32, EventU32TypedSev);
+try_from_impls!(SeverityLow, Severity::LOW, u32, EventU32TypedSev);
+try_from_impls!(SeverityMedium, Severity::MEDIUM, u32, EventU32TypedSev);
+try_from_impls!(SeverityHigh, Severity::HIGH, u32, EventU32TypedSev);
+
+impl EcssEnumeration for EventU32 {
     fn pfc(&self) -> u8 {
         32
     }
@@ -241,12 +354,26 @@ impl EcssEnumeration for Event {
     }
 }
 
+//noinspection RsTraitImplementation
+impl<SEVERITY: HasSeverity> EcssEnumeration for EventU32TypedSev<SEVERITY> {
+    delegate!(to self.event {
+        fn pfc(&self) -> u8;
+        fn write_to_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError>;
+    });
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct EventSmall {
+pub struct EventU16 {
     base: EventBase<u16, u8, u8>,
 }
 
-impl EventSmall {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct EventU16TypedSev<SEVERITY> {
+    event: EventU16,
+    phantom: PhantomData<SEVERITY>,
+}
+
+impl EventU16 {
     /// Generate a small event. The raw representation of a small event has 16 bits.
     /// If the passed group ID is invalid (too large), [None] wil be returned
     ///
@@ -260,8 +387,8 @@ impl EventSmall {
     ///       raw event ID
     pub fn new(
         severity: Severity,
-        group_id: <Self as EventProvider>::GroupId,
-        unique_id: <Self as EventProvider>::UniqueId,
+        group_id: <Self as GenericEvent>::GroupId,
+        unique_id: <Self as GenericEvent>::UniqueId,
     ) -> Option<Self> {
         if group_id > (2u8.pow(6) - 1) {
             return None;
@@ -278,8 +405,8 @@ impl EventSmall {
 
     pub const fn const_new(
         severity: Severity,
-        group_id: <Self as EventProvider>::GroupId,
-        unique_id: <Self as EventProvider>::UniqueId,
+        group_id: <Self as GenericEvent>::GroupId,
+        unique_id: <Self as GenericEvent>::UniqueId,
     ) -> Self {
         if group_id > (2u8.pow(6) - 1) {
             panic!("Group ID too large");
@@ -294,24 +421,55 @@ impl EventSmall {
         }
     }
 }
-
-impl EventProvider for EventSmall {
-    type Raw = u16;
-    type GroupId = u8;
-    type UniqueId = u8;
-
-    event_provider_impl!();
-
-    fn raw_as_largest_type(&self) -> LargestEventRaw {
-        self.raw().into()
+impl<SEVERITY: HasSeverity> EventU16TypedSev<SEVERITY> {
+    /// Generate a small event. The raw representation of a small event has 16 bits.
+    /// If the passed group ID is invalid (too large), [None] wil be returned
+    ///
+    /// # Parameter
+    ///
+    /// * `severity`: Each event has a [severity][Severity]. The raw value of the severity will
+    ///        be stored inside the uppermost 2 bits of the raw event ID
+    /// * `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
+    ///        next 6 bits after the severity. Therefore, the size is limited by dec 63 hex 0x3F.
+    /// * `unique_id`: Each event has a unique 8 bit ID occupying the last 8 bits of the
+    ///       raw event ID
+    pub fn new(
+        group_id: <Self as GenericEvent>::GroupId,
+        unique_id: <Self as GenericEvent>::UniqueId,
+    ) -> Option<Self> {
+        let event = EventU16::new(SEVERITY::SEVERITY, group_id, unique_id)?;
+        Some(Self {
+            event,
+            phantom: PhantomData,
+        })
     }
 
-    fn group_id_as_largest_type(&self) -> LargestGroupIdRaw {
-        self.group_id().into()
+    pub const fn const_new(
+        group_id: <Self as GenericEvent>::GroupId,
+        unique_id: <Self as GenericEvent>::UniqueId,
+    ) -> Self {
+        let event = EventU16::const_new(SEVERITY::SEVERITY, group_id, unique_id);
+        Self {
+            event,
+            phantom: PhantomData,
+        }
+    }
+
+    fn try_from_generic(expected: Severity, raw: u16) -> Result<Self, Severity> {
+        let severity = Severity::try_from(((raw >> 14) & 0b11) as u8).unwrap();
+        if severity != expected {
+            return Err(severity);
+        }
+        Ok(Self::const_new(
+            ((raw >> 8) & 0x3F) as u8,
+            (raw & 0xFF) as u8,
+        ))
     }
 }
 
-impl EcssEnumeration for EventSmall {
+impl_event_provider!(EventU16, EventU16TypedSev, u16, u8, u8);
+
+impl EcssEnumeration for EventU16 {
     fn pfc(&self) -> u8 {
         16
     }
@@ -321,8 +479,16 @@ impl EcssEnumeration for EventSmall {
     }
 }
 
-impl From<u16> for EventSmall {
-    fn from(raw: <Self as EventProvider>::Raw) -> Self {
+//noinspection RsTraitImplementation
+impl<SEVERITY: HasSeverity> EcssEnumeration for EventU16TypedSev<SEVERITY> {
+    delegate!(to self.event {
+        fn pfc(&self) -> u8;
+        fn write_to_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError>;
+    });
+}
+
+impl From<u16> for EventU16 {
+    fn from(raw: <Self as GenericEvent>::Raw) -> Self {
         let severity = Severity::try_from(((raw >> 14) & 0b11) as u8).unwrap();
         let group_id = ((raw >> 8) & 0x3F) as u8;
         let unique_id = (raw & 0xFF) as u8;
@@ -331,10 +497,15 @@ impl From<u16> for EventSmall {
     }
 }
 
+try_from_impls!(SeverityInfo, Severity::INFO, u16, EventU16TypedSev);
+try_from_impls!(SeverityLow, Severity::LOW, u16, EventU16TypedSev);
+try_from_impls!(SeverityMedium, Severity::MEDIUM, u16, EventU16TypedSev);
+try_from_impls!(SeverityHigh, Severity::HIGH, u16, EventU16TypedSev);
+
 #[cfg(test)]
 mod tests {
-    use super::Event;
-    use crate::events::{EventProvider, EventSmall, Severity};
+    use super::EventU32TypedSev;
+    use super::*;
     use spacepackets::ecss::EcssEnumeration;
     use spacepackets::ByteConversionError;
     use std::mem::size_of;
@@ -343,20 +514,24 @@ mod tests {
         assert_eq!(size_of::<T>(), val);
     }
 
-    const INFO_EVENT: Event = Event::const_new(Severity::INFO, 0, 0);
-    const INFO_EVENT_SMALL: EventSmall = EventSmall::const_new(Severity::INFO, 0, 0);
-    const HIGH_SEV_EVENT: Event = Event::const_new(Severity::HIGH, 0x3FFF, 0xFFFF);
-    const HIGH_SEV_EVENT_SMALL: EventSmall = EventSmall::const_new(Severity::HIGH, 0x3F, 0xff);
+    const INFO_EVENT: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::const_new(0, 0);
+    const INFO_EVENT_SMALL: EventU16TypedSev<SeverityInfo> = EventU16TypedSev::const_new(0, 0);
+    const HIGH_SEV_EVENT: EventU32TypedSev<SeverityHigh> =
+        EventU32TypedSev::const_new(0x3FFF, 0xFFFF);
+    const HIGH_SEV_EVENT_SMALL: EventU16TypedSev<SeverityHigh> =
+        EventU16TypedSev::const_new(0x3F, 0xff);
 
     #[test]
     fn test_normal_from_raw_conversion() {
-        let conv_from_raw = Event::from(INFO_EVENT.raw());
+        let conv_from_raw = EventU32TypedSev::<SeverityInfo>::try_from(INFO_EVENT.raw())
+            .expect("Creating typed EventU32 failed");
         assert_eq!(conv_from_raw, INFO_EVENT);
     }
 
     #[test]
     fn test_small_from_raw_conversion() {
-        let conv_from_raw = EventSmall::from(INFO_EVENT_SMALL.raw());
+        let conv_from_raw = EventU16TypedSev::<SeverityInfo>::try_from(INFO_EVENT_SMALL.raw())
+            .expect("Creating typed EventU16 failed");
         assert_eq!(conv_from_raw, INFO_EVENT_SMALL);
     }
 
@@ -408,18 +583,18 @@ mod tests {
 
     #[test]
     fn invalid_group_id_normal() {
-        assert!(Event::new(Severity::MEDIUM, 2_u16.pow(14), 0).is_none());
+        assert!(EventU32TypedSev::<SeverityMedium>::new(2_u16.pow(14), 0).is_none());
     }
 
     #[test]
     fn invalid_group_id_small() {
-        assert!(EventSmall::new(Severity::MEDIUM, 2_u8.pow(6), 0).is_none());
+        assert!(EventU16TypedSev::<SeverityMedium>::new(2_u8.pow(6), 0).is_none());
     }
 
     #[test]
     fn regular_new() {
         assert_eq!(
-            Event::new(Severity::INFO, 0, 0).expect("Creating regular event failed"),
+            EventU32TypedSev::<SeverityInfo>::new(0, 0).expect("Creating regular event failed"),
             INFO_EVENT
         );
     }
@@ -427,7 +602,7 @@ mod tests {
     #[test]
     fn small_new() {
         assert_eq!(
-            EventSmall::new(Severity::INFO, 0, 0).expect("Creating regular event failed"),
+            EventU16TypedSev::<SeverityInfo>::new(0, 0).expect("Creating regular event failed"),
             INFO_EVENT_SMALL
         );
     }

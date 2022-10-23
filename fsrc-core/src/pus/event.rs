@@ -255,7 +255,7 @@ mod allocvec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{Event, Severity};
+    use crate::events::{EventU32, Severity};
     use crate::pus::tests::CommonTmInfo;
     use spacepackets::ByteConversionError;
     use std::collections::VecDeque;
@@ -270,7 +270,7 @@ mod tests {
     #[derive(Debug, Eq, PartialEq)]
     struct TmInfo {
         pub common: CommonTmInfo,
-        pub event: Event,
+        pub event: EventU32,
         pub aux_data: Vec<u8>,
     }
 
@@ -284,9 +284,7 @@ mod tests {
             assert!(tm.source_data().is_some());
             let src_data = tm.source_data().unwrap();
             assert!(src_data.len() >= 4);
-            let event = Event::try_from(u32::from_be_bytes(src_data[0..4].try_into().unwrap()));
-            assert!(event.is_ok());
-            let event = event.unwrap();
+            let event = EventU32::from(u32::from_be_bytes(src_data[0..4].try_into().unwrap()));
             let mut aux_data = Vec::new();
             if src_data.len() > 4 {
                 aux_data.extend_from_slice(&src_data[4..]);
@@ -313,7 +311,7 @@ mod tests {
         reporter: &mut EventReporter,
         sender: &mut TestSender,
         time_stamp: &[u8],
-        event: Event,
+        event: EventU32,
         severity: Severity,
         aux_data: Option<&[u8]>,
     ) {
@@ -355,7 +353,7 @@ mod tests {
         if let Some(err_data) = error_data {
             error_copy.extend_from_slice(err_data);
         }
-        let event = Event::new(severity, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
+        let event = EventU32::new(severity, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
             .expect("Error creating example event");
         report_basic_event(
             &mut reporter,
@@ -418,7 +416,7 @@ mod tests {
         expected_found_len: usize,
     ) {
         let time_stamp_empty: [u8; 7] = [0; 7];
-        let event = Event::new(Severity::INFO, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
+        let event = EventU32::new(Severity::INFO, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
             .expect("Error creating example event");
         let err = reporter.event_info(sender, &time_stamp_empty, event, None);
         assert!(err.is_err());
