@@ -1,5 +1,5 @@
 //! [Event][crate::events::Event] management and forwarding
-use crate::events::{Event, EventRaw, GroupId};
+use crate::events::{Event, EventProvider, EventSmall};
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -7,63 +7,86 @@ use hashbrown::HashMap;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]
 enum ListenerType {
-    Single(EventRaw),
-    Group(GroupId),
+    Single(u32),
+    Group(u16),
 }
 
-pub trait EventListener {
+pub trait EventListener<Provider: EventProvider = Event> {
     type Error;
 
     fn id(&self) -> u32;
-    fn send_to(&mut self, event: Event) -> Result<(), Self::Error>;
+    fn send_to(&mut self, event: Provider) -> Result<(), Self::Error>;
 }
 
-struct Listener<E> {
+struct Listener<E, Provider: EventProvider = Event> {
     ltype: ListenerType,
-    dest: Box<dyn EventListener<Error = E>>,
+    dest: Box<dyn EventListener<Provider, Error = E>>,
 }
 
-pub trait ReceivesAllEvent {
-    fn receive(&mut self) -> Option<Event>;
+pub trait ReceivesAllEvent<Provider: EventProvider = Event> {
+    fn receive(&mut self) -> Option<Provider>;
 }
 
-pub struct EventManager<E> {
-    listeners: HashMap<ListenerType, Vec<Listener<E>>>,
-    event_receiver: Box<dyn ReceivesAllEvent>,
+pub struct EventManager<E, Provider: EventProvider = Event> {
+    listeners: HashMap<ListenerType, Vec<Listener<E, Provider>>>,
+    event_receiver: Box<dyn ReceivesAllEvent<Provider>>,
 }
 
-pub enum HandlerResult {
+pub enum HandlerResult<Provider: EventProvider = Event> {
     Empty,
-    Handled(u32, Event),
+    Handled(u32, Provider),
 }
 
-impl<E> EventManager<E> {
-    pub fn new(event_receiver: Box<dyn ReceivesAllEvent>) -> Self {
+impl<E> EventManager<E, Event> {
+    pub fn new(event_receiver: Box<dyn ReceivesAllEvent<Event>>) -> Self {
         EventManager {
             listeners: HashMap::new(),
             event_receiver,
         }
     }
+}
+
+impl<E> EventManager<E, Event> {
     pub fn subscribe_single(
         &mut self,
         event: Event,
-        dest: impl EventListener<Error = E> + 'static,
+        dest: impl EventListener<Event, Error = E> + 'static,
     ) {
-        self.update_listeners(ListenerType::Single(event.raw()), dest);
+        self.update_listeners(ListenerType::Single(event.raw_as_largest_type()), dest);
     }
 
     pub fn subscribe_group(
         &mut self,
-        group_id: GroupId,
-        dest: impl EventListener<Error = E> + 'static,
+        group_id: <Event as EventProvider>::GroupId,
+        dest: impl EventListener<Event, Error = E> + 'static,
     ) {
         self.update_listeners(ListenerType::Group(group_id), dest);
     }
+}
 
+impl<E> EventManager<E, EventSmall> {
+    pub fn subscribe_single(
+        &mut self,
+        event: EventSmall,
+        dest: impl EventListener<EventSmall, Error = E> + 'static,
+    ) {
+        self.update_listeners(ListenerType::Single(event.raw_as_largest_type()), dest);
+    }
+
+    pub fn subscribe_group(
+        &mut self,
+        group_id: <EventSmall as EventProvider>::GroupId,
+        dest: impl EventListener<EventSmall, Error = E> + 'static,
+    ) {
+        self.update_listeners(ListenerType::Group(group_id.into()), dest);
+    }
+}
+
+impl<E, Provider: EventProvider> EventManager<E, Provider> {
     fn update_listeners(
         &mut self,
         key: ListenerType,
-        dest: impl EventListener<Error = E> + 'static,
+        dest: impl EventListener<Provider, Error = E> + 'static,
     ) {
         if !self.listeners.contains_key(&key) {
             self.listeners.insert(
@@ -88,10 +111,10 @@ impl<E> EventManager<E> {
         }
     }
 
-    pub fn try_event_handling(&mut self) -> Result<HandlerResult, E> {
+    pub fn try_event_handling(&mut self) -> Result<HandlerResult<Provider>, E> {
         let mut err_status = None;
         let mut num_recipients = 0;
-        let mut send_handler = |event, llist: &mut Vec<Listener<E>>| {
+        let mut send_handler = |event: Provider, llist: &mut Vec<Listener<E, Provider>>| {
             for listener in llist.iter_mut() {
                 if let Err(e) = listener.dest.send_to(event) {
                     err_status = Some(Err(e));
@@ -101,11 +124,11 @@ impl<E> EventManager<E> {
             }
         };
         if let Some(event) = self.event_receiver.receive() {
-            let single_key = ListenerType::Single(event.raw());
+            let single_key = ListenerType::Single(event.raw_as_largest_type());
             if self.listeners.contains_key(&single_key) {
                 send_handler(event, self.listeners.get_mut(&single_key).unwrap());
             }
-            let group_key = ListenerType::Group(event.group_id());
+            let group_key = ListenerType::Group(event.group_id_as_largest_type());
             if self.listeners.contains_key(&group_key) {
                 send_handler(event, self.listeners.get_mut(&group_key).unwrap());
             }
@@ -122,7 +145,7 @@ impl<E> EventManager<E> {
 mod tests {
     use super::{EventListener, HandlerResult, ReceivesAllEvent};
     use crate::event_man::EventManager;
-    use crate::events::{Event, Severity};
+    use crate::events::{Event, EventProvider, Severity};
     use alloc::boxed::Box;
     use std::sync::mpsc::{channel, Receiver, SendError, Sender};
     use std::thread;
@@ -131,7 +154,7 @@ mod tests {
     struct EventReceiver {
         mpsc_receiver: Receiver<Event>,
     }
-    impl ReceivesAllEvent for EventReceiver {
+    impl ReceivesAllEvent<Event> for EventReceiver {
         fn receive(&mut self) -> Option<Event> {
             self.mpsc_receiver.try_recv().ok()
         }
@@ -143,7 +166,7 @@ mod tests {
         mpsc_sender: Sender<Event>,
     }
 
-    impl EventListener for MpscEventSenderQueue {
+    impl EventListener<Event> for MpscEventSenderQueue {
         type Error = SendError<Event>;
 
         fn id(&self) -> u32 {
@@ -178,7 +201,7 @@ mod tests {
         let event_man_receiver = EventReceiver {
             mpsc_receiver: manager_queue,
         };
-        let mut event_man: EventManager<SendError<Event>> =
+        let mut event_man: EventManager<SendError<Event>, Event> =
             EventManager::new(Box::new(event_man_receiver));
         let event_grp_0 = Event::new(Severity::INFO, 0, 0).unwrap();
         let event_grp_1_0 = Event::new(Severity::HIGH, 1, 0).unwrap();
@@ -221,7 +244,7 @@ mod tests {
         let event_man_receiver = EventReceiver {
             mpsc_receiver: manager_queue,
         };
-        let mut event_man: EventManager<SendError<Event>> =
+        let mut event_man: EventManager<SendError<Event>, Event> =
             EventManager::new(Box::new(event_man_receiver));
         let res = event_man.try_event_handling();
         assert!(res.is_ok());
@@ -263,7 +286,7 @@ mod tests {
         let event_man_receiver = EventReceiver {
             mpsc_receiver: manager_queue,
         };
-        let mut event_man: EventManager<SendError<Event>> =
+        let mut event_man: EventManager<SendError<Event>, Event> =
             EventManager::new(Box::new(event_man_receiver));
         let event_0 = Event::new(Severity::INFO, 0, 5).unwrap();
         let event_1 = Event::new(Severity::HIGH, 1, 0).unwrap();

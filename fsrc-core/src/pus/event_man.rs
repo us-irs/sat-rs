@@ -1,4 +1,4 @@
-use crate::events::Event;
+use crate::events::EventProvider;
 use hashbrown::HashSet;
 
 #[cfg(feature = "heapless")]
@@ -14,12 +14,12 @@ pub use heapless_mod::*;
 /// structure to track disabled events. A more primitive and embedded friendly
 /// solution could track this information in a static or pre-allocated list which contains
 /// the disabled events.
-pub trait PusEventMgmtBackendProvider {
+pub trait PusEventMgmtBackendProvider<Provider: EventProvider> {
     type Error;
 
-    fn event_enabled(&self, event: &Event) -> bool;
-    fn enable_event_reporting(&mut self, event: &Event) -> Result<bool, Self::Error>;
-    fn disable_event_reporting(&mut self, event: &Event) -> Result<bool, Self::Error>;
+    fn event_enabled(&self, event: &Provider) -> bool;
+    fn enable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error>;
+    fn disable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error>;
 }
 
 /// Default backend provider which uses a hash set as the event reporting status container
@@ -28,21 +28,23 @@ pub trait PusEventMgmtBackendProvider {
 /// This provider is a good option for host systems or larger embedded systems where
 /// the expected occasional memory allocation performed by the [HashSet] is not an issue.
 #[derive(Default)]
-pub struct DefaultPusMgmtBackendProvider {
-    disabled: HashSet<Event>,
+pub struct DefaultPusMgmtBackendProvider<Provider: EventProvider> {
+    disabled: HashSet<Provider>,
 }
 
-impl PusEventMgmtBackendProvider for DefaultPusMgmtBackendProvider {
+impl<Provider: EventProvider> PusEventMgmtBackendProvider<Provider>
+    for DefaultPusMgmtBackendProvider<Provider>
+{
     type Error = ();
-    fn event_enabled(&self, event: &Event) -> bool {
+    fn event_enabled(&self, event: &Provider) -> bool {
         !self.disabled.contains(event)
     }
 
-    fn enable_event_reporting(&mut self, event: &Event) -> Result<bool, Self::Error> {
+    fn enable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error> {
         Ok(self.disabled.remove(event))
     }
 
-    fn disable_event_reporting(&mut self, event: &Event) -> Result<bool, Self::Error> {
+    fn disable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error> {
         Ok(self.disabled.insert(*event))
     }
 }
@@ -50,28 +52,34 @@ impl PusEventMgmtBackendProvider for DefaultPusMgmtBackendProvider {
 #[cfg(feature = "heapless")]
 pub mod heapless_mod {
     use super::*;
-    use crate::events::EventRaw;
+    use crate::events::{EventProvider, LargestEventRaw};
+    use std::marker::PhantomData;
 
     // TODO: After a new version of heapless is released which uses hash32 version 0.3, try using
     //       regular Event type again.
     #[derive(Default)]
-    pub struct HeaplessPusMgmtBckendProvider<const N: usize> {
-        disabled: heapless::FnvIndexSet<EventRaw, N>,
+    pub struct HeaplessPusMgmtBckendProvider<const N: usize, Provider: EventProvider> {
+        disabled: heapless::FnvIndexSet<LargestEventRaw, N>,
+        phantom: PhantomData<Provider>,
     }
 
-    impl<const N: usize> PusEventMgmtBackendProvider for HeaplessPusMgmtBckendProvider<N> {
+    impl<const N: usize, Provider: EventProvider> PusEventMgmtBackendProvider<Provider>
+        for HeaplessPusMgmtBckendProvider<N, Provider>
+    {
         type Error = ();
 
-        fn event_enabled(&self, event: &Event) -> bool {
-            self.disabled.contains(&event.raw())
+        fn event_enabled(&self, event: &Provider) -> bool {
+            self.disabled.contains(&event.raw_as_largest_type())
         }
 
-        fn enable_event_reporting(&mut self, event: &Event) -> Result<bool, Self::Error> {
-            self.disabled.insert(event.raw()).map_err(|_| ())
+        fn enable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error> {
+            self.disabled
+                .insert(event.raw_as_largest_type())
+                .map_err(|_| ())
         }
 
-        fn disable_event_reporting(&mut self, event: &Event) -> Result<bool, Self::Error> {
-            Ok(self.disabled.remove(&event.raw()))
+        fn disable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error> {
+            Ok(self.disabled.remove(&event.raw_as_largest_type()))
         }
     }
 }
