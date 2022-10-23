@@ -52,7 +52,7 @@ impl<E> EventManager<E, Event> {
         event: Event,
         dest: impl EventListener<Event, Error = E> + 'static,
     ) {
-        self.update_listeners(ListenerType::Single(event.raw_as_u32()), dest);
+        self.update_listeners(ListenerType::Single(event.raw_as_largest_type()), dest);
     }
 
     pub fn subscribe_group(
@@ -68,9 +68,9 @@ impl<E> EventManager<E, EventSmall> {
     pub fn subscribe_single(
         &mut self,
         event: EventSmall,
-        dest: impl EventListener<Event, Error = E> + 'static,
+        dest: impl EventListener<EventSmall, Error = E> + 'static,
     ) {
-        self.update_listeners(ListenerType::Single(event.raw_as_u32()), dest);
+        self.update_listeners(ListenerType::Single(event.raw_as_largest_type()), dest);
     }
 
     pub fn subscribe_group(
@@ -81,6 +81,7 @@ impl<E> EventManager<E, EventSmall> {
         self.update_listeners(ListenerType::Group(group_id.into()), dest);
     }
 }
+
 impl<E, Provider: EventProvider> EventManager<E, Provider> {
     fn update_listeners(
         &mut self,
@@ -123,11 +124,11 @@ impl<E, Provider: EventProvider> EventManager<E, Provider> {
             }
         };
         if let Some(event) = self.event_receiver.receive() {
-            let single_key = ListenerType::Single(event.raw_as_u32());
+            let single_key = ListenerType::Single(event.raw_as_largest_type());
             if self.listeners.contains_key(&single_key) {
                 send_handler(event, self.listeners.get_mut(&single_key).unwrap());
             }
-            let group_key = ListenerType::Group(event.group_id_as_u16());
+            let group_key = ListenerType::Group(event.group_id_as_largest_type());
             if self.listeners.contains_key(&group_key) {
                 send_handler(event, self.listeners.get_mut(&group_key).unwrap());
             }
