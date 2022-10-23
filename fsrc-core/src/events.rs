@@ -3,9 +3,14 @@
 use spacepackets::ecss::EcssEnumeration;
 use spacepackets::{ByteConversionError, SizeMissmatch};
 
+pub type EventRaw = u32;
+pub type SmallEventRaw = u16;
+
 pub type GroupId = u16;
 pub type UniqueId = u16;
-pub type EventRaw = u32;
+
+pub type GroupIdSmall = u8;
+pub type UniqueIdSmall = u8;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub enum Severity {
@@ -13,6 +18,20 @@ pub enum Severity {
     LOW = 1,
     MEDIUM = 2,
     HIGH = 3,
+}
+
+pub trait EventProvider: PartialEq + Eq + Copy + Clone {
+    type Raw;
+    type GroupId;
+    type UniqueId;
+
+    fn raw(&self) -> Self::Raw;
+    fn severity(&self) -> Severity;
+    fn group_id(&self) -> Self::GroupId;
+    fn unique_id(&self) -> Self::UniqueId;
+
+    fn raw_as_u32(&self) -> u32;
+    fn group_id_as_u16(&self) -> u16;
 }
 
 impl TryFrom<u8> for Severity {
@@ -32,8 +51,42 @@ impl TryFrom<u8> for Severity {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Event {
     severity: Severity,
-    group_id: GroupId,
-    unique_id: UniqueId,
+    group_id: u16,
+    unique_id: u16,
+}
+
+impl EventProvider for Event {
+    type Raw = u32;
+    type GroupId = u16;
+    type UniqueId = u16;
+
+    fn raw(&self) -> Self::Raw {
+        (((self.severity as Self::Raw) << 30) as Self::Raw
+            | ((self.group_id as Self::Raw) << 16) as Self::Raw
+            | self.unique_id as u32) as Self::Raw
+    }
+
+    /// Retrieve the severity of an event. Returns None if that severity bit field of the raw event
+    /// ID is invalid
+    fn severity(&self) -> Severity {
+        self.severity
+    }
+
+    fn group_id(&self) -> Self::GroupId {
+        self.group_id
+    }
+
+    fn unique_id(&self) -> Self::UniqueId {
+        self.unique_id
+    }
+
+    fn raw_as_u32(&self) -> u32 {
+        self.raw()
+    }
+
+    fn group_id_as_u16(&self) -> u16 {
+        self.group_id()
+    }
 }
 
 impl Event {
@@ -43,12 +96,16 @@ impl Event {
     /// # Parameter
     ///
     /// * `severity`: Each event has a [severity][Severity]. The raw value of the severity will
-    ///        be stored inside the uppermost 3 bits of the raw event ID
+    ///        be stored inside the uppermost 2 bits of the raw event ID
     /// * `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
-    ///        next 13 bits after the severity. Therefore, the size is limited by dec 8191 hex 0x1FFF.
+    ///        next 14 bits after the severity. Therefore, the size is limited by dec 16383 hex 0x3FFF.
     /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
     ///       raw event ID
-    pub fn new(severity: Severity, group_id: GroupId, unique_id: UniqueId) -> Option<Self> {
+    pub fn new(
+        severity: Severity,
+        group_id: <Self as EventProvider>::GroupId,
+        unique_id: <Self as EventProvider>::UniqueId,
+    ) -> Option<Self> {
         if group_id > (2u16.pow(14) - 1) {
             return None;
         }
@@ -58,29 +115,9 @@ impl Event {
             unique_id,
         })
     }
-
-    /// Retrieve the severity of an event. Returns None if that severity bit field of the raw event
-    /// ID is invalid
-    pub fn severity(&self) -> Severity {
-        self.severity
-    }
-
-    pub fn group_id(&self) -> GroupId {
-        self.group_id
-    }
-
-    pub fn unique_id(&self) -> UniqueId {
-        self.unique_id
-    }
-
-    pub fn raw(&self) -> EventRaw {
-        (((self.severity as u32) << 30) as u32
-            | ((self.group_id as u32) << 16) as u32
-            | self.unique_id as u32) as EventRaw
-    }
 }
 
-impl TryFrom<EventRaw> for Event {
+impl TryFrom<u32> for Event {
     type Error = ();
 
     fn try_from(raw: u32) -> Result<Self, Self::Error> {
@@ -94,56 +131,6 @@ impl TryFrom<EventRaw> for Event {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct EventSmall {
-    severity: Severity,
-    group_id: u8,
-    unique_id: u8,
-}
-
-impl EventSmall {
-    /// Generate an event. The raw representation of an event has 32 bits.
-    /// If the passed group ID is invalid (too large), None wil be returned
-    ///
-    /// # Parameter
-    ///
-    /// * `severity`: Each event has a [severity][Severity]. The raw value of the severity will
-    ///        be stored inside the uppermost 3 bits of the raw event ID
-    /// * `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
-    ///        next 13 bits after the severity. Therefore, the size is limited by dec 8191 hex 0x1FFF.
-    /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
-    ///       raw event ID
-    pub fn new(severity: Severity, group_id: u8, unique_id: u8) -> Option<Self> {
-        if group_id > (2u8.pow(5) - 1) {
-            return None;
-        }
-        Some(Self {
-            severity,
-            group_id,
-            unique_id,
-        })
-    }
-
-    /// Retrieve the severity of an event. Returns None if that severity bit field of the raw event
-    /// ID is invalid
-    pub fn severity(&self) -> Severity {
-        self.severity
-    }
-
-    pub fn group_id(&self) -> u8 {
-        self.group_id
-    }
-
-    pub fn unique_id(&self) -> u8 {
-        self.unique_id
-    }
-
-    pub fn raw(&self) -> u16 {
-        (((self.severity as u16) << 12) as u16
-            | ((self.group_id as u16) << 8) as u16
-            | self.unique_id as u16) as u16
-    }
-}
 impl EcssEnumeration for Event {
     fn pfc(&self) -> u8 {
         32
@@ -161,10 +148,78 @@ impl EcssEnumeration for Event {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct EventSmall {
+    severity: Severity,
+    group_id: u8,
+    unique_id: u8,
+}
+
+impl EventProvider for EventSmall {
+    type Raw = u16;
+    type GroupId = u8;
+    type UniqueId = u8;
+
+    fn raw(&self) -> Self::Raw {
+        (((self.severity as Self::Raw) << 14) as Self::Raw
+            | ((self.group_id as Self::Raw) << 8) as Self::Raw
+            | self.unique_id as Self::Raw) as Self::Raw
+    }
+
+    /// Retrieve the severity of an event. Returns None if that severity bit field of the raw event
+    /// ID is invalid
+    fn severity(&self) -> Severity {
+        self.severity
+    }
+
+    fn group_id(&self) -> Self::GroupId {
+        self.group_id.into()
+    }
+
+    fn unique_id(&self) -> Self::UniqueId {
+        self.unique_id.into()
+    }
+
+    fn raw_as_u32(&self) -> u32 {
+        self.raw().into()
+    }
+
+    fn group_id_as_u16(&self) -> u16 {
+        self.group_id().into()
+    }
+}
+
+impl EventSmall {
+    /// Generate a small event. The raw representation of a small event has 16 bits.
+    /// If the passed group ID is invalid (too large), [None] wil be returned
+    ///
+    /// # Parameter
+    ///
+    /// * `severity`: Each event has a [severity][Severity]. The raw value of the severity will
+    ///        be stored inside the uppermost 2 bits of the raw event ID
+    /// * `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
+    ///        next 6 bits after the severity. Therefore, the size is limited by dec 63 hex 0x3F.
+    /// * `unique_id`: Each event has a unique 8 bit ID occupying the last 8 bits of the
+    ///       raw event ID
+    pub fn new(
+        severity: Severity,
+        group_id: <Self as EventProvider>::GroupId,
+        unique_id: <Self as EventProvider>::UniqueId,
+    ) -> Option<Self> {
+        if group_id > (2u8.pow(6) - 1) {
+            return None;
+        }
+        Some(Self {
+            severity,
+            group_id,
+            unique_id,
+        })
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::Event;
-    use crate::events::Severity;
+    use crate::events::{EventProvider, Severity};
 
     #[test]
     fn test_events() {

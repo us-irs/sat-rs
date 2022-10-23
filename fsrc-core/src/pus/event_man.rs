@@ -50,7 +50,7 @@ impl PusEventMgmtBackendProvider for DefaultPusMgmtBackendProvider {
 #[cfg(feature = "heapless")]
 pub mod heapless_mod {
     use super::*;
-    use crate::events::EventRaw;
+    use crate::events::{EventProvider, EventRaw};
 
     // TODO: After a new version of heapless is released which uses hash32 version 0.3, try using
     //       regular Event type again.
