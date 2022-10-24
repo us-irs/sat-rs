@@ -1,32 +1,34 @@
 #![allow(dead_code, unused_imports)]
-use fsrc_core::events::{
-    EventU32TypedSev, GenericEvent, HasSeverity, LargestEventRaw, LargestGroupIdRaw, Severity,
-    SeverityInfo, SeverityLow, SeverityMedium,
-};
 
+use std::convert::AsRef;
+use fsrc_core::events::{EventU32, EventU32TypedSev, GenericEvent, HasSeverity, LargestEventRaw, LargestGroupIdRaw, Severity, SeverityInfo, SeverityLow, SeverityMedium};
+
+#[derive(Debug)]
 struct GroupIdIntrospection {
     name: &'static str,
     id: LargestGroupIdRaw,
 }
 
-struct EventIntrospection<SEVERITY: HasSeverity + 'static> {
+#[derive(Debug)]
+struct EventIntrospection {
     name: &'static str,
     group_id: GroupIdIntrospection,
-    event: &'static EventU32TypedSev<SEVERITY>,
+    event: &'static EventU32,
     info: &'static str,
 }
 
 //#[event(descr="This is some info event")]
 const INFO_EVENT_0: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::const_new(0, 0);
+const INFO_EVENT_0_ERASED: EventU32 = EventU32::const_from_info(INFO_EVENT_0);
 
 // This is ideally auto-generated
-const INFO_EVENT_0_INTROSPECTION: EventIntrospection<SeverityInfo> = EventIntrospection {
+const INFO_EVENT_0_INTROSPECTION: EventIntrospection = EventIntrospection {
     name: "INFO_EVENT_0",
     group_id: GroupIdIntrospection {
         id: 0,
         name: "Group ID 0 without name",
     },
-    event: &INFO_EVENT_0,
+    event: &INFO_EVENT_0_ERASED,
     info: "This is some info event",
 };
 
@@ -43,18 +45,37 @@ const TEST_GROUP_NAME_NAME: &'static str = "TEST_GROUP_NAME";
 //#[event(desc="Some medium severity event")]
 const MEDIUM_SEV_EVENT_IN_OTHER_GROUP: EventU32TypedSev<SeverityMedium> =
     EventU32TypedSev::const_new(TEST_GROUP_NAME, 0);
+const MEDIUM_SEV_EVENT_IN_OTHER_GROUP_REDUCED: EventU32 = EventU32::const_from_medium(MEDIUM_SEV_EVENT_IN_OTHER_GROUP);
 
 // Also auto-generated
-const MEDIUM_SEV_EVENT_IN_OTHER_GROUP_INTROSPECTION: EventIntrospection<SeverityMedium> =
+const MEDIUM_SEV_EVENT_IN_OTHER_GROUP_INTROSPECTION: EventIntrospection =
     EventIntrospection {
         name: "MEDIUM_SEV_EVENT_IN_OTHER_GROUP",
         group_id: GroupIdIntrospection {
             name: TEST_GROUP_NAME_NAME,
             id: TEST_GROUP_NAME,
         },
-        event: &MEDIUM_SEV_EVENT_IN_OTHER_GROUP,
+        event: &MEDIUM_SEV_EVENT_IN_OTHER_GROUP_REDUCED,
         info: "Some medium severity event",
     };
+
+const CONST_SLICE: &'static [u8] = &[0, 1, 2, 3];
+const INTROSPECTION_FOR_TEST_GROUP_0: [&'static EventIntrospection; 2] = [
+    &INFO_EVENT_0_INTROSPECTION,
+    &INFO_EVENT_0_INTROSPECTION
+];
+
+const INTROSPECTION_FOR_TABLE: &'static [&EventIntrospection] = &INTROSPECTION_FOR_TEST_GROUP_0;
+
+const INTROSPECTION_FOR_TEST_GROUP_NAME: [&'static EventIntrospection; 1] = [
+    &MEDIUM_SEV_EVENT_IN_OTHER_GROUP_INTROSPECTION
+];
+const BLAH: &'static [&EventIntrospection] = &INTROSPECTION_FOR_TEST_GROUP_NAME;
+
+const ALL_EVENTS: [&'static [&EventIntrospection]; 2] = [
+    INTROSPECTION_FOR_TABLE,
+    BLAH
+];
 
 #[test]
 fn main() {
@@ -62,6 +83,12 @@ fn main() {
     //println!("{:?}", test);
     //for event in EVENT_LIST {
     //    println!("{:?}", event);
+    //}
+    for events in ALL_EVENTS.into_iter().flatten() {
+        dbg!("{:?}", events);
+    }
+    //for introspection_info in INTROSPECTION_FOR_TEST_GROUP {
+    //    dbg!("{:?}", introspection_info);
     //}
     //let test_struct =
 }

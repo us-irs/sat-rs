@@ -279,6 +279,17 @@ impl EventU32 {
             },
         }
     }
+
+    pub const fn const_from_info(event: EventU32TypedSev<SeverityInfo>) -> Self {
+        Self {
+            base: event.event.base
+        }
+    }
+    pub const fn const_from_medium(event: EventU32TypedSev<SeverityMedium>) -> Self {
+        Self {
+            base: event.event.base
+        }
+    }
 }
 
 impl<SEVERITY: HasSeverity> EventU32TypedSev<SEVERITY> {
