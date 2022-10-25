@@ -32,8 +32,9 @@ impl<E> From<ByteConversionError> for EcssTmError<E> {
     }
 }
 
-/// Generic trait for a user supplied sender object. This sender object is responsible for sending
-/// telemetry to a TM sink. The [Downcast] trait
+/// Generic trait for a user supplied sender object.
+///
+/// This sender object is responsible for sending telemetry to a TM sink. The [Downcast] trait
 /// is implemented to allow passing the sender as a boxed trait object and still retrieve the
 /// concrete type at a later point.
 pub trait EcssTmSender<E>: Downcast + Send {
