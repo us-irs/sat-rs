@@ -22,6 +22,7 @@ pub enum Severity {
 pub trait HasSeverity {
     const SEVERITY: Severity;
 }
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct SeverityInfo {}
 impl HasSeverity for SeverityInfo {
@@ -229,10 +230,10 @@ macro_rules! const_from_fn {
     ($from_fn_name: ident, $TypedIdent: ident, $SevIdent: ident) => {
         pub const fn $from_fn_name(event: $TypedIdent<$SevIdent>) -> Self {
             Self {
-                base: event.event.base
+                base: event.event.base,
             }
         }
-    }
+    };
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -255,6 +256,17 @@ impl<SEVERITY: HasSeverity> From<EventU32TypedSev<SEVERITY>> for EventU32 {
 impl_event_provider!(EventU32, EventU32TypedSev, u32, u16, u16);
 
 impl EventU32 {
+    /// Generate an event. The raw representation of an event has 32 bits.
+    /// If the passed group ID is invalid (too large), None wil be returned
+    ///
+    /// # Parameter
+    ///
+    /// * `severity`: Each event has a [severity][Severity]. The raw value of the severity will
+    ///        be stored inside the uppermost 2 bits of the raw event ID
+    /// * `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
+    ///        next 14 bits after the severity. Therefore, the size is limited by dec 16383 hex 0x3FFF.
+    /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
+    ///       raw event ID
     pub fn new(
         severity: Severity,
         group_id: <Self as GenericEvent>::GroupId,
@@ -297,17 +309,8 @@ impl EventU32 {
 }
 
 impl<SEVERITY: HasSeverity> EventU32TypedSev<SEVERITY> {
-    /// Generate an event. The raw representation of an event has 32 bits.
-    /// If the passed group ID is invalid (too large), None wil be returned
-    ///
-    /// # Parameter
-    ///
-    /// * `severity`: Each event has a [severity][Severity]. The raw value of the severity will
-    ///        be stored inside the uppermost 2 bits of the raw event ID
-    /// * `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
-    ///        next 14 bits after the severity. Therefore, the size is limited by dec 16383 hex 0x3FFF.
-    /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
-    ///       raw event ID
+    /// This is similar to [EventU32::new] but the severity is a type generic, which allows to
+    /// have distinct types for events with different severities
     pub fn new(
         group_id: <Self as GenericEvent>::GroupId,
         unique_id: <Self as GenericEvent>::UniqueId,
@@ -418,6 +421,7 @@ impl EventU16 {
         })
     }
 
+    /// Const version of [new], but panics on invalid group ID input values.
     pub const fn const_new(
         severity: Severity,
         group_id: <Self as GenericEvent>::GroupId,
@@ -440,18 +444,10 @@ impl EventU16 {
     const_from_fn!(const_from_medium, EventU16TypedSev, SeverityMedium);
     const_from_fn!(const_from_high, EventU16TypedSev, SeverityHigh);
 }
+
 impl<SEVERITY: HasSeverity> EventU16TypedSev<SEVERITY> {
-    /// Generate a small event. The raw representation of a small event has 16 bits.
-    /// If the passed group ID is invalid (too large), [None] wil be returned
-    ///
-    /// # Parameter
-    ///
-    /// * `severity`: Each event has a [severity][Severity]. The raw value of the severity will
-    ///        be stored inside the uppermost 2 bits of the raw event ID
-    /// * `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
-    ///        next 6 bits after the severity. Therefore, the size is limited by dec 63 hex 0x3F.
-    /// * `unique_id`: Each event has a unique 8 bit ID occupying the last 8 bits of the
-    ///       raw event ID
+    /// This is similar to [EventU16::new] but the severity is a type generic, which allows to
+    /// have distinct types for events with different severities
     pub fn new(
         group_id: <Self as GenericEvent>::GroupId,
         unique_id: <Self as GenericEvent>::UniqueId,
@@ -463,6 +459,7 @@ impl<SEVERITY: HasSeverity> EventU16TypedSev<SEVERITY> {
         })
     }
 
+    /// Const version of [new], but panics on invalid group ID input values.
     pub const fn const_new(
         group_id: <Self as GenericEvent>::GroupId,
         unique_id: <Self as GenericEvent>::UniqueId,
