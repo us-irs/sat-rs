@@ -42,3 +42,7 @@ default = ["std"]
 std = ["downcast-rs/std", "alloc", "bus", "postcard/use-std", "crossbeam-channel/std"]
 alloc = []
 heapless = []
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "doc_cfg"]

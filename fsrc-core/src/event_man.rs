@@ -1,4 +1,4 @@
-//! [Event][crate::events::Event] management and forwarding
+//! Event management and forwarding
 use crate::events::{EventU16TypedSev, EventU32, GenericEvent, HasSeverity};
 use alloc::boxed::Box;
 use alloc::vec;

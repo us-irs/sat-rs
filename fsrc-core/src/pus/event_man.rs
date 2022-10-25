@@ -6,12 +6,14 @@ use hashbrown::HashSet;
 use crate::pus::event::EventReporter;
 use crate::pus::{EcssTmError, EcssTmSender};
 #[cfg(feature = "heapless")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "heapless")))]
 pub use heapless_mod::*;
 
 /// This trait allows the PUS event manager implementation to stay generic over various types
-/// of backend containers. These backend containers keep track on whether a particular event
-/// is enabled or disabled for reporting and also expose a simple API to enable or disable the event
-/// reporting.
+/// of backend containers.
+///
+/// These backend containers keep track on whether a particular event is enabled or disabled for
+/// reporting and also expose a simple API to enable or disable the event reporting.
 ///
 /// For example, a straight forward implementation for host systems could use a
 /// [hash set](https://docs.rs/hashbrown/latest/hashbrown/struct.HashSet.html)
@@ -59,6 +61,7 @@ pub mod heapless_mod {
     use crate::events::{GenericEvent, LargestEventRaw};
     use std::marker::PhantomData;
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "heapless")))]
     // TODO: After a new version of heapless is released which uses hash32 version 0.3, try using
     //       regular Event type again.
     #[derive(Default)]

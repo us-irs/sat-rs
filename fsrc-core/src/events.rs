@@ -1,5 +1,32 @@
 //! Event support module
-
+//!
+//! This module includes the basic event structs [EventU32] and [EventU16] and versions with the
+//! ECSS severity levels as a type parameter. These structs are simple abstractions on top of the
+//! [u32] and [u16] types where the raw value is the unique identifier for a particular event.
+//! The abstraction also allows to group related events using a group ID, and the severity
+//! of an event is encoded inside the raw value itself with four possible [Severity] levels:
+//!
+//!  - INFO
+//!  - LOW
+//!  - MEDIUM
+//!  - HIGH
+//!
+//! All event structs implement the [EcssEnumeration] trait and can be created as constants.
+//! This allows to easily create a static list of constant events which can then be used to generate
+//! event telemetry using the PUS event manager modules.
+//!
+//! # Examples
+//!
+//! ```
+//! use fsrc_core::events::{EventU16, EventU32, EventU32TypedSev, Severity, SeverityHigh, SeverityInfo};
+//!
+//! const MSG_RECVD: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::const_new(1, 0);
+//! const MSG_FAILED: EventU32 = EventU32::const_new(Severity::LOW, 1, 1);
+//!
+//! const TEMPERATURE_HIGH: EventU32TypedSev<SeverityHigh> = EventU32TypedSev::const_new(2, 0);
+//!
+//! let small_event = EventU16::new(Severity::INFO, 3, 0);
+//! ```
 use core::hash::Hash;
 use delegate::delegate;
 use spacepackets::ecss::{EcssEnumeration, ToBeBytes};
@@ -23,24 +50,28 @@ pub trait HasSeverity {
     const SEVERITY: Severity;
 }
 
+/// Type level support struct
 #[derive(Debug, PartialEq, Eq)]
 pub struct SeverityInfo {}
 impl HasSeverity for SeverityInfo {
     const SEVERITY: Severity = Severity::INFO;
 }
 
+/// Type level support struct
 #[derive(Debug, PartialEq, Eq)]
 pub struct SeverityLow {}
 impl HasSeverity for SeverityLow {
     const SEVERITY: Severity = Severity::LOW;
 }
 
+/// Type level support struct
 #[derive(Debug, PartialEq, Eq)]
 pub struct SeverityMedium {}
 impl HasSeverity for SeverityMedium {
     const SEVERITY: Severity = Severity::MEDIUM;
 }
 
+/// Type level support struct
 #[derive(Debug, PartialEq, Eq)]
 pub struct SeverityHigh {}
 impl HasSeverity for SeverityHigh {
@@ -76,7 +107,7 @@ impl TryFrom<u8> for Severity {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct EventBase<RAW, GID, UID> {
+struct EventBase<RAW, GID, UID> {
     severity: Severity,
     group_id: GID,
     unique_id: UID,
@@ -322,7 +353,7 @@ impl<SEVERITY: HasSeverity> EventU32TypedSev<SEVERITY> {
         })
     }
 
-    /// Const version of [new], but panics on invalid group ID input values.
+    /// Const version of [Self::new], but panics on invalid group ID input values.
     pub const fn const_new(
         group_id: <Self as GenericEvent>::GroupId,
         unique_id: <Self as GenericEvent>::UniqueId,
@@ -421,7 +452,7 @@ impl EventU16 {
         })
     }
 
-    /// Const version of [new], but panics on invalid group ID input values.
+    /// Const version of [Self::new], but panics on invalid group ID input values.
     pub const fn const_new(
         severity: Severity,
         group_id: <Self as GenericEvent>::GroupId,
@@ -459,7 +490,7 @@ impl<SEVERITY: HasSeverity> EventU16TypedSev<SEVERITY> {
         })
     }
 
-    /// Const version of [new], but panics on invalid group ID input values.
+    /// Const version of [Self::new], but panics on invalid group ID input values.
     pub const fn const_new(
         group_id: <Self as GenericEvent>::GroupId,
         unique_id: <Self as GenericEvent>::UniqueId,
