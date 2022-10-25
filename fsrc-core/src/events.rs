@@ -225,6 +225,16 @@ macro_rules! try_from_impls {
     };
 }
 
+macro_rules! const_from_fn {
+    ($from_fn_name: ident, $TypedIdent: ident, $SevIdent: ident) => {
+        pub const fn $from_fn_name(event: $TypedIdent<$SevIdent>) -> Self {
+            Self {
+                base: event.event.base
+            }
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EventU32 {
     base: EventBase<u32, u16, u16>,
@@ -280,16 +290,10 @@ impl EventU32 {
         }
     }
 
-    pub const fn const_from_info(event: EventU32TypedSev<SeverityInfo>) -> Self {
-        Self {
-            base: event.event.base
-        }
-    }
-    pub const fn const_from_medium(event: EventU32TypedSev<SeverityMedium>) -> Self {
-        Self {
-            base: event.event.base
-        }
-    }
+    const_from_fn!(const_from_info, EventU32TypedSev, SeverityInfo);
+    const_from_fn!(const_from_low, EventU32TypedSev, SeverityLow);
+    const_from_fn!(const_from_medium, EventU32TypedSev, SeverityMedium);
+    const_from_fn!(const_from_high, EventU32TypedSev, SeverityHigh);
 }
 
 impl<SEVERITY: HasSeverity> EventU32TypedSev<SEVERITY> {
@@ -431,6 +435,10 @@ impl EventU16 {
             },
         }
     }
+    const_from_fn!(const_from_info, EventU16TypedSev, SeverityInfo);
+    const_from_fn!(const_from_low, EventU16TypedSev, SeverityLow);
+    const_from_fn!(const_from_medium, EventU16TypedSev, SeverityMedium);
+    const_from_fn!(const_from_high, EventU16TypedSev, SeverityHigh);
 }
 impl<SEVERITY: HasSeverity> EventU16TypedSev<SEVERITY> {
     /// Generate a small event. The raw representation of a small event has 16 bits.
@@ -531,6 +539,9 @@ mod tests {
         EventU32TypedSev::const_new(0x3FFF, 0xFFFF);
     const HIGH_SEV_EVENT_SMALL: EventU16TypedSev<SeverityHigh> =
         EventU16TypedSev::const_new(0x3F, 0xff);
+
+    /// This working is a test in itself.
+    const INFO_REDUCED: EventU32 = EventU32::const_from_info(INFO_EVENT);
 
     #[test]
     fn test_normal_from_raw_conversion() {
@@ -692,5 +703,20 @@ mod tests {
         assert!(Severity::try_from(invalid).is_err());
         let invalid = Severity::HIGH as u8 + 1;
         assert!(Severity::try_from(invalid).is_err());
+    }
+
+    #[test]
+    fn reduction() {
+        let event = EventU32TypedSev::<SeverityInfo>::const_new(1, 1);
+        let raw = event.raw();
+        let reduced: EventU32 = event.into();
+        assert_eq!(reduced.group_id(), 1);
+        assert_eq!(reduced.unique_id(), 1);
+        assert_eq!(raw, reduced.raw());
+    }
+
+    #[test]
+    fn const_reducation() {
+        assert_eq!(INFO_REDUCED.raw(), INFO_EVENT.raw());
     }
 }

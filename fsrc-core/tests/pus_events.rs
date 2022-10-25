@@ -40,7 +40,7 @@ const SOME_LOW_SEV_EVENT: EventU32TypedSev<SeverityLow> = EventU32TypedSev::cons
 //#[event_group]
 const TEST_GROUP_NAME: u16 = 1;
 // Auto-generated?
-const TEST_GROUP_NAME_NAME: &'static str = "TEST_GROUP_NAME";
+const TEST_GROUP_NAME_NAME: &str = "TEST_GROUP_NAME";
 
 //#[event(desc="Some medium severity event")]
 const MEDIUM_SEV_EVENT_IN_OTHER_GROUP: EventU32TypedSev<SeverityMedium> =
@@ -60,21 +60,21 @@ const MEDIUM_SEV_EVENT_IN_OTHER_GROUP_INTROSPECTION: EventIntrospection =
     };
 
 const CONST_SLICE: &'static [u8] = &[0, 1, 2, 3];
-const INTROSPECTION_FOR_TEST_GROUP_0: [&'static EventIntrospection; 2] = [
+const INTROSPECTION_FOR_TEST_GROUP_0: [&EventIntrospection; 2] = [
     &INFO_EVENT_0_INTROSPECTION,
     &INFO_EVENT_0_INTROSPECTION
 ];
 
-const INTROSPECTION_FOR_TABLE: &'static [&EventIntrospection] = &INTROSPECTION_FOR_TEST_GROUP_0;
+//const INTROSPECTION_FOR_TABLE: &'static [&EventIntrospection] = &INTROSPECTION_FOR_TEST_GROUP_0;
 
-const INTROSPECTION_FOR_TEST_GROUP_NAME: [&'static EventIntrospection; 1] = [
+const INTROSPECTION_FOR_TEST_GROUP_NAME: [&EventIntrospection; 1] = [
     &MEDIUM_SEV_EVENT_IN_OTHER_GROUP_INTROSPECTION
 ];
-const BLAH: &'static [&EventIntrospection] = &INTROSPECTION_FOR_TEST_GROUP_NAME;
+//const BLAH: &'static [&EventIntrospection] = &INTROSPECTION_FOR_TEST_GROUP_NAME;
 
-const ALL_EVENTS: [&'static [&EventIntrospection]; 2] = [
-    INTROSPECTION_FOR_TABLE,
-    BLAH
+const ALL_EVENTS: [&[&EventIntrospection]; 2] = [
+    &INTROSPECTION_FOR_TEST_GROUP_0,
+    &INTROSPECTION_FOR_TEST_GROUP_NAME
 ];
 
 #[test]
