@@ -103,14 +103,12 @@ impl<E, Event: GenericEvent + Copy> EventManager<E, Event> {
     pub fn remove_single_subscriptions_for_group(
         &mut self,
         group_id: LargestGroupIdRaw,
-        dest: impl SendEventProvider<Event, Error=E> + 'static
+        dest: impl SendEventProvider<Event, Error = E> + 'static,
     ) {
         if self.listeners.contains_key(&ListenerType::Group(group_id)) {
             for (ltype, listeners) in &mut self.listeners {
                 if let ListenerType::Single(_) = ltype {
-                    listeners.retain(|f| {
-                        f.send_provider.id() != dest.id()
-                    });
+                    listeners.retain(|f| f.send_provider.id() != dest.id());
                 }
             }
         }
