@@ -1,24 +1,27 @@
 //! Event management and forwarding
 //!
 //! This module provides components to perform event routing. The most important component for this
-//! task is the [EventManager]. It has a map of event listeners and uses a dynamic [EventReceiver]
+//! task is the [EventManager]. It uses a map of event listeners and uses a dynamic [EventReceiver]
 //! instance to receive all events and then route them to event subscribers where appropriate.
 //!
 //! One common use case for satellite systems is to offer a light-weight publish-subscribe mechanism
-//! and IPC mechanism for software and hardware events which are also packaged as telemetry.
-//! This can be done with the [EventManager] like this:
+//! and IPC mechanism for software and hardware events which are also packaged as telemetry or can
+//! trigger a system response. This can be done with the [EventManager] like this:
 //!
 //!  1. Provide a concrete [SendEventProvider] implementation and a concrete [EventReceiver]
 //!     implementation. These abstraction allow to use different message queue backends.
 //!     A straightforward implementation where dynamic memory allocation is not a big concern could
 //!     use [std::sync::mpsc::channel] to do this. It is recommended that these implementations
 //!     derive [Clone].
-//!  2. Each event creator gets a sender component which allows it to send events to the manager.
-//!  3. The event manager receives all receiver ends so all events are routed to the
+//!  2. Each event creator gets a (cloned) sender component which allows it to send events to the
 //!     manager.
-//!  4. Each event receiver and/or subscriber gets a receiver component. The sender component is
-//!     used with the [SendEventProvider] trait and the subscription API provided by the
-//!     [EventManager] to subscribe for individual events, whole group of events or all events
+//!  3. The event manager receives the receiver component so all events are routed to the
+//!     manager.
+//!  4. Additional channels are created for each event receiver and/or subscriber.
+//!     The sender component is used with the [SendEventProvider] trait and the subscription API
+//!     provided by the [EventManager] to subscribe for individual events, whole group of events or
+//!     all events. The receiver/subscribers can then receive all subscribed events via the receiver
+//!     end.
 //!
 //! Some components like a PUS Event Service or PUS Event Action Service might require all
 //! events to package them as telemetry or start actions where applicable.
