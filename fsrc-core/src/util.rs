@@ -24,7 +24,7 @@ pub enum AuxDataRaw {
     U32Pair((u32, u32)),
     U32Triplet((u32, u32, u32)),
     I32(i32),
-    I32Tuple((i32, i32)),
+    I32Pair((i32, i32)),
     I32Triplet((i32, i32, i32)),
     F32(f32),
     F32Pair((f32, f32)),
@@ -45,17 +45,49 @@ impl From<StoreAddr> for AuxDataHeapless {
     }
 }
 
-impl From<(u32, u32)> for AuxDataRaw {
-    fn from(val: (u32, u32)) -> Self {
-        Self::U32Pair(val)
-    }
+macro_rules! from_conversions_for_raw {
+    ($(($raw_ty: ty, $TargetPath: path),)+) => {
+        $(
+            impl From<$raw_ty> for AuxDataRaw {
+                fn from(val: $raw_ty) -> Self {
+                    $TargetPath(val)
+                }
+            }
+
+            impl From<$raw_ty> for AuxDataHeapless {
+                fn from(val: $raw_ty) -> Self {
+                    AuxDataHeapless::Raw(val.into())
+                }
+            }
+        )+
+    };
 }
 
-impl From<(u32, u32)> for AuxDataHeapless {
-    fn from(val: (u32, u32)) -> Self {
-        AuxDataHeapless::Raw(val.into())
-    }
-}
+from_conversions_for_raw!(
+    (u8, Self::U8),
+    ((u8, u8), Self::U8Pair),
+    ((u8, u8, u8), Self::U8Triplet),
+    (i8, Self::I8),
+    ((i8, i8), Self::I8Pair),
+    ((i8, i8, i8), Self::I8Triplet),
+    (u16, Self::U16),
+    ((u16, u16), Self::U16Pair),
+    ((u16, u16, u16), Self::U16Triplet),
+    (i16, Self::I16),
+    ((i16, i16), Self::I16Pair),
+    ((i16, i16, i16), Self::I16Triplet),
+    (u32, Self::U32),
+    ((u32, u32), Self::U32Pair),
+    ((u32, u32, u32), Self::U32Triplet),
+    (i32, Self::I32),
+    ((i32, i32), Self::I32Pair),
+    ((i32, i32, i32), Self::I32Triplet),
+    (f32, Self::F32),
+    ((f32, f32), Self::F32Pair),
+    ((f32, f32, f32), Self::F32Triplet),
+    (u64, Self::U64),
+    (f64, Self::F64),
+);
 
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
