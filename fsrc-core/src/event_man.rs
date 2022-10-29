@@ -33,6 +33,9 @@ use alloc::vec;
 use alloc::vec::Vec;
 use hashbrown::HashMap;
 
+#[cfg(feature = "std")]
+pub use stdmod::MpscEventReceiver;
+
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]
 enum ListenerType {
     Single(LargestEventRaw),
@@ -197,25 +200,26 @@ impl<E, Provider: GenericEvent + Copy> EventManager<E, Provider> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{EventReceiver, HandlerResult, SendEventProvider};
-    use crate::event_man::EventManager;
-    use crate::events::{EventU32, GenericEvent, Severity};
-    use alloc::boxed::Box;
-    use std::sync::mpsc::{channel, Receiver, SendError, Sender};
-    use std::time::Duration;
-    use std::{thread, vec};
-    use vec::Vec;
+#[cfg(feature = "std")]
+pub mod stdmod {
+    use crate::event_man::EventReceiver;
+    use crate::events::{EventU16, EventU32, GenericEvent};
+    use std::sync::mpsc::Receiver;
+    use std::vec::Vec;
 
-    type EventAndParams<'a> = (EventU32, Option<&'a [u8]>);
-
-    struct MpscEventReceiver {
-        mpsc_receiver: Receiver<(EventU32, Option<Vec<u8>>)>,
+    pub struct MpscEventReceiver<Event: GenericEvent = EventU32> {
+        mpsc_receiver: Receiver<(Event, Option<Vec<u8>>)>,
     }
 
-    impl EventReceiver<EventU32> for MpscEventReceiver {
-        fn receive(&mut self, aux_data: &mut [u8]) -> Option<EventU32> {
+    impl<Event: GenericEvent> MpscEventReceiver<Event> {
+        pub fn new(receiver: Receiver<(Event, Option<Vec<u8>>)>) -> Self {
+            Self {
+                mpsc_receiver: receiver,
+            }
+        }
+    }
+    impl<Event: GenericEvent> EventReceiver<Event> for MpscEventReceiver<Event> {
+        fn receive(&mut self, aux_data: &mut [u8]) -> Option<Event> {
             if let Some((event, params)) = self.mpsc_receiver.try_recv().ok() {
                 if let Some(params) = params {
                     if params.len() < aux_data.len() {
@@ -227,6 +231,20 @@ mod tests {
             None
         }
     }
+
+    pub type MpscEventU32Receiver = MpscEventReceiver<EventU32>;
+    pub type MpscEventU16Receiver = MpscEventReceiver<EventU16>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event_man::EventManager;
+    use crate::events::{EventU32, GenericEvent, Severity};
+    use alloc::boxed::Box;
+    use std::sync::mpsc::{channel, Receiver, SendError, Sender};
+
+    type EventAndParams<'a> = (EventU32, Option<&'a [u8]>);
 
     #[derive(Clone)]
     struct MpscEventSenderQueue<'a> {
@@ -240,8 +258,8 @@ mod tests {
         fn id(&self) -> u32 {
             self.id
         }
-        fn send(&mut self, event: EventU32, _aux_data: Option<&[u8]>) -> Result<(), Self::Error> {
-            self.mpsc_sender.send((event, None))
+        fn send(&mut self, event: EventU32, aux_data: Option<&'a [u8]>) -> Result<(), Self::Error> {
+            self.mpsc_sender.send((event, aux_data))
         }
     }
 
@@ -251,7 +269,6 @@ mod tests {
                 assert_eq!(event.0, expected);
                 break;
             }
-            thread::sleep(Duration::from_millis(1));
         }
     }
 
@@ -270,9 +287,7 @@ mod tests {
     #[test]
     fn test_basic() {
         let (event_sender, manager_queue) = channel();
-        let event_man_receiver = MpscEventReceiver {
-            mpsc_receiver: manager_queue,
-        };
+        let event_man_receiver = MpscEventReceiver::new(manager_queue);
         let mut event_man: EventManager<SendError<EventAndParams>, EventU32> =
             EventManager::new(Box::new(event_man_receiver), 128);
         let event_grp_0 = EventU32::new(Severity::INFO, 0, 0).unwrap();
@@ -313,9 +328,7 @@ mod tests {
     #[test]
     fn test_multi_group() {
         let (event_sender, manager_queue) = channel();
-        let event_man_receiver = MpscEventReceiver {
-            mpsc_receiver: manager_queue,
-        };
+        let event_man_receiver = MpscEventReceiver::new(manager_queue);
         let mut event_man: EventManager<SendError<EventAndParams>, EventU32> =
             EventManager::new(Box::new(event_man_receiver), 128);
         let res = event_man.try_event_handling();
@@ -355,9 +368,7 @@ mod tests {
     #[test]
     fn test_listening_to_same_event_and_multi_type() {
         let (event_sender, manager_queue) = channel();
-        let event_man_receiver = MpscEventReceiver {
-            mpsc_receiver: manager_queue,
-        };
+        let event_man_receiver = MpscEventReceiver::new(manager_queue);
         let mut event_man: EventManager<SendError<EventAndParams>, EventU32> =
             EventManager::new(Box::new(event_man_receiver), 128);
         let event_0 = EventU32::new(Severity::INFO, 0, 5).unwrap();
@@ -414,9 +425,7 @@ mod tests {
     #[test]
     fn test_all_events_listener() {
         let (event_sender, manager_queue) = channel();
-        let event_man_receiver = MpscEventReceiver {
-            mpsc_receiver: manager_queue,
-        };
+        let event_man_receiver = MpscEventReceiver::new(manager_queue);
         let mut event_man: EventManager<SendError<EventAndParams>, EventU32> =
             EventManager::new(Box::new(event_man_receiver), 128);
         let event_0 = EventU32::new(Severity::INFO, 0, 5).unwrap();
