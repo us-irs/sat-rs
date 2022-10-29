@@ -28,5 +28,6 @@ pub mod objects;
 pub mod pool;
 pub mod pus;
 pub mod tmtc;
+pub mod util;
 
 extern crate downcast_rs;
