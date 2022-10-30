@@ -12,6 +12,7 @@
 extern crate alloc;
 #[cfg(any(feature = "std", test))]
 extern crate std;
+extern crate downcast_rs;
 
 pub mod error;
 #[cfg(feature = "alloc")]
@@ -29,5 +30,3 @@ pub mod pool;
 pub mod pus;
 pub mod tmtc;
 pub mod util;
-
-extern crate downcast_rs;

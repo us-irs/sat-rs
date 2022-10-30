@@ -1,8 +1,7 @@
-//! Utility types and enums
+//! Utility types and enums.
 //!
 //! This module contains various helper types. This includes wrapper for primitive rust types
-//! using the newtype pattern. This was also done for pairs and triplets of these primtive types.
-//!
+//! using the newtype pattern. This was also done for pairs and triplets of these primitive types.
 //! The [ToBeBytes] was implemented for those types as well, which allows to easily convert them
 //! into a network friendly raw byte format.
 //!
@@ -345,6 +344,7 @@ impl From<Vec<u8>> for Params {
     }
 }
 
+/// Converts a byte slice into the [Params::Vec] variant
 impl From<&[u8]> for Params {
     fn from(val: &[u8]) -> Self {
         Self::Vec(val.to_vec())
@@ -357,6 +357,7 @@ impl From<String> for Params {
     }
 }
 
+/// Converts a string slice into the [Params::String] variant
 impl From<&str> for Params {
     fn from(val: &str) -> Self {
         Self::String(val.to_string())
