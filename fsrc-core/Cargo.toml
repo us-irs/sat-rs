@@ -9,6 +9,7 @@ edition = "2021"
 delegate = "0.8"
 hashbrown = "0.12"
 heapless = "0.7"
+paste = "1.0"
 
 [dependencies.num-traits]
 version = "0.2"
