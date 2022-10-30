@@ -1,6 +1,27 @@
 //! Utility types and enums
 //!
-//! This module contains helper types.
+//! This module contains various helper types. This includes wrapper for primitive rust types
+//! using the newtype pattern. This was also done for pairs and triplets of these primtive types.
+//!
+//! The [ToBeBytes] was implemented for those types as well, which allows to easily convert them
+//! into a network friendly raw byte format.
+//!
+//! The module also contains generic parameter enumerations.
+//!
+//! # Example for primitive type wrapper
+//!
+//! ```
+//! use fsrc_core::util::{ParamsRaw, ToBeBytes, U32Pair};
+//!
+//! let u32_pair = U32Pair(0x1010, 25);
+//! assert_eq!(u32_pair.0, 0x1010);
+//! assert_eq!(u32_pair.1, 25);
+//! let raw_buf = u32_pair.to_be_bytes();
+//! assert_eq!(raw_buf, [0, 0, 0x10, 0x10, 0, 0, 0, 25]);
+//!
+//! let params_raw: ParamsRaw = u32_pair.into();
+//! assert_eq!(params_raw, (0x1010_u32, 25_u32).into());
+//! ```
 use crate::pool::StoreAddr;
 #[cfg(feature = "alloc")]
 use alloc::string::String;
@@ -8,19 +29,21 @@ use alloc::string::String;
 use alloc::string::ToString;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
+use core::fmt::Debug;
 use core::mem::size_of;
 use paste::paste;
-use spacepackets::ecss::ToBeBytes;
+pub use spacepackets::ecss::ToBeBytes;
+use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU64, EcssEnumU8};
 
-macro_rules! primitive_newtypes {
+macro_rules! primitive_newtypes_with_eq {
     ($($ty: ty,)+) => {
         $(
             paste! {
-                #[derive(Debug, Copy, Clone)]
+                #[derive(Debug, Copy, Clone, PartialEq, Eq)]
                 pub struct [<$ty:upper>](pub $ty);
-                #[derive(Debug, Copy, Clone)]
+                #[derive(Debug, Copy, Clone, PartialEq, Eq)]
                 pub struct [<$ty:upper Pair>](pub $ty, pub $ty);
-                #[derive(Debug, Copy, Clone)]
+                #[derive(Debug, Copy, Clone, PartialEq, Eq)]
                 pub struct [<$ty:upper Triplet>](pub $ty, pub $ty, pub $ty);
 
                 impl From<$ty> for [<$ty:upper>] {
@@ -43,7 +66,39 @@ macro_rules! primitive_newtypes {
     }
 }
 
-primitive_newtypes!(u8, u16, u32, u64, i8, i16, i32, i64, f32, f64,);
+macro_rules! primitive_newtypes {
+    ($($ty: ty,)+) => {
+        $(
+            paste! {
+                #[derive(Debug, Copy, Clone, PartialEq)]
+                pub struct [<$ty:upper>](pub $ty);
+                #[derive(Debug, Copy, Clone, PartialEq)]
+                pub struct [<$ty:upper Pair>](pub $ty, pub $ty);
+                #[derive(Debug, Copy, Clone, PartialEq)]
+                pub struct [<$ty:upper Triplet>](pub $ty, pub $ty, pub $ty);
+
+                impl From<$ty> for [<$ty:upper>] {
+                    fn from(v: $ty) -> Self {
+                        Self(v)
+                    }
+                }
+                impl From<($ty, $ty)> for [<$ty:upper Pair>] {
+                    fn from(v: ($ty, $ty)) -> Self {
+                        Self(v.0, v.1)
+                    }
+                }
+                impl From<($ty, $ty, $ty)> for [<$ty:upper Triplet>] {
+                    fn from(v: ($ty, $ty, $ty)) -> Self {
+                        Self(v.0, v.1, v.2)
+                    }
+                }
+            }
+        )+
+    }
+}
+
+primitive_newtypes_with_eq!(u8, u16, u32, u64, i8, i16, i32, i64,);
+primitive_newtypes!(f32, f64,);
 
 macro_rules! scalar_to_be_bytes_impl {
     ($($ty: ty,)+) => {
@@ -154,8 +209,9 @@ impl ToBeBytes for I8Triplet {
 pair_to_be_bytes_impl!(u16, u32, u64, i16, i32, i64, f32, f64,);
 triplet_to_be_bytes_impl!(u16, u32, u64, i16, i32, i64, f32, f64,);
 
-#[derive(Debug, Copy, Clone)]
-pub enum AuxDataRaw {
+/// Generic enumeration for additonal parameters only consisting of primitive data types.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum ParamsRaw {
     U8(U8),
     U8Pair(U8Pair),
     U8Triplet(U8Triplet),
@@ -178,16 +234,45 @@ pub enum AuxDataRaw {
     F32Pair(F32Pair),
     F32Triplet(F32Triplet),
     U64(U64),
+    I64(I64),
     F64(F64),
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum AuxDataHeapless {
-    Raw(AuxDataRaw),
+macro_rules! params_raw_from_newtype {
+    ($($newtype: ident,)+) => {
+        $(
+            impl From<$newtype> for ParamsRaw {
+                fn from(v: $newtype) -> Self {
+                    Self::$newtype(v)
+                }
+            }
+        )+
+    }
+}
+
+params_raw_from_newtype!(
+    U8, U8Pair, U8Triplet, U16, U16Pair, U16Triplet, U32, U32Pair, U32Triplet, I8, I8Pair,
+    I8Triplet, I16, I16Pair, I16Triplet, I32, I32Pair, I32Triplet, F32, F32Pair, F32Triplet, U64,
+    I64, F64,
+);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum EcssEnumParams {
+    U8(EcssEnumU8),
+    U16(EcssEnumU16),
+    U32(EcssEnumU32),
+    U64(EcssEnumU64),
+}
+
+/// Generic enumeration for parameters which do not rely on heap allocations.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum ParamsHeapless {
+    Raw(ParamsRaw),
+    EcssEnum(EcssEnumParams),
     Store(StoreAddr),
 }
 
-impl From<StoreAddr> for AuxDataHeapless {
+impl From<StoreAddr> for ParamsHeapless {
     fn from(x: StoreAddr) -> Self {
         Self::Store(x)
     }
@@ -196,15 +281,15 @@ impl From<StoreAddr> for AuxDataHeapless {
 macro_rules! from_conversions_for_raw {
     ($(($raw_ty: ty, $TargetPath: path),)+) => {
         $(
-            impl From<$raw_ty> for AuxDataRaw {
+            impl From<$raw_ty> for ParamsRaw {
                 fn from(val: $raw_ty) -> Self {
                     $TargetPath(val.into())
                 }
             }
 
-            impl From<$raw_ty> for AuxDataHeapless {
+            impl From<$raw_ty> for ParamsHeapless {
                 fn from(val: $raw_ty) -> Self {
-                    AuxDataHeapless::Raw(val.into())
+                    ParamsHeapless::Raw(val.into())
                 }
             }
         )+
@@ -237,40 +322,42 @@ from_conversions_for_raw!(
     (f64, Self::F64),
 );
 
+/// Generic enumeration for additional parameters, including parameters which rely on heap
+/// allocations.
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 #[derive(Debug, Clone)]
-pub enum AuxData {
-    Heapless(AuxDataHeapless),
+pub enum Params {
+    Heapless(ParamsHeapless),
     Vec(Vec<u8>),
     String(String),
 }
 
-impl From<AuxDataHeapless> for AuxData {
-    fn from(x: AuxDataHeapless) -> Self {
+impl From<ParamsHeapless> for Params {
+    fn from(x: ParamsHeapless) -> Self {
         Self::Heapless(x)
     }
 }
 
-impl From<Vec<u8>> for AuxData {
+impl From<Vec<u8>> for Params {
     fn from(val: Vec<u8>) -> Self {
         Self::Vec(val)
     }
 }
 
-impl From<&[u8]> for AuxData {
+impl From<&[u8]> for Params {
     fn from(val: &[u8]) -> Self {
         Self::Vec(val.to_vec())
     }
 }
 
-impl From<String> for AuxData {
+impl From<String> for Params {
     fn from(val: String) -> Self {
         Self::String(val)
     }
 }
 
-impl From<&str> for AuxData {
+impl From<&str> for Params {
     fn from(val: &str) -> Self {
         Self::String(val.to_string())
     }
@@ -317,5 +404,26 @@ mod tests {
         assert_eq!(i8_conv_back, -16);
         i8_conv_back = i8::from_be_bytes(raw[2..3].try_into().unwrap());
         assert_eq!(i8_conv_back, -126);
+    }
+
+    #[test]
+    fn conversion_test_string() {
+        let param: Params = "Test String".into();
+        if let Params::String(str) = param {
+            assert_eq!(str, String::from("Test String"));
+        } else {
+            panic!("Params type is not String")
+        }
+    }
+
+    #[test]
+    fn conversion_from_slice() {
+        let test_slice: [u8; 5] = [0; 5];
+        let vec_param: Params = test_slice.as_slice().into();
+        if let Params::Vec(vec) = vec_param {
+            assert_eq!(vec, test_slice.to_vec());
+        } else {
+            panic!("Params type is not a vector")
+        }
     }
 }

@@ -27,6 +27,7 @@
 //!
 //! let small_event = EventU16::new(Severity::INFO, 3, 0);
 //! ```
+use core::fmt::Debug;
 use core::hash::Hash;
 use delegate::delegate;
 use spacepackets::ecss::{EcssEnumeration, ToBeBytes};
@@ -46,33 +47,33 @@ pub enum Severity {
     HIGH = 3,
 }
 
-pub trait HasSeverity {
+pub trait HasSeverity: Debug + PartialEq + Eq + Copy + Clone {
     const SEVERITY: Severity;
 }
 
 /// Type level support struct
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct SeverityInfo {}
 impl HasSeverity for SeverityInfo {
     const SEVERITY: Severity = Severity::INFO;
 }
 
 /// Type level support struct
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct SeverityLow {}
 impl HasSeverity for SeverityLow {
     const SEVERITY: Severity = Severity::LOW;
 }
 
 /// Type level support struct
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct SeverityMedium {}
 impl HasSeverity for SeverityMedium {
     const SEVERITY: Severity = Severity::MEDIUM;
 }
 
 /// Type level support struct
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct SeverityHigh {}
 impl HasSeverity for SeverityHigh {
     const SEVERITY: Severity = Severity::HIGH;
