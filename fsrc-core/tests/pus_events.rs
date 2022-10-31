@@ -30,9 +30,11 @@ fn main() {
     let mut event_man = PusEventTmManager::new(reporter, Box::new(backend));
     let (event_tx, event_rx) = channel();
     let mut sender = EventTmSender { sender: event_tx };
-    event_man
+    let event_sent = event_man
         .generate_pus_event_tm(&mut sender, &EMPTY_STAMP, INFO_EVENT, None)
         .expect("Sending info event failed");
+
+    assert!(event_sent);
     let packet = event_rx.recv().expect("Receiving event TM failed");
     println!("{:?}", packet);
     //let event_man;
