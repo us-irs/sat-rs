@@ -312,7 +312,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<StateNone>,
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<VerificationToken<StateAccepted>, VerificationErrorWithToken<E, StateNone>> {
         let tm = self
@@ -339,7 +339,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<StateNone>,
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, StateNone>> {
         let tm = self
@@ -365,7 +365,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<StateAccepted>,
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<VerificationToken<StateStarted>, VerificationErrorWithToken<E, StateAccepted>> {
         let tm = self
@@ -395,7 +395,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<StateAccepted>,
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, StateAccepted>> {
         let tm = self
@@ -421,7 +421,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: &VerificationToken<StateStarted>,
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         time_stamp: &[u8],
         step: impl EcssEnumeration,
     ) -> Result<(), EcssTmError<E>> {
@@ -445,7 +445,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<StateStarted>,
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         params: FailParamsWithStep,
     ) -> Result<(), VerificationErrorWithToken<E, StateStarted>> {
         let tm = self
@@ -472,7 +472,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<StateStarted>,
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<(), VerificationErrorWithToken<E, StateStarted>> {
         let tm = self
@@ -499,7 +499,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<StateStarted>,
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, StateStarted>> {
         let tm = self
@@ -685,7 +685,7 @@ mod allocmod {
         pub fn acceptance_success<E>(
             &mut self,
             token: VerificationToken<StateNone>,
-            sender: &mut (impl EcssTmSender<E> + ?Sized),
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             time_stamp: &[u8],
         ) -> Result<VerificationToken<StateAccepted>, VerificationErrorWithToken<E, StateNone>>
         {
@@ -701,7 +701,7 @@ mod allocmod {
         pub fn acceptance_failure<E>(
             &mut self,
             token: VerificationToken<StateNone>,
-            sender: &mut (impl EcssTmSender<E> + ?Sized),
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             params: FailParams,
         ) -> Result<(), VerificationErrorWithToken<E, StateNone>> {
             self.reporter.acceptance_failure(
@@ -718,7 +718,7 @@ mod allocmod {
         pub fn start_success<E>(
             &mut self,
             token: VerificationToken<StateAccepted>,
-            sender: &mut (impl EcssTmSender<E> + ?Sized),
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             time_stamp: &[u8],
         ) -> Result<VerificationToken<StateStarted>, VerificationErrorWithToken<E, StateAccepted>>
         {
@@ -737,7 +737,7 @@ mod allocmod {
         pub fn start_failure<E>(
             &mut self,
             token: VerificationToken<StateAccepted>,
-            sender: &mut (impl EcssTmSender<E> + ?Sized),
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             params: FailParams,
         ) -> Result<(), VerificationErrorWithToken<E, StateAccepted>> {
             self.reporter
@@ -750,7 +750,7 @@ mod allocmod {
         pub fn step_success<E>(
             &mut self,
             token: &VerificationToken<StateStarted>,
-            sender: &mut (impl EcssTmSender<E> + ?Sized),
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             time_stamp: &[u8],
             step: impl EcssEnumeration,
         ) -> Result<(), EcssTmError<E>> {
@@ -770,7 +770,7 @@ mod allocmod {
         pub fn step_failure<E>(
             &mut self,
             token: VerificationToken<StateStarted>,
-            sender: &mut (impl EcssTmSender<E> + ?Sized),
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             params: FailParamsWithStep,
         ) -> Result<(), VerificationErrorWithToken<E, StateStarted>> {
             self.reporter
@@ -784,7 +784,7 @@ mod allocmod {
         pub fn completion_success<E>(
             &mut self,
             token: VerificationToken<StateStarted>,
-            sender: &mut (impl EcssTmSender<E> + ?Sized),
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             time_stamp: &[u8],
         ) -> Result<(), VerificationErrorWithToken<E, StateStarted>> {
             self.reporter.completion_success(
@@ -802,7 +802,7 @@ mod allocmod {
         pub fn completion_failure<E>(
             &mut self,
             token: VerificationToken<StateStarted>,
-            sender: &mut (impl EcssTmSender<E> + ?Sized),
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             params: FailParams,
         ) -> Result<(), VerificationErrorWithToken<E, StateStarted>> {
             self.reporter.completion_failure(
@@ -818,18 +818,18 @@ mod allocmod {
     /// API as [VerificationReporter] but without the explicit sender arguments.
     pub struct VerificationReporterWithSender<E> {
         pub reporter: VerificationReporter,
-        pub sender: Box<dyn EcssTmSender<E>>,
+        pub sender: Box<dyn EcssTmSender<Error = E>>,
     }
 
     impl<E: 'static> VerificationReporterWithSender<E> {
-        pub fn new(cfg: VerificationReporterCfg, sender: Box<dyn EcssTmSender<E>>) -> Self {
+        pub fn new(cfg: VerificationReporterCfg, sender: Box<dyn EcssTmSender<Error = E>>) -> Self {
             let reporter = VerificationReporter::new(cfg);
             Self::new_from_reporter(reporter, sender)
         }
 
         pub fn new_from_reporter(
             reporter: VerificationReporter,
-            sender: Box<dyn EcssTmSender<E>>,
+            sender: Box<dyn EcssTmSender<Error = E>>,
         ) -> Self {
             Self { reporter, sender }
         }
@@ -997,7 +997,9 @@ mod stdmod {
     }
 
     //noinspection RsTraitImplementation
-    impl EcssTmSender<StdVerifSenderError> for MpscVerifSender {
+    impl EcssTmSender for MpscVerifSender {
+        type Error = StdVerifSenderError;
+
         delegate!(
             to self.base {
                 fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<StdVerifSenderError>>;
@@ -1028,7 +1030,9 @@ mod stdmod {
     }
 
     //noinspection RsTraitImplementation
-    impl EcssTmSender<StdVerifSenderError> for CrossbeamVerifSender {
+    impl EcssTmSender for CrossbeamVerifSender {
+        type Error = StdVerifSenderError;
+
         delegate!(
             to self.base {
                 fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<StdVerifSenderError>>;
@@ -1039,8 +1043,9 @@ mod stdmod {
     unsafe impl Sync for CrossbeamVerifSender {}
     unsafe impl Send for CrossbeamVerifSender {}
 
-    impl<S: SendBackend + 'static> EcssTmSender<StdVerifSenderError> for StdSenderBase<S> {
-        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<StdVerifSenderError>> {
+    impl<S: SendBackend + 'static> EcssTmSender for StdSenderBase<S> {
+        type Error = StdVerifSenderError;
+        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>> {
             let operation = |mut mg: RwLockWriteGuard<ShareablePoolProvider>| {
                 let (addr, buf) = mg.free_element(tm.len_packed())?;
                 tm.write_to_bytes(buf).map_err(EcssTmError::PusError)?;
@@ -1096,8 +1101,9 @@ mod tests {
         pub service_queue: VecDeque<TmInfo>,
     }
 
-    impl EcssTmSender<()> for TestSender {
-        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<()>> {
+    impl EcssTmSender for TestSender {
+        type Error = ();
+        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>> {
             assert_eq!(PusPacket::service(&tm), 1);
             assert!(tm.source_data().is_some());
             let mut time_stamp = [0; 7];

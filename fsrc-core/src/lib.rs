@@ -10,9 +10,9 @@
 #![no_std]
 #[cfg(feature = "alloc")]
 extern crate alloc;
+extern crate downcast_rs;
 #[cfg(any(feature = "std", test))]
 extern crate std;
-extern crate downcast_rs;
 
 pub mod error;
 #[cfg(feature = "alloc")]

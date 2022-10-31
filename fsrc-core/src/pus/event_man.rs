@@ -1,9 +1,10 @@
-use crate::events::{EventU16TypedSev, EventU32TypedSev, GenericEvent, HasSeverity, Severity};
+use crate::events::{EventU32, EventU32TypedSev, GenericEvent, HasSeverity, Severity};
 use alloc::boxed::Box;
 use core::hash::Hash;
 use hashbrown::HashSet;
 
-use crate::pus::event::EventReporter;
+#[cfg(feature = "alloc")]
+pub use crate::pus::event::EventReporter;
 use crate::pus::{EcssTmError, EcssTmSender};
 #[cfg(feature = "heapless")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "heapless")))]
@@ -33,9 +34,16 @@ pub trait PusEventMgmtBackendProvider<Provider: GenericEvent> {
 ///
 /// This provider is a good option for host systems or larger embedded systems where
 /// the expected occasional memory allocation performed by the [HashSet] is not an issue.
-#[derive(Default)]
-pub struct DefaultPusMgmtBackendProvider<Provider: GenericEvent> {
-    disabled: HashSet<Provider>,
+pub struct DefaultPusMgmtBackendProvider<Event: GenericEvent = EventU32> {
+    disabled: HashSet<Event>,
+}
+
+impl<Event: GenericEvent> Default for DefaultPusMgmtBackendProvider<Event> {
+    fn default() -> Self {
+        Self {
+            disabled: HashSet::default(),
+        }
+    }
 }
 
 impl<Provider: GenericEvent + PartialEq + Eq + Hash + Copy + Clone>
@@ -91,12 +99,33 @@ pub mod heapless_mod {
     }
 }
 
-pub struct PusEventManager<BackendError, Provider: GenericEvent> {
+#[derive(Debug)]
+pub enum EventManError<SenderE> {
+    EcssTmError(EcssTmError<SenderE>),
+    SeverityMissmatch(Severity, Severity),
+}
+
+impl<SenderE> From<EcssTmError<SenderE>> for EventManError<SenderE> {
+    fn from(v: EcssTmError<SenderE>) -> Self {
+        Self::EcssTmError(v)
+    }
+}
+
+pub struct PusEventTmManager<BackendError, Provider: GenericEvent> {
     reporter: EventReporter,
     backend: Box<dyn PusEventMgmtBackendProvider<Provider, Error = BackendError>>,
 }
 
-impl<BackendError, Event: GenericEvent> PusEventManager<BackendError, Event> {
+impl<BackendError, Provider: GenericEvent> PusEventTmManager<BackendError, Provider> {
+    pub fn new(
+        reporter: EventReporter,
+        backend: Box<dyn PusEventMgmtBackendProvider<Provider, Error = BackendError>>,
+    ) -> Self {
+        Self { reporter, backend }
+    }
+}
+
+impl<BackendError, Event: GenericEvent> PusEventTmManager<BackendError, Event> {
     pub fn enable_tm_for_event(&mut self, event: &Event) -> Result<bool, BackendError> {
         self.backend.enable_event_reporting(event)
     }
@@ -108,59 +137,56 @@ impl<BackendError, Event: GenericEvent> PusEventManager<BackendError, Event> {
     pub fn generate_pus_event_tm_generic<E>(
         &mut self,
         severity: Severity,
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         time_stamp: &[u8],
         event: Event,
         aux_data: Option<&[u8]>,
-    ) -> Result<bool, EcssTmError<E>> {
+    ) -> Result<bool, EventManError<E>> {
         if !self.backend.event_enabled(&event) {
             return Ok(false);
+        }
+        if event.severity() != severity {
+            return Err(EventManError::SeverityMissmatch(severity, event.severity()));
         }
         match severity {
             Severity::INFO => self
                 .reporter
                 .event_info(sender, time_stamp, event, aux_data)
-                .map(|_| true),
+                .map(|_| true)
+                .map_err(|e| e.into()),
             Severity::LOW => self
                 .reporter
                 .event_low_severity(sender, time_stamp, event, aux_data)
-                .map(|_| true),
+                .map(|_| true)
+                .map_err(|e| e.into()),
             Severity::MEDIUM => self
                 .reporter
                 .event_medium_severity(sender, time_stamp, event, aux_data)
-                .map(|_| true),
+                .map(|_| true)
+                .map_err(|e| e.into()),
             Severity::HIGH => self
                 .reporter
                 .event_high_severity(sender, time_stamp, event, aux_data)
-                .map(|_| true),
+                .map(|_| true)
+                .map_err(|e| e.into()),
         }
     }
 }
 
-impl<BackendError, SEVERITY: HasSeverity>
-    PusEventManager<BackendError, EventU32TypedSev<SEVERITY>>
-{
-    pub fn generate_pus_event_tm<E>(
+impl<BackendError> PusEventTmManager<BackendError, EventU32> {
+    pub fn generate_pus_event_tm<E, Severity: HasSeverity>(
         &mut self,
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         time_stamp: &[u8],
-        event: EventU32TypedSev<SEVERITY>,
+        event: EventU32TypedSev<Severity>,
         aux_data: Option<&[u8]>,
-    ) -> Result<bool, EcssTmError<E>> {
-        self.generate_pus_event_tm_generic(SEVERITY::SEVERITY, sender, time_stamp, event, aux_data)
-    }
-}
-
-impl<BackendError, SEVERITY: HasSeverity>
-    PusEventManager<BackendError, EventU16TypedSev<SEVERITY>>
-{
-    pub fn generate_pus_event_tm<E>(
-        &mut self,
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
-        time_stamp: &[u8],
-        event: EventU16TypedSev<SEVERITY>,
-        aux_data: Option<&[u8]>,
-    ) -> Result<bool, EcssTmError<E>> {
-        self.generate_pus_event_tm_generic(SEVERITY::SEVERITY, sender, time_stamp, event, aux_data)
+    ) -> Result<bool, EventManError<E>> {
+        self.generate_pus_event_tm_generic(
+            Severity::SEVERITY,
+            sender,
+            time_stamp,
+            event.into(),
+            aux_data,
+        )
     }
 }

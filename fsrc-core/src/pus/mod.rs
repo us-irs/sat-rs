@@ -26,6 +26,12 @@ pub enum EcssTmError<E> {
     PusError(PusError),
 }
 
+impl<E> From<PusError> for EcssTmError<E> {
+    fn from(e: PusError) -> Self {
+        EcssTmError::PusError(e)
+    }
+}
+
 impl<E> From<ByteConversionError> for EcssTmError<E> {
     fn from(e: ByteConversionError) -> Self {
         EcssTmError::ByteConversionError(e)
@@ -37,11 +43,13 @@ impl<E> From<ByteConversionError> for EcssTmError<E> {
 /// This sender object is responsible for sending telemetry to a TM sink. The [Downcast] trait
 /// is implemented to allow passing the sender as a boxed trait object and still retrieve the
 /// concrete type at a later point.
-pub trait EcssTmSender<E>: Downcast + Send {
-    fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<E>>;
+pub trait EcssTmSender: Downcast + Send {
+    type Error;
+
+    fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>>;
 }
 
-impl_downcast!(EcssTmSender<E>);
+impl_downcast!(EcssTmSender assoc Error);
 
 pub(crate) fn source_buffer_large_enough<E>(cap: usize, len: usize) -> Result<(), EcssTmError<E>> {
     if len > cap {
