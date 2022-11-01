@@ -1131,7 +1131,8 @@ mod tests {
     #[derive(Default)]
     struct FallibleSender {}
 
-    impl EcssTmSender<DummyError> for FallibleSender {
+    impl EcssTmSender for FallibleSender {
+        type Error = DummyError;
         fn send_tm(&mut self, _: PusTm) -> Result<(), EcssTmError<DummyError>> {
             Err(EcssTmError::SendError(DummyError {}))
         }

@@ -285,6 +285,18 @@ impl<SEVERITY: HasSeverity> From<EventU32TypedSev<SEVERITY>> for EventU32 {
     }
 }
 
+impl<Severity: HasSeverity> AsRef<EventU32> for EventU32TypedSev<Severity> {
+    fn as_ref(&self) -> &EventU32 {
+        &self.event
+    }
+}
+
+impl<Severity: HasSeverity> AsMut<EventU32> for EventU32TypedSev<Severity> {
+    fn as_mut(&mut self) -> &mut EventU32 {
+        &mut self.event
+    }
+}
+
 impl_event_provider!(EventU32, EventU32TypedSev, u32, u16, u16);
 
 impl EventU32 {
@@ -421,6 +433,18 @@ pub struct EventU16 {
 pub struct EventU16TypedSev<SEVERITY> {
     event: EventU16,
     phantom: PhantomData<SEVERITY>,
+}
+
+impl<Severity: HasSeverity> AsRef<EventU16> for EventU16TypedSev<Severity> {
+    fn as_ref(&self) -> &EventU16 {
+        &self.event
+    }
+}
+
+impl<Severity: HasSeverity> AsMut<EventU16> for EventU16TypedSev<Severity> {
+    fn as_mut(&mut self) -> &mut EventU16 {
+        &mut self.event
+    }
 }
 
 impl EventU16 {
