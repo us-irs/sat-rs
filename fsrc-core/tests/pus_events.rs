@@ -42,6 +42,7 @@ fn test_threaded_usage() {
     // PUS + Generic event manager thread
     let jh0 = thread::spawn(move || {
         let mut sender = EventTmSender { sender: event_tx };
+        let mut event_cnt = 0;
         loop {
             let res = event_man.try_event_handling();
             assert!(res.is_ok());
@@ -61,9 +62,12 @@ fn test_threaded_usage() {
                         event,
                         None,
                     );
+                    event_cnt += 1;
                     assert!(res.is_ok());
                     assert!(res.unwrap());
-                    break;
+                    if event_cnt == 2 {
+                        break;
+                    }
                 }
                 Err(e) => {
                     if let TryRecvError::Disconnected = e {
@@ -82,7 +86,10 @@ fn test_threaded_usage() {
         loop {
             match event_rx.try_recv() {
                 // Event TM received successfully
-                Ok(_) => break,
+                Ok(event) => {
+                    println!("{:x?}", event);
+                    break;
+                }
                 Err(e) => {
                     if let TryRecvError::Disconnected = e {
                         panic!("Event sender disconnected!")
@@ -99,7 +106,10 @@ fn test_threaded_usage() {
         loop {
             match event_rx.try_recv() {
                 // Event TM received successfully
-                Ok(_) => break,
+                Ok(event) => {
+                    println!("{:x?}", event);
+                    break;
+                }
                 Err(e) => {
                     if let TryRecvError::Disconnected = e {
                         panic!("Event sender disconnected!")
