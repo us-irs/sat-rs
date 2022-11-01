@@ -35,7 +35,7 @@ use alloc::vec::Vec;
 use hashbrown::HashMap;
 
 #[cfg(feature = "std")]
-pub use stdmod::MpscEventReceiver;
+pub use stdmod::*;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]
 enum ListenerType {
@@ -96,6 +96,14 @@ pub struct EventManager<SendProviderError, Event: GenericEvent = EventU32, AuxDa
     event_receiver: Box<dyn EventReceiver<Event, AuxDataProvider>>,
 }
 
+/// Safety: It is safe to implement [Send] because all fields in the [EventManager] are [Send]
+/// as well
+#[cfg(feature = "std")]
+unsafe impl<E, Event: GenericEvent + Send, AuxDataProvider: Send> Send
+    for EventManager<E, Event, AuxDataProvider>
+{
+}
+
 pub enum HandlerResult<Provider: GenericEvent, AuxDataProvider> {
     Empty,
     Handled(u32, Provider, Option<AuxDataProvider>),
@@ -128,8 +136,11 @@ impl<E, Event: GenericEvent + Copy> EventManager<E, Event> {
     ///
     /// For example, this can be useful for a handler component which sends every event as
     /// a telemetry packet.
-    pub fn subscribe_all(&mut self, dest: impl SendEventProvider<Event, Error = E> + 'static) {
-        self.update_listeners(ListenerType::All, dest);
+    pub fn subscribe_all(
+        &mut self,
+        send_provider: impl SendEventProvider<Event, Error = E> + 'static,
+    ) {
+        self.update_listeners(ListenerType::All, send_provider);
     }
 
     /// Helper function which removes single subscriptions for which a group subscription already
@@ -226,23 +237,24 @@ impl<E, Event: GenericEvent + Copy, AuxDataProvider: Clone>
 
 #[cfg(feature = "std")]
 pub mod stdmod {
+    use super::*;
     use crate::event_man::{EventReceiver, EventWithAuxData};
     use crate::events::{EventU16, EventU32, GenericEvent};
     use crate::util::Params;
-    use std::sync::mpsc::Receiver;
+    use std::sync::mpsc::{Receiver, SendError, Sender};
 
-    pub struct MpscEventReceiver<Event: GenericEvent = EventU32> {
+    pub struct MpscEventReceiver<Event: GenericEvent + Send = EventU32> {
         mpsc_receiver: Receiver<(Event, Option<Params>)>,
     }
 
-    impl<Event: GenericEvent> MpscEventReceiver<Event> {
+    impl<Event: GenericEvent + Send> MpscEventReceiver<Event> {
         pub fn new(receiver: Receiver<(Event, Option<Params>)>) -> Self {
             Self {
                 mpsc_receiver: receiver,
             }
         }
     }
-    impl<Event: GenericEvent> EventReceiver<Event> for MpscEventReceiver<Event> {
+    impl<Event: GenericEvent + Send> EventReceiver<Event> for MpscEventReceiver<Event> {
         fn receive(&mut self) -> Option<EventWithAuxData<Event>> {
             if let Ok(event_and_data) = self.mpsc_receiver.try_recv() {
                 return Some(event_and_data);
@@ -253,6 +265,35 @@ pub mod stdmod {
 
     pub type MpscEventU32Receiver = MpscEventReceiver<EventU32>;
     pub type MpscEventU16Receiver = MpscEventReceiver<EventU16>;
+
+    #[derive(Clone)]
+    pub struct MpscEventSendProvider<Event: GenericEvent + Send> {
+        id: u32,
+        sender: Sender<(Event, Option<Params>)>,
+    }
+
+    /// Safety: Send is safe to implement because both the ID and the MPSC sender are Send
+    //unsafe impl<Event: GenericEvent> Send for MpscEventSendProvider<Event> {}
+
+    impl<Event: GenericEvent + Send> MpscEventSendProvider<Event> {
+        pub fn new(id: u32, sender: Sender<(Event, Option<Params>)>) -> Self {
+            Self { id, sender }
+        }
+    }
+
+    impl<Event: GenericEvent + Send> SendEventProvider<Event> for MpscEventSendProvider<Event> {
+        type Error = SendError<(Event, Option<Params>)>;
+
+        fn id(&self) -> u32 {
+            self.id
+        }
+        fn send(&mut self, event: Event, aux_data: Option<Params>) -> Result<(), Self::Error> {
+            self.sender.send((event, aux_data))
+        }
+    }
+
+    pub type MpscEventU32SendProvider = MpscEventSendProvider<EventU32>;
+    pub type MpscEventU16SendProvider = MpscEventSendProvider<EventU16>;
 }
 
 #[cfg(test)]

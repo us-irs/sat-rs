@@ -38,6 +38,9 @@ pub struct DefaultPusMgmtBackendProvider<Event: GenericEvent = EventU32> {
     disabled: HashSet<Event>,
 }
 
+/// Safety: All contained field are [Send] as well
+unsafe impl<Event: GenericEvent + Send> Send for DefaultPusMgmtBackendProvider<Event> {}
+
 impl<Event: GenericEvent> Default for DefaultPusMgmtBackendProvider<Event> {
     fn default() -> Self {
         Self {
@@ -73,13 +76,19 @@ pub mod heapless_mod {
     // TODO: After a new version of heapless is released which uses hash32 version 0.3, try using
     //       regular Event type again.
     #[derive(Default)]
-    pub struct HeaplessPusMgmtBckendProvider<const N: usize, Provider: GenericEvent> {
+    pub struct HeaplessPusMgmtBackendProvider<const N: usize, Provider: GenericEvent> {
         disabled: heapless::FnvIndexSet<LargestEventRaw, N>,
         phantom: PhantomData<Provider>,
     }
 
+    /// Safety: All contained field are [Send] as well
+    unsafe impl<const N: usize, Event: GenericEvent + Send> Send
+        for HeaplessPusMgmtBackendProvider<N, Event>
+    {
+    }
+
     impl<const N: usize, Provider: GenericEvent> PusEventMgmtBackendProvider<Provider>
-        for HeaplessPusMgmtBckendProvider<N, Provider>
+        for HeaplessPusMgmtBackendProvider<N, Provider>
     {
         type Error = ();
 
@@ -116,6 +125,9 @@ pub struct PusEventTmManager<BackendError, Provider: GenericEvent> {
     backend: Box<dyn PusEventMgmtBackendProvider<Provider, Error = BackendError>>,
 }
 
+/// Safety: All contained fields are send as well.
+unsafe impl<E: Send, Event: GenericEvent + Send> Send for PusEventTmManager<E, Event> {}
+
 impl<BackendError, Provider: GenericEvent> PusEventTmManager<BackendError, Provider> {
     pub fn new(
         reporter: EventReporter,
@@ -136,7 +148,6 @@ impl<BackendError, Event: GenericEvent> PusEventTmManager<BackendError, Event> {
 
     pub fn generate_pus_event_tm_generic<E>(
         &mut self,
-        severity: Severity,
         sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         time_stamp: &[u8],
         event: Event,
@@ -145,10 +156,7 @@ impl<BackendError, Event: GenericEvent> PusEventTmManager<BackendError, Event> {
         if !self.backend.event_enabled(&event) {
             return Ok(false);
         }
-        if event.severity() != severity {
-            return Err(EventManError::SeverityMissmatch(severity, event.severity()));
-        }
-        match severity {
+        match event.severity() {
             Severity::INFO => self
                 .reporter
                 .event_info(sender, time_stamp, event, aux_data)
@@ -195,13 +203,7 @@ impl<BackendError> PusEventTmManager<BackendError, EventU32> {
         event: EventU32TypedSev<Severity>,
         aux_data: Option<&[u8]>,
     ) -> Result<bool, EventManError<E>> {
-        self.generate_pus_event_tm_generic(
-            Severity::SEVERITY,
-            sender,
-            time_stamp,
-            event.into(),
-            aux_data,
-        )
+        self.generate_pus_event_tm_generic(sender, time_stamp, event.into(), aux_data)
     }
 }
 
@@ -261,13 +263,7 @@ mod tests {
         assert!(res.is_ok());
         assert!(res.unwrap());
         let mut event_sent = event_man
-            .generate_pus_event_tm_generic(
-                Severity::LOW,
-                &mut sender,
-                &EMPTY_STAMP,
-                LOW_SEV_EVENT,
-                None,
-            )
+            .generate_pus_event_tm_generic(&mut sender, &EMPTY_STAMP, LOW_SEV_EVENT, None)
             .expect("Sending low severity event failed");
         assert!(!event_sent);
         let res = event_rx.try_recv();
