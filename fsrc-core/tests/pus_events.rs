@@ -2,7 +2,7 @@ use fsrc_core::event_man::{EventManager, MpscEventReceiver, MpscEventU32SendProv
 use fsrc_core::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
 use fsrc_core::pus::event_man::{DefaultPusMgmtBackendProvider, EventReporter, PusEventTmManager};
 use fsrc_core::pus::{EcssTmError, EcssTmSender};
-use fsrc_core::util::Params;
+use fsrc_core::util::{Params, ParamsHeapless, ParamsRaw};
 use spacepackets::tm::PusTm;
 use std::sync::mpsc::{channel, SendError, TryRecvError};
 use std::thread;
@@ -43,6 +43,7 @@ fn test_threaded_usage() {
     let jh0 = thread::spawn(move || {
         let mut sender = EventTmSender { sender: event_tx };
         let mut event_cnt = 0;
+        let _params_array: [u8; 256] = [0; 256];
         loop {
             let res = event_man.try_event_handling();
             assert!(res.is_ok());
@@ -51,7 +52,36 @@ fn test_threaded_usage() {
                     // TODO: Convert auxiliary data into raw byte format
                     if let Some(aux_data) = aux_data {
                         match aux_data {
-                            Params::Heapless(_) => {}
+                            Params::Heapless(heapless) => match heapless {
+                                ParamsHeapless::Raw(raw) => match raw {
+                                    ParamsRaw::U8(_) => {}
+                                    ParamsRaw::U8Pair(_) => {}
+                                    ParamsRaw::U8Triplet(_) => {}
+                                    ParamsRaw::I8(_) => {}
+                                    ParamsRaw::I8Pair(_) => {}
+                                    ParamsRaw::I8Triplet(_) => {}
+                                    ParamsRaw::U16(_) => {}
+                                    ParamsRaw::U16Pair(_) => {}
+                                    ParamsRaw::U16Triplet(_) => {}
+                                    ParamsRaw::I16(_) => {}
+                                    ParamsRaw::I16Pair(_) => {}
+                                    ParamsRaw::I16Triplet(_) => {}
+                                    ParamsRaw::U32(_) => {}
+                                    ParamsRaw::U32Pair(_) => {}
+                                    ParamsRaw::U32Triplet(_) => {}
+                                    ParamsRaw::I32(_) => {}
+                                    ParamsRaw::I32Pair(_) => {}
+                                    ParamsRaw::I32Triplet(_) => {}
+                                    ParamsRaw::F32(_) => {}
+                                    ParamsRaw::F32Pair(_) => {}
+                                    ParamsRaw::F32Triplet(_) => {}
+                                    ParamsRaw::U64(_) => {}
+                                    ParamsRaw::I64(_) => {}
+                                    ParamsRaw::F64(_) => {}
+                                },
+                                ParamsHeapless::EcssEnum(_) => {}
+                                ParamsHeapless::Store(_) => {}
+                            },
                             Params::Vec(_) => {}
                             Params::String(_) => {}
                         }

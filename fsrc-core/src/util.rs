@@ -33,6 +33,36 @@ use core::mem::size_of;
 use paste::paste;
 pub use spacepackets::ecss::ToBeBytes;
 use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU64, EcssEnumU8};
+use spacepackets::ByteConversionError;
+use spacepackets::SizeMissmatch;
+
+pub trait WritableAsBeBytes {
+    fn raw_len(&self) -> usize;
+    fn write_be(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError>;
+}
+
+macro_rules! param_to_be_bytes_impl {
+    ($Newtype: ident) => {
+        impl WritableAsBeBytes for $Newtype {
+            #[inline]
+            fn raw_len(&self) -> usize {
+                size_of::<<Self as ToBeBytes>::ByteArray>()
+            }
+
+            fn write_be(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
+                let raw_len = self.raw_len();
+                if buf.len() < raw_len {
+                    return Err(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
+                        found: buf.len(),
+                        expected: raw_len,
+                    }));
+                }
+                buf[0..raw_len].copy_from_slice(&self.to_be_bytes());
+                Ok(raw_len)
+            }
+        }
+    };
+}
 
 macro_rules! primitive_newtypes_with_eq {
     ($($ty: ty,)+) => {
@@ -44,6 +74,10 @@ macro_rules! primitive_newtypes_with_eq {
                 pub struct [<$ty:upper Pair>](pub $ty, pub $ty);
                 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
                 pub struct [<$ty:upper Triplet>](pub $ty, pub $ty, pub $ty);
+
+                param_to_be_bytes_impl!([<$ty:upper>]);
+                param_to_be_bytes_impl!([<$ty:upper Pair>]);
+                param_to_be_bytes_impl!([<$ty:upper Triplet>]);
 
                 impl From<$ty> for [<$ty:upper>] {
                     fn from(v: $ty) -> Self {
@@ -75,6 +109,10 @@ macro_rules! primitive_newtypes {
                 pub struct [<$ty:upper Pair>](pub $ty, pub $ty);
                 #[derive(Debug, Copy, Clone, PartialEq)]
                 pub struct [<$ty:upper Triplet>](pub $ty, pub $ty, pub $ty);
+
+                param_to_be_bytes_impl!([<$ty:upper>]);
+                param_to_be_bytes_impl!([<$ty:upper Pair>]);
+                param_to_be_bytes_impl!([<$ty:upper Triplet>]);
 
                 impl From<$ty> for [<$ty:upper>] {
                     fn from(v: $ty) -> Self {
@@ -237,6 +275,65 @@ pub enum ParamsRaw {
     F64(F64),
 }
 
+impl WritableAsBeBytes for ParamsRaw {
+    fn raw_len(&self) -> usize {
+        match self {
+            ParamsRaw::U8(v) => v.raw_len(),
+            ParamsRaw::U8Pair(v) => v.raw_len(),
+            ParamsRaw::U8Triplet(v) => v.raw_len(),
+            ParamsRaw::I8(v) => v.raw_len(),
+            ParamsRaw::I8Pair(v) => v.raw_len(),
+            ParamsRaw::I8Triplet(v) => v.raw_len(),
+            ParamsRaw::U16(v) => v.raw_len(),
+            ParamsRaw::U16Pair(v) => v.raw_len(),
+            ParamsRaw::U16Triplet(v) => v.raw_len(),
+            ParamsRaw::I16(v) => v.raw_len(),
+            ParamsRaw::I16Pair(v) => v.raw_len(),
+            ParamsRaw::I16Triplet(v) => v.raw_len(),
+            ParamsRaw::U32(v) => v.raw_len(),
+            ParamsRaw::U32Pair(v) => v.raw_len(),
+            ParamsRaw::U32Triplet(v) => v.raw_len(),
+            ParamsRaw::I32(v) => v.raw_len(),
+            ParamsRaw::I32Pair(v) => v.raw_len(),
+            ParamsRaw::I32Triplet(v) => v.raw_len(),
+            ParamsRaw::F32(v) => v.raw_len(),
+            ParamsRaw::F32Pair(v) => v.raw_len(),
+            ParamsRaw::F32Triplet(v) => v.raw_len(),
+            ParamsRaw::U64(v) => v.raw_len(),
+            ParamsRaw::I64(v) => v.raw_len(),
+            ParamsRaw::F64(v) => v.raw_len(),
+        }
+    }
+
+    fn write_be(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
+        match self {
+            ParamsRaw::U8(v) => v.write_be(buf),
+            ParamsRaw::U8Pair(v) => v.write_be(buf),
+            ParamsRaw::U8Triplet(v) => v.write_be(buf),
+            ParamsRaw::I8(v) => v.write_be(buf),
+            ParamsRaw::I8Pair(v) => v.write_be(buf),
+            ParamsRaw::I8Triplet(v) => v.write_be(buf),
+            ParamsRaw::U16(v) => v.write_be(buf),
+            ParamsRaw::U16Pair(v) => v.write_be(buf),
+            ParamsRaw::U16Triplet(v) => v.write_be(buf),
+            ParamsRaw::I16(v) => v.write_be(buf),
+            ParamsRaw::I16Pair(v) => v.write_be(buf),
+            ParamsRaw::I16Triplet(v) => v.write_be(buf),
+            ParamsRaw::U32(v) => v.write_be(buf),
+            ParamsRaw::U32Pair(v) => v.write_be(buf),
+            ParamsRaw::U32Triplet(v) => v.write_be(buf),
+            ParamsRaw::I32(v) => v.write_be(buf),
+            ParamsRaw::I32Pair(v) => v.write_be(buf),
+            ParamsRaw::I32Triplet(v) => v.write_be(buf),
+            ParamsRaw::F32(v) => v.write_be(buf),
+            ParamsRaw::F32Pair(v) => v.write_be(buf),
+            ParamsRaw::F32Triplet(v) => v.write_be(buf),
+            ParamsRaw::U64(v) => v.write_be(buf),
+            ParamsRaw::I64(v) => v.write_be(buf),
+            ParamsRaw::F64(v) => v.write_be(buf),
+        }
+    }
+}
 macro_rules! params_raw_from_newtype {
     ($($newtype: ident,)+) => {
         $(
