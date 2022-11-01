@@ -411,7 +411,7 @@ impl EcssEnumeration for EventU32 {
         32
     }
 
-    fn write_to_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError> {
+    fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError> {
         self.base.write_to_bytes(self.raw(), buf, self.byte_width())
     }
 }
@@ -420,7 +420,7 @@ impl EcssEnumeration for EventU32 {
 impl<SEVERITY: HasSeverity> EcssEnumeration for EventU32TypedSev<SEVERITY> {
     delegate!(to self.event {
         fn pfc(&self) -> u8;
-        fn write_to_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError>;
+        fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError>;
     });
 }
 
@@ -542,11 +542,12 @@ impl<SEVERITY: HasSeverity> EventU16TypedSev<SEVERITY> {
 impl_event_provider!(EventU16, EventU16TypedSev, u16, u8, u8);
 
 impl EcssEnumeration for EventU16 {
+    #[inline]
     fn pfc(&self) -> u8 {
         16
     }
 
-    fn write_to_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError> {
+    fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError> {
         self.base.write_to_bytes(self.raw(), buf, self.byte_width())
     }
 }
@@ -555,7 +556,7 @@ impl EcssEnumeration for EventU16 {
 impl<SEVERITY: HasSeverity> EcssEnumeration for EventU16TypedSev<SEVERITY> {
     delegate!(to self.event {
         fn pfc(&self) -> u8;
-        fn write_to_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError>;
+        fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError>;
     });
 }
 
@@ -573,6 +574,34 @@ try_from_impls!(SeverityInfo, Severity::INFO, u16, EventU16TypedSev);
 try_from_impls!(SeverityLow, Severity::LOW, u16, EventU16TypedSev);
 try_from_impls!(SeverityMedium, Severity::MEDIUM, u16, EventU16TypedSev);
 try_from_impls!(SeverityHigh, Severity::HIGH, u16, EventU16TypedSev);
+
+impl<Severity: HasSeverity> PartialEq<EventU32> for EventU32TypedSev<Severity> {
+    #[inline]
+    fn eq(&self, other: &EventU32) -> bool {
+        self.raw() == other.raw()
+    }
+}
+
+impl<Severity: HasSeverity> PartialEq<EventU32TypedSev<Severity>> for EventU32 {
+    #[inline]
+    fn eq(&self, other: &EventU32TypedSev<Severity>) -> bool {
+        self.raw() == other.raw()
+    }
+}
+
+impl<Severity: HasSeverity> PartialEq<EventU16> for EventU16TypedSev<Severity> {
+    #[inline]
+    fn eq(&self, other: &EventU16) -> bool {
+        self.raw() == other.raw()
+    }
+}
+
+impl<Severity: HasSeverity> PartialEq<EventU16TypedSev<Severity>> for EventU16 {
+    #[inline]
+    fn eq(&self, other: &EventU16TypedSev<Severity>) -> bool {
+        self.raw() == other.raw()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -713,7 +742,7 @@ mod tests {
     #[test]
     fn write_to_buf() {
         let mut buf: [u8; 4] = [0; 4];
-        assert!(HIGH_SEV_EVENT.write_to_bytes(&mut buf).is_ok());
+        assert!(HIGH_SEV_EVENT.write_to_be_bytes(&mut buf).is_ok());
         let val_from_raw = u32::from_be_bytes(buf);
         assert_eq!(val_from_raw, 0xFFFFFFFF);
     }
@@ -721,7 +750,7 @@ mod tests {
     #[test]
     fn write_to_buf_small() {
         let mut buf: [u8; 2] = [0; 2];
-        assert!(HIGH_SEV_EVENT_SMALL.write_to_bytes(&mut buf).is_ok());
+        assert!(HIGH_SEV_EVENT_SMALL.write_to_be_bytes(&mut buf).is_ok());
         let val_from_raw = u16::from_be_bytes(buf);
         assert_eq!(val_from_raw, 0xFFFF);
     }
@@ -729,7 +758,7 @@ mod tests {
     #[test]
     fn write_to_buf_insufficient_buf() {
         let mut buf: [u8; 3] = [0; 3];
-        let err = HIGH_SEV_EVENT.write_to_bytes(&mut buf);
+        let err = HIGH_SEV_EVENT.write_to_be_bytes(&mut buf);
         assert!(err.is_err());
         let err = err.unwrap_err();
         if let ByteConversionError::ToSliceTooSmall(missmatch) = err {
@@ -741,7 +770,7 @@ mod tests {
     #[test]
     fn write_to_buf_small_insufficient_buf() {
         let mut buf: [u8; 1] = [0; 1];
-        let err = HIGH_SEV_EVENT_SMALL.write_to_bytes(&mut buf);
+        let err = HIGH_SEV_EVENT_SMALL.write_to_be_bytes(&mut buf);
         assert!(err.is_err());
         let err = err.unwrap_err();
         if let ByteConversionError::ToSliceTooSmall(missmatch) = err {

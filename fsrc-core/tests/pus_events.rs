@@ -2,7 +2,9 @@ use fsrc_core::event_man::{EventManager, MpscEventReceiver, MpscEventU32SendProv
 use fsrc_core::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
 use fsrc_core::pus::event_man::{DefaultPusMgmtBackendProvider, EventReporter, PusEventTmManager};
 use fsrc_core::pus::{EcssTmError, EcssTmSender};
-use fsrc_core::util::{Params, ParamsHeapless, ParamsRaw};
+use fsrc_core::util::U32Pair;
+use fsrc_core::util::{Params, ParamsHeapless, WritableAsBeBytes};
+use spacepackets::ecss::PusPacket;
 use spacepackets::tm::PusTm;
 use std::sync::mpsc::{channel, SendError, TryRecvError};
 use std::thread;
@@ -43,55 +45,41 @@ fn test_threaded_usage() {
     let jh0 = thread::spawn(move || {
         let mut sender = EventTmSender { sender: event_tx };
         let mut event_cnt = 0;
-        let _params_array: [u8; 256] = [0; 256];
+        let mut params_array: [u8; 128] = [0; 128];
         loop {
             let res = event_man.try_event_handling();
             assert!(res.is_ok());
             match pus_event_man_rx.try_recv() {
                 Ok((event, aux_data)) => {
-                    // TODO: Convert auxiliary data into raw byte format
-                    if let Some(aux_data) = aux_data {
+                    let mut gen_event = |aux_data| {
+                        pus_event_man.generate_pus_event_tm_generic(
+                            &mut sender,
+                            &EMPTY_STAMP,
+                            event,
+                            aux_data,
+                        )
+                    };
+                    let res = if let Some(aux_data) = aux_data {
                         match aux_data {
                             Params::Heapless(heapless) => match heapless {
-                                ParamsHeapless::Raw(raw) => match raw {
-                                    ParamsRaw::U8(_) => {}
-                                    ParamsRaw::U8Pair(_) => {}
-                                    ParamsRaw::U8Triplet(_) => {}
-                                    ParamsRaw::I8(_) => {}
-                                    ParamsRaw::I8Pair(_) => {}
-                                    ParamsRaw::I8Triplet(_) => {}
-                                    ParamsRaw::U16(_) => {}
-                                    ParamsRaw::U16Pair(_) => {}
-                                    ParamsRaw::U16Triplet(_) => {}
-                                    ParamsRaw::I16(_) => {}
-                                    ParamsRaw::I16Pair(_) => {}
-                                    ParamsRaw::I16Triplet(_) => {}
-                                    ParamsRaw::U32(_) => {}
-                                    ParamsRaw::U32Pair(_) => {}
-                                    ParamsRaw::U32Triplet(_) => {}
-                                    ParamsRaw::I32(_) => {}
-                                    ParamsRaw::I32Pair(_) => {}
-                                    ParamsRaw::I32Triplet(_) => {}
-                                    ParamsRaw::F32(_) => {}
-                                    ParamsRaw::F32Pair(_) => {}
-                                    ParamsRaw::F32Triplet(_) => {}
-                                    ParamsRaw::U64(_) => {}
-                                    ParamsRaw::I64(_) => {}
-                                    ParamsRaw::F64(_) => {}
-                                },
-                                ParamsHeapless::EcssEnum(_) => {}
-                                ParamsHeapless::Store(_) => {}
+                                ParamsHeapless::Raw(raw) => {
+                                    raw.write_to_be_bytes(&mut params_array)
+                                        .expect("Writing raw parameter failed");
+                                    gen_event(Some(&params_array[0..raw.raw_len()]))
+                                }
+                                ParamsHeapless::EcssEnum(e) => {
+                                    e.write_to_be_bytes(&mut params_array)
+                                        .expect("Writing ECSS enum failed");
+                                    gen_event(Some(&params_array[0..e.raw_len()]))
+                                }
+                                ParamsHeapless::Store(_) => gen_event(None),
                             },
-                            Params::Vec(_) => {}
-                            Params::String(_) => {}
+                            Params::Vec(vec) => gen_event(Some(vec.as_slice())),
+                            Params::String(str) => gen_event(Some(str.as_bytes())),
                         }
-                    }
-                    let res = pus_event_man.generate_pus_event_tm_generic(
-                        &mut sender,
-                        &EMPTY_STAMP,
-                        event,
-                        None,
-                    );
+                    } else {
+                        gen_event(None)
+                    };
                     event_cnt += 1;
                     assert!(res.is_ok());
                     assert!(res.unwrap());
@@ -116,8 +104,18 @@ fn test_threaded_usage() {
         loop {
             match event_rx.try_recv() {
                 // Event TM received successfully
-                Ok(event) => {
-                    println!("{:x?}", event);
+                Ok(event_tm) => {
+                    let tm =
+                        PusTm::from_bytes(event_tm.as_slice(), 7).expect("Deserializing TM failed");
+                    assert_eq!(tm.0.service(), 5);
+                    assert_eq!(tm.0.subservice(), 1);
+                    let src_data = tm.0.source_data();
+                    assert!(src_data.is_some());
+                    let src_data = src_data.unwrap();
+                    assert_eq!(src_data.len(), 4);
+                    let event =
+                        EventU32::from(u32::from_be_bytes(src_data[0..4].try_into().unwrap()));
+                    assert_eq!(event, INFO_EVENT);
                     break;
                 }
                 Err(e) => {
@@ -136,8 +134,22 @@ fn test_threaded_usage() {
         loop {
             match event_rx.try_recv() {
                 // Event TM received successfully
-                Ok(event) => {
-                    println!("{:x?}", event);
+                Ok(event_tm) => {
+                    let tm =
+                        PusTm::from_bytes(event_tm.as_slice(), 7).expect("Deserializing TM failed");
+                    assert_eq!(tm.0.service(), 5);
+                    assert_eq!(tm.0.subservice(), 2);
+                    let src_data = tm.0.source_data();
+                    assert!(src_data.is_some());
+                    let src_data = src_data.unwrap();
+                    assert_eq!(src_data.len(), 12);
+                    let event =
+                        EventU32::from(u32::from_be_bytes(src_data[0..4].try_into().unwrap()));
+                    assert_eq!(event, LOW_SEV_EVENT);
+                    let u32_pair: U32Pair =
+                        src_data[4..].try_into().expect("Creating U32Pair failed");
+                    assert_eq!(u32_pair.0, 2);
+                    assert_eq!(u32_pair.1, 3);
                     break;
                 }
                 Err(e) => {
