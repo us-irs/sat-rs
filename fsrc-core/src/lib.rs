@@ -29,4 +29,4 @@ pub mod objects;
 pub mod pool;
 pub mod pus;
 pub mod tmtc;
-pub mod util;
+pub mod params;

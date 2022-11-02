@@ -2,8 +2,8 @@ use fsrc_core::event_man::{EventManager, MpscEventReceiver, MpscEventU32SendProv
 use fsrc_core::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
 use fsrc_core::pus::event_man::{DefaultPusMgmtBackendProvider, EventReporter, PusEventTmManager};
 use fsrc_core::pus::{EcssTmError, EcssTmSender};
-use fsrc_core::util::U32Pair;
-use fsrc_core::util::{Params, ParamsHeapless, WritableAsBeBytes};
+use fsrc_core::params::U32Pair;
+use fsrc_core::params::{Params, ParamsHeapless, WritableToBeBytes};
 use spacepackets::ecss::PusPacket;
 use spacepackets::tm::PusTm;
 use std::sync::mpsc::{channel, SendError, TryRecvError};

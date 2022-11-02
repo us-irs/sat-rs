@@ -1,26 +1,48 @@
-//! Utility types and enums.
+//! Parameter types and enums.
 //!
-//! This module contains various helper types. This includes wrapper for primitive rust types
-//! using the newtype pattern. This was also done for pairs and triplets of these primitive types.
-//! The [ToBeBytes] was implemented for those types as well, which allows to easily convert them
-//! into a network friendly raw byte format.
+//! This module contains various helper types.
 //!
-//! The module also contains generic parameter enumerations.
+//! # Primtive Parameter Wrappers and Enumeration
 //!
-//! # Example for primitive type wrapper
+//! This module includes wrapper for primitive rust types using the newtype pattern.
+//! This was also done for pairs and triplets of these primitive types.
+//! The [WritableToBeBytes] was implemented for all those types as well, which allows to easily
+//! convert them into a network friendly raw byte format. The [ParamsRaw] enumeration groups
+//! all newtypes and implements the [WritableToBeBytes] trait itself.
+//!
+//! ## Example for primitive type wrapper
 //!
 //! ```
-//! use fsrc_core::util::{ParamsRaw, ToBeBytes, U32Pair};
+//! use fsrc_core::params::{ParamsRaw, ToBeBytes, U32Pair, WritableToBeBytes};
 //!
 //! let u32_pair = U32Pair(0x1010, 25);
 //! assert_eq!(u32_pair.0, 0x1010);
 //! assert_eq!(u32_pair.1, 25);
+//! // Convert to raw stream
 //! let raw_buf = u32_pair.to_be_bytes();
 //! assert_eq!(raw_buf, [0, 0, 0x10, 0x10, 0, 0, 0, 25]);
 //!
+//! // Convert to enum variant
 //! let params_raw: ParamsRaw = u32_pair.into();
 //! assert_eq!(params_raw, (0x1010_u32, 25_u32).into());
+//!
+//! // Convert to stream using the enum variant
+//! let mut other_raw_buf: [u8; 8] = [0; 8];
+//! params_raw.write_to_be_bytes(&mut other_raw_buf).expect("Writing parameter to buffer failed");
+//! assert_eq!(other_raw_buf, [0, 0, 0x10, 0x10, 0, 0, 0, 25]);
+//!
+//! // Create a pair from a raw stream
+//! let u32_pair_from_stream: U32Pair = raw_buf.as_slice().try_into().unwrap();
+//! assert_eq!(u32_pair_from_stream.0, 0x1010);
+//! assert_eq!(u32_pair_from_stream.1, 25);
 //! ```
+//!
+//! # Generic Parameter Enumeration
+//!
+//! The module also contains generic parameter enumerations.
+//! This includes the [ParamsHeapless] enumeration for contained values which do not require heap
+//! allocation, and the [Params] which enumerates [ParamsHeapless] and some additional types which
+//! require [alloc] support but allow for more flexbility.
 use crate::pool::StoreAddr;
 #[cfg(feature = "alloc")]
 use alloc::string::String;
@@ -38,7 +60,7 @@ use spacepackets::SizeMissmatch;
 
 /// Generic trait which is used for objects which can be converted into a raw network (big) endian
 /// byte format.
-pub trait WritableAsBeBytes {
+pub trait WritableToBeBytes {
     fn raw_len(&self) -> usize;
     /// Writes the object to a raw buffer in network endianness (big)
     fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError>;
@@ -46,7 +68,7 @@ pub trait WritableAsBeBytes {
 
 macro_rules! param_to_be_bytes_impl {
     ($Newtype: ident) => {
-        impl WritableAsBeBytes for $Newtype {
+        impl WritableToBeBytes for $Newtype {
             #[inline]
             fn raw_len(&self) -> usize {
                 size_of::<<Self as ToBeBytes>::ByteArray>()
@@ -298,6 +320,9 @@ pair_byte_conversions_impl!(u16, u32, u64, i16, i32, i64, f32, f64,);
 triplet_to_be_bytes_impl!(u16, u32, u64, i16, i32, i64, f32, f64,);
 
 /// Generic enumeration for additonal parameters only consisting of primitive data types.
+///
+/// All contained variants and the enum itself implement the [WritableToBeBytes] trait, which
+/// allows to easily convert them into a network-friendly format.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ParamsRaw {
     U8(U8),
@@ -326,7 +351,7 @@ pub enum ParamsRaw {
     F64(F64),
 }
 
-impl WritableAsBeBytes for ParamsRaw {
+impl WritableToBeBytes for ParamsRaw {
     fn raw_len(&self) -> usize {
         match self {
             ParamsRaw::U8(v) => v.raw_len(),
@@ -414,7 +439,7 @@ pub enum EcssEnumParams {
 
 macro_rules! writable_as_be_bytes_ecss_enum_impl {
     ($EnumIdent: ident) => {
-        impl WritableAsBeBytes for $EnumIdent {
+        impl WritableToBeBytes for $EnumIdent {
             fn raw_len(&self) -> usize {
                 self.byte_width()
             }
@@ -431,7 +456,7 @@ writable_as_be_bytes_ecss_enum_impl!(EcssEnumU16);
 writable_as_be_bytes_ecss_enum_impl!(EcssEnumU32);
 writable_as_be_bytes_ecss_enum_impl!(EcssEnumU64);
 
-impl WritableAsBeBytes for EcssEnumParams {
+impl WritableToBeBytes for EcssEnumParams {
     fn raw_len(&self) -> usize {
         match self {
             EcssEnumParams::U8(e) => e.byte_width(),
@@ -443,10 +468,10 @@ impl WritableAsBeBytes for EcssEnumParams {
 
     fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
         match self {
-            EcssEnumParams::U8(e) => WritableAsBeBytes::write_to_be_bytes(e, buf),
-            EcssEnumParams::U16(e) => WritableAsBeBytes::write_to_be_bytes(e, buf),
-            EcssEnumParams::U32(e) => WritableAsBeBytes::write_to_be_bytes(e, buf),
-            EcssEnumParams::U64(e) => WritableAsBeBytes::write_to_be_bytes(e, buf),
+            EcssEnumParams::U8(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
+            EcssEnumParams::U16(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
+            EcssEnumParams::U32(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
+            EcssEnumParams::U64(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
         }
     }
 }
