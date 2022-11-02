@@ -152,7 +152,7 @@ impl EventReporterBase {
             time_stamp,
         );
         let mut current_idx = 0;
-        event_id.write_to_bytes(&mut buf[0..event_id.byte_width()])?;
+        event_id.write_to_be_bytes(&mut buf[0..event_id.byte_width()])?;
         current_idx += event_id.byte_width();
         if let Some(aux_data) = aux_data {
             buf[current_idx..current_idx + aux_data.len()].copy_from_slice(aux_data);

@@ -536,7 +536,7 @@ impl VerificationReporterBasic {
         idx += RequestId::SIZE_AS_BYTES;
         if let Some(step) = step {
             // Size check was done beforehand
-            step.write_to_bytes(&mut buf[idx..idx + step.byte_width() as usize])
+            step.write_to_be_bytes(&mut buf[idx..idx + step.byte_width() as usize])
                 .unwrap();
         }
         let mut sp_header = SpHeader::tm(self.apid(), 0, 0).unwrap();
@@ -571,13 +571,13 @@ impl VerificationReporterBasic {
         idx += RequestId::SIZE_AS_BYTES;
         if let Some(step) = step {
             // Size check done beforehand
-            step.write_to_bytes(&mut buf[idx..idx + step.byte_width() as usize])
+            step.write_to_be_bytes(&mut buf[idx..idx + step.byte_width() as usize])
                 .unwrap();
             idx += step.byte_width() as usize;
         }
         params
             .failure_code
-            .write_to_bytes(&mut buf[idx..idx + params.failure_code.byte_width() as usize])?;
+            .write_to_be_bytes(&mut buf[idx..idx + params.failure_code.byte_width() as usize])?;
         idx += params.failure_code.byte_width() as usize;
         if let Some(failure_data) = params.failure_data {
             buf[idx..idx + failure_data.len()].copy_from_slice(failure_data);
@@ -1344,7 +1344,7 @@ mod tests {
         let fail_code = EcssEnumU8::new(10);
         let fail_data = EcssEnumU32::new(12);
         let mut fail_data_raw = [0; 4];
-        fail_data.write_to_bytes(&mut fail_data_raw).unwrap();
+        fail_data.write_to_be_bytes(&mut fail_data_raw).unwrap();
         let fail_params = FailParams::new(&EMPTY_STAMP, &fail_code, Some(fail_data_raw.as_slice()));
         b.vr.acceptance_failure(tok, &mut sender, fail_params)
             .expect("Sending acceptance success failed");

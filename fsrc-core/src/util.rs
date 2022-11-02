@@ -32,7 +32,40 @@ use core::fmt::Debug;
 use core::mem::size_of;
 use paste::paste;
 pub use spacepackets::ecss::ToBeBytes;
-use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU64, EcssEnumU8};
+use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU64, EcssEnumU8, EcssEnumeration};
+use spacepackets::ByteConversionError;
+use spacepackets::SizeMissmatch;
+
+/// Generic trait which is used for objects which can be converted into a raw network (big) endian
+/// byte format.
+pub trait WritableAsBeBytes {
+    fn raw_len(&self) -> usize;
+    /// Writes the object to a raw buffer in network endianness (big)
+    fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError>;
+}
+
+macro_rules! param_to_be_bytes_impl {
+    ($Newtype: ident) => {
+        impl WritableAsBeBytes for $Newtype {
+            #[inline]
+            fn raw_len(&self) -> usize {
+                size_of::<<Self as ToBeBytes>::ByteArray>()
+            }
+
+            fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
+                let raw_len = self.raw_len();
+                if buf.len() < raw_len {
+                    return Err(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
+                        found: buf.len(),
+                        expected: raw_len,
+                    }));
+                }
+                buf[0..raw_len].copy_from_slice(&self.to_be_bytes());
+                Ok(raw_len)
+            }
+        }
+    };
+}
 
 macro_rules! primitive_newtypes_with_eq {
     ($($ty: ty,)+) => {
@@ -44,6 +77,10 @@ macro_rules! primitive_newtypes_with_eq {
                 pub struct [<$ty:upper Pair>](pub $ty, pub $ty);
                 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
                 pub struct [<$ty:upper Triplet>](pub $ty, pub $ty, pub $ty);
+
+                param_to_be_bytes_impl!([<$ty:upper>]);
+                param_to_be_bytes_impl!([<$ty:upper Pair>]);
+                param_to_be_bytes_impl!([<$ty:upper Triplet>]);
 
                 impl From<$ty> for [<$ty:upper>] {
                     fn from(v: $ty) -> Self {
@@ -76,6 +113,10 @@ macro_rules! primitive_newtypes {
                 #[derive(Debug, Copy, Clone, PartialEq)]
                 pub struct [<$ty:upper Triplet>](pub $ty, pub $ty, pub $ty);
 
+                param_to_be_bytes_impl!([<$ty:upper>]);
+                param_to_be_bytes_impl!([<$ty:upper Pair>]);
+                param_to_be_bytes_impl!([<$ty:upper Triplet>]);
+
                 impl From<$ty> for [<$ty:upper>] {
                     fn from(v: $ty) -> Self {
                         Self(v)
@@ -99,7 +140,7 @@ macro_rules! primitive_newtypes {
 primitive_newtypes_with_eq!(u8, u16, u32, u64, i8, i16, i32, i64,);
 primitive_newtypes!(f32, f64,);
 
-macro_rules! scalar_to_be_bytes_impl {
+macro_rules! scalar_byte_conversions_impl {
     ($($ty: ty,)+) => {
         $(
             paste! {
@@ -109,12 +150,26 @@ macro_rules! scalar_to_be_bytes_impl {
                         self.0.to_be_bytes()
                     }
                 }
+
+                impl TryFrom<&[u8]> for [<$ty:upper>] {
+                    type Error = ByteConversionError;
+
+                    fn try_from(v: &[u8]) -> Result<Self, Self::Error>  {
+                        if v.len() < size_of::<$ty>() {
+                            return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
+                                expected: size_of::<$ty>(),
+                                found: v.len()
+                            }));
+                        }
+                        Ok([<$ty:upper>]($ty::from_be_bytes(v[0..size_of::<$ty>()].try_into().unwrap())))
+                    }
+                }
             }
         )+
     }
 }
 
-macro_rules! pair_to_be_bytes_impl {
+macro_rules! pair_byte_conversions_impl {
     ($($ty: ty,)+) => {
         $(
             paste! {
@@ -127,6 +182,23 @@ macro_rules! pair_to_be_bytes_impl {
                             size_of::<$ty>()..2 * size_of::<$ty>()
                         ].copy_from_slice(&self.1.to_be_bytes());
                         array
+                    }
+                }
+
+                impl TryFrom<&[u8]> for [<$ty:upper Pair>] {
+                    type Error = ByteConversionError;
+
+                    fn try_from(v: &[u8]) -> Result<Self, Self::Error>  {
+                        if v.len() < 2 * size_of::<$ty>() {
+                            return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
+                                expected: 2 * size_of::<$ty>(),
+                                found: v.len()
+                            }));
+                        }
+                        Ok([<$ty:upper Pair>](
+                            $ty::from_be_bytes(v[0..size_of::<$ty>()].try_into().unwrap()),
+                            $ty::from_be_bytes(v[size_of::<$ty>()..2 * size_of::<$ty>()].try_into().unwrap())
+                        ))
                     }
                 }
             }
@@ -144,12 +216,29 @@ macro_rules! triplet_to_be_bytes_impl {
                         let mut array = [0; size_of::<$ty>() * 3];
                         array[0..size_of::<$ty>()].copy_from_slice(&self.0.to_be_bytes());
                         array[
-                            size_of::<$ty>()..2*  size_of::<$ty>()
+                            size_of::<$ty>()..2 * size_of::<$ty>()
                         ].copy_from_slice(&self.1.to_be_bytes());
                         array[
-                            2 * size_of::<$ty>()..3*  size_of::<$ty>()
+                            2 * size_of::<$ty>()..3 * size_of::<$ty>()
                         ].copy_from_slice(&self.2.to_be_bytes());
                         array
+                    }
+                }
+                impl TryFrom<&[u8]> for [<$ty:upper Triplet>] {
+                    type Error = ByteConversionError;
+
+                    fn try_from(v: &[u8]) -> Result<Self, Self::Error>  {
+                        if v.len() < 3 * size_of::<$ty>() {
+                            return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
+                                expected: 3 * size_of::<$ty>(),
+                                found: v.len()
+                            }));
+                        }
+                        Ok([<$ty:upper Triplet>](
+                            $ty::from_be_bytes(v[0..size_of::<$ty>()].try_into().unwrap()),
+                            $ty::from_be_bytes(v[size_of::<$ty>()..2 * size_of::<$ty>()].try_into().unwrap()),
+                            $ty::from_be_bytes(v[2 * size_of::<$ty>()..3 * size_of::<$ty>()].try_into().unwrap())
+                        ))
                     }
                 }
             }
@@ -157,7 +246,7 @@ macro_rules! triplet_to_be_bytes_impl {
     }
 }
 
-scalar_to_be_bytes_impl!(u8, u16, u32, u64, i8, i16, i32, i64, f32, f64,);
+scalar_byte_conversions_impl!(u8, u16, u32, u64, i8, i16, i32, i64, f32, f64,);
 
 impl ToBeBytes for U8Pair {
     type ByteArray = [u8; 2];
@@ -205,7 +294,7 @@ impl ToBeBytes for I8Triplet {
     }
 }
 
-pair_to_be_bytes_impl!(u16, u32, u64, i16, i32, i64, f32, f64,);
+pair_byte_conversions_impl!(u16, u32, u64, i16, i32, i64, f32, f64,);
 triplet_to_be_bytes_impl!(u16, u32, u64, i16, i32, i64, f32, f64,);
 
 /// Generic enumeration for additonal parameters only consisting of primitive data types.
@@ -237,6 +326,66 @@ pub enum ParamsRaw {
     F64(F64),
 }
 
+impl WritableAsBeBytes for ParamsRaw {
+    fn raw_len(&self) -> usize {
+        match self {
+            ParamsRaw::U8(v) => v.raw_len(),
+            ParamsRaw::U8Pair(v) => v.raw_len(),
+            ParamsRaw::U8Triplet(v) => v.raw_len(),
+            ParamsRaw::I8(v) => v.raw_len(),
+            ParamsRaw::I8Pair(v) => v.raw_len(),
+            ParamsRaw::I8Triplet(v) => v.raw_len(),
+            ParamsRaw::U16(v) => v.raw_len(),
+            ParamsRaw::U16Pair(v) => v.raw_len(),
+            ParamsRaw::U16Triplet(v) => v.raw_len(),
+            ParamsRaw::I16(v) => v.raw_len(),
+            ParamsRaw::I16Pair(v) => v.raw_len(),
+            ParamsRaw::I16Triplet(v) => v.raw_len(),
+            ParamsRaw::U32(v) => v.raw_len(),
+            ParamsRaw::U32Pair(v) => v.raw_len(),
+            ParamsRaw::U32Triplet(v) => v.raw_len(),
+            ParamsRaw::I32(v) => v.raw_len(),
+            ParamsRaw::I32Pair(v) => v.raw_len(),
+            ParamsRaw::I32Triplet(v) => v.raw_len(),
+            ParamsRaw::F32(v) => v.raw_len(),
+            ParamsRaw::F32Pair(v) => v.raw_len(),
+            ParamsRaw::F32Triplet(v) => v.raw_len(),
+            ParamsRaw::U64(v) => v.raw_len(),
+            ParamsRaw::I64(v) => v.raw_len(),
+            ParamsRaw::F64(v) => v.raw_len(),
+        }
+    }
+
+    fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
+        match self {
+            ParamsRaw::U8(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::U8Pair(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::U8Triplet(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::I8(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::I8Pair(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::I8Triplet(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::U16(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::U16Pair(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::U16Triplet(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::I16(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::I16Pair(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::I16Triplet(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::U32(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::U32Pair(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::U32Triplet(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::I32(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::I32Pair(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::I32Triplet(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::F32(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::F32Pair(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::F32Triplet(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::U64(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::I64(v) => v.write_to_be_bytes(buf),
+            ParamsRaw::F64(v) => v.write_to_be_bytes(buf),
+        }
+    }
+}
+
 macro_rules! params_raw_from_newtype {
     ($($newtype: ident,)+) => {
         $(
@@ -261,6 +410,45 @@ pub enum EcssEnumParams {
     U16(EcssEnumU16),
     U32(EcssEnumU32),
     U64(EcssEnumU64),
+}
+
+macro_rules! writable_as_be_bytes_ecss_enum_impl {
+    ($EnumIdent: ident) => {
+        impl WritableAsBeBytes for $EnumIdent {
+            fn raw_len(&self) -> usize {
+                self.byte_width()
+            }
+
+            fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
+                EcssEnumeration::write_to_be_bytes(self, buf).map(|_| self.byte_width())
+            }
+        }
+    };
+}
+
+writable_as_be_bytes_ecss_enum_impl!(EcssEnumU8);
+writable_as_be_bytes_ecss_enum_impl!(EcssEnumU16);
+writable_as_be_bytes_ecss_enum_impl!(EcssEnumU32);
+writable_as_be_bytes_ecss_enum_impl!(EcssEnumU64);
+
+impl WritableAsBeBytes for EcssEnumParams {
+    fn raw_len(&self) -> usize {
+        match self {
+            EcssEnumParams::U8(e) => e.byte_width(),
+            EcssEnumParams::U16(e) => e.byte_width(),
+            EcssEnumParams::U32(e) => e.byte_width(),
+            EcssEnumParams::U64(e) => e.byte_width(),
+        }
+    }
+
+    fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
+        match self {
+            EcssEnumParams::U8(e) => WritableAsBeBytes::write_to_be_bytes(e, buf),
+            EcssEnumParams::U16(e) => WritableAsBeBytes::write_to_be_bytes(e, buf),
+            EcssEnumParams::U32(e) => WritableAsBeBytes::write_to_be_bytes(e, buf),
+            EcssEnumParams::U64(e) => WritableAsBeBytes::write_to_be_bytes(e, buf),
+        }
+    }
 }
 
 /// Generic enumeration for parameters which do not rely on heap allocations.
