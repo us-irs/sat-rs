@@ -13,9 +13,8 @@
   <key attr.name="description" attr.type="string" for="edge" id="d9"/>
   <key for="edge" id="d10" yfiles.type="edgegraphics"/>
   <graph edgedefault="directed" id="G">
-    <data key="d0"/>
+    <data key="d0" xml:space="preserve"/>
     <node id="n0">
-      <data key="d5"/>
       <data key="d6">
         <y:ShapeNode>
           <y:Geometry height="509.9999999999999" width="768.7000000000003" x="579.3105418719211" y="304.7"/>
@@ -27,7 +26,6 @@
       </data>
     </node>
     <node id="n1">
-      <data key="d5"/>
       <data key="d6">
         <y:ShapeNode>
           <y:Geometry height="60.0" width="203.0" x="814.0" y="506.6799999999999"/>
@@ -39,7 +37,6 @@
       </data>
     </node>
     <node id="n2">
-      <data key="d5"/>
       <data key="d6">
         <y:ShapeNode>
           <y:Geometry height="60.0" width="82.0" x="617.6" y="413.23"/>
@@ -52,7 +49,6 @@ Creator 0<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:
       </data>
     </node>
     <node id="n3">
-      <data key="d5"/>
       <data key="d6">
         <y:ShapeNode>
           <y:Geometry height="60.0" width="76.55999999999995" x="988.5" y="335.62999999999994"/>
@@ -65,7 +61,6 @@ Creator 2<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:
       </data>
     </node>
     <node id="n4">
-      <data key="d5"/>
       <data key="d6">
         <y:ShapeNode>
           <y:Geometry height="60.0" width="72.55999999999983" x="860.6610837438426" y="335.62999999999994"/>
@@ -78,7 +73,6 @@ Creator 1<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:
       </data>
     </node>
     <node id="n5">
-      <data key="d5"/>
       <data key="d6">
         <y:ShapeNode>
           <y:Geometry height="60.0" width="87.27999999999997" x="1112.52" y="335.62999999999994"/>
@@ -91,7 +85,6 @@ Creator 3<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:
       </data>
     </node>
     <node id="n6">
-      <data key="d5"/>
       <data key="d6">
         <y:ShapeNode>
           <y:Geometry height="60.0" width="126.0" x="781.0" y="620.26"/>
@@ -105,7 +98,6 @@ Event Reporting
       </data>
     </node>
     <node id="n7">
-      <data key="d5"/>
       <data key="d6">
         <y:ShapeNode>
           <y:Geometry height="60.0" width="118.63999999999987" x="928.2" y="620.26"/>
@@ -118,7 +110,6 @@ Event Action<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel>
       </data>
     </node>
     <node id="n8">
-      <data key="d5"/>
       <data key="d6">
         <y:ShapeNode>
           <y:Geometry height="60.0" width="87.27999999999997" x="792.1260377358491" y="733.8400000000001"/>
@@ -139,11 +130,11 @@ Sink<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:Model
           <y:NodeLabel alignment="left" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="143.6875" horizontalTextPosition="center" iconTextGap="4" modelName="custom" textColor="#000000" verticalTextPosition="bottom" visible="true" width="181.591796875" x="8.373079774614325" xml:space="preserve" y="7.444138124199753">Subscriptions
 
 1. Event Creator 0 subscribes
-   for event 0
+    for event 0
 2. Event Creator 1 subscribes
-   for event group 2
+    for event group 2
 3. PUS Service 5 handler
-   subscribes for all events
+    subscribes for all events
 4. PUS Service 19 handler
     subscribes for all events<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:ModelParameter><y:SmartNodeLabelModelParameter labelRatioX="-0.5" labelRatioY="-0.5" nodeRatioX="-0.4602795077105583" nodeRatioY="-0.45641605313700395" offsetX="0.0" offsetY="0.0" upX="0.0" upY="-1.0"/></y:ModelParameter></y:NodeLabel>
           <y:Shape type="rectangle"/>
@@ -151,7 +142,6 @@ Sink<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:Model
       </data>
     </node>
     <edge id="e0" source="n4" target="n1">
-      <data key="d9"/>
       <data key="d10">
         <y:PolyLineEdge>
           <y:Path sx="8.058916256157545" sy="0.0" tx="-10.5" ty="0.0"/>
@@ -164,7 +154,6 @@ Sink<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:Model
       </data>
     </edge>
     <edge id="e1" source="n2" target="n1">
-      <data key="d9"/>
       <data key="d10">
         <y:PolyLineEdge>
           <y:Path sx="0.0" sy="11.93999999999994" tx="-83.5" ty="0.0">
@@ -179,7 +168,6 @@ Sink<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:Model
       </data>
     </edge>
     <edge id="e2" source="n3" target="n1">
-      <data key="d9"/>
       <data key="d10">
         <y:PolyLineEdge>
           <y:Path sx="-23.719999999999914" sy="5.5" tx="87.56000000000006" ty="0.0"/>
@@ -192,7 +180,6 @@ Sink<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:Model
       </data>
     </edge>
     <edge id="e3" source="n5" target="n1">
-      <data key="d9"/>
       <data key="d10">
         <y:PolyLineEdge>
           <y:Path sx="-6.275467980295616" sy="0.0" tx="57.5" ty="8.5">
@@ -207,7 +194,6 @@ event 4 (group 2)<y:LabelModel><y:SmartEdgeLabelModel autoRotationEnabled="false
       </data>
     </edge>
     <edge id="e4" source="n1" target="n6">
-      <data key="d9"/>
       <data key="d10">
         <y:PolyLineEdge>
           <y:Path sx="-65.0" sy="0.0" tx="6.5" ty="0.0"/>
@@ -219,7 +205,6 @@ event 4 (group 2)<y:LabelModel><y:SmartEdgeLabelModel autoRotationEnabled="false
       </data>
     </edge>
     <edge id="e5" source="n1" target="n7">
-      <data key="d9"/>
       <data key="d10">
         <y:PolyLineEdge>
           <y:Path sx="42.660000000000196" sy="0.0" tx="-29.359999999999786" ty="0.0"/>
@@ -231,7 +216,6 @@ event 4 (group 2)<y:LabelModel><y:SmartEdgeLabelModel autoRotationEnabled="false
       </data>
     </edge>
     <edge id="e6" source="n1" target="n2">
-      <data key="d9"/>
       <data key="d10">
         <y:PolyLineEdge>
           <y:Path sx="0.0" sy="0.0" tx="0.0" ty="0.0">
@@ -246,7 +230,6 @@ event 2<y:LabelModel><y:SmartEdgeLabelModel autoRotationEnabled="false" defaultA
       </data>
     </edge>
     <edge id="e7" source="n1" target="n4">
-      <data key="d9"/>
       <data key="d10">
         <y:PolyLineEdge>
           <y:Path sx="-35.69940886699487" sy="0.0" tx="-17.140492610837327" ty="1.5"/>
@@ -258,7 +241,6 @@ event 2<y:LabelModel><y:SmartEdgeLabelModel autoRotationEnabled="false" defaultA
       </data>
     </edge>
     <edge id="e8" source="n6" target="n8">
-      <data key="d9"/>
       <data key="d10">
         <y:PolyLineEdge>
           <y:Path sx="0.0" sy="0.0" tx="8.233962264150945" ty="-21.42352238805968"/>
