@@ -1,6 +1,9 @@
+use fsrc_core::events::EventU32;
 use fsrc_core::hal::host::udp_server::{ReceiveResult, UdpTcServer};
+use fsrc_core::params::Params;
 use std::net::SocketAddr;
 use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::Duration;
 
@@ -31,11 +34,12 @@ impl TmStore {
 }
 
 pub fn core_tmtc_task(
-    tm_creator_tx: mpsc::Sender<StoreAddr>,
+    tm_creator_tx: Sender<StoreAddr>,
     tm_server_rx: mpsc::Receiver<StoreAddr>,
     tm_store_helper: TmStore,
     addr: SocketAddr,
     verif_reporter: SharedStdVerifReporterWithSender,
+    _event_tx: Sender<(EventU32, Option<Params>)>,
 ) {
     let pus_receiver = PusReceiver::new(
         PUS_APID,

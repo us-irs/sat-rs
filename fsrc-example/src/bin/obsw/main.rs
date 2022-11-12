@@ -3,14 +3,19 @@ mod pus;
 mod tmtc;
 
 use crate::tmtc::{core_tmtc_task, TmStore, PUS_APID};
+use fsrc_core::event_man::{EventManager, MpscEventReceiver, MpscEventU32SendProvider};
+use fsrc_core::events::EventU32;
 use fsrc_core::hal::host::udp_server::UdpTcServer;
+use fsrc_core::params::Params;
 use fsrc_core::pool::{LocalPool, PoolCfg, SharedPool, StoreAddr};
+use fsrc_core::pus::event_man::{DefaultPusMgmtBackendProvider, EventReporter, PusEventDispatcher};
 use fsrc_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
 };
 use fsrc_core::tmtc::CcsdsError;
 use fsrc_example::{OBSW_SERVER_ADDR, SERVER_PORT};
 use std::net::{IpAddr, SocketAddr};
+use std::sync::mpsc::{channel, TryRecvError};
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
 
@@ -44,13 +49,23 @@ fn main() {
         verif_cfg,
         Box::new(sender),
     )));
+    let (event_sender, event_man_rx) = channel();
+    let event_recv = MpscEventReceiver::<EventU32>::new(event_man_rx);
+    let mut event_man = EventManager::new(Box::new(event_recv));
+    let event_reporter = EventReporter::new(PUS_APID, 128).unwrap();
+    let pus_tm_backend = DefaultPusMgmtBackendProvider::<EventU32>::default();
+    let pus_event_man = PusEventDispatcher::new(event_reporter, Box::new(pus_tm_backend));
+    let (pus_event_man_tx, pus_event_man_rx) = channel();
+    let pus_event_man_send_provider = MpscEventU32SendProvider::new(1, pus_event_man_tx);
+    event_man.subscribe_all(pus_event_man_send_provider);
     let jh0 = thread::spawn(move || {
         core_tmtc_task(
             tm_funnel_tx.clone(),
             tm_server_rx,
             tm_store_helper.clone(),
             addr,
-            reporter_with_sender_0,
+            reporter_with_sender_0.clone(),
+            event_sender.clone(),
         );
     });
 
@@ -68,6 +83,15 @@ fn main() {
             }
         }
     });
+
+    let jh2 = thread::spawn(move || loop {
+        match pus_event_man_rx.try_recv() {
+            Ok(_) => {}
+            Err(_) => {}
+        }
+    });
+
     jh0.join().expect("Joining UDP TMTC server thread failed");
     jh1.join().expect("Joining TM Funnel thread failed");
+    jh2.join().expect("Joining Event Manager thread failed");
 }

@@ -120,15 +120,15 @@ impl<SenderE> From<EcssTmError<SenderE>> for EventManError<SenderE> {
     }
 }
 
-pub struct PusEventTmManager<BackendError, Provider: GenericEvent> {
+pub struct PusEventDispatcher<BackendError, Provider: GenericEvent> {
     reporter: EventReporter,
     backend: Box<dyn PusEventMgmtBackendProvider<Provider, Error = BackendError>>,
 }
 
 /// Safety: All contained fields are send as well.
-unsafe impl<E: Send, Event: GenericEvent + Send> Send for PusEventTmManager<E, Event> {}
+unsafe impl<E: Send, Event: GenericEvent + Send> Send for PusEventDispatcher<E, Event> {}
 
-impl<BackendError, Provider: GenericEvent> PusEventTmManager<BackendError, Provider> {
+impl<BackendError, Provider: GenericEvent> PusEventDispatcher<BackendError, Provider> {
     pub fn new(
         reporter: EventReporter,
         backend: Box<dyn PusEventMgmtBackendProvider<Provider, Error = BackendError>>,
@@ -137,7 +137,7 @@ impl<BackendError, Provider: GenericEvent> PusEventTmManager<BackendError, Provi
     }
 }
 
-impl<BackendError, Event: GenericEvent> PusEventTmManager<BackendError, Event> {
+impl<BackendError, Event: GenericEvent> PusEventDispatcher<BackendError, Event> {
     pub fn enable_tm_for_event(&mut self, event: &Event) -> Result<bool, BackendError> {
         self.backend.enable_event_reporting(event)
     }
@@ -181,7 +181,7 @@ impl<BackendError, Event: GenericEvent> PusEventTmManager<BackendError, Event> {
     }
 }
 
-impl<BackendError> PusEventTmManager<BackendError, EventU32> {
+impl<BackendError> PusEventDispatcher<BackendError, EventU32> {
     pub fn enable_tm_for_event_with_sev<Severity: HasSeverity>(
         &mut self,
         event: &EventU32TypedSev<Severity>,
@@ -234,10 +234,10 @@ mod tests {
         }
     }
 
-    fn create_basic_man() -> PusEventTmManager<(), EventU32> {
+    fn create_basic_man() -> PusEventDispatcher<(), EventU32> {
         let reporter = EventReporter::new(0x02, 128).expect("Creating event repoter failed");
         let backend = DefaultPusMgmtBackendProvider::<EventU32>::default();
-        PusEventTmManager::new(reporter, Box::new(backend))
+        PusEventDispatcher::new(reporter, Box::new(backend))
     }
 
     #[test]

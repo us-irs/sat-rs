@@ -118,9 +118,9 @@ unsafe impl<E, Event: GenericEvent + Send, AuxDataProvider: Send> Send
 {
 }
 
-pub enum HandlerResult<Provider: GenericEvent, AuxDataProvider> {
+pub enum HandlerResult<Event: GenericEvent, AuxDataProvider> {
     Empty,
-    Handled(u32, Provider, Option<AuxDataProvider>),
+    Handled(u32, Event, Option<AuxDataProvider>),
 }
 
 impl<E, Event: GenericEvent + Copy> EventManager<E, Event> {

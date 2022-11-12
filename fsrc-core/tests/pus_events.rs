@@ -2,7 +2,7 @@ use fsrc_core::event_man::{EventManager, MpscEventReceiver, MpscEventU32SendProv
 use fsrc_core::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
 use fsrc_core::params::U32Pair;
 use fsrc_core::params::{Params, ParamsHeapless, WritableToBeBytes};
-use fsrc_core::pus::event_man::{DefaultPusMgmtBackendProvider, EventReporter, PusEventTmManager};
+use fsrc_core::pus::event_man::{DefaultPusMgmtBackendProvider, EventReporter, PusEventDispatcher};
 use fsrc_core::pus::{EcssTmError, EcssTmSender};
 use spacepackets::ecss::PusPacket;
 use spacepackets::tm::PusTm;
@@ -40,7 +40,7 @@ fn test_threaded_usage() {
     let (event_tx, event_rx) = channel();
     let reporter = EventReporter::new(0x02, 128).expect("Creating event reporter failed");
     let backend = DefaultPusMgmtBackendProvider::<EventU32>::default();
-    let mut pus_event_man = PusEventTmManager::new(reporter, Box::new(backend));
+    let mut pus_event_man = PusEventDispatcher::new(reporter, Box::new(backend));
     // PUS + Generic event manager thread
     let jh0 = thread::spawn(move || {
         let mut sender = EventTmSender { sender: event_tx };
