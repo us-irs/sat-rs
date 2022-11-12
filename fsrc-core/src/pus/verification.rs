@@ -197,10 +197,29 @@ pub struct StateAccepted;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct StateStarted;
 
+#[derive(Debug, Eq, PartialEq)]
 pub enum StateToken {
     None(StateNone),
     Accepted(StateAccepted),
     Started(StateStarted),
+}
+
+impl From<StateNone> for StateToken {
+    fn from(t: StateNone) -> Self {
+        StateToken::None(t)
+    }
+}
+
+impl From<StateAccepted> for StateToken {
+    fn from(t: StateAccepted) -> Self {
+        StateToken::Accepted(t)
+    }
+}
+
+impl From<StateStarted> for StateToken {
+    fn from(t: StateStarted) -> Self {
+        StateToken::Started(t)
+    }
 }
 
 impl<STATE> VerificationToken<STATE> {

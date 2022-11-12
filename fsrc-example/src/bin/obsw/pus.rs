@@ -63,6 +63,8 @@ impl PusServiceProvider for PusReceiver {
         drop(reporter);
         if service == 17 {
             self.handle_test_service(pus_tc, accepted_token);
+        } else if service == 5 {
+            // TODO: Send message to event manager here
         }
         Ok(())
     }
