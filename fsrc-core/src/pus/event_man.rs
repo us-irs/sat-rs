@@ -5,6 +5,7 @@ use hashbrown::HashSet;
 
 #[cfg(feature = "alloc")]
 pub use crate::pus::event::EventReporter;
+use crate::pus::verification::{TcStateStarted, VerificationToken};
 use crate::pus::{EcssTmError, EcssTmSender};
 #[cfg(feature = "heapless")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "heapless")))]
@@ -106,6 +107,18 @@ pub mod heapless_mod {
             Ok(self.disabled.remove(&event.raw_as_largest_type()))
         }
     }
+}
+
+#[derive(Debug)]
+pub enum EventRequest<Event: GenericEvent = EventU32> {
+    Enable(Event),
+    Disable(Event),
+}
+
+#[derive(Debug)]
+pub struct EventRequestWithToken<Event: GenericEvent = EventU32> {
+    pub request: EventRequest<Event>,
+    pub token: VerificationToken<TcStateStarted>,
 }
 
 #[derive(Debug)]

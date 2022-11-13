@@ -1,7 +1,7 @@
 use crate::tmtc::TmStore;
 use fsrc_core::pool::StoreAddr;
 use fsrc_core::pus::verification::{
-    SharedStdVerifReporterWithSender, StateAccepted, VerificationToken,
+    SharedStdVerifReporterWithSender, TcStateAccepted, VerificationToken,
 };
 use fsrc_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use fsrc_core::tmtc::PusServiceProvider;
@@ -71,7 +71,7 @@ impl PusServiceProvider for PusReceiver {
 }
 
 impl PusReceiver {
-    fn handle_test_service(&mut self, pus_tc: &PusTc, token: VerificationToken<StateAccepted>) {
+    fn handle_test_service(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
         if pus_tc.subservice() == 1 {
             println!("Received PUS ping command TC[17,1]");
             println!("Sending ping reply PUS TM[17,2]");

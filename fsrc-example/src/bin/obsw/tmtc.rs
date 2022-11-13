@@ -11,11 +11,19 @@ use crate::ccsds::CcsdsReceiver;
 use crate::pus::PusReceiver;
 use crate::UdpTmtcServer;
 use fsrc_core::pool::{SharedPool, StoreAddr};
+use fsrc_core::pus::event_man::EventRequestWithToken;
 use fsrc_core::pus::verification::SharedStdVerifReporterWithSender;
 use fsrc_core::tmtc::{CcsdsDistributor, CcsdsError, PusDistributor};
 use spacepackets::tm::PusTm;
 
 pub const PUS_APID: u16 = 0x02;
+
+pub struct CoreTmtcArgs {
+    pub tm_store: TmStore,
+    pub tm_sender: Sender<StoreAddr>,
+    pub event_sender: Sender<(EventU32, Option<Params>)>,
+    pub event_request_tx: Sender<EventRequestWithToken>,
+}
 
 #[derive(Clone)]
 pub struct TmStore {
@@ -34,17 +42,15 @@ impl TmStore {
 }
 
 pub fn core_tmtc_task(
-    tm_creator_tx: Sender<StoreAddr>,
+    args: CoreTmtcArgs,
     tm_server_rx: mpsc::Receiver<StoreAddr>,
-    tm_store_helper: TmStore,
     addr: SocketAddr,
     verif_reporter: SharedStdVerifReporterWithSender,
-    _event_tx: Sender<(EventU32, Option<Params>)>,
 ) {
     let pus_receiver = PusReceiver::new(
         PUS_APID,
-        tm_creator_tx,
-        tm_store_helper.clone(),
+        args.tm_sender,
+        args.tm_store.clone(),
         verif_reporter,
     );
     let pus_distributor = PusDistributor::new(Box::new(pus_receiver));
@@ -58,7 +64,7 @@ pub fn core_tmtc_task(
     let mut udp_tmtc_server = UdpTmtcServer {
         udp_tc_server,
         tm_rx: tm_server_rx,
-        tm_store: tm_store_helper.pool.clone(),
+        tm_store: args.tm_store.pool.clone(),
     };
     loop {
         core_tmtc_loop(&mut udp_tmtc_server);
