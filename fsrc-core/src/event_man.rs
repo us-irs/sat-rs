@@ -96,6 +96,14 @@ pub trait EventReceiver<Event: GenericEvent, AuxDataProvider = Params> {
     fn receive(&mut self) -> Option<(Event, Option<AuxDataProvider>)>;
 }
 
+pub trait ListenerTable<SendProviderError, Event: GenericEvent = EventU32, AuxDataProvider = Params>
+{
+    fn get_listeners(
+        &mut self,
+        key: ListenerType,
+    ) -> &[Listener<SendProviderError, Event, AuxDataProvider>];
+}
+
 /// Generic event manager implementation.
 ///
 /// # Generics
@@ -107,6 +115,7 @@ pub trait EventReceiver<Event: GenericEvent, AuxDataProvider = Params> {
 pub struct EventManager<SendProviderError, Event: GenericEvent = EventU32, AuxDataProvider = Params>
 {
     listeners: HashMap<ListenerType, Vec<Listener<SendProviderError, Event, AuxDataProvider>>>,
+    //listener_table: Box<dyn ListenerTable<SendProviderError, Event, AuxDataProvider>>,
     event_receiver: Box<dyn EventReceiver<Event, AuxDataProvider>>,
 }
 
