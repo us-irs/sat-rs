@@ -46,13 +46,14 @@ use crate::params::{Params, ParamsHeapless};
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::slice::Iter;
 use hashbrown::HashMap;
 
 #[cfg(feature = "std")]
 pub use stdmod::*;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]
-enum ListenerType {
+pub enum ListenerKey {
     Single(LargestEventRaw),
     Group(LargestGroupIdRaw),
     All,
@@ -66,10 +67,12 @@ pub type EventWithAuxData<Event> = (Event, Option<Params>);
 pub type EventU32WithAuxData = EventWithAuxData<EventU32>;
 pub type EventU16WithAuxData = EventWithAuxData<EventU16>;
 
+type SenderId = u32;
+
 pub trait SendEventProvider<Provider: GenericEvent, AuxDataProvider = Params> {
     type Error;
 
-    fn id(&self) -> u32;
+    fn id(&self) -> SenderId;
     fn send_no_data(&mut self, event: Provider) -> Result<(), Self::Error> {
         self.send(event, None)
     }
@@ -80,8 +83,8 @@ pub trait SendEventProvider<Provider: GenericEvent, AuxDataProvider = Params> {
     ) -> Result<(), Self::Error>;
 }
 
-struct Listener<E, Event: GenericEvent, AuxDataProvider = Params> {
-    ltype: ListenerType,
+pub struct Listener<E, Event: GenericEvent, AuxDataProvider = Params> {
+    ltype: ListenerKey,
     send_provider: Box<dyn SendEventProvider<Event, AuxDataProvider, Error = E>>,
 }
 
@@ -98,10 +101,19 @@ pub trait EventReceiver<Event: GenericEvent, AuxDataProvider = Params> {
 
 pub trait ListenerTable<SendProviderError, Event: GenericEvent = EventU32, AuxDataProvider = Params>
 {
-    fn get_listeners(
+    fn get_listener_ids(&mut self, key: ListenerKey) -> Option<Iter<SenderId>>;
+    fn add_listener(&mut self, key: ListenerKey, sender_id: SenderId) -> bool;
+
+    fn get_send_event_provider(
         &mut self,
-        key: ListenerType,
-    ) -> &[Listener<SendProviderError, Event, AuxDataProvider>];
+        id: SenderId,
+    ) -> Option<&mut Box<dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>>;
+    fn add_send_event_provider(
+        &mut self,
+        send_provider: Box<
+            dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>,
+        >,
+    ) -> bool;
 }
 
 /// Generic event manager implementation.
@@ -114,9 +126,64 @@ pub trait ListenerTable<SendProviderError, Event: GenericEvent = EventU32, AuxDa
 ///     [ParamsHeapless]
 pub struct EventManager<SendProviderError, Event: GenericEvent = EventU32, AuxDataProvider = Params>
 {
-    listeners: HashMap<ListenerType, Vec<Listener<SendProviderError, Event, AuxDataProvider>>>,
+    listeners: HashMap<ListenerKey, Vec<Listener<SendProviderError, Event, AuxDataProvider>>>,
     //listener_table: Box<dyn ListenerTable<SendProviderError, Event, AuxDataProvider>>,
     event_receiver: Box<dyn EventReceiver<Event, AuxDataProvider>>,
+}
+
+#[cfg(feature = "std")]
+#[derive(Default)]
+pub struct DefaultSenderTableProvider<
+    SendProviderError,
+    Event: GenericEvent = EventU32,
+    AuxDataProvider = Params,
+> {
+    listeners: HashMap<ListenerKey, Vec<SenderId>>,
+    senders: HashMap<
+        SenderId,
+        Box<dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>,
+    >,
+}
+
+#[cfg(feature = "std")]
+impl<SendProviderError, Event: GenericEvent, AuxDataProvider>
+    ListenerTable<SendProviderError, Event, AuxDataProvider>
+    for DefaultSenderTableProvider<SendProviderError, Event, AuxDataProvider>
+{
+    fn get_listener_ids(&mut self, key: ListenerKey) -> Option<Iter<SenderId>> {
+        self.listeners.get(&key).map(|vec| vec.into_iter())
+    }
+
+    fn add_listener(&mut self, key: ListenerKey, sender_id: SenderId) -> bool {
+        if let Some(existing_list) = self.listeners.get_mut(&key) {
+            existing_list.push(sender_id);
+        } else {
+            let new_list = vec![sender_id];
+            self.listeners.insert(key, new_list);
+        }
+        true
+    }
+
+    fn get_send_event_provider(
+        &mut self,
+        id: SenderId,
+    ) -> Option<&mut Box<dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>>
+    {
+        self.senders.get_mut(&id).filter(|sender| sender.id() == id)
+    }
+
+    fn add_send_event_provider(
+        &mut self,
+        send_provider: Box<
+            dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>,
+        >,
+    ) -> bool {
+        let id = send_provider.id();
+        if self.senders.contains_key(&id) {
+            return false;
+        }
+        self.senders.insert(id, send_provider).is_none()
+    }
 }
 
 /// Safety: It is safe to implement [Send] because all fields in the [EventManager] are [Send]
@@ -144,7 +211,7 @@ impl<E, Event: GenericEvent + Copy> EventManager<E, Event> {
         event: Event,
         dest: impl SendEventProvider<Event, Error = E> + 'static,
     ) {
-        self.update_listeners(ListenerType::Single(event.raw_as_largest_type()), dest);
+        self.update_listeners(ListenerKey::Single(event.raw_as_largest_type()), dest);
     }
 
     pub fn subscribe_group(
@@ -152,7 +219,7 @@ impl<E, Event: GenericEvent + Copy> EventManager<E, Event> {
         group_id: LargestGroupIdRaw,
         dest: impl SendEventProvider<Event, Error = E> + 'static,
     ) {
-        self.update_listeners(ListenerType::Group(group_id), dest);
+        self.update_listeners(ListenerKey::Group(group_id), dest);
     }
 
     /// Subscribe for all events received by the manager.
@@ -163,7 +230,7 @@ impl<E, Event: GenericEvent + Copy> EventManager<E, Event> {
         &mut self,
         send_provider: impl SendEventProvider<Event, Error = E> + 'static,
     ) {
-        self.update_listeners(ListenerType::All, send_provider);
+        self.update_listeners(ListenerKey::All, send_provider);
     }
 
     /// Helper function which removes single subscriptions for which a group subscription already
@@ -173,9 +240,9 @@ impl<E, Event: GenericEvent + Copy> EventManager<E, Event> {
         group_id: LargestGroupIdRaw,
         dest: impl SendEventProvider<Event, Error = E> + 'static,
     ) {
-        if self.listeners.contains_key(&ListenerType::Group(group_id)) {
+        if self.listeners.contains_key(&ListenerKey::Group(group_id)) {
             for (ltype, listeners) in &mut self.listeners {
-                if let ListenerType::Single(_) = ltype {
+                if let ListenerKey::Single(_) = ltype {
                     listeners.retain(|f| f.send_provider.id() != dest.id());
                 }
             }
@@ -188,7 +255,7 @@ impl<E, Event: GenericEvent + Copy, AuxDataProvider: Clone>
 {
     fn update_listeners(
         &mut self,
-        key: ListenerType,
+        key: ListenerKey,
         dest: impl SendEventProvider<Event, AuxDataProvider, Error = E> + 'static,
     ) {
         if !self.listeners.contains_key(&key) {
@@ -230,7 +297,7 @@ impl<E, Event: GenericEvent + Copy, AuxDataProvider: Clone>
                 }
             };
         if let Some((event, aux_data)) = self.event_receiver.receive() {
-            let single_key = ListenerType::Single(event.raw_as_largest_type());
+            let single_key = ListenerKey::Single(event.raw_as_largest_type());
             if self.listeners.contains_key(&single_key) {
                 send_handler(
                     event,
@@ -238,7 +305,7 @@ impl<E, Event: GenericEvent + Copy, AuxDataProvider: Clone>
                     self.listeners.get_mut(&single_key).unwrap(),
                 );
             }
-            let group_key = ListenerType::Group(event.group_id_as_largest_type());
+            let group_key = ListenerKey::Group(event.group_id_as_largest_type());
             if self.listeners.contains_key(&group_key) {
                 send_handler(
                     event,
@@ -246,7 +313,7 @@ impl<E, Event: GenericEvent + Copy, AuxDataProvider: Clone>
                     self.listeners.get_mut(&group_key).unwrap(),
                 );
             }
-            if let Some(all_receivers) = self.listeners.get_mut(&ListenerType::All) {
+            if let Some(all_receivers) = self.listeners.get_mut(&ListenerKey::All) {
                 send_handler(event, aux_data.clone(), all_receivers);
             }
             if let Some(err) = err_status {
