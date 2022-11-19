@@ -1,4 +1,6 @@
-use fsrc_core::event_man::{EventManager, MpscEventReceiver, MpscEventU32SendProvider};
+use fsrc_core::event_man::{
+    EventManagerWithMpscQueue, MpscEventU32Receiver, MpscEventU32SendProvider, SendEventProvider,
+};
 use fsrc_core::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
 use fsrc_core::params::U32Pair;
 use fsrc_core::params::{Params, ParamsHeapless, WritableToBeBytes};
@@ -31,12 +33,13 @@ impl EcssTmSender for EventTmSender {
 #[test]
 fn test_threaded_usage() {
     let (event_sender, event_man_receiver) = channel();
-    let event_receiver = MpscEventReceiver::new(event_man_receiver);
-    let mut event_man = EventManager::new(Box::new(event_receiver));
+    let event_receiver = MpscEventU32Receiver::new(event_man_receiver);
+    let mut event_man = EventManagerWithMpscQueue::new(Box::new(event_receiver));
 
     let (pus_event_man_tx, pus_event_man_rx) = channel();
     let pus_event_man_send_provider = MpscEventU32SendProvider::new(1, pus_event_man_tx);
-    event_man.subscribe_all(pus_event_man_send_provider);
+    event_man.subscribe_all(pus_event_man_send_provider.id());
+    event_man.add_sender(pus_event_man_send_provider);
     let (event_tx, event_rx) = channel();
     let reporter = EventReporter::new(0x02, 128).expect("Creating event reporter failed");
     let backend = DefaultPusMgmtBackendProvider::<EventU32>::default();

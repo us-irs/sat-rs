@@ -3,7 +3,9 @@ mod pus;
 mod tmtc;
 
 use crate::tmtc::{core_tmtc_task, CoreTmtcArgs, TmStore, PUS_APID};
-use fsrc_core::event_man::{EventManager, MpscEventReceiver, MpscEventU32SendProvider};
+use fsrc_core::event_man::{
+    EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
+};
 use fsrc_core::events::EventU32;
 use fsrc_core::hal::host::udp_server::UdpTcServer;
 use fsrc_core::pool::{LocalPool, PoolCfg, SharedPool, StoreAddr};
@@ -81,7 +83,7 @@ fn main() {
     let (event_request_tx, event_request_rx) = channel::<EventRequestWithToken>();
     let (event_sender, event_man_rx) = channel();
     let event_recv = MpscEventReceiver::<EventU32>::new(event_man_rx);
-    let mut event_man = EventManager::new(Box::new(event_recv));
+    let mut event_man = EventManagerWithMpscQueue::new(Box::new(event_recv));
     let event_reporter = EventReporter::new(PUS_APID, 128).unwrap();
     let pus_tm_backend = DefaultPusMgmtBackendProvider::<EventU32>::default();
     let mut pus_event_dispatcher =
@@ -89,7 +91,7 @@ fn main() {
     let (pus_event_man_tx, pus_event_man_rx) = channel();
     let pus_event_man_send_provider = MpscEventU32SendProvider::new(1, pus_event_man_tx);
     let reporter1 = reporter_with_sender_0.clone();
-    event_man.subscribe_all(pus_event_man_send_provider);
+    event_man.subscribe_all(pus_event_man_send_provider.id());
 
     // Create clones here to allow move for thread 0
     let core_args = CoreTmtcArgs {
