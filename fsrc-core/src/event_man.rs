@@ -13,8 +13,8 @@ doc = ::embed_doc_image::embed_image!("event_man_arch", "images/event_man_arch.p
            to enable."
 )]
 //! One common use case for satellite systems is to offer a light-weight publish-subscribe mechanism
-//! and IPC mechanism for software and hardware events which are also packaged as telemetry or can
-//! trigger a system response.
+//! and IPC mechanism for software and hardware events which are also packaged as telemetry (TM) or
+//! can trigger a system response.
 //!
 //! The following graph shows how the event flow for such a setup could look like:
 //!
@@ -208,6 +208,8 @@ impl<E, Event: GenericEvent + Copy> EventManager<E, Event> {
 impl<E: 'static, Event: GenericEvent + Copy + 'static, AuxDataProvider: Clone + 'static>
     EventManager<E, Event, AuxDataProvider>
 {
+    /// Create an event manager where the sender table will be the [DefaultSenderTableProvider]
+    /// and the listener table will be the [DefaultListenerTableProvider].
     pub fn new(event_receiver: Box<dyn EventReceiver<Event, AuxDataProvider>>) -> Self {
         let listener_table = Box::new(DefaultListenerTableProvider::default());
         let sender_table =
