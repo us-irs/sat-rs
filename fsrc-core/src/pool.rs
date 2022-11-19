@@ -405,6 +405,8 @@ impl<'a> PoolGuard<'a> {
         self.pool.read(&self.addr)
     }
 
+    /// Releasing the pool guard will disable the automatic deletion of the data when the guard
+    /// is dropped.
     pub fn release(&mut self) {
         self.no_deletion = true;
     }
@@ -438,6 +440,8 @@ impl<'a> PoolRwGuard<'a> {
     delegate!(
         to self.guard {
             pub fn read(&self) -> Result<&[u8], StoreError>;
+            /// Releasing the pool guard will disable the automatic deletion of the data when the guard
+            /// is dropped.
             pub fn release(&mut self);
         }
     );
