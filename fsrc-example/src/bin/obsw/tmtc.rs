@@ -52,6 +52,7 @@ pub fn core_tmtc_task(
         args.tm_sender,
         args.tm_store.clone(),
         verif_reporter,
+        args.event_request_tx,
     );
     let pus_distributor = PusDistributor::new(Box::new(pus_receiver));
     let ccsds_receiver = CcsdsReceiver {

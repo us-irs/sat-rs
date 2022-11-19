@@ -25,6 +25,37 @@ impl From<Subservices> for u8 {
     }
 }
 
+impl TryFrom<u8> for Subservices {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            x if x == Subservices::TmInfoReport as u8 => Ok(Subservices::TmInfoReport),
+            x if x == Subservices::TmLowSeverityReport as u8 => {
+                Ok(Subservices::TmLowSeverityReport)
+            }
+            x if x == Subservices::TmMediumSeverityReport as u8 => {
+                Ok(Subservices::TmMediumSeverityReport)
+            }
+            x if x == Subservices::TmHighSeverityReport as u8 => {
+                Ok(Subservices::TmHighSeverityReport)
+            }
+            x if x == Subservices::TcEnableEventGeneration as u8 => {
+                Ok(Subservices::TcEnableEventGeneration)
+            }
+            x if x == Subservices::TcDisableEventGeneration as u8 => {
+                Ok(Subservices::TcDisableEventGeneration)
+            }
+            x if x == Subservices::TcReportDisabledList as u8 => {
+                Ok(Subservices::TcReportDisabledList)
+            }
+            x if x == Subservices::TmDisabledEventsReport as u8 => {
+                Ok(Subservices::TmDisabledEventsReport)
+            }
+            _ => Err(()),
+        }
+    }
+}
 pub struct EventReporterBase {
     msg_count: u16,
     apid: u16,
