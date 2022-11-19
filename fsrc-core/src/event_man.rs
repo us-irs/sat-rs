@@ -1,8 +1,8 @@
 //! Event management and forwarding
 //!
 //! This module provides components to perform event routing. The most important component for this
-//! task is the [EventManager]. It uses a map of event listeners and uses a dynamic [EventReceiver]
-//! instance to receive all events and then route them to event subscribers where appropriate.
+//! task is the [EventManager]. It receives all events and then routes them to event subscribers
+//! where appropriate.
 #![cfg_attr(feature = "doc-images",
 cfg_attr(all(),
 doc = ::embed_doc_image::embed_image!("event_man_arch", "images/event_man_arch.png"
@@ -23,7 +23,7 @@ doc = ::embed_doc_image::embed_image!("event_man_arch", "images/event_man_arch.p
 //! The event manager has a listener table abstracted by the [ListenerTable], which maps
 //! listener groups identified by [ListenerKey]s to a [sender ID][SenderId].
 //! It also contains a sender table abstracted by the [SenderTable] which maps these sender IDs
-//! to a concrete [SendEventProvider]. A simple approach would be to use one send event provider
+//! to a concrete [SendEventProvider]s. A simple approach would be to use one send event provider
 //! for each OBSW thread and then subscribe for all interesting events for a particular thread
 //! using the send event provider ID.
 //!
@@ -32,16 +32,15 @@ doc = ::embed_doc_image::embed_image!("event_man_arch", "images/event_man_arch.p
 //!  1. Provide a concrete [EventReceiver] implementation. This abstraction allow to use different
 //!     message queue backends. A straightforward implementation where dynamic memory allocation is
 //!     not a big concern could use [std::sync::mpsc::channel] to do this and is provided in
-//!     form of the [MpscEventSendProvider].
+//!     form of the [MpscEventReceiver].
 //!  2. To set up event creators, create channel pairs using some message queue implementation.
 //!     Each event creator gets a (cloned) sender component which allows it to send events to the
 //!     manager.
-//!  3. The event manager receives the receiver component so all events are routed to the
-//!     manager.
+//!  3. The event manager receives the receiver component as part of a [EventReceiver]
+//!     implementation so all events are routed to the manager.
 //!  4. Create the [send event providers][SendEventProvider]s which allow routing events to
-//!     subscribers.
-//!     Use can now use their [sender IDs][SendEventProvider::id] to subscribe for event groups,
-//!     for example by using the [EventManager::subscribe_single] method.
+//!     subscribers. You can now use their [sender IDs][SendEventProvider::id] to subscribe for
+//!     event groups, for example by using the [EventManager::subscribe_single] method.
 //!  5. Add the send provider as well using the [EventManager::add_sender] call so the event
 //!     manager can route listener groups to a the send provider.
 //!
@@ -52,7 +51,7 @@ doc = ::embed_doc_image::embed_image!("event_man_arch", "images/event_man_arch.p
 //!
 //! # Examples
 //!
-//! You can check [integration test](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/event_man_table_impl/fsrc-core/tests/pus_events.rs)
+//! You can check [integration test](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-core/tests/pus_events.rs)
 //! for a concrete example using multi-threading where events are routed to
 //! different threads.
 use crate::events::{EventU16, EventU32, GenericEvent, LargestEventRaw, LargestGroupIdRaw};
