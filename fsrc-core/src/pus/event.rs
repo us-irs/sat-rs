@@ -25,6 +25,37 @@ impl From<Subservices> for u8 {
     }
 }
 
+impl TryFrom<u8> for Subservices {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            x if x == Subservices::TmInfoReport as u8 => Ok(Subservices::TmInfoReport),
+            x if x == Subservices::TmLowSeverityReport as u8 => {
+                Ok(Subservices::TmLowSeverityReport)
+            }
+            x if x == Subservices::TmMediumSeverityReport as u8 => {
+                Ok(Subservices::TmMediumSeverityReport)
+            }
+            x if x == Subservices::TmHighSeverityReport as u8 => {
+                Ok(Subservices::TmHighSeverityReport)
+            }
+            x if x == Subservices::TcEnableEventGeneration as u8 => {
+                Ok(Subservices::TcEnableEventGeneration)
+            }
+            x if x == Subservices::TcDisableEventGeneration as u8 => {
+                Ok(Subservices::TcDisableEventGeneration)
+            }
+            x if x == Subservices::TcReportDisabledList as u8 => {
+                Ok(Subservices::TcReportDisabledList)
+            }
+            x if x == Subservices::TmDisabledEventsReport as u8 => {
+                Ok(Subservices::TmDisabledEventsReport)
+            }
+            _ => Err(()),
+        }
+    }
+}
 pub struct EventReporterBase {
     msg_count: u16,
     apid: u16,
@@ -46,7 +77,7 @@ impl EventReporterBase {
     pub fn event_info<E>(
         &mut self,
         buf: &mut [u8],
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
@@ -64,7 +95,7 @@ impl EventReporterBase {
     pub fn event_low_severity<E>(
         &mut self,
         buf: &mut [u8],
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
@@ -82,7 +113,7 @@ impl EventReporterBase {
     pub fn event_medium_severity<E>(
         &mut self,
         buf: &mut [u8],
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
@@ -100,7 +131,7 @@ impl EventReporterBase {
     pub fn event_high_severity<E>(
         &mut self,
         buf: &mut [u8],
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
@@ -119,7 +150,7 @@ impl EventReporterBase {
         &mut self,
         buf: &mut [u8],
         subservice: Subservices,
-        sender: &mut (impl EcssTmSender<E> + ?Sized),
+        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
@@ -152,7 +183,7 @@ impl EventReporterBase {
             time_stamp,
         );
         let mut current_idx = 0;
-        event_id.write_to_bytes(&mut buf[0..event_id.byte_width()])?;
+        event_id.write_to_be_bytes(&mut buf[0..event_id.byte_width()])?;
         current_idx += event_id.byte_width();
         if let Some(aux_data) = aux_data {
             buf[current_idx..current_idx + aux_data.len()].copy_from_slice(aux_data);
@@ -188,7 +219,7 @@ mod allocvec {
         }
         pub fn event_info<E>(
             &mut self,
-            sender: &mut (impl EcssTmSender<E> + ?Sized),
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
@@ -204,7 +235,7 @@ mod allocvec {
 
         pub fn event_low_severity<E>(
             &mut self,
-            sender: &mut (impl EcssTmSender<E> + ?Sized),
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
@@ -220,7 +251,7 @@ mod allocvec {
 
         pub fn event_medium_severity<E>(
             &mut self,
-            sender: &mut (impl EcssTmSender<E> + ?Sized),
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
@@ -236,7 +267,7 @@ mod allocvec {
 
         pub fn event_high_severity<E>(
             &mut self,
-            sender: &mut (impl EcssTmSender<E> + ?Sized),
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
@@ -255,7 +286,7 @@ mod allocvec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{Event, Severity};
+    use crate::events::{EventU32, Severity};
     use crate::pus::tests::CommonTmInfo;
     use spacepackets::ByteConversionError;
     use std::collections::VecDeque;
@@ -270,7 +301,7 @@ mod tests {
     #[derive(Debug, Eq, PartialEq)]
     struct TmInfo {
         pub common: CommonTmInfo,
-        pub event: Event,
+        pub event: EventU32,
         pub aux_data: Vec<u8>,
     }
 
@@ -279,14 +310,14 @@ mod tests {
         pub service_queue: VecDeque<TmInfo>,
     }
 
-    impl EcssTmSender<()> for TestSender {
+    impl EcssTmSender for TestSender {
+        type Error = ();
+
         fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<()>> {
             assert!(tm.source_data().is_some());
             let src_data = tm.source_data().unwrap();
             assert!(src_data.len() >= 4);
-            let event = Event::try_from(u32::from_be_bytes(src_data[0..4].try_into().unwrap()));
-            assert!(event.is_ok());
-            let event = event.unwrap();
+            let event = EventU32::from(u32::from_be_bytes(src_data[0..4].try_into().unwrap()));
             let mut aux_data = Vec::new();
             if src_data.len() > 4 {
                 aux_data.extend_from_slice(&src_data[4..]);
@@ -313,7 +344,7 @@ mod tests {
         reporter: &mut EventReporter,
         sender: &mut TestSender,
         time_stamp: &[u8],
-        event: Event,
+        event: EventU32,
         severity: Severity,
         aux_data: Option<&[u8]>,
     ) {
@@ -355,7 +386,7 @@ mod tests {
         if let Some(err_data) = error_data {
             error_copy.extend_from_slice(err_data);
         }
-        let event = Event::new(severity, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
+        let event = EventU32::new(severity, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
             .expect("Error creating example event");
         report_basic_event(
             &mut reporter,
@@ -418,7 +449,7 @@ mod tests {
         expected_found_len: usize,
     ) {
         let time_stamp_empty: [u8; 7] = [0; 7];
-        let event = Event::new(Severity::INFO, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
+        let event = EventU32::new(Severity::INFO, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
             .expect("Error creating example event");
         let err = reporter.event_info(sender, &time_stamp_empty, event, None);
         assert!(err.is_err());

@@ -10,20 +10,23 @@
 #![no_std]
 #[cfg(feature = "alloc")]
 extern crate alloc;
+extern crate downcast_rs;
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
 pub mod error;
 #[cfg(feature = "alloc")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub mod event_man;
 pub mod events;
 #[cfg(feature = "std")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod executable;
 pub mod hal;
 pub mod objects;
+pub mod params;
 #[cfg(feature = "alloc")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub mod pool;
 pub mod pus;
 pub mod tmtc;
-
-extern crate downcast_rs;
