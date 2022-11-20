@@ -18,8 +18,8 @@
 //! # Example
 //!
 //! ```rust
-//! use fsrc_core::tmtc::ccsds_distrib::{CcsdsPacketHandler, CcsdsDistributor};
-//! use fsrc_core::tmtc::ReceivesTc;
+//! use satrs_core::tmtc::ccsds_distrib::{CcsdsPacketHandler, CcsdsDistributor};
+//! use satrs_core::tmtc::ReceivesTc;
 //! use spacepackets::{CcsdsPacket, SpHeader};
 //! use spacepackets::tc::PusTc;
 //!

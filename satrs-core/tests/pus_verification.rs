@@ -1,5 +1,5 @@
-use fsrc_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
-use fsrc_core::pus::verification::{
+use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
+use satrs_core::pus::verification::{
     CrossbeamVerifSender, FailParams, RequestId, VerificationReporterCfg,
     VerificationReporterWithSender,
 };

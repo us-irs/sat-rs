@@ -1,5 +1,5 @@
 use crate::tmtc::PUS_APID;
-use fsrc_core::tmtc::{CcsdsPacketHandler, PusDistributor, ReceivesCcsdsTc};
+use satrs_core::tmtc::{CcsdsPacketHandler, PusDistributor, ReceivesCcsdsTc};
 use spacepackets::{CcsdsPacket, SpHeader};
 
 pub struct CcsdsReceiver {

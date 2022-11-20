@@ -1,6 +1,6 @@
-use fsrc_core::events::EventU32;
-use fsrc_core::hal::host::udp_server::{ReceiveResult, UdpTcServer};
-use fsrc_core::params::Params;
+use satrs_core::events::EventU32;
+use satrs_core::hal::host::udp_server::{ReceiveResult, UdpTcServer};
+use satrs_core::params::Params;
 use std::net::SocketAddr;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
@@ -10,10 +10,10 @@ use std::time::Duration;
 use crate::ccsds::CcsdsReceiver;
 use crate::pus::PusReceiver;
 use crate::UdpTmtcServer;
-use fsrc_core::pool::{SharedPool, StoreAddr};
-use fsrc_core::pus::event_man::EventRequestWithToken;
-use fsrc_core::pus::verification::SharedStdVerifReporterWithSender;
-use fsrc_core::tmtc::{CcsdsDistributor, CcsdsError, PusDistributor};
+use satrs_core::pool::{SharedPool, StoreAddr};
+use satrs_core::pus::event_man::EventRequestWithToken;
+use satrs_core::pus::verification::SharedStdVerifReporterWithSender;
+use satrs_core::tmtc::{CcsdsDistributor, CcsdsError, PusDistributor};
 use spacepackets::tm::PusTm;
 
 pub const PUS_APID: u16 = 0x02;

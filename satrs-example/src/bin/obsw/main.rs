@@ -3,22 +3,22 @@ mod pus;
 mod tmtc;
 
 use crate::tmtc::{core_tmtc_task, CoreTmtcArgs, TmStore, PUS_APID};
-use fsrc_core::event_man::{
+use satrs_core::event_man::{
     EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
 };
-use fsrc_core::events::EventU32;
-use fsrc_core::hal::host::udp_server::UdpTcServer;
-use fsrc_core::pool::{LocalPool, PoolCfg, SharedPool, StoreAddr};
-use fsrc_core::pus::event_man::{
+use satrs_core::events::EventU32;
+use satrs_core::hal::host::udp_server::UdpTcServer;
+use satrs_core::pool::{LocalPool, PoolCfg, SharedPool, StoreAddr};
+use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, EventRequest, EventRequestWithToken,
     PusEventDispatcher,
 };
-use fsrc_core::pus::verification::{
+use satrs_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
 };
-use fsrc_core::pus::{EcssTmError, EcssTmSender};
-use fsrc_core::tmtc::CcsdsError;
-use fsrc_example::{OBSW_SERVER_ADDR, SERVER_PORT};
+use satrs_core::pus::{EcssTmError, EcssTmSender};
+use satrs_core::tmtc::CcsdsError;
+use satrs_example::{OBSW_SERVER_ADDR, SERVER_PORT};
 use spacepackets::time::{CdsShortTimeProvider, TimeWriter};
 use spacepackets::tm::PusTm;
 use std::net::{IpAddr, SocketAddr};

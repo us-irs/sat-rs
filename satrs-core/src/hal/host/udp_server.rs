@@ -18,8 +18,8 @@ use std::vec::Vec;
 ///
 /// ```
 /// use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
-/// use fsrc_core::hal::host::udp_server::UdpTcServer;
-/// use fsrc_core::tmtc::ReceivesTc;
+/// use satrs_core::hal::host::udp_server::UdpTcServer;
+/// use satrs_core::tmtc::ReceivesTc;
 /// use spacepackets::SpHeader;
 /// use spacepackets::tc::PusTc;
 ///

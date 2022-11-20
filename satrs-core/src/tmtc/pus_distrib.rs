@@ -17,8 +17,8 @@
 //! # Example
 //!
 //! ```rust
-//! use fsrc_core::tmtc::pus_distrib::{PusDistributor, PusServiceProvider};
-//! use fsrc_core::tmtc::ReceivesTc;
+//! use satrs_core::tmtc::pus_distrib::{PusDistributor, PusServiceProvider};
+//! use satrs_core::tmtc::ReceivesTc;
 //! use spacepackets::SpHeader;
 //! use spacepackets::tc::PusTc;
 //! struct ConcretePusHandler {

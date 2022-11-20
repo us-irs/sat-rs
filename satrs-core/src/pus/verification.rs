@@ -15,8 +15,8 @@
 //! ```
 //! use std::sync::{Arc, RwLock};
 //! use std::time::Duration;
-//! use fsrc_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
-//! use fsrc_core::pus::verification::{CrossbeamVerifSender, VerificationReporterCfg, VerificationReporterWithSender};
+//! use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
+//! use satrs_core::pus::verification::{CrossbeamVerifSender, VerificationReporterCfg, VerificationReporterWithSender};
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
 //! use spacepackets::tc::{PusTc, PusTcSecondaryHeader};

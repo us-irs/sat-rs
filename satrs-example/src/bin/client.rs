@@ -1,5 +1,5 @@
-use fsrc_core::pus::verification::RequestId;
-use fsrc_example::{OBSW_SERVER_ADDR, SERVER_PORT};
+use satrs_core::pus::verification::RequestId;
+use satrs_example::{OBSW_SERVER_ADDR, SERVER_PORT};
 use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
 use spacepackets::tm::PusTm;

@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_imports)]
 
-use fsrc_core::events::{
+use satrs_core::events::{
     EventU32, EventU32TypedSev, GenericEvent, HasSeverity, LargestEventRaw, LargestGroupIdRaw,
     Severity, SeverityInfo, SeverityLow, SeverityMedium,
 };

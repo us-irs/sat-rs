@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```
-//! use fsrc_core::pool::{LocalPool, PoolCfg, PoolProvider};
+//! use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider};
 //!
 //! // 4 buckets of 4 bytes, 2 of 8 bytes and 1 of 16 bytes
 //! let pool_cfg = PoolCfg::new(vec![(4, 4), (2, 8), (1, 16)]);

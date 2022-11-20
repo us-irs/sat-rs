@@ -1,13 +1,13 @@
 use crate::tmtc::TmStore;
-use fsrc_core::events::EventU32;
-use fsrc_core::pool::StoreAddr;
-use fsrc_core::pus::event::Subservices;
-use fsrc_core::pus::event_man::{EventRequest, EventRequestWithToken};
-use fsrc_core::pus::verification::{
+use satrs_core::events::EventU32;
+use satrs_core::pool::StoreAddr;
+use satrs_core::pus::event::Subservices;
+use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
+use satrs_core::pus::verification::{
     FailParams, SharedStdVerifReporterWithSender, TcStateAccepted, VerificationToken,
 };
-use fsrc_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
-use fsrc_core::tmtc::PusServiceProvider;
+use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
+use satrs_core::tmtc::PusServiceProvider;
 use spacepackets::ecss::{EcssEnumU16, PusPacket};
 use spacepackets::tc::PusTc;
 use spacepackets::time::{CdsShortTimeProvider, TimeWriter};

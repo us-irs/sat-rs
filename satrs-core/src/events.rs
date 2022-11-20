@@ -18,7 +18,7 @@
 //! # Examples
 //!
 //! ```
-//! use fsrc_core::events::{EventU16, EventU32, EventU32TypedSev, Severity, SeverityHigh, SeverityInfo};
+//! use satrs_core::events::{EventU16, EventU32, EventU32TypedSev, Severity, SeverityHigh, SeverityInfo};
 //!
 //! const MSG_RECVD: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::const_new(1, 0);
 //! const MSG_FAILED: EventU32 = EventU32::const_new(Severity::LOW, 1, 1);

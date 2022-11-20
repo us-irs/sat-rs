@@ -12,5 +12,5 @@ zerocopy = "0.6"
 [dependencies.spacepackets]
 path = "../spacepackets"
 
-[dependencies.fsrc-core]
-path = "../fsrc-core"
+[dependencies.satrs-core]
+path = "../satrs-core"

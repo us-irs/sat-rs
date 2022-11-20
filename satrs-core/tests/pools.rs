@@ -1,4 +1,4 @@
-use fsrc_core::pool::{LocalPool, PoolCfg, PoolGuard, PoolProvider, StoreAddr};
+use satrs_core::pool::{LocalPool, PoolCfg, PoolGuard, PoolProvider, StoreAddr};
 use std::ops::DerefMut;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
