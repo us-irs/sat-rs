@@ -55,7 +55,6 @@ class SatRsConfigHook(TmTcCfgHookBase):
         super().__init__(json_cfg_path=json_cfg_path)
 
     def assign_communication_interface(self, com_if_key: str) -> Optional[ComInterface]:
-        print("Communication interface assignment function was called")
         from tmtccmd.config.com_if import (
             create_com_interface_default,
             create_com_interface_cfg_default,

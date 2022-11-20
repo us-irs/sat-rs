@@ -42,4 +42,12 @@ pip install tmtccmd[gui]
 After setting up the dependencies, you can simply run the `main.py` script to send commands
 to the OBSW example and to view and handle incoming telemetry. The script and the `tmtccmd`
 framework it uses allow to easily add and expose additional telecommand and telemetry handling
-as Python code.
+as Python code. For example, you can use the following command to send a ping like done with
+the `simpleclient`:
+
+```sh
+./main.py -s test -o ping
+```
+
+You can also simply call the script without any arguments to view a list of services (`-s` flag)
+and corresponding op codes (`-o` flag) for each service.
