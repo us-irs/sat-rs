@@ -28,10 +28,10 @@ impl CcsdsPacketHandler for CcsdsReceiver {
 
     fn handle_unknown_apid(
         &mut self,
-        _sp_header: &SpHeader,
+        sp_header: &SpHeader,
         _tc_raw: &[u8],
     ) -> Result<(), Self::Error> {
-        println!("Unknown APID detected");
+        println!("Unknown APID 0x{:x?} detected", sp_header.apid());
         Ok(())
     }
 }

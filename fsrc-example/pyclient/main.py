@@ -47,7 +47,7 @@ from tmtccmd.util.tmtc_printer import FsfwTmTcPrinter
 
 LOGGER = get_console_logger()
 
-EXAMPLE_PUS_APID = 0xEF
+EXAMPLE_PUS_APID = 0x02
 
 
 class SatRsConfigHook(TmTcCfgHookBase):
@@ -113,10 +113,10 @@ class PusHandler(SpecificApidHandlerBase):
     def handle_tm(self, packet: bytes, _user_args: any):
         try:
             tm_packet = PusTelemetry.unpack(packet)
-        except ValueError:
+        except ValueError as e:
             LOGGER.warning("Could not generate PUS TM object from raw data")
             LOGGER.warning(f"Raw Packet: [{packet.hex(sep=',')}], REPR: {packet!r}")
-            return
+            raise e
         service = tm_packet.service
         dedicated_handler = False
         if service == 1:
@@ -263,7 +263,10 @@ def main():
             elif state.request == BackendRequest.DELAY_LISTENER:
                 time.sleep(0.8)
             elif state.request == BackendRequest.DELAY_CUSTOM:
-                time.sleep(state.next_delay)
+                if state.next_delay.total_seconds() <= 0.4:
+                    time.sleep(state.next_delay.total_seconds())
+                else:
+                    time.sleep(0.4)
             elif state.request == BackendRequest.CALL_NEXT:
                 pass
     except KeyboardInterrupt:

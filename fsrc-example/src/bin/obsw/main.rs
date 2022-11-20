@@ -100,10 +100,13 @@ fn main() {
         event_sender,
         event_request_tx,
     };
+
+    println!("Starting TMTC task");
     let jh0 = thread::spawn(move || {
         core_tmtc_task(core_args, tm_server_rx, addr, reporter_with_sender_0);
     });
 
+    println!("Starting TM funnel task");
     let jh1 = thread::spawn(move || {
         let tm_funnel = TmFunnel {
             tm_server_tx,
@@ -119,6 +122,7 @@ fn main() {
         }
     });
 
+    println!("Starting event handling task");
     let jh2 = thread::spawn(move || {
         let mut timestamp: [u8; 7] = [0; 7];
         let mut sender = EventTmSender::new(tm_store_helper, tm_funnel_tx);
