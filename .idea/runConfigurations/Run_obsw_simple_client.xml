@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Run obsw example" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-    <option name="command" value="run -p satrs-example --bin satrs-example" />
+  <configuration default="false" name="Run obsw simple client" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+    <option name="command" value="run --package fsrc-example --bin client" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <option name="channel" value="DEFAULT" />
     <option name="requiredFeatures" value="true" />

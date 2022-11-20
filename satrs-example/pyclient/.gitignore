@@ -1,0 +1,6 @@
+/venv
+/log
+/.idea/*
+!/.idea/runConfigurations
+
+/seqcnt.txt

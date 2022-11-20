@@ -1,0 +1,17 @@
+[package]
+name = "satrs-example"
+version = "0.1.0"
+edition = "2021"
+authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
+default-run = "satrs-example"
+
+[dependencies]
+crossbeam-channel = "0.5"
+delegate = "0.8"
+zerocopy = "0.6"
+
+[dependencies.spacepackets]
+path = "../spacepackets"
+
+[dependencies.satrs-core]
+path = "../satrs-core"

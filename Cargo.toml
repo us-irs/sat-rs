@@ -1,7 +1,7 @@
 [workspace]
 
 members = [
-    "fsrc-core",
+    "satrs-core",
     "spacepackets",
-    "fsrc-example"
+    "satrs-example"
 ]
