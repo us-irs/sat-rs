@@ -25,6 +25,10 @@ impl SequenceCountProvider<u16> for SimpleSeqCountProvider {
     }
 
     fn increment(&mut self) {
+        if self.seq_count == u16::MAX {
+            self.seq_count = 0;
+            return;
+        }
         self.seq_count += 1;
     }
 }
