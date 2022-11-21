@@ -17,6 +17,7 @@
 //! use std::time::Duration;
 //! use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
 //! use satrs_core::pus::verification::{CrossbeamVerifSender, VerificationReporterCfg, VerificationReporterWithSender};
+//! use satrs_core::seq_count::SimpleSeqCountProvider;
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
 //! use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
@@ -29,7 +30,7 @@
 //! let shared_tm_pool: SharedPool = Arc::new(RwLock::new(Box::new(LocalPool::new(pool_cfg.clone()))));
 //! let (verif_tx, verif_rx) = crossbeam_channel::bounded(10);
 //! let sender = CrossbeamVerifSender::new(shared_tm_pool.clone(), verif_tx);
-//! let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
+//! let cfg = VerificationReporterCfg::new(TEST_APID, Box::new(SimpleSeqCountProvider::default()), 1, 2, 8).unwrap();
 //! let mut  reporter = VerificationReporterWithSender::new(cfg , Box::new(sender));
 //!
 //! let mut sph = SpHeader::tc(TEST_APID, 0, 0).unwrap();
@@ -83,14 +84,17 @@ use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
 use spacepackets::{SpHeader, MAX_APID};
 
+pub use crate::seq_count::SimpleSeqCountProvider;
+
 #[cfg(feature = "alloc")]
-pub use allocmod::{VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender};
+pub use allocmod::{VerificationReporterWithBuf, VerificationReporterCfg, VerificationReporterWithSender};
 
 #[cfg(feature = "std")]
 pub use stdmod::{
     CrossbeamVerifSender, MpscVerifSender, SharedStdVerifReporterWithSender,
     StdVerifReporterWithSender, StdVerifSenderError,
 };
+use crate::seq_count::SequenceCountProvider;
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Subservices {
@@ -276,10 +280,10 @@ impl<'a> FailParamsWithStep<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct VerificationReporterBasic {
     pub dest_id: u16,
     apid: u16,
-    msg_count: u16,
 }
 
 impl VerificationReporterBasic {
@@ -289,7 +293,6 @@ impl VerificationReporterBasic {
         }
         Some(Self {
             apid,
-            msg_count: 0,
             dest_id: 0,
         })
     }
@@ -332,6 +335,7 @@ impl VerificationReporterBasic {
         buf: &mut [u8],
         token: VerificationToken<TcStateNone>,
         sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<VerificationToken<TcStateAccepted>, VerificationErrorWithToken<E, TcStateNone>>
     {
@@ -339,6 +343,7 @@ impl VerificationReporterBasic {
             .create_pus_verif_success_tm(
                 buf,
                 Subservices::TmAcceptanceSuccess.into(),
+                seq_counter.get(),
                 &token.req_id,
                 time_stamp,
                 None::<&dyn EcssEnumeration>,
@@ -347,7 +352,8 @@ impl VerificationReporterBasic {
         sender
             .send_tm(tm)
             .map_err(|e| VerificationErrorWithToken(e, token))?;
-        self.msg_count += 1;
+        seq_counter.increment();
+        //seq_counter.get_and_increment()
         Ok(VerificationToken {
             state: PhantomData,
             req_id: token.req_id,
@@ -360,12 +366,14 @@ impl VerificationReporterBasic {
         buf: &mut [u8],
         token: VerificationToken<TcStateNone>,
         sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateNone>> {
         let tm = self
             .create_pus_verif_fail_tm(
                 buf,
                 Subservices::TmAcceptanceFailure.into(),
+                seq_counter.get(),
                 &token.req_id,
                 None::<&dyn EcssEnumeration>,
                 &params,
@@ -374,7 +382,7 @@ impl VerificationReporterBasic {
         sender
             .send_tm(tm)
             .map_err(|e| VerificationErrorWithToken(e, token))?;
-        self.msg_count += 1;
+        seq_counter.increment();
         Ok(())
     }
 
@@ -386,6 +394,7 @@ impl VerificationReporterBasic {
         buf: &mut [u8],
         token: VerificationToken<TcStateAccepted>,
         sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<VerificationToken<TcStateStarted>, VerificationErrorWithToken<E, TcStateAccepted>>
     {
@@ -393,6 +402,7 @@ impl VerificationReporterBasic {
             .create_pus_verif_success_tm(
                 buf,
                 Subservices::TmStartSuccess.into(),
+                seq_counter.get(),
                 &token.req_id,
                 time_stamp,
                 None::<&dyn EcssEnumeration>,
@@ -401,7 +411,7 @@ impl VerificationReporterBasic {
         sender
             .send_tm(tm)
             .map_err(|e| VerificationErrorWithToken(e, token))?;
-        self.msg_count += 1;
+        seq_counter.increment();
         Ok(VerificationToken {
             state: PhantomData,
             req_id: token.req_id,
@@ -417,12 +427,14 @@ impl VerificationReporterBasic {
         buf: &mut [u8],
         token: VerificationToken<TcStateAccepted>,
         sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateAccepted>> {
         let tm = self
             .create_pus_verif_fail_tm(
                 buf,
                 Subservices::TmStartFailure.into(),
+                seq_counter.get(),
                 &token.req_id,
                 None::<&dyn EcssEnumeration>,
                 &params,
@@ -431,7 +443,7 @@ impl VerificationReporterBasic {
         sender
             .send_tm(tm)
             .map_err(|e| VerificationErrorWithToken(e, token))?;
-        self.msg_count += 1;
+        seq_counter.increment();
         Ok(())
     }
 
@@ -443,18 +455,20 @@ impl VerificationReporterBasic {
         buf: &mut [u8],
         token: &VerificationToken<TcStateStarted>,
         sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         time_stamp: &[u8],
         step: impl EcssEnumeration,
     ) -> Result<(), EcssTmError<E>> {
         let tm = self.create_pus_verif_success_tm(
             buf,
             Subservices::TmStepSuccess.into(),
+            seq_counter.get(),
             &token.req_id,
             time_stamp,
             Some(&step),
         )?;
         sender.send_tm(tm)?;
-        self.msg_count += 1;
+        seq_counter.increment();
         Ok(())
     }
 
@@ -467,12 +481,14 @@ impl VerificationReporterBasic {
         buf: &mut [u8],
         token: VerificationToken<TcStateStarted>,
         sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         params: FailParamsWithStep,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
         let tm = self
             .create_pus_verif_fail_tm(
                 buf,
                 Subservices::TmStepFailure.into(),
+                seq_counter.get(),
                 &token.req_id,
                 Some(params.step),
                 &params.bp,
@@ -481,7 +497,7 @@ impl VerificationReporterBasic {
         sender
             .send_tm(tm)
             .map_err(|e| VerificationErrorWithToken(e, token))?;
-        self.msg_count += 1;
+        seq_counter.increment();
         Ok(())
     }
 
@@ -494,12 +510,14 @@ impl VerificationReporterBasic {
         buf: &mut [u8],
         token: VerificationToken<TcStateStarted>,
         sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
         let tm = self
             .create_pus_verif_success_tm(
                 buf,
                 Subservices::TmCompletionSuccess.into(),
+                seq_counter.get(),
                 &token.req_id,
                 time_stamp,
                 None::<&dyn EcssEnumeration>,
@@ -508,7 +526,7 @@ impl VerificationReporterBasic {
         sender
             .send_tm(tm)
             .map_err(|e| VerificationErrorWithToken(e, token))?;
-        self.msg_count += 1;
+        seq_counter.increment();
         Ok(())
     }
 
@@ -521,12 +539,14 @@ impl VerificationReporterBasic {
         buf: &mut [u8],
         token: VerificationToken<TcStateStarted>,
         sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
         let tm = self
             .create_pus_verif_fail_tm(
                 buf,
                 Subservices::TmCompletionFailure.into(),
+                seq_counter.get(),
                 &token.req_id,
                 None::<&dyn EcssEnumeration>,
                 &params,
@@ -535,7 +555,7 @@ impl VerificationReporterBasic {
         sender
             .send_tm(tm)
             .map_err(|e| VerificationErrorWithToken(e, token))?;
-        self.msg_count += 1;
+        seq_counter.increment();
         Ok(())
     }
 
@@ -543,6 +563,7 @@ impl VerificationReporterBasic {
         &'a mut self,
         buf: &'a mut [u8],
         subservice: u8,
+        msg_counter: u16,
         req_id: &RequestId,
         time_stamp: &'a [u8],
         step: Option<&(impl EcssEnumeration + ?Sized)>,
@@ -564,6 +585,7 @@ impl VerificationReporterBasic {
         Ok(self.create_pus_verif_tm_base(
             buf,
             subservice,
+            msg_counter,
             &mut sp_header,
             time_stamp,
             source_data_len,
@@ -574,6 +596,7 @@ impl VerificationReporterBasic {
         &'a mut self,
         buf: &'a mut [u8],
         subservice: u8,
+        msg_counter: u16,
         req_id: &RequestId,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
         params: &'a FailParams,
@@ -607,6 +630,7 @@ impl VerificationReporterBasic {
         Ok(self.create_pus_verif_tm_base(
             buf,
             subservice,
+            msg_counter,
             &mut sp_header,
             params.time_stamp,
             source_data_len,
@@ -617,12 +641,13 @@ impl VerificationReporterBasic {
         &'a mut self,
         buf: &'a mut [u8],
         subservice: u8,
+        msg_counter: u16,
         sp_header: &mut SpHeader,
         time_stamp: &'a [u8],
         source_data_len: usize,
     ) -> PusTm {
         let tm_sec_header =
-            PusTmSecondaryHeader::new(1, subservice, self.msg_count, self.dest_id, time_stamp);
+            PusTmSecondaryHeader::new(1, subservice, msg_counter, self.dest_id, time_stamp);
         PusTm::new(
             sp_header,
             tm_sec_header,
@@ -639,8 +664,10 @@ mod allocmod {
     use alloc::vec;
     use alloc::vec::Vec;
 
+    #[derive(Clone)]
     pub struct VerificationReporterCfg {
         apid: u16,
+        seq_counter: Box<dyn SequenceCountProvider<u16> + Send>,
         pub step_field_width: usize,
         pub fail_code_field_width: usize,
         pub max_fail_data_len: usize,
@@ -649,6 +676,7 @@ mod allocmod {
     impl VerificationReporterCfg {
         pub fn new(
             apid: u16,
+            seq_counter: Box<dyn SequenceCountProvider<u16> + Send>,
             step_field_width: usize,
             fail_code_field_width: usize,
             max_fail_data_len: usize,
@@ -658,6 +686,7 @@ mod allocmod {
             }
             Some(Self {
                 apid,
+                seq_counter,
                 step_field_width,
                 fail_code_field_width,
                 max_fail_data_len,
@@ -667,13 +696,15 @@ mod allocmod {
 
     /// Primary verification handler. It provides an API to send PUS 1 verification telemetry packets
     /// and verify the various steps of telecommand handling as specified in the PUS standard.
-    pub struct VerificationReporter {
+    #[derive (Clone)]
+    pub struct VerificationReporterWithBuf {
         source_data_buf: Vec<u8>,
+        seq_counter: Box<dyn SequenceCountProvider<u16> + Send + 'static>,
         pub reporter: VerificationReporterBasic,
     }
 
-    impl VerificationReporter {
-        pub fn new(cfg: VerificationReporterCfg) -> Self {
+    impl VerificationReporterWithBuf {
+        pub fn new(cfg: &VerificationReporterCfg) -> Self {
             let reporter = VerificationReporterBasic::new(cfg.apid).unwrap();
             Self {
                 source_data_buf: vec![
@@ -683,6 +714,7 @@ mod allocmod {
                         + cfg.fail_code_field_width as usize
                         + cfg.max_fail_data_len
                 ],
+                seq_counter: cfg.seq_counter.clone(),
                 reporter,
             }
         }
@@ -714,6 +746,7 @@ mod allocmod {
                 self.source_data_buf.as_mut_slice(),
                 token,
                 sender,
+                self.seq_counter.as_mut(),
                 time_stamp,
             )
         }
@@ -729,6 +762,7 @@ mod allocmod {
                 self.source_data_buf.as_mut_slice(),
                 token,
                 sender,
+                self.seq_counter.as_mut(),
                 params,
             )
         }
@@ -747,6 +781,7 @@ mod allocmod {
                 self.source_data_buf.as_mut_slice(),
                 token,
                 sender,
+                self.seq_counter.as_mut(),
                 time_stamp,
             )
         }
@@ -762,7 +797,7 @@ mod allocmod {
             params: FailParams,
         ) -> Result<(), VerificationErrorWithToken<E, TcStateAccepted>> {
             self.reporter
-                .start_failure(self.source_data_buf.as_mut_slice(), token, sender, params)
+                .start_failure(self.source_data_buf.as_mut_slice(), token, sender, self.seq_counter.as_mut(), params)
         }
 
         /// Package and send a PUS TM\[1, 5\] packet, see 8.1.2.5 of the PUS standard.
@@ -779,6 +814,7 @@ mod allocmod {
                 self.source_data_buf.as_mut_slice(),
                 token,
                 sender,
+                self.seq_counter.as_mut(),
                 time_stamp,
                 step,
             )
@@ -795,7 +831,7 @@ mod allocmod {
             params: FailParamsWithStep,
         ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
             self.reporter
-                .step_failure(self.source_data_buf.as_mut_slice(), token, sender, params)
+                .step_failure(self.source_data_buf.as_mut_slice(), token, sender, self.seq_counter.as_mut(), params)
         }
 
         /// Package and send a PUS TM\[1, 7\] packet, see 8.1.2.7 of the PUS standard.
@@ -812,6 +848,7 @@ mod allocmod {
                 self.source_data_buf.as_mut_slice(),
                 token,
                 sender,
+                self.seq_counter.as_mut(),
                 time_stamp,
             )
         }
@@ -830,6 +867,7 @@ mod allocmod {
                 self.source_data_buf.as_mut_slice(),
                 token,
                 sender,
+                self.seq_counter.as_mut(),
                 params,
             )
         }
@@ -838,18 +876,18 @@ mod allocmod {
     /// Helper object which caches the sender passed as a trait object. Provides the same
     /// API as [VerificationReporter] but without the explicit sender arguments.
     pub struct VerificationReporterWithSender<E> {
-        pub reporter: VerificationReporter,
+        pub reporter: VerificationReporterWithBuf,
         pub sender: Box<dyn EcssTmSender<Error = E>>,
     }
 
     impl<E: 'static> VerificationReporterWithSender<E> {
-        pub fn new(cfg: VerificationReporterCfg, sender: Box<dyn EcssTmSender<Error = E>>) -> Self {
-            let reporter = VerificationReporter::new(cfg);
+        pub fn new(cfg: &VerificationReporterCfg, sender: Box<dyn EcssTmSender<Error = E>>) -> Self {
+            let reporter = VerificationReporterWithBuf::new(cfg);
             Self::new_from_reporter(reporter, sender)
         }
 
         pub fn new_from_reporter(
-            reporter: VerificationReporter,
+            reporter: VerificationReporterWithBuf,
             sender: Box<dyn EcssTmSender<Error = E>>,
         ) -> Self {
             Self { reporter, sender }
@@ -1095,8 +1133,8 @@ mod tests {
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
         EcssTmError, EcssTmSender, FailParams, FailParamsWithStep, RequestId, TcStateNone,
-        VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
-        VerificationToken,
+        VerificationReporterWithBuf, VerificationReporterCfg, VerificationReporterWithSender,
+        VerificationToken
     };
     use alloc::boxed::Box;
     use alloc::format;
@@ -1106,6 +1144,7 @@ mod tests {
     use spacepackets::{ByteConversionError, SpHeader};
     use std::collections::VecDeque;
     use std::vec::Vec;
+    use crate::seq_count::SimpleSeqCountProvider;
 
     const TEST_APID: u16 = 0x02;
     const EMPTY_STAMP: [u8; 7] = [0; 7];
@@ -1160,13 +1199,13 @@ mod tests {
     }
 
     struct TestBase<'a> {
-        vr: VerificationReporter,
+        vr: VerificationReporterWithBuf,
         #[allow(dead_code)]
         tc: PusTc<'a>,
     }
 
     impl<'a> TestBase<'a> {
-        fn rep(&mut self) -> &mut VerificationReporter {
+        fn rep(&mut self) -> &mut VerificationReporterWithBuf {
             &mut self.vr
         }
     }
@@ -1177,14 +1216,14 @@ mod tests {
     }
 
     impl<'a, E> TestBaseWithHelper<'a, E> {
-        fn rep(&mut self) -> &mut VerificationReporter {
+        fn rep(&mut self) -> &mut VerificationReporterWithBuf {
             &mut self.helper.reporter
         }
     }
 
-    fn base_reporter() -> VerificationReporter {
-        let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
-        VerificationReporter::new(cfg)
+    fn base_reporter() -> VerificationReporterWithBuf {
+        let cfg = VerificationReporterCfg::new(TEST_APID, Box::new(SimpleSeqCountProvider::default()), 1, 2, 8).unwrap();
+        VerificationReporterWithBuf::new(&cfg)
     }
 
     fn base_tc_init(app_data: Option<&[u8]>) -> (PusTc, RequestId) {

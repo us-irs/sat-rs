@@ -1,9 +1,7 @@
 use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
-use satrs_core::pus::verification::{
-    CrossbeamVerifSender, FailParams, RequestId, VerificationReporterCfg,
-    VerificationReporterWithSender,
-};
+use satrs_core::pus::verification::{CrossbeamVerifSender, FailParams, RequestId, VerificationReporterCfg, VerificationReporterWithSender};
 use hashbrown::HashMap;
+use satrs_core::seq_count::SimpleSeqCountProvider;
 use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket};
 use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
 use spacepackets::tm::PusTm;
@@ -25,7 +23,7 @@ const PACKETS_SENT: u8 = 8;
 ///    threads have sent the correct expected verification reports
 #[test]
 fn test_shared_reporter() {
-    let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
+    let cfg = VerificationReporterCfg::new(TEST_APID, Box::new(SimpleSeqCountProvider::default()), 1, 2, 8).unwrap();
     // Shared pool object to store the verification PUS telemetry
     let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
     let shared_tm_pool: SharedPool =
@@ -35,7 +33,7 @@ fn test_shared_reporter() {
     let (tx, rx) = crossbeam_channel::bounded(5);
     let sender = CrossbeamVerifSender::new(shared_tm_pool.clone(), tx.clone());
     let reporter_with_sender_0 = Arc::new(Mutex::new(VerificationReporterWithSender::new(
-        cfg,
+        &cfg,
         Box::new(sender),
     )));
     let reporter_with_sender_1 = reporter_with_sender_0.clone();

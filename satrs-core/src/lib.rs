@@ -30,3 +30,4 @@ pub mod params;
 pub mod pool;
 pub mod pus;
 pub mod tmtc;
+pub mod seq_count;
