@@ -35,7 +35,7 @@ pub mod stdmod {
     use std::sync::atomic::{AtomicU16, Ordering};
     use std::sync::Arc;
 
-    #[derive(Clone)]
+    #[derive(Clone, Default)]
     pub struct SyncSeqCountProvider {
         seq_count: Arc<AtomicU16>,
     }

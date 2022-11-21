@@ -4,7 +4,7 @@ use satrs_core::pus::verification::{
     CrossbeamVerifSender, FailParams, RequestId, VerificationReporterCfg,
     VerificationReporterWithSender,
 };
-use satrs_core::seq_count::SimpleSeqCountProvider;
+use satrs_core::seq_count::SyncSeqCountProvider;
 use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket};
 use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
 use spacepackets::tm::PusTm;
@@ -26,9 +26,12 @@ const PACKETS_SENT: u8 = 8;
 ///    threads have sent the correct expected verification reports
 #[test]
 fn test_shared_reporter() {
+    // We use a synced sequence count provider here because both verification reporters have the
+    // the same APID. If they had distinct APIDs, the more correct approach would be to have
+    // each reporter have an own sequence count provider.
     let cfg = VerificationReporterCfg::new(
         TEST_APID,
-        Box::new(SimpleSeqCountProvider::default()),
+        Box::new(SyncSeqCountProvider::default()),
         1,
         2,
         8,
