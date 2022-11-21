@@ -1,5 +1,7 @@
 #![allow(dead_code)]
+
 use crossbeam_channel::{bounded, Receiver, Sender};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::thread;
 use zerocopy::{AsBytes, FromBytes, NetworkEndian, Unaligned, U16};
 
@@ -52,4 +54,13 @@ fn main() {
     let jh1 = thread::spawn(|| {});
     jh0.join().unwrap();
     jh1.join().unwrap();
+    //let mut max_val: u16 = u16::MAX;
+    //max_val += 1;
+    //println!("Max val: {}", max_val);
+    let atomic_u16: AtomicU16 = AtomicU16::new(u16::MAX);
+    atomic_u16.fetch_add(1, Ordering::SeqCst);
+    println!(
+        "atomic after overflow: {}",
+        atomic_u16.load(Ordering::SeqCst)
+    );
 }

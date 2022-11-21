@@ -17,6 +17,7 @@ use satrs_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
 };
 use satrs_core::pus::{EcssTmError, EcssTmSender};
+use satrs_core::seq_count::SimpleSeqCountProvider;
 use satrs_core::tmtc::CcsdsError;
 use satrs_example::{OBSW_SERVER_ADDR, SERVER_PORT};
 use spacepackets::time::{CdsShortTimeProvider, TimeWriter};
@@ -39,6 +40,7 @@ struct UdpTmtcServer {
 
 unsafe impl Send for UdpTmtcServer {}
 
+#[derive(Clone)]
 struct EventTmSender {
     store_helper: TmStore,
     sender: mpsc::Sender<StoreAddr>,
@@ -73,9 +75,16 @@ fn main() {
     let (tm_funnel_tx, tm_funnel_rx) = channel();
     let (tm_server_tx, tm_server_rx) = channel();
     let sender = MpscVerifSender::new(tm_store.clone(), tm_funnel_tx.clone());
-    let verif_cfg = VerificationReporterCfg::new(PUS_APID, 1, 2, 8).unwrap();
+    let verif_cfg = VerificationReporterCfg::new(
+        PUS_APID,
+        Box::new(SimpleSeqCountProvider::default()),
+        1,
+        2,
+        8,
+    )
+    .unwrap();
     let reporter_with_sender_0 = Arc::new(Mutex::new(VerificationReporterWithSender::new(
-        verif_cfg,
+        &verif_cfg,
         Box::new(sender),
     )));
 

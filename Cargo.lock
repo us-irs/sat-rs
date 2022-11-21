@@ -285,6 +285,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 
 [[package]]
+name = "dyn-clone"
+version = "1.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f94fa09c2aeea5b8839e414b7b841bf429fd25b9c522116ac97ee87856d88b2"
+
+[[package]]
 name = "embed-doc-image"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -597,6 +603,7 @@ dependencies = [
  "crossbeam-channel",
  "delegate 0.8.0",
  "downcast-rs",
+ "dyn-clone",
  "embed-doc-image",
  "hashbrown",
  "heapless",
