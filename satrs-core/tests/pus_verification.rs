@@ -1,12 +1,15 @@
-use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
-use satrs_core::pus::verification::{CrossbeamVerifSender, FailParams, RequestId, VerificationReporterCfg, VerificationReporterWithSender};
 use hashbrown::HashMap;
+use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
+use satrs_core::pus::verification::{
+    CrossbeamVerifSender, FailParams, RequestId, VerificationReporterCfg,
+    VerificationReporterWithSender,
+};
 use satrs_core::seq_count::SimpleSeqCountProvider;
 use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket};
 use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
 use spacepackets::tm::PusTm;
 use spacepackets::SpHeader;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -23,7 +26,14 @@ const PACKETS_SENT: u8 = 8;
 ///    threads have sent the correct expected verification reports
 #[test]
 fn test_shared_reporter() {
-    let cfg = VerificationReporterCfg::new(TEST_APID, Box::new(SimpleSeqCountProvider::default()), 1, 2, 8).unwrap();
+    let cfg = VerificationReporterCfg::new(
+        TEST_APID,
+        Box::new(SimpleSeqCountProvider::default()),
+        1,
+        2,
+        8,
+    )
+    .unwrap();
     // Shared pool object to store the verification PUS telemetry
     let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
     let shared_tm_pool: SharedPool =
@@ -32,11 +42,8 @@ fn test_shared_reporter() {
     let shared_tc_pool_1 = shared_tc_pool_0.clone();
     let (tx, rx) = crossbeam_channel::bounded(5);
     let sender = CrossbeamVerifSender::new(shared_tm_pool.clone(), tx.clone());
-    let reporter_with_sender_0 = Arc::new(Mutex::new(VerificationReporterWithSender::new(
-        &cfg,
-        Box::new(sender),
-    )));
-    let reporter_with_sender_1 = reporter_with_sender_0.clone();
+    let mut reporter_with_sender_0 = VerificationReporterWithSender::new(&cfg, Box::new(sender));
+    let mut reporter_with_sender_1 = reporter_with_sender_0.clone();
     // For test purposes, we retrieve the request ID from the TCs and pass them to the receiver
     // tread.
     let req_id_0;
@@ -76,29 +83,28 @@ fn test_shared_reporter() {
         }
         let (_tc, _) = PusTc::from_bytes(&tc_buf[0..tc_len]).unwrap();
         let accepted_token;
-        {
-            let mut mg = reporter_with_sender_0.lock().expect("Locking mutex failed");
-            let token = mg.add_tc_with_req_id(req_id_0);
-            accepted_token = mg
-                .acceptance_success(token, &FIXED_STAMP)
-                .expect("Acceptance success failed");
-        }
+
+        let token = reporter_with_sender_0.add_tc_with_req_id(req_id_0);
+        accepted_token = reporter_with_sender_0
+            .acceptance_success(token, &FIXED_STAMP)
+            .expect("Acceptance success failed");
+
         // Do some start handling here
         let started_token;
-        {
-            let mut mg = reporter_with_sender_0.lock().expect("Locking mutex failed");
-            started_token = mg
-                .start_success(accepted_token, &FIXED_STAMP)
-                .expect("Start success failed");
-            // Do some step handling here
-            mg.step_success(&started_token, &FIXED_STAMP, EcssEnumU8::new(0))
-                .expect("Start success failed");
-        }
-        // Finish up
-        let mut mg = reporter_with_sender_0.lock().expect("Locking mutex failed");
-        mg.step_success(&started_token, &FIXED_STAMP, EcssEnumU8::new(1))
+        started_token = reporter_with_sender_0
+            .start_success(accepted_token, &FIXED_STAMP)
             .expect("Start success failed");
-        mg.completion_success(started_token, &FIXED_STAMP)
+        // Do some step handling here
+        reporter_with_sender_0
+            .step_success(&started_token, &FIXED_STAMP, EcssEnumU8::new(0))
+            .expect("Start success failed");
+
+        // Finish up
+        reporter_with_sender_0
+            .step_success(&started_token, &FIXED_STAMP, EcssEnumU8::new(1))
+            .expect("Start success failed");
+        reporter_with_sender_0
+            .completion_success(started_token, &FIXED_STAMP)
             .expect("Completion success failed");
     });
 
@@ -116,19 +122,17 @@ fn test_shared_reporter() {
             tc_buf[0..tc_len].copy_from_slice(buf);
         }
         let (tc, _) = PusTc::from_bytes(&tc_buf[0..tc_len]).unwrap();
-        let mut mg = reporter_with_sender_1
-            .lock()
-            .expect("Locking reporter failed");
-        let token = mg.add_tc(&tc);
-        let accepted_token = mg
+        let token = reporter_with_sender_1.add_tc(&tc);
+        let accepted_token = reporter_with_sender_1
             .acceptance_success(token, &FIXED_STAMP)
             .expect("Acceptance success failed");
-        let started_token = mg
+        let started_token = reporter_with_sender_1
             .start_success(accepted_token, &FIXED_STAMP)
             .expect("Start success failed");
         let fail_code = EcssEnumU16::new(2);
         let params = FailParams::new(&FIXED_STAMP, &fail_code, None);
-        mg.completion_failure(started_token, params)
+        reporter_with_sender_1
+            .completion_failure(started_token, params)
             .expect("Completion success failed");
     });
 

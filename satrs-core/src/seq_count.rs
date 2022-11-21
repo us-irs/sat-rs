@@ -14,7 +14,7 @@ pub trait SequenceCountProvider<Raw>: DynClone {
 
 #[derive(Default, Clone)]
 pub struct SimpleSeqCountProvider {
-    seq_count: u16
+    seq_count: u16,
 }
 
 dyn_clone::clone_trait_object!(SequenceCountProvider<u16>);
@@ -32,12 +32,12 @@ impl SequenceCountProvider<u16> for SimpleSeqCountProvider {
 #[cfg(feature = "std")]
 pub mod stdmod {
     use super::*;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU16, Ordering};
+    use std::sync::Arc;
 
     #[derive(Clone)]
     pub struct SyncSeqCountProvider {
-        seq_count: Arc<AtomicU16>
+        seq_count: Arc<AtomicU16>,
     }
 
     impl SequenceCountProvider<u16> for SyncSeqCountProvider {

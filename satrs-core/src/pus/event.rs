@@ -298,14 +298,14 @@ mod tests {
     #[allow(dead_code)]
     const EXAMPLE_EVENT_ID_1: u16 = 2;
 
-    #[derive(Debug, Eq, PartialEq)]
+    #[derive(Debug, Eq, PartialEq, Clone)]
     struct TmInfo {
         pub common: CommonTmInfo,
         pub event: EventU32,
         pub aux_data: Vec<u8>,
     }
 
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     struct TestSender {
         pub service_queue: VecDeque<TmInfo>,
     }

@@ -233,6 +233,7 @@ mod tests {
     const LOW_SEV_EVENT: EventU32 = EventU32::const_new(Severity::LOW, 1, 5);
     const EMPTY_STAMP: [u8; 7] = [0; 7];
 
+    #[derive(Clone)]
     struct EventTmSender {
         sender: std::sync::mpsc::Sender<Vec<u8>>,
     }

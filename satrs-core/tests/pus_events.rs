@@ -4,7 +4,9 @@ use satrs_core::event_man::{
 use satrs_core::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
 use satrs_core::params::U32Pair;
 use satrs_core::params::{Params, ParamsHeapless, WritableToBeBytes};
-use satrs_core::pus::event_man::{DefaultPusMgmtBackendProvider, EventReporter, PusEventDispatcher};
+use satrs_core::pus::event_man::{
+    DefaultPusMgmtBackendProvider, EventReporter, PusEventDispatcher,
+};
 use satrs_core::pus::{EcssTmError, EcssTmSender};
 use spacepackets::ecss::PusPacket;
 use spacepackets::tm::PusTm;
@@ -16,6 +18,7 @@ const INFO_EVENT: EventU32TypedSev<SeverityInfo> =
 const LOW_SEV_EVENT: EventU32 = EventU32::const_new(Severity::LOW, 1, 5);
 const EMPTY_STAMP: [u8; 7] = [0; 7];
 
+#[derive(Clone)]
 struct EventTmSender {
     sender: std::sync::mpsc::Sender<Vec<u8>>,
 }

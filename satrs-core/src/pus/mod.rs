@@ -4,6 +4,7 @@
 //!
 //!  1. PUS Verification Service 1 module inside [verification]. Requires [alloc] support.
 use downcast_rs::{impl_downcast, Downcast};
+use dyn_clone::DynClone;
 use spacepackets::ecss::PusError;
 use spacepackets::time::TimestampError;
 use spacepackets::tm::PusTm;
@@ -43,13 +44,14 @@ impl<E> From<ByteConversionError> for EcssTmError<E> {
 /// This sender object is responsible for sending telemetry to a TM sink. The [Downcast] trait
 /// is implemented to allow passing the sender as a boxed trait object and still retrieve the
 /// concrete type at a later point.
-pub trait EcssTmSender: Downcast + Send {
+pub trait EcssTmSender: Downcast + Send + DynClone {
     type Error;
 
     fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>>;
 }
 
 impl_downcast!(EcssTmSender assoc Error);
+dyn_clone::clone_trait_object!(<T> EcssTmSender<Error=T>);
 
 pub(crate) fn source_buffer_large_enough<E>(cap: usize, len: usize) -> Result<(), EcssTmError<E>> {
     if len > cap {
@@ -68,7 +70,7 @@ pub(crate) mod tests {
     use spacepackets::tm::{PusTm, PusTmSecondaryHeaderT};
     use spacepackets::CcsdsPacket;
 
-    #[derive(Debug, Eq, PartialEq)]
+    #[derive(Debug, Eq, PartialEq, Clone)]
     pub(crate) struct CommonTmInfo {
         pub subservice: u8,
         pub apid: u16,

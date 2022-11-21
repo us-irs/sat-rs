@@ -31,7 +31,7 @@
 //! let (verif_tx, verif_rx) = crossbeam_channel::bounded(10);
 //! let sender = CrossbeamVerifSender::new(shared_tm_pool.clone(), verif_tx);
 //! let cfg = VerificationReporterCfg::new(TEST_APID, Box::new(SimpleSeqCountProvider::default()), 1, 2, 8).unwrap();
-//! let mut  reporter = VerificationReporterWithSender::new(cfg , Box::new(sender));
+//! let mut  reporter = VerificationReporterWithSender::new(&cfg , Box::new(sender));
 //!
 //! let mut sph = SpHeader::tc(TEST_APID, 0, 0).unwrap();
 //! let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
@@ -87,14 +87,16 @@ use spacepackets::{SpHeader, MAX_APID};
 pub use crate::seq_count::SimpleSeqCountProvider;
 
 #[cfg(feature = "alloc")]
-pub use allocmod::{VerificationReporterWithBuf, VerificationReporterCfg, VerificationReporterWithSender};
+pub use allocmod::{
+    VerificationReporterCfg, VerificationReporterWithBuf, VerificationReporterWithSender,
+};
 
+use crate::seq_count::SequenceCountProvider;
 #[cfg(feature = "std")]
 pub use stdmod::{
     CrossbeamVerifSender, MpscVerifSender, SharedStdVerifReporterWithSender,
     StdVerifReporterWithSender, StdVerifSenderError,
 };
-use crate::seq_count::SequenceCountProvider;
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Subservices {
@@ -291,10 +293,7 @@ impl VerificationReporterBasic {
         if apid > MAX_APID {
             return None;
         }
-        Some(Self {
-            apid,
-            dest_id: 0,
-        })
+        Some(Self { apid, dest_id: 0 })
     }
 
     pub fn set_apid(&mut self, apid: u16) -> bool {
@@ -696,7 +695,7 @@ mod allocmod {
 
     /// Primary verification handler. It provides an API to send PUS 1 verification telemetry packets
     /// and verify the various steps of telecommand handling as specified in the PUS standard.
-    #[derive (Clone)]
+    #[derive(Clone)]
     pub struct VerificationReporterWithBuf {
         source_data_buf: Vec<u8>,
         seq_counter: Box<dyn SequenceCountProvider<u16> + Send + 'static>,
@@ -796,8 +795,13 @@ mod allocmod {
             sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             params: FailParams,
         ) -> Result<(), VerificationErrorWithToken<E, TcStateAccepted>> {
-            self.reporter
-                .start_failure(self.source_data_buf.as_mut_slice(), token, sender, self.seq_counter.as_mut(), params)
+            self.reporter.start_failure(
+                self.source_data_buf.as_mut_slice(),
+                token,
+                sender,
+                self.seq_counter.as_mut(),
+                params,
+            )
         }
 
         /// Package and send a PUS TM\[1, 5\] packet, see 8.1.2.5 of the PUS standard.
@@ -830,8 +834,13 @@ mod allocmod {
             sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
             params: FailParamsWithStep,
         ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
-            self.reporter
-                .step_failure(self.source_data_buf.as_mut_slice(), token, sender, self.seq_counter.as_mut(), params)
+            self.reporter.step_failure(
+                self.source_data_buf.as_mut_slice(),
+                token,
+                sender,
+                self.seq_counter.as_mut(),
+                params,
+            )
         }
 
         /// Package and send a PUS TM\[1, 7\] packet, see 8.1.2.7 of the PUS standard.
@@ -875,13 +884,17 @@ mod allocmod {
 
     /// Helper object which caches the sender passed as a trait object. Provides the same
     /// API as [VerificationReporter] but without the explicit sender arguments.
+    #[derive(Clone)]
     pub struct VerificationReporterWithSender<E> {
         pub reporter: VerificationReporterWithBuf,
         pub sender: Box<dyn EcssTmSender<Error = E>>,
     }
 
     impl<E: 'static> VerificationReporterWithSender<E> {
-        pub fn new(cfg: &VerificationReporterCfg, sender: Box<dyn EcssTmSender<Error = E>>) -> Self {
+        pub fn new(
+            cfg: &VerificationReporterCfg,
+            sender: Box<dyn EcssTmSender<Error = E>>,
+        ) -> Self {
             let reporter = VerificationReporterWithBuf::new(cfg);
             Self::new_from_reporter(reporter, sender)
         }
@@ -993,7 +1006,7 @@ mod stdmod {
     pub type StdVerifReporterWithSender = VerificationReporterWithSender<StdVerifSenderError>;
     pub type SharedStdVerifReporterWithSender = Arc<Mutex<StdVerifReporterWithSender>>;
 
-    #[derive(Debug, Eq, PartialEq)]
+    #[derive(Debug, Eq, PartialEq, Clone)]
     pub enum StdVerifSenderError {
         PoisonError,
         StoreError(StoreError),
@@ -1016,6 +1029,7 @@ mod stdmod {
         fn send(&self, addr: StoreAddr) -> Result<(), StoreAddr>;
     }
 
+    #[derive(Clone)]
     struct StdSenderBase<S> {
         pub ignore_poison_error: bool,
         tm_store: SharedPool,
@@ -1041,6 +1055,7 @@ mod stdmod {
         }
     }
 
+    #[derive(Clone)]
     pub struct MpscVerifSender {
         base: StdSenderBase<mpsc::Sender<StoreAddr>>,
     }
@@ -1076,6 +1091,7 @@ mod stdmod {
 
     /// Verification sender with a [crossbeam_channel::Sender] backend.
     /// It implements the [EcssTmSender] trait to be used as PUS Verification TM sender
+    #[derive(Clone)]
     pub struct CrossbeamVerifSender {
         base: StdSenderBase<crossbeam_channel::Sender<StoreAddr>>,
     }
@@ -1102,7 +1118,7 @@ mod stdmod {
     unsafe impl Sync for CrossbeamVerifSender {}
     unsafe impl Send for CrossbeamVerifSender {}
 
-    impl<S: SendBackend + 'static> EcssTmSender for StdSenderBase<S> {
+    impl<S: SendBackend + Clone + 'static> EcssTmSender for StdSenderBase<S> {
         type Error = StdVerifSenderError;
         fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>> {
             let operation = |mut mg: RwLockWriteGuard<ShareablePoolProvider>| {
@@ -1133,9 +1149,10 @@ mod tests {
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
         EcssTmError, EcssTmSender, FailParams, FailParamsWithStep, RequestId, TcStateNone,
-        VerificationReporterWithBuf, VerificationReporterCfg, VerificationReporterWithSender,
-        VerificationToken
+        VerificationReporterCfg, VerificationReporterWithBuf, VerificationReporterWithSender,
+        VerificationToken,
     };
+    use crate::seq_count::SimpleSeqCountProvider;
     use alloc::boxed::Box;
     use alloc::format;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration, PusPacket};
@@ -1144,19 +1161,18 @@ mod tests {
     use spacepackets::{ByteConversionError, SpHeader};
     use std::collections::VecDeque;
     use std::vec::Vec;
-    use crate::seq_count::SimpleSeqCountProvider;
 
     const TEST_APID: u16 = 0x02;
     const EMPTY_STAMP: [u8; 7] = [0; 7];
 
-    #[derive(Debug, Eq, PartialEq)]
+    #[derive(Debug, Eq, PartialEq, Clone)]
     struct TmInfo {
         pub common: CommonTmInfo,
         pub req_id: RequestId,
         pub additional_data: Option<Vec<u8>>,
     }
 
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     struct TestSender {
         pub service_queue: VecDeque<TmInfo>,
     }
@@ -1188,7 +1204,7 @@ mod tests {
 
     #[derive(Debug, Copy, Clone, Eq, PartialEq)]
     struct DummyError {}
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     struct FallibleSender {}
 
     impl EcssTmSender for FallibleSender {
@@ -1222,7 +1238,14 @@ mod tests {
     }
 
     fn base_reporter() -> VerificationReporterWithBuf {
-        let cfg = VerificationReporterCfg::new(TEST_APID, Box::new(SimpleSeqCountProvider::default()), 1, 2, 8).unwrap();
+        let cfg = VerificationReporterCfg::new(
+            TEST_APID,
+            Box::new(SimpleSeqCountProvider::default()),
+            1,
+            2,
+            8,
+        )
+        .unwrap();
         VerificationReporterWithBuf::new(&cfg)
     }
 
