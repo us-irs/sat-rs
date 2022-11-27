@@ -54,12 +54,7 @@ impl PusServiceProvider for PusReceiver {
         pus_tc: &PusTc,
     ) -> Result<(), Self::Error> {
         let init_token = self.verif_reporter.add_tc(pus_tc);
-        self.stamper
-            .update_from_now()
-            .expect("Updating time for time stamp failed");
-        self.stamper
-            .write_to_bytes(&mut self.time_stamp)
-            .expect("Writing time stamp failed");
+        self.update_time_stamp();
         let accepted_token = self
             .verif_reporter
             .acceptance_success(init_token, &self.time_stamp)
