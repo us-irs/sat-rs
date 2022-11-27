@@ -85,7 +85,11 @@ impl ResultExtGenerator {
         let result_code_name = self.name_str.to_owned().unwrap();
         let name_as_str = result_code_name.to_string();
         let gen_struct_name = format_ident!("{}_EXT", result_code_name);
-        let info_str = self.info_str.to_owned().unwrap();
+        let info_str = if let Some(info_str) = &self.info_str {
+            info_str.value()
+        } else {
+            String::from("")
+        };
         let gen_struct = quote! {
             const #gen_struct_name: satrs_core::resultcode::ResultU16Ext =
                 satrs_core::resultcode::ResultU16Ext::const_new(

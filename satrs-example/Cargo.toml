@@ -13,5 +13,8 @@ zerocopy = "0.6"
 [dependencies.spacepackets]
 path = "../spacepackets"
 
+[dependencies.satrs-macros]
+path = "../satrs-macros"
+
 [dependencies.satrs-core]
 path = "../satrs-core"

@@ -647,6 +647,7 @@ dependencies = [
  "crossbeam-channel",
  "delegate 0.8.0",
  "satrs-core",
+ "satrs-macros",
  "spacepackets",
  "zerocopy",
 ]
