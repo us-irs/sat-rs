@@ -2,6 +2,7 @@
 
 members = [
     "satrs-core",
+    "satrs-macros",
+    "satrs-example",
     "spacepackets",
-    "satrs-example"
 ]
