@@ -1,5 +1,4 @@
 use crate::tmtc::TmStore;
-use crate::results::{INVALID_PUS_SERVICE, INVALID_PUS_SUBSERVICE, NOT_ENOUGH_APP_DATA};
 use satrs_core::events::EventU32;
 use satrs_core::pool::StoreAddr;
 use satrs_core::pus::event::Subservices;
@@ -7,14 +6,15 @@ use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
 use satrs_core::pus::verification::{
     FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
 };
+use satrs_core::res_code::ResultU16;
 use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use satrs_core::tmtc::PusServiceProvider;
+use satrs_example::{INVALID_PUS_SERVICE, INVALID_PUS_SUBSERVICE, NOT_ENOUGH_APP_DATA};
 use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
 use spacepackets::time::{CdsShortTimeProvider, TimeWriter};
 use spacepackets::SpHeader;
 use std::sync::mpsc;
-use satrs_core::resultcode::ResultU16;
 
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
@@ -67,7 +67,11 @@ impl PusServiceProvider for PusReceiver {
             self.handle_event_service(pus_tc, accepted_token);
         } else {
             self.update_time_stamp();
-            self.verif_reporter.start_failure(accepted_token, FailParams::new(&self.time_stamp, &INVALID_PUS_SERVICE, None))
+            self.verif_reporter
+                .start_failure(
+                    accepted_token,
+                    FailParams::new(&self.time_stamp, &INVALID_PUS_SERVICE, None),
+                )
                 .expect("Start failure verification failed")
         }
         Ok(())

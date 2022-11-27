@@ -1,7 +1,6 @@
 mod ccsds;
 mod pus;
 mod tmtc;
-mod results;
 
 use crate::tmtc::{core_tmtc_task, CoreTmtcArgs, TmStore, PUS_APID};
 use satrs_core::event_man::{

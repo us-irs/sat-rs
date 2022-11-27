@@ -29,6 +29,10 @@ optional = true
 version= "0.5"
 default-features = false
 
+[dependencies.serde]
+version = "1.0"
+default-features = false
+
 [dependencies.spacepackets]
 path = "../spacepackets"
 
@@ -42,8 +46,8 @@ version = "1.0"
 
 [features]
 default = ["std"]
-std = ["downcast-rs/std", "alloc", "bus", "postcard/use-std", "crossbeam-channel/std"]
-alloc = []
+std = ["downcast-rs/std", "alloc", "bus", "postcard/use-std", "crossbeam-channel/std", "serde/std"]
+alloc = ["serde/alloc"]
 heapless = []
 doc-images = []
 

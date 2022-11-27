@@ -90,11 +90,13 @@ impl ResultExtGenerator {
         } else {
             String::from("")
         };
+        // TODO: Group string
         let gen_struct = quote! {
-            const #gen_struct_name: satrs_core::resultcode::ResultU16Ext =
-                satrs_core::resultcode::ResultU16Ext::const_new(
+            const #gen_struct_name: satrs_mib::res_code::ResultU16Info =
+                satrs_mib::res_code::ResultU16Info::const_new(
                     #name_as_str,
                     &#result_code_name,
+                    "",
                     #info_str
                 );
         };

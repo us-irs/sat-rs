@@ -3,6 +3,7 @@
 members = [
     "satrs-core",
     "satrs-macros",
+    "satrs-mib",
     "satrs-example",
     "spacepackets",
 ]

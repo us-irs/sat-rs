@@ -1,7 +1,8 @@
+use serde::{Deserialize, Serialize};
+use spacepackets::ecss::{EcssEnumU16, EcssEnumeration};
 use spacepackets::{ByteConversionError, SizeMissmatch};
-use spacepackets::ecss::{EcssEnumeration, EcssEnumU16};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResultU16 {
     group_id: u8,
     unique_id: u8,
@@ -40,28 +41,11 @@ impl EcssEnumeration for ResultU16 {
         if buf.len() < 2 {
             return Err(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
                 found: buf.len(),
-                expected: 2
+                expected: 2,
             }));
         }
         buf[0] = self.group_id;
         buf[1] = self.unique_id;
         Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct ResultU16Ext {
-    pub name: &'static str,
-    pub result: &'static ResultU16,
-    pub info: &'static str,
-}
-
-impl ResultU16Ext {
-    pub const fn const_new(
-        name: &'static str,
-        result: &'static ResultU16,
-        info: &'static str,
-    ) -> Self {
-        Self { name, result, info }
     }
 }

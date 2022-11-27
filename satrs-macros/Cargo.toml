@@ -21,6 +21,9 @@ path = "../satrs-core"
 [dev-dependencies]
 trybuild = { version = "1.0", features = ["diff"] }
 
+[dev-dependencies.satrs-mib]
+path = "../satrs-mib"
+
 [dependencies.syn]
 version = "1.0"
 features = ["extra-traits"]
