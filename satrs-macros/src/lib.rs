@@ -10,15 +10,12 @@ struct ResultExtGenerator {
 }
 
 #[proc_macro_attribute]
-pub fn result(
+pub fn resultcode(
     args: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let args = parse_macro_input!(args as AttributeArgs);
     let input = parse_macro_input!(item as Item);
-
-    dbg!("Arguments: {}", &args);
-    dbg!("Input: {}", &input);
     let mut result_ext_generator = ResultExtGenerator::default();
     result_ext_generator.parse(args, input).into()
 }
@@ -53,10 +50,7 @@ impl ResultExtGenerator {
                     } else {
                         return Err(syn::Error::new(
                             path.span(),
-                            format!(
-                                "Unknown attribute argument name {}",
-                                path.ident
-                            ),
+                            format!("Unknown attribute argument name {}", path.ident),
                         ));
                     }
                 }
@@ -93,13 +87,13 @@ impl ResultExtGenerator {
         let gen_struct_name = format_ident!("{}_EXT", result_code_name);
         let info_str = self.info_str.to_owned().unwrap();
         let gen_struct = quote! {
-            const #gen_struct_name: satrs_core::resultcode::ResultU16Ext = satrs_core::resultcode::ResultU16Ext {
-                name: #name_as_str,
-                result: &#result_code_name,
-                info: #info_str
-            };
+            const #gen_struct_name: satrs_core::resultcode::ResultU16Ext =
+                satrs_core::resultcode::ResultU16Ext::const_new(
+                    #name_as_str,
+                    &#result_code_name,
+                    #info_str
+                );
         };
         Ok(gen_struct)
-        //Ok(TokenStream::new())
     }
 }
