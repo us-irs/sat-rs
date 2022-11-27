@@ -57,12 +57,12 @@ impl From<ResultU16Info> for ResultU16InfoSerializable {
 
 #[cfg(feature = "std")]
 pub mod stdmod {
+    use std::fs::File;
     use super::*;
     use std::io;
-    use std::path::Path;
 
-    pub fn print_resultcodes_as_csv(codes: &[ResultU16Info]) -> Result<(), csv::Error> {
-        let mut wtr = csv::Writer::from_writer(io::stdout());
+    pub fn print_resultcodes_as_csv(writer_builder: csv::WriterBuilder, codes: &[ResultU16Info]) -> Result<(), csv::Error> {
+        let mut wtr = writer_builder.from_writer(io::stdout());
         for result in codes {
             wtr.serialize(ResultU16InfoSerializable::from(*result))?;
         }
@@ -71,10 +71,11 @@ pub mod stdmod {
     }
 
     pub fn write_resultcodes_to_csv(
+        writer_builder: csv::WriterBuilder,
         results: &[ResultU16Info],
-        path: impl AsRef<Path>,
+        file: File,
     ) -> Result<(), csv::Error> {
-        let mut wtr = csv::Writer::from_path(path)?;
+        let mut wtr = writer_builder.from_writer(file);
         for result_code in results {
             wtr.serialize(ResultU16InfoSerializable::from(*result_code))?;
         }
@@ -119,13 +120,18 @@ mod tests {
 
     #[test]
     fn test_printout() {
-        print_resultcodes_as_csv(TMTC_RESULTS).expect("Priting result codes failed");
+        let mut wtrb = csv::WriterBuilder::new();
+        wtrb.delimiter(';' as u8);
+        print_resultcodes_as_csv(wtrb, TMTC_RESULTS).expect("Priting result codes failed");
     }
 
     #[test]
     fn test_csv_export() {
         let csvpath = Path::new(CSV_NAME);
-        write_resultcodes_to_csv(TMTC_RESULTS, csvpath).expect("CSV export failed");
+        let mut wtrb = csv::WriterBuilder::new();
+        let file = File::create(csvpath).expect("Creating CSV file failed");
+        wtrb.delimiter(';' as u8);
+        write_resultcodes_to_csv(wtrb, TMTC_RESULTS, file).expect("CSV export failed");
         assert!(csvpath.exists());
         let file = File::open(csvpath).expect("Opening CSV file failed");
         let buf_reader = BufReader::new(file);
@@ -134,22 +140,22 @@ mod tests {
                 0 => {
                     assert!(line.is_ok());
                     let line = line.unwrap();
-                    assert_eq!(line, "raw,group_id,unique_id,name,group_str,info");
+                    assert_eq!(line, "raw;group_id;unique_id;name;group_str;info");
                 }
                 1 => {
                     assert!(line.is_ok());
                     let line = line.unwrap();
-                    assert_eq!(line, "0x0000,0x00,0x00,INVALID_PUS_SERVICE,,");
+                    assert_eq!(line, "0x0000;0x00;0x00;INVALID_PUS_SERVICE;;");
                 }
                 2 => {
                     assert!(line.is_ok());
                     let line = line.unwrap();
-                    assert_eq!(line, "0x0001,0x00,0x01,INVALID_PUS_SUBSERVICE,,");
+                    assert_eq!(line, "0x0001;0x00;0x01;INVALID_PUS_SUBSERVICE;;");
                 }
                 3 => {
                     assert!(line.is_ok());
                     let line = line.unwrap();
-                    assert_eq!(line, "0x0002,0x00,0x02,NOT_ENOUGH_APP_DATA,,Not enough data inside the TC application data field");
+                    assert_eq!(line, "0x0002;0x00;0x02;NOT_ENOUGH_APP_DATA;;Not enough data inside the TC application data field");
                 }
                 _ => (),
             }
