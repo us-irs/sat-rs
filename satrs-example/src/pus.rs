@@ -70,6 +70,7 @@ impl PusServiceProvider for PusReceiver {
             self.handle_event_service(pus_tc, accepted_token);
         } else {
             // TODO: Unknown service verification failure
+            // TODO: Unknown service returncode
         }
         Ok(())
     }
@@ -94,8 +95,6 @@ impl PusReceiver {
                 .expect("Error sending completion success");
         } else {
             // TODO: Unknown Subservice returncode
-            // TODO: Generate unknown subservice completion failure
-
             self.update_time_stamp();
             self.verif_reporter
                 .start_failure(
