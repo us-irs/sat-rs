@@ -715,22 +715,9 @@ dependencies = [
  "csv",
  "delegate 0.8.0",
  "satrs-core",
- "satrs-macros",
  "satrs-mib",
  "spacepackets",
  "zerocopy",
-]
-
-[[package]]
-name = "satrs-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "satrs-core",
- "satrs-mib",
- "syn",
- "trybuild",
 ]
 
 [[package]]
@@ -739,9 +726,21 @@ version = "0.1.0"
 dependencies = [
  "csv",
  "satrs-core",
- "satrs-macros",
+ "satrs-mib-codegen",
  "serde",
  "serde-hex",
+]
+
+[[package]]
+name = "satrs-mib-codegen"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "satrs-core",
+ "satrs-mib",
+ "syn",
+ "trybuild",
 ]
 
 [[package]]

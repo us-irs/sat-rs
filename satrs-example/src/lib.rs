@@ -1,8 +1,7 @@
 use std::net::Ipv4Addr;
 
-use satrs_core::res_code::ResultU16;
-use satrs_macros::resultcode;
-use satrs_mib::res_code::ResultU16Info;
+use satrs_mib::resultcode;
+use satrs_mib::res_code::{ResultU16, ResultU16Info};
 
 #[derive(Debug)]
 pub enum GroupId {

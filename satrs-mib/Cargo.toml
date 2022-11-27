@@ -7,13 +7,13 @@ edition = "2021"
 
 [dependencies]
 serde-hex = "0.1.0"
-csv = "1"
+
+[dependencies.csv]
+version = "1"
+optional = true
 
 [dependencies.satrs-core]
 path = "../satrs-core"
-
-[dependencies.satrs-macros]
-path = "../satrs-macros"
 
 [dependencies.satrs-mib-codegen]
 path = "codegen"
@@ -21,3 +21,7 @@ path = "codegen"
 [dependencies.serde]
 version = "1.0"
 default-features = false
+
+[features]
+default = ["std"]
+std = ["csv", "serde/std"]

@@ -1,5 +1,5 @@
 use satrs_core::res_code::ResultU16;
-use satrs_macros::*;
+use satrs_mib::resultcode;
 use satrs_mib::res_code::ResultU16Info;
 
 #[resultcode(info = "This is a test result where the first parameter is foo")]
