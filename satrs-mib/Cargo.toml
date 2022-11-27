@@ -15,6 +15,9 @@ path = "../satrs-core"
 [dependencies.satrs-macros]
 path = "../satrs-macros"
 
+[dependencies.satrs-mib-codegen]
+path = "codegen"
+
 [dependencies.serde]
 version = "1.0"
 default-features = false

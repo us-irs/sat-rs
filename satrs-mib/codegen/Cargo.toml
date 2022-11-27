@@ -1,5 +1,5 @@
 [package]
-name = "satrs-macros"
+name = "satrs-mib-codegen"
 version = "0.1.0"
 edition = "2021"
 
@@ -16,13 +16,13 @@ quote = "1.0"
 proc-macro2 = "1.0"
 
 [dependencies.satrs-core]
-path = "../satrs-core"
+path = "../../satrs-core"
 
 [dev-dependencies]
 trybuild = { version = "1.0", features = ["diff"] }
 
 [dev-dependencies.satrs-mib]
-path = "../satrs-mib"
+path = ".."
 
 [dependencies.syn]
 version = "1.0"
