@@ -24,7 +24,7 @@ use spacepackets::time::{CdsShortTimeProvider, TimeWriter};
 use spacepackets::tm::PusTm;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::channel;
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 
 struct TmFunnel {
@@ -83,10 +83,7 @@ fn main() {
         8,
     )
     .unwrap();
-    let reporter_with_sender_0 = Arc::new(Mutex::new(VerificationReporterWithSender::new(
-        &verif_cfg,
-        Box::new(sender),
-    )));
+    let reporter_with_sender_0 = VerificationReporterWithSender::new(&verif_cfg, Box::new(sender));
 
     // Create event handling components
     let (event_request_tx, event_request_rx) = channel::<EventRequestWithToken>();
@@ -99,7 +96,7 @@ fn main() {
         PusEventDispatcher::new(event_reporter, Box::new(pus_tm_backend));
     let (pus_event_man_tx, pus_event_man_rx) = channel();
     let pus_event_man_send_provider = MpscEventU32SendProvider::new(1, pus_event_man_tx);
-    let reporter1 = reporter_with_sender_0.clone();
+    let mut reporter1 = reporter_with_sender_0.clone();
     event_man.subscribe_all(pus_event_man_send_provider.id());
 
     // Create clones here to allow move for thread 0
@@ -136,11 +133,8 @@ fn main() {
         let mut timestamp: [u8; 7] = [0; 7];
         let mut sender = EventTmSender::new(tm_store_helper, tm_funnel_tx);
         let mut time_provider = CdsShortTimeProvider::new(0, 0);
-        let report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
-            let mut reporter = reporter1
-                .lock()
-                .expect("Locking Verification reporter failed");
-            reporter
+        let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
+            reporter1
                 .completion_success(event_req.token, timestamp)
                 .expect("Sending completion success failed");
         };

@@ -4,7 +4,7 @@ use satrs_core::pool::StoreAddr;
 use satrs_core::pus::event::Subservices;
 use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
 use satrs_core::pus::verification::{
-    FailParams, SharedStdVerifReporterWithSender, TcStateAccepted, VerificationToken,
+    FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
 };
 use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use satrs_core::tmtc::PusServiceProvider;
@@ -18,7 +18,7 @@ pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
     pub tm_tx: mpsc::Sender<StoreAddr>,
     pub tm_store: TmStore,
-    pub verif_reporter: SharedStdVerifReporterWithSender,
+    pub verif_reporter: StdVerifReporterWithSender,
     event_request_tx: mpsc::Sender<EventRequestWithToken>,
     stamper: CdsShortTimeProvider,
     time_stamp: [u8; 7],
@@ -29,7 +29,7 @@ impl PusReceiver {
         apid: u16,
         tm_tx: mpsc::Sender<StoreAddr>,
         tm_store: TmStore,
-        verif_reporter: SharedStdVerifReporterWithSender,
+        verif_reporter: StdVerifReporterWithSender,
         event_request_tx: mpsc::Sender<EventRequestWithToken>,
     ) -> Self {
         Self {
@@ -53,25 +53,23 @@ impl PusServiceProvider for PusReceiver {
         _header: &SpHeader,
         pus_tc: &PusTc,
     ) -> Result<(), Self::Error> {
-        let mut reporter = self
-            .verif_reporter
-            .lock()
-            .expect("Locking Verification Reporter failed");
-        let init_token = reporter.add_tc(pus_tc);
+        let init_token = self.verif_reporter.add_tc(pus_tc);
         self.stamper
             .update_from_now()
             .expect("Updating time for time stamp failed");
         self.stamper
             .write_to_bytes(&mut self.time_stamp)
             .expect("Writing time stamp failed");
-        let accepted_token = reporter
+        let accepted_token = self
+            .verif_reporter
             .acceptance_success(init_token, &self.time_stamp)
             .expect("Acceptance success failure");
-        drop(reporter);
         if service == 17 {
             self.handle_test_service(pus_tc, accepted_token);
         } else if service == 5 {
             self.handle_event_service(pus_tc, accepted_token);
+        } else {
+            // TODO: Unknown service verification failure
         }
         Ok(())
     }
@@ -84,19 +82,27 @@ impl PusReceiver {
             println!("Sending ping reply PUS TM[17,2]");
             let ping_reply = self.tm_helper.create_pus_tm_timestamp_now(17, 2, None);
             let addr = self.tm_store.add_pus_tm(&ping_reply);
-            let mut reporter = self
+            let start_token = self
                 .verif_reporter
-                .lock()
-                .expect("Error locking verification reporter");
-            let start_token = reporter
                 .start_success(token, &self.time_stamp)
                 .expect("Error sending start success");
             self.tm_tx
                 .send(addr)
                 .expect("Sending TM to TM funnel failed");
-            reporter
+            self.verif_reporter
                 .completion_success(start_token, &self.time_stamp)
                 .expect("Error sending completion success");
+        } else {
+            // TODO: Unknown Subservice returncode
+            // TODO: Generate unknown subservice completion failure
+
+            self.update_time_stamp();
+            self.verif_reporter
+                .start_failure(
+                    token,
+                    FailParams::new(&self.time_stamp, &EcssEnumU16::new(2), None),
+                )
+                .expect("Sending start failure TM failed");
         }
     }
 
@@ -110,24 +116,20 @@ impl PusReceiver {
     }
 
     fn handle_event_service(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
-        let send_start_failure = |verif_reporter: &mut SharedStdVerifReporterWithSender,
+        let send_start_failure = |verif_reporter: &mut StdVerifReporterWithSender,
                                   timestamp: &[u8; 7],
                                   failure_code: EcssEnumU16,
                                   failure_data: Option<&[u8]>| {
             verif_reporter
-                .lock()
-                .expect("Locking verification reporter failed")
                 .start_failure(
                     token,
                     FailParams::new(timestamp, &failure_code, failure_data),
                 )
                 .expect("Sending start failure TM failed");
         };
-        let send_start_acceptance = |verif_reporter: &mut SharedStdVerifReporterWithSender,
+        let send_start_acceptance = |verif_reporter: &mut StdVerifReporterWithSender,
                                      timestamp: &[u8; 7]| {
             verif_reporter
-                .lock()
-                .expect("Locking verification reporter failed")
                 .start_success(token, timestamp)
                 .expect("Sending start success TM failed")
         };
@@ -175,6 +177,7 @@ impl PusReceiver {
                     .expect("Sending event request failed");
             }
             _ => {
+                // TODO: Unknown Subservice returncode
                 self.update_time_stamp();
                 send_start_failure(
                     &mut self.verif_reporter,

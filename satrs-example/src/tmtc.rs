@@ -12,7 +12,7 @@ use crate::pus::PusReceiver;
 use crate::UdpTmtcServer;
 use satrs_core::pool::{SharedPool, StoreAddr};
 use satrs_core::pus::event_man::EventRequestWithToken;
-use satrs_core::pus::verification::SharedStdVerifReporterWithSender;
+use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::tmtc::{CcsdsDistributor, CcsdsError, PusDistributor};
 use spacepackets::tm::PusTm;
 
@@ -45,7 +45,7 @@ pub fn core_tmtc_task(
     args: CoreTmtcArgs,
     tm_server_rx: mpsc::Receiver<StoreAddr>,
     addr: SocketAddr,
-    verif_reporter: SharedStdVerifReporterWithSender,
+    verif_reporter: StdVerifReporterWithSender,
 ) {
     let pus_receiver = PusReceiver::new(
         PUS_APID,
@@ -111,7 +111,13 @@ fn core_tm_handling(udp_tmtc_server: &mut UdpTmtcServer, recv_addr: &SocketAddr)
             .expect("Locking TM store failed");
         let pg = store_lock.read_with_guard(addr);
         let buf = pg.read().expect("Error reading TM pool data");
-        println!("Sending TM");
+        if buf.len() > 9 {
+            let service = buf[7];
+            let subservice = buf[8];
+            println!("Sending PUS TM[{},{}]", service, subservice)
+        } else {
+            println!("Sending PUS TM");
+        }
         udp_tmtc_server
             .udp_tc_server
             .socket
