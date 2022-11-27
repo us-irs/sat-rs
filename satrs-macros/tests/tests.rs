@@ -2,4 +2,6 @@
 fn tests() {
     let t = trybuild::TestCases::new();
     t.pass("tests/basic.rs");
+    //t.pass("tests/verify_gen_struct.rs");
+    //t.pass("tests/group_in_enum.rs");
 }
