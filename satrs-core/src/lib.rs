@@ -8,6 +8,7 @@
 //! [alloc](https://doc.rust-lang.org/alloc) crate is available to allow boxed trait objects.
 //! These are used to supply user code to the crates.
 #![no_std]
+#![cfg_attr(doc_cfg, feature(doc_cfg))]
 #[cfg(feature = "alloc")]
 extern crate alloc;
 extern crate downcast_rs;
