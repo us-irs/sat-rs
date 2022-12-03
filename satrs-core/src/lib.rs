@@ -29,6 +29,6 @@ pub mod params;
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub mod pool;
 pub mod pus;
-pub mod resultcode;
+pub mod res_code;
 pub mod seq_count;
 pub mod tmtc;

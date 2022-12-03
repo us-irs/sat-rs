@@ -6,9 +6,11 @@ use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
 use satrs_core::pus::verification::{
     FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
 };
+use satrs_core::res_code::ResultU16;
 use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use satrs_core::tmtc::PusServiceProvider;
-use spacepackets::ecss::{EcssEnumU16, PusPacket};
+use satrs_example::{INVALID_PUS_SERVICE, INVALID_PUS_SUBSERVICE, NOT_ENOUGH_APP_DATA};
+use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
 use spacepackets::time::{CdsShortTimeProvider, TimeWriter};
 use spacepackets::SpHeader;
@@ -64,8 +66,13 @@ impl PusServiceProvider for PusReceiver {
         } else if service == 5 {
             self.handle_event_service(pus_tc, accepted_token);
         } else {
-            // TODO: Unknown service verification failure
-            // TODO: Unknown service returncode
+            self.update_time_stamp();
+            self.verif_reporter
+                .start_failure(
+                    accepted_token,
+                    FailParams::new(&self.time_stamp, &INVALID_PUS_SERVICE, None),
+                )
+                .expect("Start failure verification failed")
         }
         Ok(())
     }
@@ -89,12 +96,11 @@ impl PusReceiver {
                 .completion_success(start_token, &self.time_stamp)
                 .expect("Error sending completion success");
         } else {
-            // TODO: Unknown Subservice returncode
             self.update_time_stamp();
             self.verif_reporter
                 .start_failure(
                     token,
-                    FailParams::new(&self.time_stamp, &EcssEnumU16::new(2), None),
+                    FailParams::new(&self.time_stamp, &INVALID_PUS_SUBSERVICE, None),
                 )
                 .expect("Sending start failure TM failed");
         }
@@ -112,12 +118,12 @@ impl PusReceiver {
     fn handle_event_service(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
         let send_start_failure = |verif_reporter: &mut StdVerifReporterWithSender,
                                   timestamp: &[u8; 7],
-                                  failure_code: EcssEnumU16,
+                                  failure_code: &ResultU16,
                                   failure_data: Option<&[u8]>| {
             verif_reporter
                 .start_failure(
                     token,
-                    FailParams::new(timestamp, &failure_code, failure_data),
+                    FailParams::new(timestamp, failure_code, failure_data),
                 )
                 .expect("Sending start failure TM failed");
         };
@@ -132,7 +138,7 @@ impl PusReceiver {
             send_start_failure(
                 &mut self.verif_reporter,
                 &self.time_stamp,
-                EcssEnumU16::new(1),
+                &NOT_ENOUGH_APP_DATA,
                 None,
             );
             return;
@@ -143,7 +149,7 @@ impl PusReceiver {
             send_start_failure(
                 &mut self.verif_reporter,
                 &self.time_stamp,
-                EcssEnumU16::new(1),
+                &NOT_ENOUGH_APP_DATA,
                 None,
             );
             return;
@@ -171,12 +177,11 @@ impl PusReceiver {
                     .expect("Sending event request failed");
             }
             _ => {
-                // TODO: Unknown Subservice returncode
                 self.update_time_stamp();
                 send_start_failure(
                     &mut self.verif_reporter,
                     &self.time_stamp,
-                    EcssEnumU16::new(2),
+                    &INVALID_PUS_SUBSERVICE,
                     None,
                 );
             }

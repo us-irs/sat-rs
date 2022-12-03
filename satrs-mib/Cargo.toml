@@ -1,0 +1,27 @@
+[package]
+name = "satrs-mib"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde-hex = "0.1.0"
+
+[dependencies.csv]
+version = "1"
+optional = true
+
+[dependencies.satrs-core]
+path = "../satrs-core"
+
+[dependencies.satrs-mib-codegen]
+path = "codegen"
+
+[dependencies.serde]
+version = "1.0"
+default-features = false
+
+[features]
+default = ["std"]
+std = ["csv", "serde/std"]

@@ -22,8 +22,8 @@ fn main() {
         .write_to_bytes(&mut buf)
         .expect("Creating PUS TC failed");
     client
-        .send_to(&buf[0..size], &addr)
-        .expect(&*format!("Sending to {:?} failed", addr));
+        .send_to(&buf[0..size], addr)
+        .unwrap_or_else(|_| panic!("Sending to {:?} failed", addr));
     client
         .set_read_timeout(Some(Duration::from_secs(2)))
         .expect("Setting read timeout failed");
