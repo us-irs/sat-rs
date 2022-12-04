@@ -56,14 +56,14 @@ fn test_shared_reporter() {
     let (tx_tc_1, rx_tc_1) = crossbeam_channel::bounded(3);
     {
         let mut tc_guard = shared_tc_pool_0.write().unwrap();
-        let mut sph = SpHeader::tc(TEST_APID, 0, 0).unwrap();
+        let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
         let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
         let pus_tc_0 = PusTc::new(&mut sph, tc_header, None, true);
         req_id_0 = RequestId::new(&pus_tc_0);
         let (addr, mut buf) = tc_guard.free_element(pus_tc_0.len_packed()).unwrap();
         pus_tc_0.write_to_bytes(&mut buf).unwrap();
         tx_tc_0.send(addr).unwrap();
-        let mut sph = SpHeader::tc(TEST_APID, 1, 0).unwrap();
+        let mut sph = SpHeader::tc_unseg(TEST_APID, 1, 0).unwrap();
         let tc_header = PusTcSecondaryHeader::new_simple(5, 1);
         let pus_tc_1 = PusTc::new(&mut sph, tc_header, None, true);
         req_id_1 = RequestId::new(&pus_tc_1);

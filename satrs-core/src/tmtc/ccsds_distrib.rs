@@ -54,7 +54,7 @@
 //! let mut ccsds_distributor = CcsdsDistributor::new(Box::new(apid_handler));
 //!
 //! // Create and pass PUS telecommand with a valid APID
-//! let mut space_packet_header = SpHeader::tc(0x002, 0x34, 0).unwrap();
+//! let mut space_packet_header = SpHeader::tc_unseg(0x002, 0x34, 0).unwrap();
 //! let mut pus_tc = PusTc::new_simple(&mut space_packet_header, 17, 1, None, true);
 //! let mut test_buf: [u8; 32] = [0; 32];
 //! let mut size = pus_tc
@@ -199,7 +199,7 @@ pub(crate) mod tests {
     use std::vec::Vec;
 
     pub fn generate_ping_tc(buf: &mut [u8]) -> &[u8] {
-        let mut sph = SpHeader::tc(0x002, 0x34, 0).unwrap();
+        let mut sph = SpHeader::tc_unseg(0x002, 0x34, 0).unwrap();
         let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
         let size = pus_tc
             .write_to_bytes(buf)
@@ -312,7 +312,7 @@ pub(crate) mod tests {
             unknown_packet_queue: unknown_packet_queue.clone(),
         };
         let mut ccsds_distrib = CcsdsDistributor::new(Box::new(apid_handler));
-        let mut sph = SpHeader::tc(0x004, 0x34, 0).unwrap();
+        let mut sph = SpHeader::tc_unseg(0x004, 0x34, 0).unwrap();
         let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
         let mut test_buf: [u8; 32] = [0; 32];
         pus_tc

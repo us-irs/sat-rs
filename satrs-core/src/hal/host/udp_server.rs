@@ -38,7 +38,7 @@ use std::vec::Vec;
 /// let ping_receiver = PingReceiver::default();
 /// let mut udp_tc_server = UdpTcServer::new(dest_addr, 2048, Box::new(ping_receiver))
 ///       .expect("Creating UDP TMTC server failed");
-/// let mut sph = SpHeader::tc(0x02, 0, 0).unwrap();
+/// let mut sph = SpHeader::tc_unseg(0x02, 0, 0).unwrap();
 /// let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
 /// let len = pus_tc
 ///     .write_to_bytes(&mut buf)
@@ -163,7 +163,7 @@ mod tests {
         let ping_receiver = PingReceiver::default();
         let mut udp_tc_server = UdpTcServer::new(dest_addr, 2048, Box::new(ping_receiver))
             .expect("Creating UDP TMTC server failed");
-        let mut sph = SpHeader::tc(0x02, 0, 0).unwrap();
+        let mut sph = SpHeader::tc_unseg(0x02, 0, 0).unwrap();
         let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
         let len = pus_tc
             .write_to_bytes(&mut buf)

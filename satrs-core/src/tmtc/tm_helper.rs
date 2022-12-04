@@ -44,7 +44,7 @@ impl PusTmWithCdsShortHelper {
         subservice: u8,
         source_data: Option<&'a [u8]>,
     ) -> PusTm {
-        let mut reply_header = SpHeader::tm(self.apid, 0, 0).unwrap();
+        let mut reply_header = SpHeader::tm_unseg(self.apid, 0, 0).unwrap();
         let tc_header = PusTmSecondaryHeader::new_simple(service, subservice, &self.cds_short_buf);
         PusTm::new(&mut reply_header, tc_header, source_data, true)
     }

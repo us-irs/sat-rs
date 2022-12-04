@@ -174,7 +174,7 @@ impl EventReporterBase {
             src_data_len += aux_data.len();
         }
         source_buffer_large_enough(buf.len(), src_data_len)?;
-        let mut sp_header = SpHeader::tm(self.apid, 0, 0).unwrap();
+        let mut sp_header = SpHeader::tm_unseg(self.apid, 0, 0).unwrap();
         let sec_header = PusTmSecondaryHeader::new(
             5,
             subservice.into(),

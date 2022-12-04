@@ -33,7 +33,7 @@
 //! let cfg = VerificationReporterCfg::new(TEST_APID, Box::new(SimpleSeqCountProvider::default()), 1, 2, 8).unwrap();
 //! let mut  reporter = VerificationReporterWithSender::new(&cfg , Box::new(sender));
 //!
-//! let mut sph = SpHeader::tc(TEST_APID, 0, 0).unwrap();
+//! let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
 //! let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
 //! let pus_tc_0 = PusTc::new(&mut sph, tc_header, None, true);
 //! let init_token = reporter.add_tc(&pus_tc_0);
@@ -580,7 +580,7 @@ impl VerificationReporterBasic {
             step.write_to_be_bytes(&mut buf[idx..idx + step.byte_width() as usize])
                 .unwrap();
         }
-        let mut sp_header = SpHeader::tm(self.apid(), 0, 0).unwrap();
+        let mut sp_header = SpHeader::tm_unseg(self.apid(), 0, 0).unwrap();
         Ok(self.create_pus_verif_tm_base(
             buf,
             subservice,
@@ -625,7 +625,7 @@ impl VerificationReporterBasic {
         if let Some(failure_data) = params.failure_data {
             buf[idx..idx + failure_data.len()].copy_from_slice(failure_data);
         }
-        let mut sp_header = SpHeader::tm(self.apid(), 0, 0).unwrap();
+        let mut sp_header = SpHeader::tm_unseg(self.apid(), 0, 0).unwrap();
         Ok(self.create_pus_verif_tm_base(
             buf,
             subservice,
@@ -1250,7 +1250,7 @@ mod tests {
     }
 
     fn base_tc_init(app_data: Option<&[u8]>) -> (PusTc, RequestId) {
-        let mut sph = SpHeader::tc(TEST_APID, 0x34, 0).unwrap();
+        let mut sph = SpHeader::tc_unseg(TEST_APID, 0x34, 0).unwrap();
         let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
         let pus_tc = PusTc::new(&mut sph, tc_header, app_data, true);
         let req_id = RequestId::new(&pus_tc);

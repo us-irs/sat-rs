@@ -43,7 +43,7 @@
 //! let mut pus_distributor = PusDistributor::new(Box::new(service_handler));
 //!
 //! // Create and pass PUS ping telecommand with a valid APID
-//! let mut space_packet_header = SpHeader::tc(0x002, 0x34, 0).unwrap();
+//! let mut space_packet_header = SpHeader::tc_unseg(0x002, 0x34, 0).unwrap();
 //! let mut pus_tc = PusTc::new_simple(&mut space_packet_header, 17, 1, None, true);
 //! let mut test_buf: [u8; 32] = [0; 32];
 //! let mut size = pus_tc

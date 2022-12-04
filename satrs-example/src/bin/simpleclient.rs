@@ -10,7 +10,7 @@ use std::time::Duration;
 fn main() {
     let mut buf = [0; 32];
     let addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
-    let mut sph = SpHeader::tc(0x02, 0, 0).unwrap();
+    let mut sph = SpHeader::tc_unseg(0x02, 0, 0).unwrap();
     let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
     let client = UdpSocket::bind("127.0.0.1:7302").expect("Connecting to UDP server failed");
     let tc_req_id = RequestId::new(&pus_tc);
