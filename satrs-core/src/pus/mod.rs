@@ -67,7 +67,7 @@ pub(crate) fn source_buffer_large_enough<E>(cap: usize, len: usize) -> Result<()
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use spacepackets::tm::{PusTm, GenericPusTmSecondaryHeader};
+    use spacepackets::tm::{GenericPusTmSecondaryHeader, PusTm};
     use spacepackets::CcsdsPacket;
 
     #[derive(Debug, Eq, PartialEq, Clone)]

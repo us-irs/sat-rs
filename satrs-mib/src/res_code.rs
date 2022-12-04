@@ -57,11 +57,14 @@ impl From<ResultU16Info> for ResultU16InfoSerializable {
 
 #[cfg(feature = "std")]
 pub mod stdmod {
-    use std::fs::File;
     use super::*;
+    use std::fs::File;
     use std::io;
 
-    pub fn print_resultcodes_as_csv(writer_builder: csv::WriterBuilder, codes: &[ResultU16Info]) -> Result<(), csv::Error> {
+    pub fn print_resultcodes_as_csv(
+        writer_builder: csv::WriterBuilder,
+        codes: &[ResultU16Info],
+    ) -> Result<(), csv::Error> {
         let mut wtr = writer_builder.from_writer(io::stdout());
         for result in codes {
             wtr.serialize(ResultU16InfoSerializable::from(*result))?;
