@@ -98,7 +98,7 @@ impl<E: 'static> ReceivesTc for PusDistributor<E> {
     type Error = PusDistribError<E>;
     fn pass_tc(&mut self, tm_raw: &[u8]) -> Result<(), Self::Error> {
         // Convert to ccsds and call pass_ccsds
-        let sp_header = SpHeader::from_raw_slice(tm_raw)
+        let sp_header = SpHeader::from_be_bytes(tm_raw)
             .map_err(|e| PusDistribError::PusError(PusError::ByteConversionError(e)))?;
         self.pass_ccsds(&sp_header, tm_raw)
     }

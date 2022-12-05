@@ -148,7 +148,7 @@ impl<E: 'static> ReceivesTc for CcsdsDistributor<E> {
                 }),
             ));
         }
-        let sp_header = SpHeader::from_raw_slice(tc_raw).map_err(|e| CcsdsError::PacketError(e))?;
+        let sp_header = SpHeader::from_be_bytes(tc_raw).map_err(|e| CcsdsError::PacketError(e))?;
         self.dispatch_ccsds(&sp_header, tc_raw)
     }
 }
