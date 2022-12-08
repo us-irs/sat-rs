@@ -12,7 +12,8 @@ use satrs_core::tmtc::PusServiceProvider;
 use satrs_example::{INVALID_PUS_SERVICE, INVALID_PUS_SUBSERVICE, NOT_ENOUGH_APP_DATA};
 use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
-use spacepackets::time::{CdsShortTimeProvider, TimeWriter};
+use spacepackets::time::cds::TimeProvider;
+use spacepackets::time::TimeWriter;
 use spacepackets::SpHeader;
 use std::sync::mpsc;
 
@@ -22,7 +23,7 @@ pub struct PusReceiver {
     pub tm_store: TmStore,
     pub verif_reporter: StdVerifReporterWithSender,
     event_request_tx: mpsc::Sender<EventRequestWithToken>,
-    stamper: CdsShortTimeProvider,
+    stamper: TimeProvider,
     time_stamp: [u8; 7],
 }
 
@@ -40,7 +41,7 @@ impl PusReceiver {
             tm_store,
             verif_reporter,
             event_request_tx,
-            stamper: CdsShortTimeProvider::default(),
+            stamper: TimeProvider::default(),
             time_stamp: [0; 7],
         }
     }

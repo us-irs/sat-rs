@@ -1,4 +1,5 @@
-use spacepackets::time::{CdsShortTimeProvider, TimeWriter};
+use spacepackets::time::cds::TimeProvider;
+use spacepackets::time::TimeWriter;
 use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::SpHeader;
 
@@ -22,7 +23,7 @@ impl PusTmWithCdsShortHelper {
         subservice: u8,
         source_data: Option<&'a [u8]>,
     ) -> PusTm {
-        let time_stamp = CdsShortTimeProvider::from_now().unwrap();
+        let time_stamp = TimeProvider::from_now_with_u16_days().unwrap();
         time_stamp.write_to_bytes(&mut self.cds_short_buf).unwrap();
         self.create_pus_tm_common(service, subservice, source_data)
     }
@@ -32,7 +33,7 @@ impl PusTmWithCdsShortHelper {
         service: u8,
         subservice: u8,
         source_data: Option<&'a [u8]>,
-        stamper: &CdsShortTimeProvider,
+        stamper: &TimeProvider,
     ) -> PusTm {
         stamper.write_to_bytes(&mut self.cds_short_buf).unwrap();
         self.create_pus_tm_common(service, subservice, source_data)

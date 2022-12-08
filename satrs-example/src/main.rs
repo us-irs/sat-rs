@@ -20,7 +20,8 @@ use satrs_core::pus::{EcssTmError, EcssTmSender};
 use satrs_core::seq_count::SimpleSeqCountProvider;
 use satrs_core::tmtc::CcsdsError;
 use satrs_example::{OBSW_SERVER_ADDR, SERVER_PORT};
-use spacepackets::time::{CdsShortTimeProvider, TimeWriter};
+use spacepackets::time::cds::TimeProvider;
+use spacepackets::time::TimeWriter;
 use spacepackets::tm::PusTm;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::channel;
@@ -132,7 +133,7 @@ fn main() {
     let jh2 = thread::spawn(move || {
         let mut timestamp: [u8; 7] = [0; 7];
         let mut sender = EventTmSender::new(tm_store_helper, tm_funnel_tx);
-        let mut time_provider = CdsShortTimeProvider::new(0, 0);
+        let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
         let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
             reporter1
                 .completion_success(event_req.token, timestamp)
@@ -171,7 +172,7 @@ fn main() {
     jh2.join().expect("Joining Event Manager thread failed");
 }
 
-pub fn update_time(time_provider: &mut CdsShortTimeProvider, timestamp: &mut [u8]) {
+pub fn update_time(time_provider: &mut TimeProvider, timestamp: &mut [u8]) {
     time_provider
         .update_from_now()
         .expect("Could not get current time");
