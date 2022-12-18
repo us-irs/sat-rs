@@ -567,6 +567,7 @@ dependencies = [
  "paste",
  "postcard",
  "serde",
+ "serde_json",
  "spacepackets",
  "zerocopy",
 ]
