@@ -153,5 +153,5 @@ pub fn main() {
         mgm_vals: [0x1f1f, 0x2f2f, 0x3f3f],
     };
     let mgm_as_json_str = serde_json::to_string(&mgm_hk_group_validity).unwrap();
-    println!("{}", mgm_as_json_str);
+    println!("JSON string with length {}: {}", mgm_as_json_str.len(), mgm_as_json_str);
 }
