@@ -1,8 +1,11 @@
 mod ccsds;
+mod hk;
 mod pus;
+mod requests;
 mod tmtc;
 
-use crate::tmtc::{core_tmtc_task, CoreTmtcArgs, TmStore, PUS_APID};
+use crate::requests::Request;
+use crate::tmtc::{core_tmtc_task, CoreTmtcArgs, RequestTargetId, TmStore, PUS_APID};
 use satrs_core::event_man::{
     EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
 };
@@ -23,6 +26,7 @@ use satrs_example::{OBSW_SERVER_ADDR, SERVER_PORT};
 use spacepackets::time::cds::TimeProvider;
 use spacepackets::time::TimeWriter;
 use spacepackets::tm::PusTm;
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::channel;
 use std::sync::{mpsc, Arc, RwLock};
@@ -100,12 +104,17 @@ fn main() {
     let mut reporter1 = reporter_with_sender_0.clone();
     event_man.subscribe_all(pus_event_man_send_provider.id());
 
+    let mut request_map = HashMap::new();
+    let (acs_thread_tx, acs_thread_rx) = channel::<Request>();
+    request_map.insert(RequestTargetId::AcsSubsystem as u32, acs_thread_tx);
+
     // Create clones here to allow move for thread 0
     let core_args = CoreTmtcArgs {
         tm_store: tm_store_helper.clone(),
         tm_sender: tm_funnel_tx.clone(),
         event_sender,
         event_request_tx,
+        request_map,
     };
 
     println!("Starting TMTC task");

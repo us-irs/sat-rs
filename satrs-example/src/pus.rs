@@ -1,3 +1,4 @@
+use crate::requests::Request;
 use crate::tmtc::TmStore;
 use satrs_core::events::EventU32;
 use satrs_core::pool::StoreAddr;
@@ -15,14 +16,17 @@ use spacepackets::tc::PusTc;
 use spacepackets::time::cds::TimeProvider;
 use spacepackets::time::TimeWriter;
 use spacepackets::SpHeader;
+use std::collections::HashMap;
 use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
-    pub tm_tx: mpsc::Sender<StoreAddr>,
+    pub tm_tx: Sender<StoreAddr>,
     pub tm_store: TmStore,
     pub verif_reporter: StdVerifReporterWithSender,
-    event_request_tx: mpsc::Sender<EventRequestWithToken>,
+    event_request_tx: Sender<EventRequestWithToken>,
+    request_map: HashMap<u32, Sender<Request>>,
     stamper: TimeProvider,
     time_stamp: [u8; 7],
 }
@@ -30,10 +34,11 @@ pub struct PusReceiver {
 impl PusReceiver {
     pub fn new(
         apid: u16,
-        tm_tx: mpsc::Sender<StoreAddr>,
+        tm_tx: Sender<StoreAddr>,
         tm_store: TmStore,
         verif_reporter: StdVerifReporterWithSender,
-        event_request_tx: mpsc::Sender<EventRequestWithToken>,
+        event_request_tx: Sender<EventRequestWithToken>,
+        request_map: HashMap<u32, Sender<Request>>,
     ) -> Self {
         Self {
             tm_helper: PusTmWithCdsShortHelper::new(apid),
@@ -41,6 +46,7 @@ impl PusReceiver {
             tm_store,
             verif_reporter,
             event_request_tx,
+            request_map,
             stamper: TimeProvider::default(),
             time_stamp: [0; 7],
         }
@@ -65,7 +71,9 @@ impl PusServiceProvider for PusReceiver {
         if service == 17 {
             self.handle_test_service(pus_tc, accepted_token);
         } else if service == 5 {
-            self.handle_event_service(pus_tc, accepted_token);
+            self.handle_event_request(pus_tc, accepted_token);
+        } else if service == 3 {
+            self.handle_hk_request(pus_tc, accepted_token);
         } else {
             self.update_time_stamp();
             self.verif_reporter
@@ -116,7 +124,8 @@ impl PusReceiver {
             .expect("Writing timestamp failed");
     }
 
-    fn handle_event_service(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
+    fn handle_hk_request(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {}
+    fn handle_event_request(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
         let send_start_failure = |verif_reporter: &mut StdVerifReporterWithSender,
                                   timestamp: &[u8; 7],
                                   failure_code: &ResultU16,
