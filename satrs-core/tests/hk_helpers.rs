@@ -2,6 +2,8 @@
 use core::mem::size_of;
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::{Ptc, RealPfc, UnsignedPfc};
+use spacepackets::time::cds::TimeProvider;
+use spacepackets::time::{CcsdsTimeProvider, TimeWriter};
 
 enum NumOfParamsInfo {
     /// The parameter entry is a scalar field
@@ -34,7 +36,7 @@ struct TestMgmHkWithIndividualValidity {
 
 #[derive(Serialize, Deserialize)]
 struct TestMgmHkWithGroupValidity {
-    last_valid_stamp: [u8; 7],
+    last_valid_stamp: TimeProvider,
     valid: bool,
     temp: f32,
     mgm_vals: [u16; 3],
@@ -90,9 +92,10 @@ impl TestMgmHkWithGroupValidity {
         let mut curr_idx = 0;
         buf[curr_idx] = self.valid as u8;
         curr_idx += 1;
-        buf[curr_idx..curr_idx + self.last_valid_stamp.len()]
-            .copy_from_slice(&self.last_valid_stamp);
-        curr_idx += self.last_valid_stamp.len();
+        self.last_valid_stamp
+            .write_to_bytes(&mut buf[curr_idx..curr_idx + self.last_valid_stamp.len_as_bytes()])
+            .unwrap();
+        curr_idx += self.last_valid_stamp.len_as_bytes();
         buf[curr_idx] = 0;
         curr_idx += 1;
         buf[curr_idx] = Ptc::Real as u8;
@@ -147,11 +150,15 @@ pub fn main() {
     // The easiest and probably best approach, trading off big advantages for TM downlink capacity:
     // Use a JSON format
     let mgm_hk_group_validity = TestMgmHkWithGroupValidity {
-        last_valid_stamp: [0; 7],
+        last_valid_stamp: TimeProvider::from_now_with_u16_days().unwrap(),
         valid: false,
         temp: 20.0,
         mgm_vals: [0x1f1f, 0x2f2f, 0x3f3f],
     };
     let mgm_as_json_str = serde_json::to_string(&mgm_hk_group_validity).unwrap();
-    println!("JSON string with length {}: {}", mgm_as_json_str.len(), mgm_as_json_str);
+    println!(
+        "JSON string with length {}: {}",
+        mgm_as_json_str.len(),
+        mgm_as_json_str
+    );
 }
