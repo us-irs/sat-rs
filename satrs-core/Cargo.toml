@@ -35,6 +35,7 @@ default-features = false
 
 [dependencies.spacepackets]
 path = "../spacepackets"
+features = ["serde"]
 
 [dev-dependencies]
 serde = "1.0"
