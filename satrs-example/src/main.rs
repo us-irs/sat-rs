@@ -83,6 +83,7 @@ fn main() {
     let sender = MpscVerifSender::new(tm_store.clone(), tm_funnel_tx.clone());
     let verif_cfg = VerificationReporterCfg::new(
         PUS_APID,
+        #[allow(clippy::box_default)]
         Box::new(SimpleSeqCountProvider::default()),
         1,
         2,

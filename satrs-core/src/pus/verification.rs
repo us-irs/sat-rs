@@ -569,7 +569,7 @@ impl VerificationReporterBasic {
     ) -> Result<PusTm, EcssTmError<E>> {
         let mut source_data_len = size_of::<u32>();
         if let Some(step) = step {
-            source_data_len += step.byte_width() as usize;
+            source_data_len += step.byte_width();
         }
         source_buffer_large_enough(buf.len(), source_data_len)?;
         let mut idx = 0;
@@ -577,7 +577,7 @@ impl VerificationReporterBasic {
         idx += RequestId::SIZE_AS_BYTES;
         if let Some(step) = step {
             // Size check was done beforehand
-            step.write_to_be_bytes(&mut buf[idx..idx + step.byte_width() as usize])
+            step.write_to_be_bytes(&mut buf[idx..idx + step.byte_width()])
                 .unwrap();
         }
         let mut sp_header = SpHeader::tm_unseg(self.apid(), 0, 0).unwrap();
@@ -601,10 +601,9 @@ impl VerificationReporterBasic {
         params: &'a FailParams,
     ) -> Result<PusTm, EcssTmError<E>> {
         let mut idx = 0;
-        let mut source_data_len =
-            RequestId::SIZE_AS_BYTES + params.failure_code.byte_width() as usize;
+        let mut source_data_len = RequestId::SIZE_AS_BYTES + params.failure_code.byte_width();
         if let Some(step) = step {
-            source_data_len += step.byte_width() as usize;
+            source_data_len += step.byte_width();
         }
         if let Some(failure_data) = params.failure_data {
             source_data_len += failure_data.len();
@@ -614,14 +613,14 @@ impl VerificationReporterBasic {
         idx += RequestId::SIZE_AS_BYTES;
         if let Some(step) = step {
             // Size check done beforehand
-            step.write_to_be_bytes(&mut buf[idx..idx + step.byte_width() as usize])
+            step.write_to_be_bytes(&mut buf[idx..idx + step.byte_width()])
                 .unwrap();
-            idx += step.byte_width() as usize;
+            idx += step.byte_width();
         }
         params
             .failure_code
-            .write_to_be_bytes(&mut buf[idx..idx + params.failure_code.byte_width() as usize])?;
-        idx += params.failure_code.byte_width() as usize;
+            .write_to_be_bytes(&mut buf[idx..idx + params.failure_code.byte_width()])?;
+        idx += params.failure_code.byte_width();
         if let Some(failure_data) = params.failure_data {
             buf[idx..idx + failure_data.len()].copy_from_slice(failure_data);
         }
@@ -709,8 +708,8 @@ mod allocmod {
                 source_data_buf: vec![
                     0;
                     RequestId::SIZE_AS_BYTES
-                        + cfg.step_field_width as usize
-                        + cfg.fail_code_field_width as usize
+                        + cfg.step_field_width
+                        + cfg.fail_code_field_width
                         + cfg.max_fail_data_len
                 ],
                 seq_counter: cfg.seq_counter.clone(),

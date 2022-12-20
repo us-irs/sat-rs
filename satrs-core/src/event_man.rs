@@ -211,9 +211,9 @@ impl<E: 'static, Event: GenericEvent + Copy + 'static, AuxDataProvider: Clone + 
     /// Create an event manager where the sender table will be the [DefaultSenderTableProvider]
     /// and the listener table will be the [DefaultListenerTableProvider].
     pub fn new(event_receiver: Box<dyn EventReceiver<Event, AuxDataProvider>>) -> Self {
-        let listener_table = Box::new(DefaultListenerTableProvider::default());
-        let sender_table =
-            Box::new(DefaultSenderTableProvider::<E, Event, AuxDataProvider>::default());
+        let listener_table: Box<DefaultListenerTableProvider> = Box::default();
+        let sender_table: Box<DefaultSenderTableProvider<E, Event, AuxDataProvider>> =
+            Box::default();
         Self::new_custom_tables(listener_table, sender_table, event_receiver)
     }
 }

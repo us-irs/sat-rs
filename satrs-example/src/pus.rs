@@ -149,7 +149,7 @@ impl PusReceiver {
                 .expect("Sending start failure TM failed");
             return;
         }
-        let addressable_id = AddressableId::from_raw_be(&user_data).unwrap();
+        let addressable_id = AddressableId::from_raw_be(user_data).unwrap();
         if !self.request_map.contains_key(&addressable_id.target_id) {
             self.update_time_stamp();
             self.verif_reporter
@@ -160,27 +160,18 @@ impl PusReceiver {
                 .expect("Sending start failure TM failed");
             return;
         }
+        let send_request = |request: HkRequest| {
+            let sender = self.request_map.get(&addressable_id.target_id).unwrap();
+            sender
+                .send(Request::HkRequest(request))
+                .expect(&format!("Sending HK request {:?} failed", request))
+        };
         if PusPacket::subservice(pus_tc) == hk::Subservice::TcEnableGeneration as u8 {
-            let sender = self.request_map.get(&addressable_id.target_id).unwrap();
-            sender
-                .send(Request::HkRequest(HkRequest::Enable(
-                    addressable_id.unique_id,
-                )))
-                .expect("Sending HK request failed")
+            send_request(HkRequest::Enable(addressable_id.unique_id));
         } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcDisableGeneration as u8 {
-            let sender = self.request_map.get(&addressable_id.target_id).unwrap();
-            sender
-                .send(Request::HkRequest(HkRequest::Disable(
-                    addressable_id.unique_id,
-                )))
-                .expect("Sending HK request failed");
+            send_request(HkRequest::Disable(addressable_id.unique_id));
         } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcGenerateOneShotHk as u8 {
-            let sender = self.request_map.get(&addressable_id.target_id).unwrap();
-            sender
-                .send(Request::HkRequest(HkRequest::OneShot(
-                    addressable_id.unique_id,
-                )))
-                .expect("Sending HK request failed");
+            send_request(HkRequest::OneShot(addressable_id.unique_id));
         } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcModifyCollectionInterval as u8
         {
             if user_data.len() < 12 {}

@@ -136,17 +136,14 @@ impl<RAW: ToBeBytes, GID, UID> EventBase<RAW, GID, UID> {
 impl EventBase<u32, u16, u16> {
     #[inline]
     fn raw(&self) -> u32 {
-        (((self.severity as u32) << 30) | ((self.group_id as u32) << 16) | self.unique_id as u32)
-            as u32
+        ((self.severity as u32) << 30) | ((self.group_id as u32) << 16) | self.unique_id as u32
     }
 }
 
 impl EventBase<u16, u8, u8> {
     #[inline]
     fn raw(&self) -> u16 {
-        (((self.severity as u16) << 14) as u16
-            | ((self.group_id as u16) << 8) as u16
-            | self.unique_id as u16) as u16
+        ((self.severity as u16) << 14) | ((self.group_id as u16) << 8) | self.unique_id as u16
     }
 }
 

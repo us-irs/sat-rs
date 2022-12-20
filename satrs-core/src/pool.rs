@@ -136,7 +136,7 @@ impl StoreAddr {
     pub const INVALID_ADDR: u32 = 0xFFFFFFFF;
 
     pub fn raw(&self) -> u32 {
-        ((self.pool_idx as u32) << 16) as u32 | self.packet_idx as u32
+        ((self.pool_idx as u32) << 16) | self.packet_idx as u32
     }
 }
 
@@ -239,7 +239,7 @@ impl LocalPool {
 
     fn validate_addr(&self, addr: &StoreAddr) -> Result<(), StoreError> {
         let pool_idx = addr.pool_idx as usize;
-        if pool_idx as usize >= self.pool_cfg.cfg.len() {
+        if pool_idx >= self.pool_cfg.cfg.len() {
             return Err(StoreError::InvalidStoreId(
                 StoreIdError::InvalidSubpool(addr.pool_idx),
                 Some(*addr),
