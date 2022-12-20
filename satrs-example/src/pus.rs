@@ -1,4 +1,4 @@
-use crate::hk::HkRequest;
+use crate::hk::{CollectionIntervalFactor, HkRequest};
 use crate::requests::Request;
 use crate::tmtc::TmStore;
 use satrs_core::events::EventU32;
@@ -174,7 +174,23 @@ impl PusReceiver {
             send_request(HkRequest::OneShot(addressable_id.unique_id));
         } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcModifyCollectionInterval as u8
         {
-            if user_data.len() < 12 {}
+            if user_data.len() < 12 {
+                self.update_time_stamp();
+                self.verif_reporter
+                    .start_failure(
+                        token,
+                        FailParams::new(
+                            &self.time_stamp,
+                            &hk_err::COLLECTION_INTERVAL_MISSING,
+                            None,
+                        ),
+                    )
+                    .expect("Sending start failure TM failed");
+                return;
+            }
+            send_request(HkRequest::ModifyCollectionInterval(
+                CollectionIntervalFactor::from_be_bytes(user_data[8..12].try_into().unwrap()),
+            ));
         }
     }
     fn handle_event_request(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
