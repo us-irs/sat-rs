@@ -31,6 +31,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::channel;
 use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
+use std::time::Duration;
 
 struct TmFunnel {
     tm_funnel_rx: mpsc::Receiver<StoreAddr>,
@@ -176,9 +177,19 @@ fn main() {
         }
     });
 
+    println!("Starting AOCS thread");
+    let jh3 = thread::spawn(move || loop {
+        match acs_thread_rx.try_recv() {
+            Ok(_) => {}
+            Err(_) => {}
+        }
+        thread::sleep(Duration::from_millis(500));
+    });
+
     jh0.join().expect("Joining UDP TMTC server thread failed");
     jh1.join().expect("Joining TM Funnel thread failed");
     jh2.join().expect("Joining Event Manager thread failed");
+    jh3.join().expect("Joining AOCS thread failed");
 }
 
 pub fn update_time(time_provider: &mut TimeProvider, timestamp: &mut [u8]) {

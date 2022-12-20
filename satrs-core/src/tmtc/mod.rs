@@ -5,10 +5,11 @@
 //! directly dispatch received packets to packet listeners based on packet fields like the CCSDS
 //! Application Process ID (APID) or the ECSS PUS service type. This allows for fast packet
 //! routing without the overhead and complication of using message queues. However, it also requires
-use crate::error::{FsrcErrorRaw, FsrcGroupIds};
 use downcast_rs::{impl_downcast, Downcast};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use spacepackets::tc::PusTc;
-use spacepackets::SpHeader;
+use spacepackets::{ByteConversionError, SizeMissmatch, SpHeader};
 
 #[cfg(feature = "alloc")]
 pub mod ccsds_distrib;
@@ -19,24 +20,27 @@ pub mod tm_helper;
 pub use ccsds_distrib::{CcsdsDistributor, CcsdsError, CcsdsPacketHandler};
 pub use pus_distrib::{PusDistributor, PusServiceProvider};
 
-const _RAW_PACKET_ERROR: &str = "raw-tmtc";
-const _CCSDS_ERROR: &str = "ccsds-tmtc";
-const _PUS_ERROR: &str = "pus-tmtc";
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct AddressableId {
+    pub target_id: u32,
+    pub unique_id: u32,
+}
 
-// TODO: A macro for general and unknown errors would be nice
-const _FROM_BYTES_SLICE_TOO_SMALL_ERROR: FsrcErrorRaw = FsrcErrorRaw::new(
-    FsrcGroupIds::Tmtc as u8,
-    0,
-    _RAW_PACKET_ERROR,
-    "FROM_BYTES_SLICE_TOO_SMALL_ERROR",
-);
-
-const _FROM_BYTES_ZEROCOPY_ERROR: FsrcErrorRaw = FsrcErrorRaw::new(
-    FsrcGroupIds::Tmtc as u8,
-    1,
-    _RAW_PACKET_ERROR,
-    "FROM_BYTES_ZEROCOPY_ERROR",
-);
+impl AddressableId {
+    pub fn from_raw_be(buf: &[u8]) -> Result<Self, ByteConversionError> {
+        if buf.len() < 8 {
+            return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
+                found: buf.len(),
+                expected: 8,
+            }));
+        }
+        Ok(Self {
+            target_id: u32::from_be_bytes(buf[0..4].try_into().unwrap()),
+            unique_id: u32::from_be_bytes(buf[4..8].try_into().unwrap()),
+        })
+    }
+}
 
 /// Generic trait for object which can receive any telecommands in form of a raw bytestream, with
 /// no assumptions about the received protocol.

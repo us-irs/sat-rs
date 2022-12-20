@@ -9,7 +9,6 @@ use std::thread;
 use std::time::Duration;
 
 use crate::ccsds::CcsdsReceiver;
-use crate::hk::HkRequest;
 use crate::pus::PusReceiver;
 use crate::requests::Request;
 use crate::UdpTmtcServer;

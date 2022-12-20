@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 pub type CollectionIntervalFactor = u32;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -8,6 +9,7 @@ pub enum AcsHkIds {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum HkRequest {
     OneShot(u32),
-    Enable(u32, CollectionIntervalFactor),
-    Disable(u32, CollectionIntervalFactor),
+    Enable(u32),
+    Disable(u32),
+    ModifyCollectionInterval(CollectionIntervalFactor),
 }
