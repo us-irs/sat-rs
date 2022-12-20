@@ -12,7 +12,7 @@ use satrs_core::pus::verification::{
 use satrs_core::res_code::ResultU16;
 use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use satrs_core::tmtc::{AddressableId, PusServiceProvider};
-use satrs_example::{INVALID_PUS_SERVICE, INVALID_PUS_SUBSERVICE, NOT_ENOUGH_APP_DATA};
+use satrs_example::{hk_err, tmtc_err};
 use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
 use spacepackets::time::cds::TimeProvider;
@@ -80,7 +80,7 @@ impl PusServiceProvider for PusReceiver {
             self.verif_reporter
                 .start_failure(
                     accepted_token,
-                    FailParams::new(&self.time_stamp, &INVALID_PUS_SERVICE, None),
+                    FailParams::new(&self.time_stamp, &tmtc_err::INVALID_PUS_SERVICE, None),
                 )
                 .expect("Start failure verification failed")
         }
@@ -110,7 +110,7 @@ impl PusReceiver {
             self.verif_reporter
                 .start_failure(
                     token,
-                    FailParams::new(&self.time_stamp, &INVALID_PUS_SUBSERVICE, None),
+                    FailParams::new(&self.time_stamp, &tmtc_err::INVALID_PUS_SUBSERVICE, None),
                 )
                 .expect("Sending start failure TM failed");
         }
@@ -131,30 +131,59 @@ impl PusReceiver {
             self.verif_reporter
                 .start_failure(
                     token,
-                    FailParams::new(&self.time_stamp, &NOT_ENOUGH_APP_DATA, None),
+                    FailParams::new(&self.time_stamp, &tmtc_err::NOT_ENOUGH_APP_DATA, None),
                 )
                 .expect("Sending start failure TM failed");
+            return;
         }
         let user_data = pus_tc.user_data().unwrap();
+        if user_data.len() < 8 {
+            let err = if user_data.len() < 4 {
+                &hk_err::TARGET_ID_MISSING
+            } else {
+                &hk_err::UNIQUE_ID_MISSING
+            };
+            self.update_time_stamp();
+            self.verif_reporter
+                .start_failure(token, FailParams::new(&self.time_stamp, err, None))
+                .expect("Sending start failure TM failed");
+            return;
+        }
+        let addressable_id = AddressableId::from_raw_be(&user_data).unwrap();
+        if !self.request_map.contains_key(&addressable_id.target_id) {
+            self.update_time_stamp();
+            self.verif_reporter
+                .start_failure(
+                    token,
+                    FailParams::new(&self.time_stamp, &hk_err::UNKNOWN_TARGET_ID, None),
+                )
+                .expect("Sending start failure TM failed");
+            return;
+        }
         if PusPacket::subservice(pus_tc) == hk::Subservice::TcEnableGeneration as u8 {
-            if user_data.len() < 8 {
-                self.update_time_stamp();
-                self.verif_reporter
-                    .start_failure(
-                        token,
-                        FailParams::new(&self.time_stamp, &NOT_ENOUGH_APP_DATA, None),
-                    )
-                    .expect("Sending start failure TM failed");
-            }
-            let addressable_id = AddressableId::from_raw_be(&user_data).unwrap();
-            if self.request_map.contains_key(&addressable_id.target_id) {
-                let sender = self.request_map.get(&addressable_id.target_id).unwrap();
-                sender
-                    .send(Request::HkRequest(HkRequest::Enable(
-                        addressable_id.unique_id,
-                    )))
-                    .expect("Sending HK request failed")
-            }
+            let sender = self.request_map.get(&addressable_id.target_id).unwrap();
+            sender
+                .send(Request::HkRequest(HkRequest::Enable(
+                    addressable_id.unique_id,
+                )))
+                .expect("Sending HK request failed")
+        } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcDisableGeneration as u8 {
+            let sender = self.request_map.get(&addressable_id.target_id).unwrap();
+            sender
+                .send(Request::HkRequest(HkRequest::Disable(
+                    addressable_id.unique_id,
+                )))
+                .expect("Sending HK request failed");
+        } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcGenerateOneShotHk as u8 {
+            let sender = self.request_map.get(&addressable_id.target_id).unwrap();
+            sender
+                .send(Request::HkRequest(HkRequest::OneShot(
+                    addressable_id.unique_id,
+                )))
+                .expect("Sending HK request failed");
+        } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcModifyCollectionInterval as u8
+        {
+            if user_data.len() < 12 {}
         }
     }
     fn handle_event_request(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
@@ -180,7 +209,7 @@ impl PusReceiver {
             send_start_failure(
                 &mut self.verif_reporter,
                 &self.time_stamp,
-                &NOT_ENOUGH_APP_DATA,
+                &tmtc_err::NOT_ENOUGH_APP_DATA,
                 None,
             );
             return;
@@ -191,7 +220,7 @@ impl PusReceiver {
             send_start_failure(
                 &mut self.verif_reporter,
                 &self.time_stamp,
-                &NOT_ENOUGH_APP_DATA,
+                &tmtc_err::NOT_ENOUGH_APP_DATA,
                 None,
             );
             return;
@@ -223,7 +252,7 @@ impl PusReceiver {
                 send_start_failure(
                     &mut self.verif_reporter,
                     &self.time_stamp,
-                    &INVALID_PUS_SUBSERVICE,
+                    &tmtc_err::INVALID_PUS_SUBSERVICE,
                     None,
                 );
             }
