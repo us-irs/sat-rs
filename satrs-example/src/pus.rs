@@ -1,5 +1,5 @@
 use crate::hk::{CollectionIntervalFactor, HkRequest};
-use crate::requests::Request;
+use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::TmStore;
 use satrs_core::events::EventU32;
 use satrs_core::pool::StoreAddr;
@@ -27,7 +27,7 @@ pub struct PusReceiver {
     pub tm_store: TmStore,
     pub verif_reporter: StdVerifReporterWithSender,
     event_request_tx: Sender<EventRequestWithToken>,
-    request_map: HashMap<u32, Sender<Request>>,
+    request_map: HashMap<u32, Sender<RequestWithToken>>,
     stamper: TimeProvider,
     time_stamp: [u8; 7],
 }
@@ -39,7 +39,7 @@ impl PusReceiver {
         tm_store: TmStore,
         verif_reporter: StdVerifReporterWithSender,
         event_request_tx: Sender<EventRequestWithToken>,
-        request_map: HashMap<u32, Sender<Request>>,
+        request_map: HashMap<u32, Sender<RequestWithToken>>,
     ) -> Self {
         Self {
             tm_helper: PusTmWithCdsShortHelper::new(apid),
@@ -163,7 +163,7 @@ impl PusReceiver {
         let send_request = |request: HkRequest| {
             let sender = self.request_map.get(&addressable_id.target_id).unwrap();
             sender
-                .send(Request::HkRequest(request))
+                .send(RequestWithToken(Request::HkRequest(request), token))
                 .unwrap_or_else(|_| panic!("Sending HK request {:?} failed", request));
         };
         if PusPacket::subservice(pus_tc) == hk::Subservice::TcEnableGeneration as u8 {

@@ -7,4 +7,4 @@ pub enum Request {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-struct RequestWithToken(Request, VerificationToken<TcStateAccepted>);
+pub struct RequestWithToken(pub Request, pub VerificationToken<TcStateAccepted>);
