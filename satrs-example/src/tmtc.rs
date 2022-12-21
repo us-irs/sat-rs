@@ -20,11 +20,6 @@ use spacepackets::tm::PusTm;
 
 pub const PUS_APID: u16 = 0x02;
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum RequestTargetId {
-    AcsSubsystem = 1,
-}
-
 pub struct CoreTmtcArgs {
     pub tm_store: TmStore,
     pub tm_sender: Sender<StoreAddr>,

@@ -3,6 +3,11 @@ use std::net::Ipv4Addr;
 use satrs_mib::res_code::{ResultU16, ResultU16Info};
 use satrs_mib::resultcode;
 
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum RequestTargetId {
+    AcsSubsystem = 1,
+}
+
 #[derive(Debug)]
 pub enum GroupId {
     Tmtc = 0,

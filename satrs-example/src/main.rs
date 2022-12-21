@@ -5,7 +5,7 @@ mod requests;
 mod tmtc;
 
 use crate::requests::Request;
-use crate::tmtc::{core_tmtc_task, CoreTmtcArgs, RequestTargetId, TmStore, PUS_APID};
+use crate::tmtc::{core_tmtc_task, CoreTmtcArgs, TmStore, PUS_APID};
 use satrs_core::event_man::{
     EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
 };
@@ -22,7 +22,7 @@ use satrs_core::pus::verification::{
 use satrs_core::pus::{EcssTmError, EcssTmSender};
 use satrs_core::seq_count::SimpleSeqCountProvider;
 use satrs_core::tmtc::CcsdsError;
-use satrs_example::{OBSW_SERVER_ADDR, SERVER_PORT};
+use satrs_example::{OBSW_SERVER_ADDR, RequestTargetId, SERVER_PORT};
 use spacepackets::time::cds::TimeProvider;
 use spacepackets::time::TimeWriter;
 use spacepackets::tm::PusTm;
