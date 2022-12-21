@@ -28,7 +28,7 @@ use spacepackets::time::TimeWriter;
 use spacepackets::tm::PusTm;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{channel, TryRecvError};
 use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -181,8 +181,15 @@ fn main() {
     println!("Starting AOCS thread");
     let jh3 = thread::spawn(move || loop {
         match acs_thread_rx.try_recv() {
-            Ok(_) => {}
-            Err(_) => {}
+            Ok(request) => {
+                println!("ACS thread: Received request {:?}", request)
+            }
+            Err(e) => match e {
+                TryRecvError::Empty => {}
+                TryRecvError::Disconnected => {
+                    println!("ACS thread: Message Queue TX disconnected!")
+                }
+            },
         }
         thread::sleep(Duration::from_millis(500));
     });

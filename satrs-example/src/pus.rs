@@ -164,7 +164,7 @@ impl PusReceiver {
             let sender = self.request_map.get(&addressable_id.target_id).unwrap();
             sender
                 .send(Request::HkRequest(request))
-                .expect(&format!("Sending HK request {:?} failed", request))
+                .unwrap_or_else(|_| panic!("Sending HK request {:?} failed", request));
         };
         if PusPacket::subservice(pus_tc) == hk::Subservice::TcEnableGeneration as u8 {
             send_request(HkRequest::Enable(addressable_id.unique_id));
