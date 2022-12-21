@@ -44,8 +44,6 @@ struct UdpTmtcServer {
     tm_store: SharedPool,
 }
 
-unsafe impl Send for UdpTmtcServer {}
-
 #[derive(Clone)]
 struct EventTmSender {
     store_helper: TmStore,

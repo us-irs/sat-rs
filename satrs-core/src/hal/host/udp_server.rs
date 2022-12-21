@@ -89,6 +89,14 @@ impl<E: PartialEq> PartialEq for ReceiveResult<E> {
 
 impl<E: Eq + PartialEq> Eq for ReceiveResult<E> {}
 
+impl<E: 'static> ReceivesTc for UdpTcServer<E> {
+    type Error = E;
+
+    fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
+        self.tc_receiver.pass_tc(tc_raw)
+    }
+}
+
 impl<E: 'static> UdpTcServer<E> {
     pub fn new<A: ToSocketAddrs>(
         addr: A,
