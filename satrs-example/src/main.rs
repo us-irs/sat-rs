@@ -188,10 +188,12 @@ fn main() {
                 Ok(request) => {
                     println!("ACS thread: Received HK request {:?}", request.0);
                     update_time(&mut time_provider, &mut timestamp);
-                    let started_token = reporter_aocs.start_success(request.1, &timestamp).unwrap();
+                    let started_token = reporter_aocs
+                        .start_success(request.1, &timestamp)
+                        .expect("Sending start success failed");
                     reporter_aocs
                         .completion_success(started_token, &timestamp)
-                        .unwrap();
+                        .expect("Sending completion success failed");
                 }
                 Err(e) => match e {
                     TryRecvError::Empty => {}
