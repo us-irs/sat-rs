@@ -5,13 +5,14 @@ mod requests;
 mod tmtc;
 
 use crate::requests::RequestWithToken;
-use crate::tmtc::{core_tmtc_task, CoreTmtcArgs, TmStore, PUS_APID};
+use crate::tmtc::{
+    core_tmtc_task, OtherArgs, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, TmStore, PUS_APID,
+};
 use satrs_core::event_man::{
     EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
 };
 use satrs_core::events::EventU32;
-use satrs_core::hal::host::udp_server::UdpTcServer;
-use satrs_core::pool::{LocalPool, PoolCfg, SharedPool, StoreAddr};
+use satrs_core::pool::{LocalPool, PoolCfg, StoreAddr};
 use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, EventRequest, EventRequestWithToken,
     PusEventDispatcher,
@@ -21,7 +22,6 @@ use satrs_core::pus::verification::{
 };
 use satrs_core::pus::{EcssTmError, EcssTmSender};
 use satrs_core::seq_count::SimpleSeqCountProvider;
-use satrs_core::tmtc::CcsdsError;
 use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
 use spacepackets::time::cds::TimeProvider;
 use spacepackets::time::TimeWriter;
@@ -32,17 +32,6 @@ use std::sync::mpsc::{channel, TryRecvError};
 use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-
-struct TmFunnel {
-    tm_funnel_rx: mpsc::Receiver<StoreAddr>,
-    tm_server_tx: mpsc::Sender<StoreAddr>,
-}
-
-struct UdpTmtcServer {
-    udp_tc_server: UdpTcServer<CcsdsError<()>>,
-    tm_rx: mpsc::Receiver<StoreAddr>,
-    tm_store: SharedPool,
-}
 
 #[derive(Clone)]
 struct EventTmSender {
@@ -70,16 +59,33 @@ impl EcssTmSender for EventTmSender {
 
 fn main() {
     println!("Running OBSW example");
-    let pool_cfg = PoolCfg::new(vec![(8, 32), (4, 64), (2, 128)]);
-    let tm_pool = LocalPool::new(pool_cfg);
-    let tm_store: SharedPool = Arc::new(RwLock::new(Box::new(tm_pool)));
-    let tm_store_helper = TmStore {
-        pool: tm_store.clone(),
+    let tm_pool = LocalPool::new(PoolCfg::new(vec![
+        (30, 32),
+        (15, 64),
+        (15, 128),
+        (15, 256),
+        (15, 1024),
+        (15, 2048),
+    ]));
+    let tm_store = TmStore {
+        pool: Arc::new(RwLock::new(Box::new(tm_pool))),
     };
-    let addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
+    let tc_pool = LocalPool::new(PoolCfg::new(vec![
+        (30, 32),
+        (15, 64),
+        (15, 128),
+        (15, 256),
+        (15, 1024),
+        (15, 2048),
+    ]));
+    let tc_store = TcStore {
+        pool: Arc::new(RwLock::new(Box::new(tc_pool))),
+    };
+    let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
+    let (tc_source_tx, tc_source_rx) = channel();
     let (tm_funnel_tx, tm_funnel_rx) = channel();
     let (tm_server_tx, tm_server_rx) = channel();
-    let sender = MpscVerifSender::new(tm_store.clone(), tm_funnel_tx.clone());
+    let sender = MpscVerifSender::new(tm_store.pool.clone(), tm_funnel_tx.clone());
     let verif_cfg = VerificationReporterCfg::new(
         PUS_APID,
         #[allow(clippy::box_default)]
@@ -89,7 +95,7 @@ fn main() {
         8,
     )
     .unwrap();
-    let reporter_with_sender_0 = VerificationReporterWithSender::new(&verif_cfg, Box::new(sender));
+    let verif_reporter = VerificationReporterWithSender::new(&verif_cfg, Box::new(sender));
 
     // Create event handling components
     let (event_request_tx, event_request_rx) = channel::<EventRequestWithToken>();
@@ -102,26 +108,40 @@ fn main() {
         PusEventDispatcher::new(event_reporter, Box::new(pus_tm_backend));
     let (pus_event_man_tx, pus_event_man_rx) = channel();
     let pus_event_man_send_provider = MpscEventU32SendProvider::new(1, pus_event_man_tx);
-    let mut reporter_event_handler = reporter_with_sender_0.clone();
-    let mut reporter_aocs = reporter_with_sender_0.clone();
+    let mut reporter_event_handler = verif_reporter.clone();
+    let mut reporter_aocs = verif_reporter.clone();
     event_man.subscribe_all(pus_event_man_send_provider.id());
 
     let mut request_map = HashMap::new();
     let (acs_thread_tx, acs_thread_rx) = channel::<RequestWithToken>();
     request_map.insert(RequestTargetId::AcsSubsystem as u32, acs_thread_tx);
 
-    // Create clones here to allow move for thread 0
-    let core_args = CoreTmtcArgs {
-        tm_store: tm_store_helper.clone(),
-        tm_sender: tm_funnel_tx.clone(),
+    let tc_source = PusTcSource {
+        tc_store,
+        tc_source: tc_source_tx,
+    };
+
+    // Create clones here to allow moving the values
+    let core_args = OtherArgs {
+        sock_addr,
+        verif_reporter,
         event_sender,
         event_request_tx,
         request_map,
     };
+    let tc_args = TcArgs {
+        tc_source,
+        tc_receiver: tc_source_rx,
+    };
+    let tm_args = TmArgs {
+        tm_store: tm_store.clone(),
+        tm_sink_sender: tm_funnel_tx.clone(),
+        tm_server_rx,
+    };
 
     println!("Starting TMTC task");
     let jh0 = thread::spawn(move || {
-        core_tmtc_task(core_args, tm_server_rx, addr, reporter_with_sender_0);
+        core_tmtc_task(core_args, tc_args, tm_args);
     });
 
     println!("Starting TM funnel task");
@@ -143,7 +163,7 @@ fn main() {
     println!("Starting event handling task");
     let jh2 = thread::spawn(move || {
         let mut timestamp: [u8; 7] = [0; 7];
-        let mut sender = EventTmSender::new(tm_store_helper, tm_funnel_tx);
+        let mut sender = EventTmSender::new(tm_store, tm_funnel_tx);
         let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
         let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
             reporter_event_handler

@@ -1,6 +1,6 @@
 use crate::hk::{CollectionIntervalFactor, HkRequest};
 use crate::requests::{Request, RequestWithToken};
-use crate::tmtc::TmStore;
+use crate::tmtc::{PusTcSource, TmStore};
 use satrs_core::events::EventU32;
 use satrs_core::pool::StoreAddr;
 use satrs_core::pus::event::Subservices;
@@ -26,6 +26,8 @@ pub struct PusReceiver {
     pub tm_tx: Sender<StoreAddr>,
     pub tm_store: TmStore,
     pub verif_reporter: StdVerifReporterWithSender,
+    #[allow(dead_code)]
+    tc_source: PusTcSource,
     event_request_tx: Sender<EventRequestWithToken>,
     request_map: HashMap<u32, Sender<RequestWithToken>>,
     stamper: TimeProvider,
@@ -38,6 +40,7 @@ impl PusReceiver {
         tm_tx: Sender<StoreAddr>,
         tm_store: TmStore,
         verif_reporter: StdVerifReporterWithSender,
+        tc_source: PusTcSource,
         event_request_tx: Sender<EventRequestWithToken>,
         request_map: HashMap<u32, Sender<RequestWithToken>>,
     ) -> Self {
@@ -46,6 +49,7 @@ impl PusReceiver {
             tm_tx,
             tm_store,
             verif_reporter,
+            tc_source,
             event_request_tx,
             request_map,
             stamper: TimeProvider::new_with_u16_days(0, 0),
