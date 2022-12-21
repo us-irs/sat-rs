@@ -1,6 +1,7 @@
 use satrs_core::events::EventU32;
 use satrs_core::hal::host::udp_server::{ReceiveResult, UdpTcServer};
 use satrs_core::params::Params;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
@@ -9,6 +10,7 @@ use std::time::Duration;
 
 use crate::ccsds::CcsdsReceiver;
 use crate::pus::PusReceiver;
+use crate::requests::RequestWithToken;
 use crate::UdpTmtcServer;
 use satrs_core::pool::{SharedPool, StoreAddr};
 use satrs_core::pus::event_man::EventRequestWithToken;
@@ -23,6 +25,7 @@ pub struct CoreTmtcArgs {
     pub tm_sender: Sender<StoreAddr>,
     pub event_sender: Sender<(EventU32, Option<Params>)>,
     pub event_request_tx: Sender<EventRequestWithToken>,
+    pub request_map: HashMap<u32, Sender<RequestWithToken>>,
 }
 
 #[derive(Clone)]
@@ -53,6 +56,7 @@ pub fn core_tmtc_task(
         args.tm_store.clone(),
         verif_reporter,
         args.event_request_tx,
+        args.request_map,
     );
     let pus_distributor = PusDistributor::new(Box::new(pus_receiver));
     let ccsds_receiver = CcsdsReceiver {

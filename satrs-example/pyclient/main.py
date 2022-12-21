@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Example client for the sat-rs example application"""
+import enum
+import struct
 import sys
 import time
 from typing import Optional
@@ -8,9 +10,9 @@ import tmtccmd
 from spacepackets.ecss import PusTelemetry, PusTelecommand, PusVerificator
 from spacepackets.ecss.pus_17_test import Service17Tm
 from spacepackets.ecss.pus_1_verification import UnpackParams, Service1Tm
-from spacepackets.util import UnsignedByteField
 
 from tmtccmd import CcsdsTmtcBackend, TcHandlerBase, ProcedureParamsWrapper
+from tmtccmd.tc.pus_3_fsfw_hk import generate_one_hk_command, make_sid
 from tmtccmd.core.base import BackendRequest
 from tmtccmd.pus import VerificationWrapper
 from tmtccmd.tm import CcsdsTmHandler, SpecificApidHandlerBase
@@ -85,6 +87,13 @@ class SatRsConfigHook(TmTcCfgHookBase):
             info="PUS Service 17 Test",
             op_code_entry=srv_17,
         )
+        srv_3 = OpCodeEntry()
+        srv_3.add(HkOpCodes.GENERATE_ONE_SHOT, "Generate AOCS one shot HK")
+        defs.add_service(
+            name=CoreServiceList.SERVICE_3,
+            info="PUS Service 3 Housekeeping",
+            op_code_entry=srv_3
+        )
         return defs
 
     def perform_mode_operation(self, tmtc_backend: CcsdsTmtcBackend, mode: int):
@@ -158,6 +167,24 @@ class PusHandler(SpecificApidHandlerBase):
             self.printer.handle_long_tm_print(packet_if=tm_packet, info_if=tm_packet)
 
 
+def make_addressable_id(target_id: int, unique_id: int) -> bytes:
+    byte_string = bytearray(struct.pack("!I", target_id))
+    byte_string.extend(struct.pack("!I", unique_id))
+    return byte_string
+
+
+class RequestTargetId(enum.IntEnum):
+    ACS = 1
+
+
+class AcsHkIds(enum.IntEnum):
+    MGM_SET = 1
+
+
+class HkOpCodes:
+    GENERATE_ONE_SHOT = ["0", "oneshot"]
+
+
 class TcHandler(TcHandlerBase):
     def __init__(
         self,
@@ -197,17 +224,27 @@ class TcHandler(TcHandlerBase):
             )
 
     def feed_cb(self, helper: ProcedureWrapper, wrapper: FeedWrapper):
-        self.queue_helper.queue_wrapper = wrapper.queue_wrapper
+        q = self.queue_helper
+        q.queue_wrapper = wrapper.queue_wrapper
         if helper.proc_type == TcProcedureType.DEFAULT:
             def_proc = helper.to_def_procedure()
             service = def_proc.service
+            op_code = def_proc.op_code
             if (
                 service == CoreServiceList.SERVICE_17
                 or service == CoreServiceList.SERVICE_17_ALT
             ):
-                return self.queue_helper.add_pus_tc(
+                q.add_log_cmd("Sending PUS ping telecommand")
+                return q.add_pus_tc(
                     PusTelecommand(service=17, subservice=1)
                 )
+            if service == CoreServiceList.SERVICE_3:
+                if op_code in HkOpCodes.GENERATE_ONE_SHOT:
+                    q.add_log_cmd("Sending HK one shot request")
+                    q.add_pus_tc(
+                        generate_one_hk_command(make_addressable_id(RequestTargetId.ACS, AcsHkIds.MGM_SET))
+                    )
+                pass
 
 
 def main():
