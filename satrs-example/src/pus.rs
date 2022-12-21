@@ -48,7 +48,7 @@ impl PusReceiver {
             verif_reporter,
             event_request_tx,
             request_map,
-            stamper: TimeProvider::default(),
+            stamper: TimeProvider::new_with_u16_days(0, 0),
             time_stamp: [0; 7],
         }
     }
