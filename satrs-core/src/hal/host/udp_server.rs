@@ -140,6 +140,8 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
     use std::vec::Vec;
 
+    fn is_send<T: Send>(_: &T) {}
+
     #[derive(Default)]
     struct PingReceiver {
         pub sent_cmds: VecDeque<Vec<u8>>,
@@ -161,8 +163,10 @@ mod tests {
         let mut buf = [0; 32];
         let dest_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 7777);
         let ping_receiver = PingReceiver::default();
+        is_send(&ping_receiver);
         let mut udp_tc_server = UdpTcServer::new(dest_addr, 2048, Box::new(ping_receiver))
             .expect("Creating UDP TMTC server failed");
+        is_send(&udp_tc_server);
         let mut sph = SpHeader::tc_unseg(0x02, 0, 0).unwrap();
         let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
         let len = pus_tc

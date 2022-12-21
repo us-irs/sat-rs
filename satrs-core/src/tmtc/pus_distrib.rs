@@ -67,7 +67,7 @@ use spacepackets::ecss::{PusError, PusPacket};
 use spacepackets::tc::PusTc;
 use spacepackets::SpHeader;
 
-pub trait PusServiceProvider: Downcast {
+pub trait PusServiceProvider: Downcast + Send {
     type Error;
     fn handle_pus_tc_packet(
         &mut self,
@@ -146,6 +146,8 @@ mod tests {
     use std::collections::VecDeque;
     #[cfg(feature = "std")]
     use std::sync::{Arc, Mutex};
+
+    fn is_send<T: Send>(_: &T) {}
 
     struct PusHandlerSharedQueue {
         pub pus_queue: Arc<Mutex<VecDeque<(u8, u16, Vec<u8>)>>>,
@@ -263,7 +265,7 @@ mod tests {
         let pus_distrib = PusDistributor {
             service_provider: Box::new(pus_handler),
         };
-
+        is_send(&pus_distrib);
         let apid_handler = ApidHandlerShared {
             pus_distrib,
             handler_base,

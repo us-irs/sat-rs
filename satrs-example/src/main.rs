@@ -69,6 +69,7 @@ impl EcssTmSender for EventTmSender {
         self.sender.send(addr).map_err(EcssTmError::SendError)
     }
 }
+
 fn main() {
     println!("Running OBSW example");
     let pool_cfg = PoolCfg::new(vec![(8, 32), (4, 64), (2, 128)]);

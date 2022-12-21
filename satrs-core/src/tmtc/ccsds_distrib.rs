@@ -99,7 +99,7 @@ use spacepackets::{ByteConversionError, CcsdsPacket, SizeMissmatch, SpHeader};
 /// This trait automatically implements the [downcast_rs::Downcast] to allow a more convenient API
 /// to cast trait objects back to their concrete type after the handler was passed to the
 /// distributor.
-pub trait CcsdsPacketHandler: Downcast {
+pub trait CcsdsPacketHandler: Downcast + Send {
     type Error;
 
     fn valid_apids(&self) -> &'static [u16];
@@ -199,6 +199,8 @@ pub(crate) mod tests {
     use std::sync::{Arc, Mutex};
     use std::vec::Vec;
 
+    fn is_send<T: Send>(_: &T) {}
+
     pub fn generate_ping_tc(buf: &mut [u8]) -> &[u8] {
         let mut sph = SpHeader::tc_unseg(0x002, 0x34, 0).unwrap();
         let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
@@ -292,6 +294,7 @@ pub(crate) mod tests {
             unknown_packet_queue: unknown_packet_queue.clone(),
         };
         let mut ccsds_distrib = CcsdsDistributor::new(Box::new(apid_handler));
+        is_send(&ccsds_distrib);
         let mut test_buf: [u8; 32] = [0; 32];
         let tc_slice = generate_ping_tc(test_buf.as_mut_slice());
 
