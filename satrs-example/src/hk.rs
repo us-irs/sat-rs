@@ -1,4 +1,5 @@
-#![allow(dead_code)]
+use satrs_core::tmtc::AddressableId;
+
 pub type CollectionIntervalFactor = u32;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -8,8 +9,8 @@ pub enum AcsHkIds {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum HkRequest {
-    OneShot(u32),
-    Enable(u32),
-    Disable(u32),
-    ModifyCollectionInterval(CollectionIntervalFactor),
+    OneShot(AddressableId),
+    Enable(AddressableId),
+    Disable(AddressableId),
+    ModifyCollectionInterval(AddressableId, CollectionIntervalFactor),
 }

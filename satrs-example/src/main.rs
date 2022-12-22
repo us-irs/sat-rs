@@ -4,7 +4,8 @@ mod pus;
 mod requests;
 mod tmtc;
 
-use crate::requests::RequestWithToken;
+use crate::hk::{AcsHkIds, HkRequest};
+use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{
     core_tmtc_task, OtherArgs, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, TmStore, PUS_APID,
 };
@@ -214,16 +215,32 @@ fn main() {
                 Ok(request) => {
                     println!("ACS thread: Received HK request {:?}", request.0);
                     update_time(&mut time_provider, &mut timestamp);
-                    let mut sp_header =
-                        SpHeader::tm(PUS_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
-                    let sec_header = PusTmSecondaryHeader::new_simple(
-                        3,
-                        Subservice::TmHkPacket as u8,
-                        &timestamp,
-                    );
-                    let pus_tm = PusTm::new(&mut sp_header, sec_header, None, true);
-                    let addr = aocs_tm_store.add_pus_tm(&pus_tm);
-                    aocs_to_funnel.send(addr).expect("Sending HK TM failed");
+                    match request.0 {
+                        Request::HkRequest(hk_req) => match hk_req {
+                            HkRequest::OneShot(one_shot_req) => {
+                                assert_eq!(
+                                    one_shot_req.unique_id,
+                                    RequestTargetId::AcsSubsystem as u32
+                                );
+                                if one_shot_req.unique_id == AcsHkIds::TestMgmSet as u32 {
+                                    let mut sp_header =
+                                        SpHeader::tm(PUS_APID, SequenceFlags::Unsegmented, 0, 0)
+                                            .unwrap();
+                                    let sec_header = PusTmSecondaryHeader::new_simple(
+                                        3,
+                                        Subservice::TmHkPacket as u8,
+                                        &timestamp,
+                                    );
+                                    let pus_tm = PusTm::new(&mut sp_header, sec_header, None, true);
+                                    let addr = aocs_tm_store.add_pus_tm(&pus_tm);
+                                    aocs_to_funnel.send(addr).expect("Sending HK TM failed");
+                                }
+                            }
+                            HkRequest::Enable(_) => {}
+                            HkRequest::Disable(_) => {}
+                            HkRequest::ModifyCollectionInterval(_, _) => {}
+                        },
+                    }
                     let started_token = reporter_aocs
                         .start_success(request.1, &timestamp)
                         .expect("Sending start success failed");

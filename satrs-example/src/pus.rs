@@ -171,11 +171,11 @@ impl PusReceiver {
                 .unwrap_or_else(|_| panic!("Sending HK request {:?} failed", request));
         };
         if PusPacket::subservice(pus_tc) == hk::Subservice::TcEnableGeneration as u8 {
-            send_request(HkRequest::Enable(addressable_id.unique_id));
+            send_request(HkRequest::Enable(addressable_id));
         } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcDisableGeneration as u8 {
-            send_request(HkRequest::Disable(addressable_id.unique_id));
+            send_request(HkRequest::Disable(addressable_id));
         } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcGenerateOneShotHk as u8 {
-            send_request(HkRequest::OneShot(addressable_id.unique_id));
+            send_request(HkRequest::OneShot(addressable_id));
         } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcModifyCollectionInterval as u8
         {
             if user_data.len() < 12 {
@@ -193,6 +193,7 @@ impl PusReceiver {
                 return;
             }
             send_request(HkRequest::ModifyCollectionInterval(
+                addressable_id,
                 CollectionIntervalFactor::from_be_bytes(user_data[8..12].try_into().unwrap()),
             ));
         }
