@@ -217,12 +217,9 @@ fn main() {
                     update_time(&mut time_provider, &mut timestamp);
                     match request.0 {
                         Request::HkRequest(hk_req) => match hk_req {
-                            HkRequest::OneShot(one_shot_req) => {
-                                assert_eq!(
-                                    one_shot_req.unique_id,
-                                    RequestTargetId::AcsSubsystem as u32
-                                );
-                                if one_shot_req.unique_id == AcsHkIds::TestMgmSet as u32 {
+                            HkRequest::OneShot(address) => {
+                                assert_eq!(address.target_id, RequestTargetId::AcsSubsystem as u32);
+                                if address.unique_id == AcsHkIds::TestMgmSet as u32 {
                                     let mut sp_header =
                                         SpHeader::tm(PUS_APID, SequenceFlags::Unsegmented, 0, 0)
                                             .unwrap();
@@ -231,7 +228,10 @@ fn main() {
                                         Subservice::TmHkPacket as u8,
                                         &timestamp,
                                     );
-                                    let pus_tm = PusTm::new(&mut sp_header, sec_header, None, true);
+                                    let mut buf: [u8; 8] = [0; 8];
+                                    address.write_to_be_bytes(&mut buf).unwrap();
+                                    let pus_tm =
+                                        PusTm::new(&mut sp_header, sec_header, Some(&buf), true);
                                     let addr = aocs_tm_store.add_pus_tm(&pus_tm);
                                     aocs_to_funnel.send(addr).expect("Sending HK TM failed");
                                 }
