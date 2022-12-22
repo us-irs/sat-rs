@@ -142,6 +142,15 @@ class PusHandler(SpecificApidHandlerBase):
                 self.verif_wrapper.log_to_console(tm_packet, res)
                 self.verif_wrapper.log_to_file(tm_packet, res)
             dedicated_handler = True
+        if service == 3:
+            LOGGER.info("No handling for HK packets implemented")
+            LOGGER.info(f"Raw packet: 0x[{packet.hex(sep=',')}]")
+            pus_tm = PusTelemetry.unpack(packet)
+            if pus_tm.subservice == 25:
+                if len(pus_tm.source_data) < 8:
+                    raise ValueError("No addressable ID in HK packet")
+                json_str = pus_tm.source_data[8:]
+            dedicated_handler = True
         if service == 5:
             tm_packet = Service5Tm.unpack(packet)
         if service == 17:

@@ -17,6 +17,7 @@ use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, EventRequest, EventRequestWithToken,
     PusEventDispatcher,
 };
+use satrs_core::pus::hk::Subservice;
 use satrs_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
 };
@@ -25,7 +26,8 @@ use satrs_core::seq_count::SimpleSeqCountProvider;
 use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
 use spacepackets::time::cds::TimeProvider;
 use spacepackets::time::TimeWriter;
-use spacepackets::tm::PusTm;
+use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
+use spacepackets::{SequenceFlags, SpHeader};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};
@@ -81,11 +83,12 @@ fn main() {
     let tc_store = TcStore {
         pool: Arc::new(RwLock::new(Box::new(tc_pool))),
     };
+
     let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
     let (tc_source_tx, tc_source_rx) = channel();
     let (tm_funnel_tx, tm_funnel_rx) = channel();
     let (tm_server_tx, tm_server_rx) = channel();
-    let sender = MpscVerifSender::new(tm_store.pool.clone(), tm_funnel_tx.clone());
+    let verif_sender = MpscVerifSender::new(tm_store.pool.clone(), tm_funnel_tx.clone());
     let verif_cfg = VerificationReporterCfg::new(
         PUS_APID,
         #[allow(clippy::box_default)]
@@ -95,7 +98,7 @@ fn main() {
         8,
     )
     .unwrap();
-    let verif_reporter = VerificationReporterWithSender::new(&verif_cfg, Box::new(sender));
+    let verif_reporter = VerificationReporterWithSender::new(&verif_cfg, Box::new(verif_sender));
 
     // Create event handling components
     let (event_request_tx, event_request_rx) = channel::<EventRequestWithToken>();
@@ -138,6 +141,9 @@ fn main() {
         tm_sink_sender: tm_funnel_tx.clone(),
         tm_server_rx,
     };
+
+    let aocs_to_funnel = tm_funnel_tx.clone();
+    let mut aocs_tm_store = tm_store.clone();
 
     println!("Starting TMTC task");
     let jh0 = thread::spawn(move || {
@@ -195,6 +201,7 @@ fn main() {
                     .generate_pus_event_tm_generic(&mut sender, &timestamp, event, None)
                     .expect("Sending TM as event failed");
             }
+            thread::sleep(Duration::from_millis(400));
         }
     });
 
@@ -207,6 +214,16 @@ fn main() {
                 Ok(request) => {
                     println!("ACS thread: Received HK request {:?}", request.0);
                     update_time(&mut time_provider, &mut timestamp);
+                    let mut sp_header =
+                        SpHeader::tc(PUS_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
+                    let sec_header = PusTmSecondaryHeader::new_simple(
+                        3,
+                        Subservice::TmHkPacket as u8,
+                        &timestamp,
+                    );
+                    let pus_tm = PusTm::new(&mut sp_header, sec_header, None, true);
+                    let addr = aocs_tm_store.add_pus_tm(&pus_tm);
+                    aocs_to_funnel.send(addr).expect("Sending HK TM failed");
                     let started_token = reporter_aocs
                         .start_success(request.1, &timestamp)
                         .expect("Sending start success failed");
