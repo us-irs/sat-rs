@@ -215,7 +215,7 @@ fn main() {
                     println!("ACS thread: Received HK request {:?}", request.0);
                     update_time(&mut time_provider, &mut timestamp);
                     let mut sp_header =
-                        SpHeader::tc(PUS_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
+                        SpHeader::tm(PUS_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
                     let sec_header = PusTmSecondaryHeader::new_simple(
                         3,
                         Subservice::TmHkPacket as u8,
