@@ -77,6 +77,7 @@ use core::fmt::{Display, Formatter};
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::mem::size_of;
+#[cfg(feature = "alloc")]
 use delegate::delegate;
 use spacepackets::ecss::EcssEnumeration;
 use spacepackets::tc::PusTc;
@@ -87,7 +88,7 @@ use spacepackets::{SpHeader, MAX_APID};
 pub use crate::seq_count::SimpleSeqCountProvider;
 
 #[cfg(feature = "alloc")]
-pub use allocmod::{
+pub use alloc_mod::{
     VerificationReporterCfg, VerificationReporterWithBuf, VerificationReporterWithSender,
 };
 
@@ -656,7 +657,7 @@ impl VerificationReporterBasic {
 }
 
 #[cfg(feature = "alloc")]
-mod allocmod {
+mod alloc_mod {
     use super::*;
     use alloc::boxed::Box;
     use alloc::vec;
@@ -995,7 +996,7 @@ mod allocmod {
 
 #[cfg(feature = "std")]
 mod stdmod {
-    use super::allocmod::VerificationReporterWithSender;
+    use super::alloc_mod::VerificationReporterWithSender;
     use super::*;
     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr, StoreError};
     use delegate::delegate;

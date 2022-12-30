@@ -1,8 +1,10 @@
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::{EcssEnumU16, EcssEnumeration};
 use spacepackets::{ByteConversionError, SizeMissmatch};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ResultU16 {
     group_id: u8,
     unique_id: u8,

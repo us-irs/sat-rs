@@ -51,10 +51,10 @@
 //!  assert_eq!(example_obj.id, obj_id);
 //!  assert_eq!(example_obj.dummy, 42);
 //! ```
+#[cfg(feature = "alloc")]
 use alloc::boxed::Box;
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 use downcast_rs::Downcast;
+#[cfg(feature = "alloc")]
 use hashbrown::HashMap;
 #[cfg(feature = "std")]
 use std::error::Error;

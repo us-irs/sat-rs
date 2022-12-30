@@ -1,4 +1,7 @@
-use crate::events::{EventU32, EventU32TypedSev, GenericEvent, HasSeverity, Severity};
+use crate::events::{EventU32, GenericEvent, Severity};
+#[cfg(feature = "alloc")]
+use crate::events::{EventU32TypedSev, HasSeverity};
+#[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 use core::hash::Hash;
 use hashbrown::HashSet;
@@ -6,7 +9,12 @@ use hashbrown::HashSet;
 #[cfg(feature = "alloc")]
 pub use crate::pus::event::EventReporter;
 use crate::pus::verification::{TcStateStarted, VerificationToken};
-use crate::pus::{EcssTmError, EcssTmSender};
+use crate::pus::EcssTmError;
+#[cfg(feature = "alloc")]
+use crate::pus::EcssTmSender;
+#[cfg(feature = "alloc")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+pub use alloc_mod::*;
 #[cfg(feature = "heapless")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "heapless")))]
 pub use heapless_mod::*;
@@ -133,93 +141,97 @@ impl<SenderE> From<EcssTmError<SenderE>> for EventManError<SenderE> {
     }
 }
 
-pub struct PusEventDispatcher<BackendError, Provider: GenericEvent> {
-    reporter: EventReporter,
-    backend: Box<dyn PusEventMgmtBackendProvider<Provider, Error = BackendError>>,
-}
+#[cfg(feature = "alloc")]
+pub mod alloc_mod {
+    use super::*;
 
-/// Safety: All contained fields are send as well.
-unsafe impl<E: Send, Event: GenericEvent + Send> Send for PusEventDispatcher<E, Event> {}
-
-impl<BackendError, Provider: GenericEvent> PusEventDispatcher<BackendError, Provider> {
-    pub fn new(
+    pub struct PusEventDispatcher<BackendError, Provider: GenericEvent> {
         reporter: EventReporter,
         backend: Box<dyn PusEventMgmtBackendProvider<Provider, Error = BackendError>>,
-    ) -> Self {
-        Self { reporter, backend }
-    }
-}
-
-impl<BackendError, Event: GenericEvent> PusEventDispatcher<BackendError, Event> {
-    pub fn enable_tm_for_event(&mut self, event: &Event) -> Result<bool, BackendError> {
-        self.backend.enable_event_reporting(event)
     }
 
-    pub fn disable_tm_for_event(&mut self, event: &Event) -> Result<bool, BackendError> {
-        self.backend.disable_event_reporting(event)
-    }
+    /// Safety: All contained fields are send as well.
+    unsafe impl<E: Send, Event: GenericEvent + Send> Send for PusEventDispatcher<E, Event> {}
 
-    pub fn generate_pus_event_tm_generic<E>(
-        &mut self,
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
-        time_stamp: &[u8],
-        event: Event,
-        aux_data: Option<&[u8]>,
-    ) -> Result<bool, EventManError<E>> {
-        if !self.backend.event_enabled(&event) {
-            return Ok(false);
-        }
-        match event.severity() {
-            Severity::INFO => self
-                .reporter
-                .event_info(sender, time_stamp, event, aux_data)
-                .map(|_| true)
-                .map_err(|e| e.into()),
-            Severity::LOW => self
-                .reporter
-                .event_low_severity(sender, time_stamp, event, aux_data)
-                .map(|_| true)
-                .map_err(|e| e.into()),
-            Severity::MEDIUM => self
-                .reporter
-                .event_medium_severity(sender, time_stamp, event, aux_data)
-                .map(|_| true)
-                .map_err(|e| e.into()),
-            Severity::HIGH => self
-                .reporter
-                .event_high_severity(sender, time_stamp, event, aux_data)
-                .map(|_| true)
-                .map_err(|e| e.into()),
+    impl<BackendError, Provider: GenericEvent> PusEventDispatcher<BackendError, Provider> {
+        pub fn new(
+            reporter: EventReporter,
+            backend: Box<dyn PusEventMgmtBackendProvider<Provider, Error = BackendError>>,
+        ) -> Self {
+            Self { reporter, backend }
         }
     }
+
+    impl<BackendError, Event: GenericEvent> PusEventDispatcher<BackendError, Event> {
+        pub fn enable_tm_for_event(&mut self, event: &Event) -> Result<bool, BackendError> {
+            self.backend.enable_event_reporting(event)
+        }
+
+        pub fn disable_tm_for_event(&mut self, event: &Event) -> Result<bool, BackendError> {
+            self.backend.disable_event_reporting(event)
+        }
+
+        pub fn generate_pus_event_tm_generic<E>(
+            &mut self,
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            time_stamp: &[u8],
+            event: Event,
+            aux_data: Option<&[u8]>,
+        ) -> Result<bool, EventManError<E>> {
+            if !self.backend.event_enabled(&event) {
+                return Ok(false);
+            }
+            match event.severity() {
+                Severity::INFO => self
+                    .reporter
+                    .event_info(sender, time_stamp, event, aux_data)
+                    .map(|_| true)
+                    .map_err(|e| e.into()),
+                Severity::LOW => self
+                    .reporter
+                    .event_low_severity(sender, time_stamp, event, aux_data)
+                    .map(|_| true)
+                    .map_err(|e| e.into()),
+                Severity::MEDIUM => self
+                    .reporter
+                    .event_medium_severity(sender, time_stamp, event, aux_data)
+                    .map(|_| true)
+                    .map_err(|e| e.into()),
+                Severity::HIGH => self
+                    .reporter
+                    .event_high_severity(sender, time_stamp, event, aux_data)
+                    .map(|_| true)
+                    .map_err(|e| e.into()),
+            }
+        }
+    }
+
+    impl<BackendError> PusEventDispatcher<BackendError, EventU32> {
+        pub fn enable_tm_for_event_with_sev<Severity: HasSeverity>(
+            &mut self,
+            event: &EventU32TypedSev<Severity>,
+        ) -> Result<bool, BackendError> {
+            self.backend.enable_event_reporting(event.as_ref())
+        }
+
+        pub fn disable_tm_for_event_with_sev<Severity: HasSeverity>(
+            &mut self,
+            event: &EventU32TypedSev<Severity>,
+        ) -> Result<bool, BackendError> {
+            self.backend.disable_event_reporting(event.as_ref())
+        }
+
+        pub fn generate_pus_event_tm<E, Severity: HasSeverity>(
+            &mut self,
+            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            time_stamp: &[u8],
+            event: EventU32TypedSev<Severity>,
+            aux_data: Option<&[u8]>,
+        ) -> Result<bool, EventManError<E>> {
+            self.generate_pus_event_tm_generic(sender, time_stamp, event.into(), aux_data)
+        }
+    }
 }
-
-impl<BackendError> PusEventDispatcher<BackendError, EventU32> {
-    pub fn enable_tm_for_event_with_sev<Severity: HasSeverity>(
-        &mut self,
-        event: &EventU32TypedSev<Severity>,
-    ) -> Result<bool, BackendError> {
-        self.backend.enable_event_reporting(event.as_ref())
-    }
-
-    pub fn disable_tm_for_event_with_sev<Severity: HasSeverity>(
-        &mut self,
-        event: &EventU32TypedSev<Severity>,
-    ) -> Result<bool, BackendError> {
-        self.backend.disable_event_reporting(event.as_ref())
-    }
-
-    pub fn generate_pus_event_tm<E, Severity: HasSeverity>(
-        &mut self,
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
-        time_stamp: &[u8],
-        event: EventU32TypedSev<Severity>,
-        aux_data: Option<&[u8]>,
-    ) -> Result<bool, EventManError<E>> {
-        self.generate_pus_event_tm_generic(sender, time_stamp, event.into(), aux_data)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

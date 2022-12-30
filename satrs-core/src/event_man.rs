@@ -56,8 +56,11 @@ doc = ::embed_doc_image::embed_image!("event_man_arch", "images/event_man_arch.p
 //! different threads.
 use crate::events::{EventU16, EventU32, GenericEvent, LargestEventRaw, LargestGroupIdRaw};
 use crate::params::{Params, ParamsHeapless};
+#[cfg(feature = "alloc")]
 use alloc::boxed::Box;
+#[cfg(feature = "alloc")]
 use alloc::vec;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 use core::slice::Iter;
 use hashbrown::HashMap;

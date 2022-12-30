@@ -78,10 +78,10 @@ fn test_threaded_usage() {
                                         .expect("Writing ECSS enum failed");
                                     gen_event(Some(&params_array[0..e.raw_len()]))
                                 }
-                                ParamsHeapless::Store(_) => gen_event(None),
                             },
                             Params::Vec(vec) => gen_event(Some(vec.as_slice())),
                             Params::String(str) => gen_event(Some(str.as_bytes())),
+                            Params::Store(_) => gen_event(None),
                         }
                     } else {
                         gen_event(None)

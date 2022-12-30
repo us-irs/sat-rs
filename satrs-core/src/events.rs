@@ -29,10 +29,10 @@
 //! ```
 use core::fmt::Debug;
 use core::hash::Hash;
+use core::marker::PhantomData;
 use delegate::delegate;
 use spacepackets::ecss::{EcssEnumeration, ToBeBytes};
 use spacepackets::{ByteConversionError, SizeMissmatch};
-use std::marker::PhantomData;
 
 /// Using a type definition allows to change this to u64 in the future more easily
 pub type LargestEventRaw = u32;

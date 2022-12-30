@@ -17,7 +17,9 @@ pub mod ccsds_distrib;
 pub mod pus_distrib;
 pub mod tm_helper;
 
+#[cfg(feature = "alloc")]
 pub use ccsds_distrib::{CcsdsDistributor, CcsdsError, CcsdsPacketHandler};
+#[cfg(feature = "alloc")]
 pub use pus_distrib::{PusDistributor, PusServiceProvider};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
