@@ -1,6 +1,6 @@
 use crate::hk::{CollectionIntervalFactor, HkRequest};
 use crate::requests::{Request, RequestWithToken};
-use crate::tmtc::TmStore;
+use crate::tmtc::{PusTcSource, TmStore};
 use satrs_core::events::EventU32;
 use satrs_core::pool::StoreAddr;
 use satrs_core::pus::event::Subservices;
@@ -26,6 +26,8 @@ pub struct PusReceiver {
     pub tm_tx: Sender<StoreAddr>,
     pub tm_store: TmStore,
     pub verif_reporter: StdVerifReporterWithSender,
+    #[allow(dead_code)]
+    tc_source: PusTcSource,
     event_request_tx: Sender<EventRequestWithToken>,
     request_map: HashMap<u32, Sender<RequestWithToken>>,
     stamper: TimeProvider,
@@ -38,6 +40,7 @@ impl PusReceiver {
         tm_tx: Sender<StoreAddr>,
         tm_store: TmStore,
         verif_reporter: StdVerifReporterWithSender,
+        tc_source: PusTcSource,
         event_request_tx: Sender<EventRequestWithToken>,
         request_map: HashMap<u32, Sender<RequestWithToken>>,
     ) -> Self {
@@ -46,6 +49,7 @@ impl PusReceiver {
             tm_tx,
             tm_store,
             verif_reporter,
+            tc_source,
             event_request_tx,
             request_map,
             stamper: TimeProvider::new_with_u16_days(0, 0),
@@ -167,11 +171,11 @@ impl PusReceiver {
                 .unwrap_or_else(|_| panic!("Sending HK request {:?} failed", request));
         };
         if PusPacket::subservice(pus_tc) == hk::Subservice::TcEnableGeneration as u8 {
-            send_request(HkRequest::Enable(addressable_id.unique_id));
+            send_request(HkRequest::Enable(addressable_id));
         } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcDisableGeneration as u8 {
-            send_request(HkRequest::Disable(addressable_id.unique_id));
+            send_request(HkRequest::Disable(addressable_id));
         } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcGenerateOneShotHk as u8 {
-            send_request(HkRequest::OneShot(addressable_id.unique_id));
+            send_request(HkRequest::OneShot(addressable_id));
         } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcModifyCollectionInterval as u8
         {
             if user_data.len() < 12 {
@@ -189,6 +193,7 @@ impl PusReceiver {
                 return;
             }
             send_request(HkRequest::ModifyCollectionInterval(
+                addressable_id,
                 CollectionIntervalFactor::from_be_bytes(user_data[8..12].try_into().unwrap()),
             ));
         }

@@ -1,13 +1,13 @@
-use crate::tmtc::PUS_APID;
-use satrs_core::tmtc::{CcsdsPacketHandler, PusDistributor, ReceivesCcsdsTc};
+use crate::tmtc::{MpscStoreAndSendError, PusTcSource, PUS_APID};
+use satrs_core::tmtc::{CcsdsPacketHandler, ReceivesCcsdsTc};
 use spacepackets::{CcsdsPacket, SpHeader};
 
 pub struct CcsdsReceiver {
-    pub pus_handler: PusDistributor<()>,
+    pub tc_source: PusTcSource,
 }
 
 impl CcsdsPacketHandler for CcsdsReceiver {
-    type Error = ();
+    type Error = MpscStoreAndSendError;
 
     fn valid_apids(&self) -> &'static [u16] {
         &[PUS_APID]
@@ -19,9 +19,7 @@ impl CcsdsPacketHandler for CcsdsReceiver {
         tc_raw: &[u8],
     ) -> Result<(), Self::Error> {
         if sp_header.apid() == PUS_APID {
-            self.pus_handler
-                .pass_ccsds(sp_header, tc_raw)
-                .expect("Handling PUS packet failed");
+            return self.tc_source.pass_ccsds(sp_header, tc_raw);
         }
         Ok(())
     }

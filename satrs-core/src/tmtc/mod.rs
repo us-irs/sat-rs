@@ -42,6 +42,18 @@ impl AddressableId {
             unique_id: u32::from_be_bytes(buf[4..8].try_into().unwrap()),
         })
     }
+
+    pub fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
+        if buf.len() < 8 {
+            return Err(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
+                found: buf.len(),
+                expected: 8,
+            }));
+        }
+        buf[0..4].copy_from_slice(&self.target_id.to_be_bytes());
+        buf[4..8].copy_from_slice(&self.unique_id.to_be_bytes());
+        Ok(8)
+    }
 }
 
 /// Generic trait for object which can receive any telecommands in form of a raw bytestream, with
@@ -50,7 +62,7 @@ impl AddressableId {
 /// This trait is implemented by both the [crate::tmtc::pus_distrib::PusDistributor] and the
 /// [crate::tmtc::ccsds_distrib::CcsdsDistributor]  which allows to pass the respective packets in
 /// raw byte format into them.
-pub trait ReceivesTc: Downcast {
+pub trait ReceivesTc: Downcast + Send {
     type Error;
     fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error>;
 }

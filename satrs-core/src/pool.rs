@@ -77,9 +77,12 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::fmt::{Display, Formatter};
 use delegate::delegate;
 #[cfg(feature = "std")]
 use std::boxed::Box;
+#[cfg(feature = "std")]
+use std::error::Error;
 #[cfg(feature = "std")]
 use std::sync::{Arc, RwLock};
 
@@ -146,6 +149,22 @@ pub enum StoreIdError {
     InvalidPacketIdx(u16),
 }
 
+impl Display for StoreIdError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        match self {
+            StoreIdError::InvalidSubpool(pool) => {
+                write!(f, "invalid subpool, index: {}", pool)
+            }
+            StoreIdError::InvalidPacketIdx(packet_idx) => {
+                write!(f, "invalid packet index: {}", packet_idx)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl Error for StoreIdError {}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreError {
     /// Requested data block is too large
@@ -158,6 +177,38 @@ pub enum StoreError {
     DataDoesNotExist(StoreAddr),
     /// Internal or configuration errors
     InternalError(String),
+}
+
+impl Display for StoreError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        match self {
+            StoreError::DataTooLarge(size) => {
+                write!(f, "data to store with size {} is too large", size)
+            }
+            StoreError::StoreFull(u16) => {
+                write!(f, "store is too full. index for full subpool: {}", u16)
+            }
+            StoreError::InvalidStoreId(id_e, addr) => {
+                write!(f, "invalid store ID: {}, address: {:?}", id_e, addr)
+            }
+            StoreError::DataDoesNotExist(addr) => {
+                write!(f, "no data exists at address {:?}", addr)
+            }
+            StoreError::InternalError(e) => {
+                write!(f, "internal error: {}", e)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl Error for StoreError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        if let StoreError::InvalidStoreId(e, _) = self {
+            return Some(e);
+        }
+        None
+    }
 }
 
 pub trait PoolProvider {
