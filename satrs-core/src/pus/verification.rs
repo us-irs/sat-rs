@@ -13,10 +13,10 @@
 //! executed. Note that the verification part could also be done in a separate thread.
 //!
 //! ```
-//! use std::sync::{Arc, RwLock};
+//! use std::sync::{Arc, mpsc, RwLock};
 //! use std::time::Duration;
 //! use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
-//! use satrs_core::pus::verification::{CrossbeamVerifSender, VerificationReporterCfg, VerificationReporterWithSender};
+//! use satrs_core::pus::verification::{MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender};
 //! use satrs_core::seq_count::SimpleSeqCountProvider;
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
@@ -28,8 +28,8 @@
 //!
 //! let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
 //! let shared_tm_pool: SharedPool = Arc::new(RwLock::new(Box::new(LocalPool::new(pool_cfg.clone()))));
-//! let (verif_tx, verif_rx) = crossbeam_channel::bounded(10);
-//! let sender = CrossbeamVerifSender::new(shared_tm_pool.clone(), verif_tx);
+//! let (verif_tx, verif_rx) = mpsc::channel();
+//! let sender = MpscVerifSender::new(shared_tm_pool.clone(), verif_tx);
 //! let cfg = VerificationReporterCfg::new(TEST_APID, Box::new(SimpleSeqCountProvider::default()), 1, 2, 8).unwrap();
 //! let mut  reporter = VerificationReporterWithSender::new(&cfg , Box::new(sender));
 //!
@@ -93,10 +93,12 @@ pub use alloc_mod::{
 };
 
 use crate::seq_count::SequenceCountProvider;
+#[cfg(feature = "crossbeam")]
+pub use stdmod::CrossbeamVerifSender;
 #[cfg(feature = "std")]
 pub use stdmod::{
-    CrossbeamVerifSender, MpscVerifSender, SharedStdVerifReporterWithSender,
-    StdVerifReporterWithSender, StdVerifSenderError,
+    MpscVerifSender, SharedStdVerifReporterWithSender, StdVerifReporterWithSender,
+    StdVerifSenderError,
 };
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -1091,11 +1093,13 @@ mod stdmod {
 
     /// Verification sender with a [crossbeam_channel::Sender] backend.
     /// It implements the [EcssTmSender] trait to be used as PUS Verification TM sender
+    #[cfg(feature = "crossbeam")]
     #[derive(Clone)]
     pub struct CrossbeamVerifSender {
         base: StdSenderBase<crossbeam_channel::Sender<StoreAddr>>,
     }
 
+    #[cfg(feature = "crossbeam")]
     impl CrossbeamVerifSender {
         pub fn new(tm_store: SharedPool, tx: crossbeam_channel::Sender<StoreAddr>) -> Self {
             Self {
@@ -1105,6 +1109,7 @@ mod stdmod {
     }
 
     //noinspection RsTraitImplementation
+    #[cfg(feature = "crossbeam")]
     impl EcssTmSender for CrossbeamVerifSender {
         type Error = StdVerifSenderError;
 
@@ -1115,7 +1120,10 @@ mod stdmod {
         );
     }
 
+    // TODO: Are those really necessary? Check with test..
+    #[cfg(feature = "crossbeam")]
     unsafe impl Sync for CrossbeamVerifSender {}
+    #[cfg(feature = "crossbeam")]
     unsafe impl Send for CrossbeamVerifSender {}
 
     impl<S: SendBackend + Clone + 'static> EcssTmSender for StdSenderBase<S> {
