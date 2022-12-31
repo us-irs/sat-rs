@@ -1,1 +1,1 @@
-tmtccmd == 3.0.0rc2
+tmtccmd == 3.0.0
