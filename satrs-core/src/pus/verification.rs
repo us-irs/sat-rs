@@ -79,6 +79,8 @@ use core::marker::PhantomData;
 use core::mem::size_of;
 #[cfg(feature = "alloc")]
 use delegate::delegate;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use spacepackets::ecss::EcssEnumeration;
 use spacepackets::tc::PusTc;
 use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
@@ -122,6 +124,7 @@ impl From<Subservices> for u8 {
 /// This is a request identifier as specified in 5.4.11.2 c. of the PUS standard
 /// This field equivalent to the first two bytes of the CCSDS space packet header.
 #[derive(Debug, Eq, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RequestId {
     version_number: u8,
     packet_id: PacketId,
