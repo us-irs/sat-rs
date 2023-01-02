@@ -12,7 +12,8 @@ zerocopy = "0.6"
 csv = "1"
 
 [dependencies.spacepackets]
-path = "../spacepackets"
+git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
+branch = "all_features"
 
 [dependencies.satrs-core]
 path = "../satrs-core"

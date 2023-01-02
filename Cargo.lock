@@ -568,7 +568,7 @@ dependencies = [
  "postcard",
  "serde",
  "serde_json",
- "spacepackets",
+ "spacepackets 0.3.1 (git+https://egit.irs.uni-stuttgart.de/rust/spacepackets.git?branch=all_features)",
  "zerocopy",
 ]
 
@@ -581,7 +581,7 @@ dependencies = [
  "delegate",
  "satrs-core",
  "satrs-mib",
- "spacepackets",
+ "spacepackets 0.3.1 (git+https://egit.irs.uni-stuttgart.de/rust/spacepackets.git?branch=all_features)",
  "zerocopy",
 ]
 
@@ -692,6 +692,19 @@ dependencies = [
  "delegate",
  "num-traits",
  "postcard",
+ "serde",
+ "zerocopy",
+]
+
+[[package]]
+name = "spacepackets"
+version = "0.3.1"
+source = "git+https://egit.irs.uni-stuttgart.de/rust/spacepackets.git?branch=all_features#ae55c394bb2455eed3b05a5b587048a931d27238"
+dependencies = [
+ "chrono",
+ "crc",
+ "delegate",
+ "num-traits",
  "serde",
  "zerocopy",
 ]

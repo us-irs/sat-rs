@@ -104,7 +104,7 @@ pub use stdmod::{
 };
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub enum Subservices {
+pub enum Subservice {
     TmAcceptanceSuccess = 1,
     TmAcceptanceFailure = 2,
     TmStartSuccess = 3,
@@ -115,8 +115,8 @@ pub enum Subservices {
     TmCompletionFailure = 8,
 }
 
-impl From<Subservices> for u8 {
-    fn from(enumeration: Subservices) -> Self {
+impl From<Subservice> for u8 {
+    fn from(enumeration: Subservice) -> Self {
         enumeration as u8
     }
 }
@@ -347,7 +347,7 @@ impl VerificationReporterBasic {
         let tm = self
             .create_pus_verif_success_tm(
                 buf,
-                Subservices::TmAcceptanceSuccess.into(),
+                Subservice::TmAcceptanceSuccess.into(),
                 seq_counter.get(),
                 &token.req_id,
                 time_stamp,
@@ -377,7 +377,7 @@ impl VerificationReporterBasic {
         let tm = self
             .create_pus_verif_fail_tm(
                 buf,
-                Subservices::TmAcceptanceFailure.into(),
+                Subservice::TmAcceptanceFailure.into(),
                 seq_counter.get(),
                 &token.req_id,
                 None::<&dyn EcssEnumeration>,
@@ -406,7 +406,7 @@ impl VerificationReporterBasic {
         let tm = self
             .create_pus_verif_success_tm(
                 buf,
-                Subservices::TmStartSuccess.into(),
+                Subservice::TmStartSuccess.into(),
                 seq_counter.get(),
                 &token.req_id,
                 time_stamp,
@@ -438,7 +438,7 @@ impl VerificationReporterBasic {
         let tm = self
             .create_pus_verif_fail_tm(
                 buf,
-                Subservices::TmStartFailure.into(),
+                Subservice::TmStartFailure.into(),
                 seq_counter.get(),
                 &token.req_id,
                 None::<&dyn EcssEnumeration>,
@@ -466,7 +466,7 @@ impl VerificationReporterBasic {
     ) -> Result<(), EcssTmError<E>> {
         let tm = self.create_pus_verif_success_tm(
             buf,
-            Subservices::TmStepSuccess.into(),
+            Subservice::TmStepSuccess.into(),
             seq_counter.get(),
             &token.req_id,
             time_stamp,
@@ -492,7 +492,7 @@ impl VerificationReporterBasic {
         let tm = self
             .create_pus_verif_fail_tm(
                 buf,
-                Subservices::TmStepFailure.into(),
+                Subservice::TmStepFailure.into(),
                 seq_counter.get(),
                 &token.req_id,
                 Some(params.step),
@@ -521,7 +521,7 @@ impl VerificationReporterBasic {
         let tm = self
             .create_pus_verif_success_tm(
                 buf,
-                Subservices::TmCompletionSuccess.into(),
+                Subservice::TmCompletionSuccess.into(),
                 seq_counter.get(),
                 &token.req_id,
                 time_stamp,
@@ -550,7 +550,7 @@ impl VerificationReporterBasic {
         let tm = self
             .create_pus_verif_fail_tm(
                 buf,
-                Subservices::TmCompletionFailure.into(),
+                Subservice::TmCompletionFailure.into(),
                 seq_counter.get(),
                 &token.req_id,
                 None::<&dyn EcssEnumeration>,
