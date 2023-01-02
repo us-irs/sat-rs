@@ -95,7 +95,7 @@ pub use alloc_mod::{
 };
 
 use crate::seq_count::SequenceCountProvider;
-#[cfg(feature = "crossbeam")]
+#[cfg(all(feature = "crossbeam", feature = "std"))]
 pub use stdmod::CrossbeamVerifSender;
 #[cfg(feature = "std")]
 pub use stdmod::{

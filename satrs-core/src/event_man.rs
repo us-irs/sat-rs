@@ -63,6 +63,7 @@ use alloc::vec;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 use core::slice::Iter;
+#[cfg(feature = "alloc")]
 use hashbrown::HashMap;
 
 #[cfg(feature = "std")]

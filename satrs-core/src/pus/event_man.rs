@@ -3,7 +3,9 @@ use crate::events::{EventU32, GenericEvent, Severity};
 use crate::events::{EventU32TypedSev, HasSeverity};
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
+#[cfg(feature = "alloc")]
 use core::hash::Hash;
+#[cfg(feature = "alloc")]
 use hashbrown::HashSet;
 
 #[cfg(feature = "alloc")]
@@ -36,43 +38,6 @@ pub trait PusEventMgmtBackendProvider<Provider: GenericEvent> {
     fn event_enabled(&self, event: &Provider) -> bool;
     fn enable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error>;
     fn disable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error>;
-}
-
-/// Default backend provider which uses a hash set as the event reporting status container
-/// like mentioned in the example of the [PusEventMgmtBackendProvider] documentation.
-///
-/// This provider is a good option for host systems or larger embedded systems where
-/// the expected occasional memory allocation performed by the [HashSet] is not an issue.
-pub struct DefaultPusMgmtBackendProvider<Event: GenericEvent = EventU32> {
-    disabled: HashSet<Event>,
-}
-
-/// Safety: All contained field are [Send] as well
-unsafe impl<Event: GenericEvent + Send> Send for DefaultPusMgmtBackendProvider<Event> {}
-
-impl<Event: GenericEvent> Default for DefaultPusMgmtBackendProvider<Event> {
-    fn default() -> Self {
-        Self {
-            disabled: HashSet::default(),
-        }
-    }
-}
-
-impl<Provider: GenericEvent + PartialEq + Eq + Hash + Copy + Clone>
-    PusEventMgmtBackendProvider<Provider> for DefaultPusMgmtBackendProvider<Provider>
-{
-    type Error = ();
-    fn event_enabled(&self, event: &Provider) -> bool {
-        !self.disabled.contains(event)
-    }
-
-    fn enable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error> {
-        Ok(self.disabled.remove(event))
-    }
-
-    fn disable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error> {
-        Ok(self.disabled.insert(*event))
-    }
 }
 
 #[cfg(feature = "heapless")]
@@ -144,6 +109,43 @@ impl<SenderE> From<EcssTmError<SenderE>> for EventManError<SenderE> {
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
     use super::*;
+
+    /// Default backend provider which uses a hash set as the event reporting status container
+    /// like mentioned in the example of the [PusEventMgmtBackendProvider] documentation.
+    ///
+    /// This provider is a good option for host systems or larger embedded systems where
+    /// the expected occasional memory allocation performed by the [HashSet] is not an issue.
+    pub struct DefaultPusMgmtBackendProvider<Event: GenericEvent = EventU32> {
+        disabled: HashSet<Event>,
+    }
+
+    /// Safety: All contained field are [Send] as well
+    unsafe impl<Event: GenericEvent + Send> Send for DefaultPusMgmtBackendProvider<Event> {}
+
+    impl<Event: GenericEvent> Default for DefaultPusMgmtBackendProvider<Event> {
+        fn default() -> Self {
+            Self {
+                disabled: HashSet::default(),
+            }
+        }
+    }
+
+    impl<Provider: GenericEvent + PartialEq + Eq + Hash + Copy + Clone>
+        PusEventMgmtBackendProvider<Provider> for DefaultPusMgmtBackendProvider<Provider>
+    {
+        type Error = ();
+        fn event_enabled(&self, event: &Provider) -> bool {
+            !self.disabled.contains(event)
+        }
+
+        fn enable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error> {
+            Ok(self.disabled.remove(event))
+        }
+
+        fn disable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error> {
+            Ok(self.disabled.insert(*event))
+        }
+    }
 
     pub struct PusEventDispatcher<BackendError, Provider: GenericEvent> {
         reporter: EventReporter,
