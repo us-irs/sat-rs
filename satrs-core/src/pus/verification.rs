@@ -17,7 +17,7 @@
 //! use std::time::Duration;
 //! use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
 //! use satrs_core::pus::verification::{MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender};
-//! use satrs_core::seq_count::SimpleSeqCountProvider;
+//! use satrs_core::seq_count::SeqCountProviderSimple;
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
 //! use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
@@ -30,7 +30,7 @@
 //! let shared_tm_pool: SharedPool = Arc::new(RwLock::new(Box::new(LocalPool::new(pool_cfg.clone()))));
 //! let (verif_tx, verif_rx) = mpsc::channel();
 //! let sender = MpscVerifSender::new(shared_tm_pool.clone(), verif_tx);
-//! let cfg = VerificationReporterCfg::new(TEST_APID, Box::new(SimpleSeqCountProvider::default()), 1, 2, 8).unwrap();
+//! let cfg = VerificationReporterCfg::new(TEST_APID, Box::new(SeqCountProviderSimple::default()), 1, 2, 8).unwrap();
 //! let mut  reporter = VerificationReporterWithSender::new(&cfg , Box::new(sender));
 //!
 //! let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
@@ -87,7 +87,7 @@ use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
 use spacepackets::{SpHeader, MAX_APID};
 
-pub use crate::seq_count::SimpleSeqCountProvider;
+pub use crate::seq_count::SeqCountProviderSimple;
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::{
@@ -1158,7 +1158,7 @@ mod tests {
         TcStateNone, VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
         VerificationToken,
     };
-    use crate::seq_count::SimpleSeqCountProvider;
+    use crate::seq_count::SeqCountProviderSimple;
     use alloc::boxed::Box;
     use alloc::format;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration, PusPacket};
@@ -1252,7 +1252,7 @@ mod tests {
     fn base_reporter() -> VerificationReporter {
         let cfg = VerificationReporterCfg::new(
             TEST_APID,
-            Box::new(SimpleSeqCountProvider::default()),
+            Box::new(SeqCountProviderSimple::default()),
             1,
             2,
             8,

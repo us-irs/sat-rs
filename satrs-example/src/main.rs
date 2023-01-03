@@ -23,7 +23,7 @@ use satrs_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
 };
 use satrs_core::pus::{EcssTmError, EcssTmSenderCore};
-use satrs_core::seq_count::SimpleSeqCountProvider;
+use satrs_core::seq_count::SeqCountProviderSimple;
 use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
 use spacepackets::time::cds::TimeProvider;
 use spacepackets::time::TimeWriter;
@@ -93,7 +93,7 @@ fn main() {
     let verif_cfg = VerificationReporterCfg::new(
         PUS_APID,
         #[allow(clippy::box_default)]
-        Box::new(SimpleSeqCountProvider::default()),
+        Box::new(SeqCountProviderSimple::default()),
         1,
         2,
         8,

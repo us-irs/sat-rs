@@ -24,11 +24,11 @@ dyn_clone::clone_trait_object!(SequenceCountProvider<u16>);
 impl<T, Raw> SequenceCountProvider<Raw> for T where T: SequenceCountProviderCore<Raw> + Clone {}
 
 #[derive(Default, Clone)]
-pub struct SimpleSeqCountProvider {
+pub struct SeqCountProviderSimple {
     seq_count: u16,
 }
 
-impl SequenceCountProviderCore<u16> for SimpleSeqCountProvider {
+impl SequenceCountProviderCore<u16> for SeqCountProviderSimple {
     fn get(&self) -> u16 {
         self.seq_count
     }
@@ -42,18 +42,44 @@ impl SequenceCountProviderCore<u16> for SimpleSeqCountProvider {
     }
 }
 
+use core::sync::atomic::{AtomicU16, Ordering};
+
+pub struct SeqCountProviderAtomicRef {
+    atomic: &'static AtomicU16,
+    ordering: Ordering,
+}
+
+impl SeqCountProviderAtomicRef {
+    pub const fn new(atomic: &'static AtomicU16, ordering: Ordering) -> Self {
+        Self { atomic, ordering }
+    }
+}
+
+impl SequenceCountProviderCore<u16> for SeqCountProviderAtomicRef {
+    fn get(&self) -> u16 {
+        self.atomic.load(self.ordering)
+    }
+
+    fn increment(&mut self) {
+        self.atomic.fetch_add(1, self.ordering);
+    }
+
+    fn get_and_increment(&mut self) -> u16 {
+        self.atomic.fetch_add(1, self.ordering)
+    }
+}
+
 #[cfg(feature = "std")]
 pub mod stdmod {
     use super::*;
-    use std::sync::atomic::{AtomicU16, Ordering};
     use std::sync::Arc;
 
     #[derive(Clone, Default)]
-    pub struct SyncSeqCountProvider {
+    pub struct SeqCountProviderSync {
         seq_count: Arc<AtomicU16>,
     }
 
-    impl SequenceCountProviderCore<u16> for SyncSeqCountProvider {
+    impl SequenceCountProviderCore<u16> for SeqCountProviderSync {
         fn get(&self) -> u16 {
             self.seq_count.load(Ordering::SeqCst)
         }
