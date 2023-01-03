@@ -390,6 +390,11 @@ impl<'slice, State> VerificationSendable<'slice, State> {
             pus_tm: Some(pus_tm),
         }
     }
+
+    pub fn len_packed(&self) -> usize {
+        self.pus_tm.as_ref().unwrap().len_packed()
+    }
+
     pub fn pus_tm(&self) -> &PusTm<'slice> {
         self.pus_tm.as_ref().unwrap()
     }
@@ -398,7 +403,9 @@ impl<'slice, State> VerificationSendable<'slice, State> {
         self.pus_tm.as_mut().unwrap()
     }
 
-    pub fn downgrade(self) -> VerificationSendableErased<State> {
+    /// Release or downgrades the PUS TM struct. This also releases the mutable slice reference,
+    /// which can be useful or necessary before sending the data.
+    pub fn release(self) -> VerificationSendableErased<State> {
         self.into()
     }
 
