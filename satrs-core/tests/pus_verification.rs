@@ -7,7 +7,7 @@ pub mod crossbeam_test {
         CrossbeamVerifSender, FailParams, RequestId, VerificationReporterCfg,
         VerificationReporterWithSender,
     };
-    use satrs_core::seq_count::SeqCountProviderSync;
+    use satrs_core::seq_count::SeqCountProviderSyncClonable;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::tm::PusTm;
@@ -34,7 +34,7 @@ pub mod crossbeam_test {
         // each reporter have an own sequence count provider.
         let cfg = VerificationReporterCfg::new(
             TEST_APID,
-            Box::new(SeqCountProviderSync::default()),
+            Box::new(SeqCountProviderSyncClonable::default()),
             1,
             2,
             8,

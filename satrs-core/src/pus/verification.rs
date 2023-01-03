@@ -340,7 +340,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateNone>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<VerificationToken<TcStateAccepted>, VerificationErrorWithToken<E, TcStateNone>>
     {
@@ -371,7 +371,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateNone>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateNone>> {
         let tm = self
@@ -399,7 +399,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateAccepted>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<VerificationToken<TcStateStarted>, VerificationErrorWithToken<E, TcStateAccepted>>
     {
@@ -432,7 +432,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateAccepted>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateAccepted>> {
         let tm = self
@@ -460,7 +460,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: &VerificationToken<TcStateStarted>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &[u8],
         step: impl EcssEnumeration,
     ) -> Result<(), EcssTmError<E>> {
@@ -486,7 +486,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateStarted>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         params: FailParamsWithStep,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
         let tm = self
@@ -515,7 +515,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateStarted>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
         let tm = self
@@ -544,7 +544,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateStarted>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
         let tm = self
