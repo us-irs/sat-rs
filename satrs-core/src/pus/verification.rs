@@ -405,7 +405,7 @@ impl<'slice, State> VerificationSendable<'slice, State> {
 
     /// Release the PUS TM struct. This also releases the mutable slice reference,
     /// which can be useful or necessary before sending the data.
-    pub fn release_buf(self) -> VerificationSendableErased<State> {
+    pub fn release_slice(self) -> VerificationSendableErased<State> {
         self.into()
     }
 
