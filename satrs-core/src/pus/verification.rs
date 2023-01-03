@@ -302,12 +302,94 @@ pub struct VerificationReporterCore {
     apid: u16,
 }
 
-pub struct VerificationSendable<'slice, State> {
+pub struct VerificationSendableErased<State> {
     token: Option<VerificationToken<State>>,
+}
+
+pub(crate) fn increment_seq_counter(
+    seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
+) {
+    if let Some(seq_counter) = seq_counter {
+        seq_counter.increment();
+    }
+}
+
+impl<State> VerificationSendableErased<State> {
+    pub fn send_success_verif_failure(
+        self,
+        seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
+    ) {
+        increment_seq_counter(seq_counter);
+    }
+}
+impl VerificationSendableErased<TcStateNone> {
+    pub fn send_success_acceptance_success(
+        self,
+        seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
+    ) -> VerificationToken<TcStateAccepted> {
+        increment_seq_counter(seq_counter);
+        VerificationToken {
+            state: PhantomData,
+            req_id: self.token.unwrap().req_id(),
+        }
+    }
+    pub fn send_failure(self) -> VerificationToken<TcStateNone> {
+        self.token.unwrap()
+    }
+}
+
+impl VerificationSendableErased<TcStateAccepted> {
+    pub fn send_success_start_success(
+        self,
+        seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
+    ) -> VerificationToken<TcStateStarted> {
+        increment_seq_counter(seq_counter);
+        VerificationToken {
+            state: PhantomData,
+            req_id: self.token.unwrap().req_id(),
+        }
+    }
+    pub fn send_failure(self) -> VerificationToken<TcStateAccepted> {
+        self.token.unwrap()
+    }
+}
+
+impl VerificationSendableErased<TcStateStarted> {
+    pub fn send_success_step_or_completion_success(
+        self,
+        seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
+    ) {
+        increment_seq_counter(seq_counter);
+    }
+    pub fn send_failure(self) -> Option<VerificationToken<TcStateStarted>> {
+        self.token
+    }
+}
+
+pub struct VerificationSendable<'slice, State> {
+    inner: VerificationSendableErased<State>,
     pus_tm: Option<PusTm<'slice>>,
 }
 
+impl<State> From<VerificationSendable<'_, State>> for VerificationSendableErased<State> {
+    fn from(value: VerificationSendable<State>) -> Self {
+        value.inner
+    }
+}
+
 impl<'slice, State> VerificationSendable<'slice, State> {
+    pub(crate) fn new(pus_tm: PusTm<'slice>, token: VerificationToken<State>) -> Self {
+        Self {
+            inner: VerificationSendableErased { token: Some(token) },
+            pus_tm: Some(pus_tm),
+        }
+    }
+    pub(crate) fn new_no_token(pus_tm: PusTm<'slice>) -> Self {
+        Self {
+            inner: VerificationSendableErased { token: None },
+            pus_tm: Some(pus_tm),
+        }
+    }
     pub fn pus_tm(&self) -> &PusTm<'slice> {
         self.pus_tm.as_ref().unwrap()
     }
@@ -316,23 +398,19 @@ impl<'slice, State> VerificationSendable<'slice, State> {
         self.pus_tm.as_mut().unwrap()
     }
 
+    pub fn downgrade(self) -> VerificationSendableErased<State> {
+        self.into()
+    }
+
     pub(crate) fn take_tm(&mut self) -> PusTm<'slice> {
         self.pus_tm.take().unwrap()
     }
 
-    pub(crate) fn increment_seq_counter(
-        &self,
-        seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
-    ) {
-        if let Some(seq_counter) = seq_counter {
-            seq_counter.increment();
-        }
-    }
     pub fn send_success_verif_failure(
         self,
         seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
     ) {
-        self.increment_seq_counter(seq_counter);
+        self.inner.send_success_verif_failure(seq_counter)
     }
 }
 
@@ -341,14 +419,10 @@ impl<'slice> VerificationSendable<'slice, TcStateNone> {
         self,
         seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
     ) -> VerificationToken<TcStateAccepted> {
-        self.increment_seq_counter(seq_counter);
-        VerificationToken {
-            state: PhantomData,
-            req_id: self.token.unwrap().req_id(),
-        }
+        self.inner.send_success_acceptance_success(seq_counter)
     }
     pub fn send_failure(self) -> (PusTm<'slice>, VerificationToken<TcStateNone>) {
-        (self.pus_tm.unwrap(), self.token.unwrap())
+        (self.pus_tm.unwrap(), self.inner.token.unwrap())
     }
 }
 
@@ -357,14 +431,11 @@ impl<'slice> VerificationSendable<'slice, TcStateAccepted> {
         self,
         seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
     ) -> VerificationToken<TcStateStarted> {
-        self.increment_seq_counter(seq_counter);
-        VerificationToken {
-            state: PhantomData,
-            req_id: self.token.unwrap().req_id(),
-        }
+        self.inner.send_success_start_success(seq_counter)
     }
+
     pub fn send_failure(self) -> (PusTm<'slice>, VerificationToken<TcStateAccepted>) {
-        (self.pus_tm.unwrap(), self.token.unwrap())
+        (self.pus_tm.unwrap(), self.inner.token.unwrap())
     }
 }
 
@@ -373,10 +444,10 @@ impl<'slice> VerificationSendable<'slice, TcStateStarted> {
         self,
         seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
     ) {
-        self.increment_seq_counter(seq_counter);
+        increment_seq_counter(seq_counter);
     }
     pub fn send_failure(self) -> (PusTm<'slice>, Option<VerificationToken<TcStateStarted>>) {
-        (self.pus_tm.unwrap(), self.token)
+        (self.pus_tm.unwrap(), self.inner.token)
     }
 }
 
@@ -428,20 +499,18 @@ impl VerificationReporterCore {
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &'slice [u8],
     ) -> Result<VerificationSendable<'slice, State>, VerificationErrorWithToken<State>> {
-        Ok(VerificationSendable {
-            pus_tm: Some(
-                self.create_pus_verif_success_tm(
-                    buf,
-                    subservice,
-                    seq_counter.get(),
-                    &token.req_id,
-                    time_stamp,
-                    None::<&dyn EcssEnumeration>,
-                )
-                .map_err(|e| VerificationErrorWithToken(e, token))?,
-            ),
-            token: Some(token),
-        })
+        Ok(VerificationSendable::new(
+            self.create_pus_verif_success_tm(
+                buf,
+                subservice,
+                seq_counter.get(),
+                &token.req_id,
+                time_stamp,
+                None::<&dyn EcssEnumeration>,
+            )
+            .map_err(|e| VerificationErrorWithToken(e, token))?,
+            token,
+        ))
     }
 
     /// Package a PUS TM\[1, 1\] packet, see 8.1.2.1 of the PUS standard.
@@ -471,20 +540,18 @@ impl VerificationReporterCore {
         params: FailParams<'slice, '_>,
     ) -> Result<VerificationSendable<'slice, TcStateNone>, VerificationErrorWithToken<TcStateNone>>
     {
-        Ok(VerificationSendable {
-            pus_tm: Some(
-                self.create_pus_verif_fail_tm(
-                    buf,
-                    Subservice::TmAcceptanceFailure.into(),
-                    seq_counter.get(),
-                    &token.req_id,
-                    None::<&dyn EcssEnumeration>,
-                    &params,
-                )
-                .map_err(|e| VerificationErrorWithToken(e, token))?,
-            ),
-            token: Some(token),
-        })
+        Ok(VerificationSendable::new(
+            self.create_pus_verif_fail_tm(
+                buf,
+                Subservice::TmAcceptanceFailure.into(),
+                seq_counter.get(),
+                &token.req_id,
+                None::<&dyn EcssEnumeration>,
+                &params,
+            )
+            .map_err(|e| VerificationErrorWithToken(e, token))?,
+            token,
+        ))
     }
 
     /// Package and send a PUS TM\[1, 3\] packet, see 8.1.2.3 of the PUS standard.
@@ -523,20 +590,18 @@ impl VerificationReporterCore {
         VerificationSendable<'slice, TcStateAccepted>,
         VerificationErrorWithToken<TcStateAccepted>,
     > {
-        Ok(VerificationSendable {
-            pus_tm: Some(
-                self.create_pus_verif_fail_tm(
-                    buf,
-                    Subservice::TmStartFailure.into(),
-                    seq_counter.get(),
-                    &token.req_id,
-                    None::<&dyn EcssEnumeration>,
-                    &params,
-                )
-                .map_err(|e| VerificationErrorWithToken(e, token))?,
-            ),
-            token: Some(token),
-        })
+        Ok(VerificationSendable::new(
+            self.create_pus_verif_fail_tm(
+                buf,
+                Subservice::TmStartFailure.into(),
+                seq_counter.get(),
+                &token.req_id,
+                None::<&dyn EcssEnumeration>,
+                &params,
+            )
+            .map_err(|e| VerificationErrorWithToken(e, token))?,
+            token,
+        ))
     }
 
     /// Package and send a PUS TM\[1, 5\] packet, see 8.1.2.5 of the PUS standard.
@@ -550,17 +615,16 @@ impl VerificationReporterCore {
         time_stamp: &'slice [u8],
         step: impl EcssEnumeration,
     ) -> Result<VerificationSendable<'slice, TcStateStarted>, EcssTmError> {
-        Ok(VerificationSendable {
-            pus_tm: Some(self.create_pus_verif_success_tm(
+        Ok(VerificationSendable::new_no_token(
+            self.create_pus_verif_success_tm(
                 buf,
                 Subservice::TmStepSuccess.into(),
                 seq_counter.get(),
                 &token.req_id,
                 time_stamp,
                 Some(&step),
-            )?),
-            token: None,
-        })
+            )?,
+        ))
     }
 
     /// Package and send a PUS TM\[1, 6\] packet, see 8.1.2.6 of the PUS standard.
@@ -577,20 +641,18 @@ impl VerificationReporterCore {
         VerificationSendable<'slice, TcStateStarted>,
         VerificationErrorWithToken<TcStateStarted>,
     > {
-        Ok(VerificationSendable {
-            pus_tm: Some(
-                self.create_pus_verif_fail_tm(
-                    buf,
-                    Subservice::TmStepFailure.into(),
-                    seq_counter.get(),
-                    &token.req_id,
-                    Some(params.step),
-                    &params.bp,
-                )
-                .map_err(|e| VerificationErrorWithToken(e, token))?,
-            ),
-            token: Some(token),
-        })
+        Ok(VerificationSendable::new(
+            self.create_pus_verif_fail_tm(
+                buf,
+                Subservice::TmStepFailure.into(),
+                seq_counter.get(),
+                &token.req_id,
+                Some(params.step),
+                &params.bp,
+            )
+            .map_err(|e| VerificationErrorWithToken(e, token))?,
+            token,
+        ))
     }
 
     /// Package and send a PUS TM\[1, 7\] packet, see 8.1.2.7 of the PUS standard.
@@ -630,20 +692,18 @@ impl VerificationReporterCore {
         VerificationSendable<'slice, TcStateStarted>,
         VerificationErrorWithToken<TcStateStarted>,
     > {
-        Ok(VerificationSendable {
-            pus_tm: Some(
-                self.create_pus_verif_fail_tm(
-                    buf,
-                    Subservice::TmCompletionFailure.into(),
-                    seq_counter.get(),
-                    &token.req_id,
-                    None::<&dyn EcssEnumeration>,
-                    &params,
-                )
-                .map_err(|e| VerificationErrorWithToken(e, token))?,
-            ),
-            token: Some(token),
-        })
+        Ok(VerificationSendable::new(
+            self.create_pus_verif_fail_tm(
+                buf,
+                Subservice::TmCompletionFailure.into(),
+                seq_counter.get(),
+                &token.req_id,
+                None::<&dyn EcssEnumeration>,
+                &params,
+            )
+            .map_err(|e| VerificationErrorWithToken(e, token))?,
+            token,
+        ))
     }
 
     fn create_pus_verif_success_tm<'slice>(
