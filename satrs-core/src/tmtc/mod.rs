@@ -63,17 +63,24 @@ impl AddressableId {
 /// This trait is implemented by both the [crate::tmtc::pus_distrib::PusDistributor] and the
 /// [crate::tmtc::ccsds_distrib::CcsdsDistributor]  which allows to pass the respective packets in
 /// raw byte format into them.
-pub trait ReceivesTcBase: Send {
+pub trait ReceivesTcCore: Send {
     type Error;
     fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error>;
 }
 
+/// Extension trait of [ReceivesTcCore] which allows downcasting by implementing [Downcast]
 #[cfg(feature = "alloc")]
-pub trait ReceivesTc: ReceivesTcBase + Downcast {}
+pub trait ReceivesTc: ReceivesTcCore + Downcast {}
+
+/// Blanket implementation to automatically implement [ReceivesTc] when the [alloc] feature
+/// is enabled.
+#[cfg(feature = "alloc")]
+impl<T> ReceivesTc for T where T: ReceivesTcCore + 'static {}
+
 #[cfg(feature = "alloc")]
 impl_downcast!(ReceivesTc assoc Error);
 
-/// Generic trait for object which can receive CCSDS space packets, for fsrc-example ECSS PUS packets
+/// Generic trait for object which can receive CCSDS space packets, for example ECSS PUS packets
 /// for CCSDS File Delivery Protocol (CFDP) packets.
 ///
 /// This trait is implemented by both the [crate::tmtc::pus_distrib::PusDistributor] and the

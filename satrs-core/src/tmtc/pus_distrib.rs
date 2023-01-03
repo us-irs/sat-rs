@@ -18,7 +18,7 @@
 //!
 //! ```rust
 //! use satrs_core::tmtc::pus_distrib::{PusDistributor, PusServiceProvider};
-//! use satrs_core::tmtc::{ReceivesTc, ReceivesTcBase};
+//! use satrs_core::tmtc::{ReceivesTc, ReceivesTcCore};
 //! use spacepackets::SpHeader;
 //! use spacepackets::tc::PusTc;
 //! struct ConcretePusHandler {
@@ -60,7 +60,7 @@
 //!     .expect("Casting back to concrete type failed");
 //! assert_eq!(concrete_handler_ref.handler_call_count, 1);
 //! ```
-use crate::tmtc::{ReceivesCcsdsTc, ReceivesEcssPusTc, ReceivesTc, ReceivesTcBase};
+use crate::tmtc::{ReceivesCcsdsTc, ReceivesEcssPusTc, ReceivesTcCore};
 use alloc::boxed::Box;
 use downcast_rs::Downcast;
 use spacepackets::ecss::{PusError, PusPacket};
@@ -94,7 +94,7 @@ pub enum PusDistribError<E> {
     PusError(PusError),
 }
 
-impl<E: 'static> ReceivesTcBase for PusDistributor<E> {
+impl<E: 'static> ReceivesTcCore for PusDistributor<E> {
     type Error = PusDistribError<E>;
     fn pass_tc(&mut self, tm_raw: &[u8]) -> Result<(), Self::Error> {
         // Convert to ccsds and call pass_ccsds
@@ -103,8 +103,6 @@ impl<E: 'static> ReceivesTcBase for PusDistributor<E> {
         self.pass_ccsds(&sp_header, tm_raw)
     }
 }
-
-impl<E: 'static> ReceivesTc for PusDistributor<E> {}
 
 impl<E: 'static> ReceivesCcsdsTc for PusDistributor<E> {
     type Error = PusDistribError<E>;
