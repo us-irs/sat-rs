@@ -7,7 +7,7 @@ use satrs_core::params::{Params, ParamsHeapless, WritableToBeBytes};
 use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, PusEventDispatcher,
 };
-use satrs_core::pus::{EcssTmError, EcssTmSenderCore};
+use satrs_core::pus::{EcssTmErrorWithSend, EcssTmSenderCore};
 use spacepackets::ecss::PusPacket;
 use spacepackets::tm::PusTm;
 use std::sync::mpsc::{channel, SendError, TryRecvError};
@@ -25,10 +25,13 @@ struct EventTmSender {
 
 impl EcssTmSenderCore for EventTmSender {
     type Error = SendError<Vec<u8>>;
-    fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>> {
+    fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmErrorWithSend<Self::Error>> {
         let mut vec = Vec::new();
-        tm.append_to_vec(&mut vec)?;
-        self.sender.send(vec).map_err(EcssTmError::SendError)?;
+        tm.append_to_vec(&mut vec)
+            .map_err(|e| EcssTmErrorWithSend::EcssTmError(e.into()))?;
+        self.sender
+            .send(vec)
+            .map_err(EcssTmErrorWithSend::SendError)?;
         Ok(())
     }
 }

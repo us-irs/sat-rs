@@ -17,11 +17,22 @@ pub mod event_man;
 pub mod hk;
 pub mod verification;
 
-/// Generic error type which is also able to wrap a user send error with the user supplied type E.
 #[derive(Debug, Clone)]
-pub enum EcssTmError<E> {
+pub enum EcssTmErrorWithSend<E> {
     /// Errors related to sending the verification telemetry to a TM recipient
     SendError(E),
+    EcssTmError(EcssTmError),
+}
+
+impl<E> From<EcssTmError> for EcssTmErrorWithSend<E> {
+    fn from(value: EcssTmError) -> Self {
+        Self::EcssTmError(value)
+    }
+}
+
+/// Generic error type which is also able to wrap a user send error with the user supplied type E.
+#[derive(Debug, Clone)]
+pub enum EcssTmError {
     /// Errors related to the time stamp format of the telemetry
     TimestampError(TimestampError),
     /// Errors related to byte conversion, for example insufficient buffer size for given data
@@ -30,13 +41,13 @@ pub enum EcssTmError<E> {
     PusError(PusError),
 }
 
-impl<E> From<PusError> for EcssTmError<E> {
+impl From<PusError> for EcssTmError {
     fn from(e: PusError) -> Self {
         EcssTmError::PusError(e)
     }
 }
 
-impl<E> From<ByteConversionError> for EcssTmError<E> {
+impl From<ByteConversionError> for EcssTmError {
     fn from(e: ByteConversionError) -> Self {
         EcssTmError::ByteConversionError(e)
     }
@@ -48,7 +59,7 @@ impl<E> From<ByteConversionError> for EcssTmError<E> {
 pub trait EcssTmSenderCore: Send {
     type Error;
 
-    fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>>;
+    fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmErrorWithSend<Self::Error>>;
 }
 
 #[cfg(feature = "alloc")]
@@ -74,7 +85,7 @@ pub mod alloc_mod {
     impl_downcast!(EcssTmSender assoc Error);
 }
 
-pub(crate) fn source_buffer_large_enough<E>(cap: usize, len: usize) -> Result<(), EcssTmError<E>> {
+pub(crate) fn source_buffer_large_enough(cap: usize, len: usize) -> Result<(), EcssTmError> {
     if len > cap {
         return Err(EcssTmError::ByteConversionError(
             ByteConversionError::ToSliceTooSmall(SizeMissmatch {

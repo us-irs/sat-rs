@@ -11,7 +11,7 @@ use hashbrown::HashSet;
 #[cfg(feature = "alloc")]
 pub use crate::pus::event::EventReporter;
 use crate::pus::verification::{TcStateStarted, VerificationToken};
-use crate::pus::EcssTmError;
+use crate::pus::EcssTmErrorWithSend;
 #[cfg(feature = "alloc")]
 use crate::pus::EcssTmSenderCore;
 #[cfg(feature = "alloc")]
@@ -96,12 +96,12 @@ pub struct EventRequestWithToken<Event: GenericEvent = EventU32> {
 
 #[derive(Debug)]
 pub enum EventManError<SenderE> {
-    EcssTmError(EcssTmError<SenderE>),
+    EcssTmError(EcssTmErrorWithSend<SenderE>),
     SeverityMissmatch(Severity, Severity),
 }
 
-impl<SenderE> From<EcssTmError<SenderE>> for EventManError<SenderE> {
-    fn from(v: EcssTmError<SenderE>) -> Self {
+impl<SenderE> From<EcssTmErrorWithSend<SenderE>> for EventManError<SenderE> {
+    fn from(v: EcssTmErrorWithSend<SenderE>) -> Self {
         Self::EcssTmError(v)
     }
 }
@@ -254,10 +254,13 @@ mod tests {
 
     impl EcssTmSenderCore for EventTmSender {
         type Error = SendError<Vec<u8>>;
-        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>> {
+        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmErrorWithSend<Self::Error>> {
             let mut vec = Vec::new();
-            tm.append_to_vec(&mut vec)?;
-            self.sender.send(vec).map_err(EcssTmError::SendError)?;
+            tm.append_to_vec(&mut vec)
+                .map_err(|e| EcssTmErrorWithSend::EcssTmError(e.into()))?;
+            self.sender
+                .send(vec)
+                .map_err(EcssTmErrorWithSend::SendError)?;
             Ok(())
         }
     }
