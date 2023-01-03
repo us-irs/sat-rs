@@ -14,6 +14,8 @@ pub trait SequenceCountProviderCore<Raw> {
     }
 }
 
+/// Extension trait which allows cloning a sequence count provider after it was turned into
+/// a trait object.
 #[cfg(feature = "alloc")]
 pub trait SequenceCountProvider<Raw>: SequenceCountProviderCore<Raw> + DynClone {}
 #[cfg(feature = "alloc")]
