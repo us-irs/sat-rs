@@ -1,9 +1,10 @@
-use crate::pus::{source_buffer_large_enough, EcssTmError, EcssTmSender};
+use crate::pus::{source_buffer_large_enough, EcssTmError};
 use spacepackets::ecss::EcssEnumeration;
 use spacepackets::tm::PusTm;
 use spacepackets::tm::PusTmSecondaryHeader;
 use spacepackets::{SpHeader, MAX_APID};
 
+use crate::pus::EcssTmSender;
 #[cfg(feature = "alloc")]
 pub use allocvec::EventReporter;
 

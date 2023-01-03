@@ -664,6 +664,8 @@ impl VerificationReporterBasic {
 #[cfg(feature = "alloc")]
 mod alloc_mod {
     use super::*;
+    use crate::pus::alloc_mod::EcssTmSenderClonable;
+    use crate::seq_count::SequenceCountProviderClonable;
     use alloc::boxed::Box;
     use alloc::vec;
     use alloc::vec::Vec;
@@ -671,7 +673,7 @@ mod alloc_mod {
     #[derive(Clone)]
     pub struct VerificationReporterCfg {
         apid: u16,
-        seq_counter: Box<dyn SequenceCountProvider<u16> + Send>,
+        seq_counter: Box<dyn SequenceCountProviderClonable<u16> + Send>,
         pub step_field_width: usize,
         pub fail_code_field_width: usize,
         pub max_fail_data_len: usize,
@@ -680,7 +682,7 @@ mod alloc_mod {
     impl VerificationReporterCfg {
         pub fn new(
             apid: u16,
-            seq_counter: Box<dyn SequenceCountProvider<u16> + Send>,
+            seq_counter: Box<dyn SequenceCountProviderClonable<u16> + Send>,
             step_field_width: usize,
             fail_code_field_width: usize,
             max_fail_data_len: usize,
@@ -703,7 +705,7 @@ mod alloc_mod {
     #[derive(Clone)]
     pub struct VerificationReporterWithBuf {
         source_data_buf: Vec<u8>,
-        seq_counter: Box<dyn SequenceCountProvider<u16> + Send + 'static>,
+        seq_counter: Box<dyn SequenceCountProviderClonable<u16> + Send + 'static>,
         pub reporter: VerificationReporterBasic,
     }
 
@@ -892,13 +894,13 @@ mod alloc_mod {
     #[derive(Clone)]
     pub struct VerificationReporterWithSender<E> {
         pub reporter: VerificationReporterWithBuf,
-        pub sender: Box<dyn EcssTmSender<Error = E>>,
+        pub sender: Box<dyn EcssTmSenderClonable<Error = E>>,
     }
 
     impl<E: 'static> VerificationReporterWithSender<E> {
         pub fn new(
             cfg: &VerificationReporterCfg,
-            sender: Box<dyn EcssTmSender<Error = E>>,
+            sender: Box<dyn EcssTmSenderClonable<Error = E>>,
         ) -> Self {
             let reporter = VerificationReporterWithBuf::new(cfg);
             Self::new_from_reporter(reporter, sender)
@@ -906,7 +908,7 @@ mod alloc_mod {
 
         pub fn new_from_reporter(
             reporter: VerificationReporterWithBuf,
-            sender: Box<dyn EcssTmSender<Error = E>>,
+            sender: Box<dyn EcssTmSenderClonable<Error = E>>,
         ) -> Self {
             Self { reporter, sender }
         }
@@ -1004,6 +1006,7 @@ mod stdmod {
     use super::alloc_mod::VerificationReporterWithSender;
     use super::*;
     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr, StoreError};
+    use crate::pus::alloc_mod::EcssTmSenderClonable;
     use delegate::delegate;
     use spacepackets::tm::PusTm;
     use std::sync::{mpsc, Arc, Mutex, RwLockWriteGuard};
@@ -1085,8 +1088,8 @@ mod stdmod {
             }
         );
     }
-    unsafe impl Sync for MpscVerifSender {}
-    unsafe impl Send for MpscVerifSender {}
+
+    impl EcssTmSenderClonable for MpscVerifSender {}
 
     impl SendBackend for crossbeam_channel::Sender<StoreAddr> {
         fn send(&self, addr: StoreAddr) -> Result<(), StoreAddr> {
@@ -1123,11 +1126,8 @@ mod stdmod {
         );
     }
 
-    // TODO: Are those really necessary? Check with test..
     #[cfg(feature = "crossbeam")]
-    unsafe impl Sync for CrossbeamVerifSender {}
-    #[cfg(feature = "crossbeam")]
-    unsafe impl Send for CrossbeamVerifSender {}
+    impl EcssTmSenderClonable for CrossbeamVerifSender {}
 
     impl<S: SendBackend + Clone + 'static> EcssTmSender for StdSenderBase<S> {
         type Error = StdVerifSenderError;
@@ -1157,11 +1157,13 @@ mod stdmod {
 
 #[cfg(test)]
 mod tests {
+    use crate::pool::{LocalPool, PoolCfg, SharedPool};
+    use crate::pus::alloc_mod::EcssTmSenderClonable;
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
-        EcssTmError, EcssTmSender, FailParams, FailParamsWithStep, RequestId, TcStateNone,
-        VerificationReporterCfg, VerificationReporterWithBuf, VerificationReporterWithSender,
-        VerificationToken,
+        EcssTmError, EcssTmSender, FailParams, FailParamsWithStep, MpscVerifSender, RequestId,
+        TcStateNone, VerificationReporterCfg, VerificationReporterWithBuf,
+        VerificationReporterWithSender, VerificationToken,
     };
     use crate::seq_count::SimpleSeqCountProvider;
     use alloc::boxed::Box;
@@ -1171,7 +1173,13 @@ mod tests {
     use spacepackets::tm::PusTm;
     use spacepackets::{ByteConversionError, SpHeader};
     use std::collections::VecDeque;
+    use std::sync::{mpsc, Arc, RwLock};
+    use std::vec;
     use std::vec::Vec;
+
+    fn is_send<T: Send>(_: &T) {}
+    #[allow(dead_code)]
+    fn is_sync<T: Sync>(_: &T) {}
 
     const TEST_APID: u16 = 0x02;
     const EMPTY_STAMP: [u8; 7] = [0; 7];
@@ -1213,6 +1221,8 @@ mod tests {
         }
     }
 
+    impl EcssTmSenderClonable for TestSender {}
+
     #[derive(Debug, Copy, Clone, Eq, PartialEq)]
     struct DummyError {}
     #[derive(Default, Clone)]
@@ -1224,6 +1234,8 @@ mod tests {
             Err(EcssTmError::SendError(DummyError {}))
         }
     }
+
+    impl EcssTmSenderClonable for FallibleSender {}
 
     struct TestBase<'a> {
         vr: VerificationReporterWithBuf,
@@ -1307,6 +1319,15 @@ mod tests {
         assert_eq!(sender.service_queue.len(), 1);
         let info = sender.service_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
+    }
+
+    #[test]
+    fn test_mpsc_verif_send_sync() {
+        let pool = LocalPool::new(PoolCfg::new(vec![(8, 8)]));
+        let shared_pool: SharedPool = Arc::new(RwLock::new(Box::new(pool)));
+        let (tx, _) = mpsc::channel();
+        let mpsc_verif_sender = MpscVerifSender::new(shared_pool, tx);
+        is_send(&mpsc_verif_sender);
     }
 
     #[test]
