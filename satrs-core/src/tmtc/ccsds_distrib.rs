@@ -19,7 +19,7 @@
 //!
 //! ```rust
 //! use satrs_core::tmtc::ccsds_distrib::{CcsdsPacketHandler, CcsdsDistributor};
-//! use satrs_core::tmtc::ReceivesTc;
+//! use satrs_core::tmtc::{ReceivesTc, ReceivesTcBase};
 //! use spacepackets::{CcsdsPacket, SpHeader};
 //! use spacepackets::tc::PusTc;
 //!
@@ -84,7 +84,7 @@
 //!     .expect("Casting back to concrete type failed");
 //! mutable_ref.mutable_foo();
 //! ```
-use crate::tmtc::{ReceivesCcsdsTc, ReceivesTc};
+use crate::tmtc::{ReceivesCcsdsTc, ReceivesTc, ReceivesTcBase};
 use alloc::boxed::Box;
 use downcast_rs::Downcast;
 use spacepackets::{ByteConversionError, CcsdsPacket, SizeMissmatch, SpHeader};
@@ -136,7 +136,7 @@ impl<E: 'static> ReceivesCcsdsTc for CcsdsDistributor<E> {
     }
 }
 
-impl<E: 'static> ReceivesTc for CcsdsDistributor<E> {
+impl<E: 'static> ReceivesTcBase for CcsdsDistributor<E> {
     type Error = CcsdsError<E>;
 
     fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
@@ -153,6 +153,8 @@ impl<E: 'static> ReceivesTc for CcsdsDistributor<E> {
         self.dispatch_ccsds(&sp_header, tc_raw)
     }
 }
+
+impl<E: 'static> ReceivesTc for CcsdsDistributor<E> {}
 
 impl<E: 'static> CcsdsDistributor<E> {
     pub fn new(apid_handler: Box<dyn CcsdsPacketHandler<Error = E>>) -> Self {

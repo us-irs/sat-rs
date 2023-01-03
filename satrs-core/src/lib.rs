@@ -11,6 +11,7 @@
 #![cfg_attr(doc_cfg, feature(doc_cfg))]
 #[cfg(feature = "alloc")]
 extern crate alloc;
+#[cfg(feature = "alloc")]
 extern crate downcast_rs;
 #[cfg(any(feature = "std", test))]
 extern crate std;

@@ -3,6 +3,7 @@
 //! Currenty includes:
 //!
 //!  1. PUS Verification Service 1 module inside [verification]. Requires [alloc] support.
+#[cfg(feature = "alloc")]
 use downcast_rs::{impl_downcast, Downcast};
 #[cfg(feature = "alloc")]
 use dyn_clone::DynClone;
@@ -46,21 +47,19 @@ impl<E> From<ByteConversionError> for EcssTmError<E> {
 /// This sender object is responsible for sending telemetry to a TM sink. The [Downcast] trait
 /// is implemented to allow passing the sender as a boxed trait object and still retrieve the
 /// concrete type at a later point.
-pub trait EcssTmSender: Downcast + Send {
+pub trait EcssTmSenderBase: Send {
     type Error;
 
     fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>>;
 }
 
-impl_downcast!(EcssTmSender assoc Error);
-
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
     use super::*;
 
-    pub trait EcssTmSenderClonable: EcssTmSender + Downcast + DynClone {}
-    dyn_clone::clone_trait_object!(<T> EcssTmSenderClonable<Error=T>);
-    impl_downcast!(EcssTmSenderClonable assoc Error);
+    pub trait EcssTmSender: EcssTmSenderBase + Downcast + DynClone {}
+    dyn_clone::clone_trait_object!(<T> EcssTmSender<Error=T>);
+    impl_downcast!(EcssTmSender assoc Error);
 }
 
 pub(crate) fn source_buffer_large_enough<E>(cap: usize, len: usize) -> Result<(), EcssTmError<E>> {

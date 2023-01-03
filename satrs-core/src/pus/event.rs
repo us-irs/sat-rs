@@ -4,7 +4,7 @@ use spacepackets::tm::PusTm;
 use spacepackets::tm::PusTmSecondaryHeader;
 use spacepackets::{SpHeader, MAX_APID};
 
-use crate::pus::EcssTmSender;
+use crate::pus::EcssTmSenderBase;
 #[cfg(feature = "alloc")]
 pub use allocvec::EventReporter;
 
@@ -78,7 +78,7 @@ impl EventReporterBase {
     pub fn event_info<E>(
         &mut self,
         buf: &mut [u8],
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
@@ -96,7 +96,7 @@ impl EventReporterBase {
     pub fn event_low_severity<E>(
         &mut self,
         buf: &mut [u8],
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
@@ -114,7 +114,7 @@ impl EventReporterBase {
     pub fn event_medium_severity<E>(
         &mut self,
         buf: &mut [u8],
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
@@ -132,7 +132,7 @@ impl EventReporterBase {
     pub fn event_high_severity<E>(
         &mut self,
         buf: &mut [u8],
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
@@ -151,7 +151,7 @@ impl EventReporterBase {
         &mut self,
         buf: &mut [u8],
         subservice: Subservices,
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
@@ -220,7 +220,7 @@ mod allocvec {
         }
         pub fn event_info<E>(
             &mut self,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
@@ -236,7 +236,7 @@ mod allocvec {
 
         pub fn event_low_severity<E>(
             &mut self,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
@@ -252,7 +252,7 @@ mod allocvec {
 
         pub fn event_medium_severity<E>(
             &mut self,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
@@ -268,7 +268,7 @@ mod allocvec {
 
         pub fn event_high_severity<E>(
             &mut self,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
@@ -311,7 +311,7 @@ mod tests {
         pub service_queue: VecDeque<TmInfo>,
     }
 
-    impl EcssTmSender for TestSender {
+    impl EcssTmSenderBase for TestSender {
         type Error = ();
 
         fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<()>> {

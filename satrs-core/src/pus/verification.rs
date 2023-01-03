@@ -72,7 +72,7 @@
 //! The [integration test](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-core/tests/verification_test.rs)
 //! for the verification module contains examples how this module could be used in a more complex
 //! context involving multiple threads
-use crate::pus::{source_buffer_large_enough, EcssTmError, EcssTmSender};
+use crate::pus::{source_buffer_large_enough, EcssTmError, EcssTmSenderBase};
 use core::fmt::{Display, Formatter};
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
@@ -339,7 +339,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<TcStateNone>,
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
         seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<VerificationToken<TcStateAccepted>, VerificationErrorWithToken<E, TcStateNone>>
@@ -370,7 +370,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<TcStateNone>,
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
         seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateNone>> {
@@ -398,7 +398,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<TcStateAccepted>,
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
         seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<VerificationToken<TcStateStarted>, VerificationErrorWithToken<E, TcStateAccepted>>
@@ -431,7 +431,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<TcStateAccepted>,
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
         seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateAccepted>> {
@@ -459,7 +459,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: &VerificationToken<TcStateStarted>,
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
         seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         time_stamp: &[u8],
         step: impl EcssEnumeration,
@@ -485,7 +485,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<TcStateStarted>,
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
         seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         params: FailParamsWithStep,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
@@ -514,7 +514,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<TcStateStarted>,
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
         seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
@@ -543,7 +543,7 @@ impl VerificationReporterBasic {
         &mut self,
         buf: &mut [u8],
         token: VerificationToken<TcStateStarted>,
-        sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
         seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
@@ -664,7 +664,7 @@ impl VerificationReporterBasic {
 #[cfg(feature = "alloc")]
 mod alloc_mod {
     use super::*;
-    use crate::pus::alloc_mod::EcssTmSenderClonable;
+    use crate::pus::alloc_mod::EcssTmSender;
     use crate::seq_count::SequenceCountProviderClonable;
     use alloc::boxed::Box;
     use alloc::vec;
@@ -744,7 +744,7 @@ mod alloc_mod {
         pub fn acceptance_success<E>(
             &mut self,
             token: VerificationToken<TcStateNone>,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             time_stamp: &[u8],
         ) -> Result<VerificationToken<TcStateAccepted>, VerificationErrorWithToken<E, TcStateNone>>
         {
@@ -761,7 +761,7 @@ mod alloc_mod {
         pub fn acceptance_failure<E>(
             &mut self,
             token: VerificationToken<TcStateNone>,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             params: FailParams,
         ) -> Result<(), VerificationErrorWithToken<E, TcStateNone>> {
             self.reporter.acceptance_failure(
@@ -779,7 +779,7 @@ mod alloc_mod {
         pub fn start_success<E>(
             &mut self,
             token: VerificationToken<TcStateAccepted>,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             time_stamp: &[u8],
         ) -> Result<VerificationToken<TcStateStarted>, VerificationErrorWithToken<E, TcStateAccepted>>
         {
@@ -799,7 +799,7 @@ mod alloc_mod {
         pub fn start_failure<E>(
             &mut self,
             token: VerificationToken<TcStateAccepted>,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             params: FailParams,
         ) -> Result<(), VerificationErrorWithToken<E, TcStateAccepted>> {
             self.reporter.start_failure(
@@ -817,7 +817,7 @@ mod alloc_mod {
         pub fn step_success<E>(
             &mut self,
             token: &VerificationToken<TcStateStarted>,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             time_stamp: &[u8],
             step: impl EcssEnumeration,
         ) -> Result<(), EcssTmError<E>> {
@@ -838,7 +838,7 @@ mod alloc_mod {
         pub fn step_failure<E>(
             &mut self,
             token: VerificationToken<TcStateStarted>,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             params: FailParamsWithStep,
         ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
             self.reporter.step_failure(
@@ -857,7 +857,7 @@ mod alloc_mod {
         pub fn completion_success<E>(
             &mut self,
             token: VerificationToken<TcStateStarted>,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             time_stamp: &[u8],
         ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
             self.reporter.completion_success(
@@ -876,7 +876,7 @@ mod alloc_mod {
         pub fn completion_failure<E>(
             &mut self,
             token: VerificationToken<TcStateStarted>,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             params: FailParams,
         ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
             self.reporter.completion_failure(
@@ -894,13 +894,13 @@ mod alloc_mod {
     #[derive(Clone)]
     pub struct VerificationReporterWithSender<E> {
         pub reporter: VerificationReporterWithBuf,
-        pub sender: Box<dyn EcssTmSenderClonable<Error = E>>,
+        pub sender: Box<dyn EcssTmSender<Error = E>>,
     }
 
     impl<E: 'static> VerificationReporterWithSender<E> {
         pub fn new(
             cfg: &VerificationReporterCfg,
-            sender: Box<dyn EcssTmSenderClonable<Error = E>>,
+            sender: Box<dyn EcssTmSender<Error = E>>,
         ) -> Self {
             let reporter = VerificationReporterWithBuf::new(cfg);
             Self::new_from_reporter(reporter, sender)
@@ -908,7 +908,7 @@ mod alloc_mod {
 
         pub fn new_from_reporter(
             reporter: VerificationReporterWithBuf,
-            sender: Box<dyn EcssTmSenderClonable<Error = E>>,
+            sender: Box<dyn EcssTmSender<Error = E>>,
         ) -> Self {
             Self { reporter, sender }
         }
@@ -1006,7 +1006,7 @@ mod stdmod {
     use super::alloc_mod::VerificationReporterWithSender;
     use super::*;
     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr, StoreError};
-    use crate::pus::alloc_mod::EcssTmSenderClonable;
+    use crate::pus::alloc_mod::EcssTmSender;
     use delegate::delegate;
     use spacepackets::tm::PusTm;
     use std::sync::{mpsc, Arc, Mutex, RwLockWriteGuard};
@@ -1069,7 +1069,7 @@ mod stdmod {
     }
 
     /// Verification sender with a [mpsc::Sender] backend.
-    /// It implements the [EcssTmSender] trait to be used as PUS Verification TM sender.
+    /// It implements the [EcssTmSenderBase] trait to be used as PUS Verification TM sender.
     impl MpscVerifSender {
         pub fn new(tm_store: SharedPool, tx: mpsc::Sender<StoreAddr>) -> Self {
             Self {
@@ -1079,7 +1079,7 @@ mod stdmod {
     }
 
     //noinspection RsTraitImplementation
-    impl EcssTmSender for MpscVerifSender {
+    impl EcssTmSenderBase for MpscVerifSender {
         type Error = StdVerifSenderError;
 
         delegate!(
@@ -1089,7 +1089,7 @@ mod stdmod {
         );
     }
 
-    impl EcssTmSenderClonable for MpscVerifSender {}
+    impl EcssTmSender for MpscVerifSender {}
 
     impl SendBackend for crossbeam_channel::Sender<StoreAddr> {
         fn send(&self, addr: StoreAddr) -> Result<(), StoreAddr> {
@@ -1098,7 +1098,7 @@ mod stdmod {
     }
 
     /// Verification sender with a [crossbeam_channel::Sender] backend.
-    /// It implements the [EcssTmSender] trait to be used as PUS Verification TM sender
+    /// It implements the [EcssTmSenderBase] trait to be used as PUS Verification TM sender
     #[cfg(feature = "crossbeam")]
     #[derive(Clone)]
     pub struct CrossbeamVerifSender {
@@ -1116,7 +1116,7 @@ mod stdmod {
 
     //noinspection RsTraitImplementation
     #[cfg(feature = "crossbeam")]
-    impl EcssTmSender for CrossbeamVerifSender {
+    impl EcssTmSenderBase for CrossbeamVerifSender {
         type Error = StdVerifSenderError;
 
         delegate!(
@@ -1127,9 +1127,9 @@ mod stdmod {
     }
 
     #[cfg(feature = "crossbeam")]
-    impl EcssTmSenderClonable for CrossbeamVerifSender {}
+    impl EcssTmSender for CrossbeamVerifSender {}
 
-    impl<S: SendBackend + Clone + 'static> EcssTmSender for StdSenderBase<S> {
+    impl<S: SendBackend + Clone + 'static> EcssTmSenderBase for StdSenderBase<S> {
         type Error = StdVerifSenderError;
         fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>> {
             let operation = |mut mg: RwLockWriteGuard<ShareablePoolProvider>| {
@@ -1158,10 +1158,10 @@ mod stdmod {
 #[cfg(test)]
 mod tests {
     use crate::pool::{LocalPool, PoolCfg, SharedPool};
-    use crate::pus::alloc_mod::EcssTmSenderClonable;
+    use crate::pus::alloc_mod::EcssTmSender;
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
-        EcssTmError, EcssTmSender, FailParams, FailParamsWithStep, MpscVerifSender, RequestId,
+        EcssTmError, EcssTmSenderBase, FailParams, FailParamsWithStep, MpscVerifSender, RequestId,
         TcStateNone, VerificationReporterCfg, VerificationReporterWithBuf,
         VerificationReporterWithSender, VerificationToken,
     };
@@ -1196,7 +1196,7 @@ mod tests {
         pub service_queue: VecDeque<TmInfo>,
     }
 
-    impl EcssTmSender for TestSender {
+    impl EcssTmSenderBase for TestSender {
         type Error = ();
         fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>> {
             assert_eq!(PusPacket::service(&tm), 1);
@@ -1221,21 +1221,21 @@ mod tests {
         }
     }
 
-    impl EcssTmSenderClonable for TestSender {}
+    impl EcssTmSender for TestSender {}
 
     #[derive(Debug, Copy, Clone, Eq, PartialEq)]
     struct DummyError {}
     #[derive(Default, Clone)]
     struct FallibleSender {}
 
-    impl EcssTmSender for FallibleSender {
+    impl EcssTmSenderBase for FallibleSender {
         type Error = DummyError;
         fn send_tm(&mut self, _: PusTm) -> Result<(), EcssTmError<DummyError>> {
             Err(EcssTmError::SendError(DummyError {}))
         }
     }
 
-    impl EcssTmSenderClonable for FallibleSender {}
+    impl EcssTmSender for FallibleSender {}
 
     struct TestBase<'a> {
         vr: VerificationReporterWithBuf,

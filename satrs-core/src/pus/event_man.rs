@@ -13,7 +13,7 @@ pub use crate::pus::event::EventReporter;
 use crate::pus::verification::{TcStateStarted, VerificationToken};
 use crate::pus::EcssTmError;
 #[cfg(feature = "alloc")]
-use crate::pus::EcssTmSender;
+use crate::pus::EcssTmSenderBase;
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub use alloc_mod::*;
@@ -175,7 +175,7 @@ pub mod alloc_mod {
 
         pub fn generate_pus_event_tm_generic<E>(
             &mut self,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             time_stamp: &[u8],
             event: Event,
             aux_data: Option<&[u8]>,
@@ -225,7 +225,7 @@ pub mod alloc_mod {
 
         pub fn generate_pus_event_tm<E, Severity: HasSeverity>(
             &mut self,
-            sender: &mut (impl EcssTmSender<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderBase<Error = E> + ?Sized),
             time_stamp: &[u8],
             event: EventU32TypedSev<Severity>,
             aux_data: Option<&[u8]>,
@@ -252,7 +252,7 @@ mod tests {
         sender: std::sync::mpsc::Sender<Vec<u8>>,
     }
 
-    impl EcssTmSender for EventTmSender {
+    impl EcssTmSenderBase for EventTmSender {
         type Error = SendError<Vec<u8>>;
         fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>> {
             let mut vec = Vec::new();

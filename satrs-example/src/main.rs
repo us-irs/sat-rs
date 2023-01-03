@@ -22,7 +22,7 @@ use satrs_core::pus::hk::Subservice;
 use satrs_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
 };
-use satrs_core::pus::{EcssTmError, EcssTmSender};
+use satrs_core::pus::{EcssTmError, EcssTmSenderBase};
 use satrs_core::seq_count::SimpleSeqCountProvider;
 use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
 use spacepackets::time::cds::TimeProvider;
@@ -51,7 +51,7 @@ impl EventTmSender {
     }
 }
 
-impl EcssTmSender for EventTmSender {
+impl EcssTmSenderBase for EventTmSender {
     type Error = mpsc::SendError<StoreAddr>;
 
     fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>> {

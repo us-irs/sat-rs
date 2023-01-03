@@ -53,6 +53,9 @@
 //! ```
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
+#[cfg(feature = "alloc")]
+pub use alloc_mod::*;
+#[cfg(feature = "alloc")]
 use downcast_rs::Downcast;
 #[cfg(feature = "alloc")]
 use hashbrown::HashMap;
@@ -65,73 +68,81 @@ pub struct ObjectId {
     pub name: &'static str,
 }
 
-/// Each object which is stored inside the [object manager][ObjectManager] needs to implemented
-/// this trait
-pub trait SystemObject: Downcast {
-    type Error;
-    fn get_object_id(&self) -> &ObjectId;
-    fn initialize(&mut self) -> Result<(), Self::Error>;
-}
-downcast_rs::impl_downcast!(SystemObject assoc Error);
-
-pub trait ManagedSystemObject: SystemObject + Send {}
-downcast_rs::impl_downcast!(ManagedSystemObject assoc Error);
-
-/// Helper module to manage multiple [ManagedSystemObjects][ManagedSystemObject] by mapping them
-/// using an [object ID][ObjectId]
 #[cfg(feature = "alloc")]
-pub struct ObjectManager<E> {
-    obj_map: HashMap<ObjectId, Box<dyn ManagedSystemObject<Error = E>>>,
-}
+pub mod alloc_mod {
+    use super::*;
 
-#[cfg(feature = "alloc")]
-impl<E: 'static> Default for ObjectManager<E> {
-    fn default() -> Self {
-        Self::new()
+    /// Each object which is stored inside the [object manager][ObjectManager] needs to implemented
+    /// this trait
+    pub trait SystemObject: Downcast {
+        type Error;
+        fn get_object_id(&self) -> &ObjectId;
+        fn initialize(&mut self) -> Result<(), Self::Error>;
     }
-}
+    downcast_rs::impl_downcast!(SystemObject assoc Error);
 
-#[cfg(feature = "alloc")]
-impl<E: 'static> ObjectManager<E> {
-    pub fn new() -> Self {
-        ObjectManager {
-            obj_map: HashMap::new(),
+    pub trait ManagedSystemObject: SystemObject + Send {}
+    downcast_rs::impl_downcast!(ManagedSystemObject assoc Error);
+
+    /// Helper module to manage multiple [ManagedSystemObjects][ManagedSystemObject] by mapping them
+    /// using an [object ID][ObjectId]
+    #[cfg(feature = "alloc")]
+    pub struct ObjectManager<E> {
+        obj_map: HashMap<ObjectId, Box<dyn ManagedSystemObject<Error = E>>>,
+    }
+
+    #[cfg(feature = "alloc")]
+    impl<E: 'static> Default for ObjectManager<E> {
+        fn default() -> Self {
+            Self::new()
         }
     }
-    pub fn insert(&mut self, sys_obj: Box<dyn ManagedSystemObject<Error = E>>) -> bool {
-        let obj_id = sys_obj.get_object_id();
-        if self.obj_map.contains_key(obj_id) {
-            return false;
-        }
-        self.obj_map.insert(*obj_id, sys_obj).is_none()
-    }
 
-    /// Initializes all System Objects in the hash map and returns the number of successful
-    /// initializations
-    pub fn initialize(&mut self) -> Result<u32, Box<dyn Error>> {
-        let mut init_success = 0;
-        for val in self.obj_map.values_mut() {
-            if val.initialize().is_ok() {
-                init_success += 1
+    #[cfg(feature = "alloc")]
+    impl<E: 'static> ObjectManager<E> {
+        pub fn new() -> Self {
+            ObjectManager {
+                obj_map: HashMap::new(),
             }
         }
-        Ok(init_success)
-    }
+        pub fn insert(&mut self, sys_obj: Box<dyn ManagedSystemObject<Error = E>>) -> bool {
+            let obj_id = sys_obj.get_object_id();
+            if self.obj_map.contains_key(obj_id) {
+                return false;
+            }
+            self.obj_map.insert(*obj_id, sys_obj).is_none()
+        }
 
-    /// Retrieve a reference to an object stored inside the manager. The type to retrieve needs to
-    /// be explicitly passed as a generic parameter or specified on the left hand side of the
-    /// expression.
-    pub fn get_ref<T: ManagedSystemObject<Error = E>>(&self, key: &ObjectId) -> Option<&T> {
-        self.obj_map.get(key).and_then(|o| o.downcast_ref::<T>())
-    }
+        /// Initializes all System Objects in the hash map and returns the number of successful
+        /// initializations
+        pub fn initialize(&mut self) -> Result<u32, Box<dyn Error>> {
+            let mut init_success = 0;
+            for val in self.obj_map.values_mut() {
+                if val.initialize().is_ok() {
+                    init_success += 1
+                }
+            }
+            Ok(init_success)
+        }
 
-    /// Retrieve a mutable reference to an object stored inside the manager. The type to retrieve
-    /// needs to be explicitly passed as a generic parameter or specified on the left hand side
-    /// of the expression.
-    pub fn get_mut<T: ManagedSystemObject<Error = E>>(&mut self, key: &ObjectId) -> Option<&mut T> {
-        self.obj_map
-            .get_mut(key)
-            .and_then(|o| o.downcast_mut::<T>())
+        /// Retrieve a reference to an object stored inside the manager. The type to retrieve needs to
+        /// be explicitly passed as a generic parameter or specified on the left hand side of the
+        /// expression.
+        pub fn get_ref<T: ManagedSystemObject<Error = E>>(&self, key: &ObjectId) -> Option<&T> {
+            self.obj_map.get(key).and_then(|o| o.downcast_ref::<T>())
+        }
+
+        /// Retrieve a mutable reference to an object stored inside the manager. The type to retrieve
+        /// needs to be explicitly passed as a generic parameter or specified on the left hand side
+        /// of the expression.
+        pub fn get_mut<T: ManagedSystemObject<Error = E>>(
+            &mut self,
+            key: &ObjectId,
+        ) -> Option<&mut T> {
+            self.obj_map
+                .get_mut(key)
+                .and_then(|o| o.downcast_mut::<T>())
+        }
     }
 }
 

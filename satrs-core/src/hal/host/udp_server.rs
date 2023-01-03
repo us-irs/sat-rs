@@ -1,5 +1,5 @@
 //! UDP server helper components
-use crate::tmtc::ReceivesTc;
+use crate::tmtc::{ReceivesTc, ReceivesTcBase};
 use std::boxed::Box;
 use std::io::{Error, ErrorKind};
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
@@ -19,19 +19,20 @@ use std::vec::Vec;
 /// ```
 /// use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 /// use satrs_core::hal::host::udp_server::UdpTcServer;
-/// use satrs_core::tmtc::ReceivesTc;
+/// use satrs_core::tmtc::{ReceivesTc, ReceivesTcBase};
 /// use spacepackets::SpHeader;
 /// use spacepackets::tc::PusTc;
 ///
 /// #[derive (Default)]
 /// struct PingReceiver {}
-/// impl ReceivesTc for PingReceiver {
+/// impl ReceivesTcBase for PingReceiver {
 ///    type Error = ();
 ///    fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
 ///         assert_eq!(tc_raw.len(), 13);
 ///         Ok(())
 ///     }
 /// }
+/// impl ReceivesTc for PingReceiver {}
 ///
 /// let mut buf = [0; 32];
 /// let dest_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 7777);
@@ -89,13 +90,15 @@ impl<E: PartialEq> PartialEq for ReceiveResult<E> {
 
 impl<E: Eq + PartialEq> Eq for ReceiveResult<E> {}
 
-impl<E: 'static> ReceivesTc for UdpTcServer<E> {
+impl<E: 'static> ReceivesTcBase for UdpTcServer<E> {
     type Error = E;
 
     fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
         self.tc_receiver.pass_tc(tc_raw)
     }
 }
+
+impl<E: 'static> ReceivesTc for UdpTcServer<E> {}
 
 impl<E: 'static> UdpTcServer<E> {
     pub fn new<A: ToSocketAddrs>(
@@ -140,7 +143,7 @@ impl<E: 'static> UdpTcServer<E> {
 #[cfg(test)]
 mod tests {
     use crate::hal::host::udp_server::{ReceiveResult, UdpTcServer};
-    use crate::tmtc::ReceivesTc;
+    use crate::tmtc::{ReceivesTc, ReceivesTcBase};
     use spacepackets::tc::PusTc;
     use spacepackets::SpHeader;
     use std::boxed::Box;
@@ -155,7 +158,7 @@ mod tests {
         pub sent_cmds: VecDeque<Vec<u8>>,
     }
 
-    impl ReceivesTc for PingReceiver {
+    impl ReceivesTcBase for PingReceiver {
         type Error = ();
 
         fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
@@ -165,6 +168,8 @@ mod tests {
             Ok(())
         }
     }
+
+    impl ReceivesTc for PingReceiver {}
 
     #[test]
     fn basic_test() {

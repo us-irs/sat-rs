@@ -5,6 +5,7 @@
 //! directly dispatch received packets to packet listeners based on packet fields like the CCSDS
 //! Application Process ID (APID) or the ECSS PUS service type. This allows for fast packet
 //! routing without the overhead and complication of using message queues. However, it also requires
+#[cfg(feature = "alloc")]
 use downcast_rs::{impl_downcast, Downcast};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -62,11 +63,14 @@ impl AddressableId {
 /// This trait is implemented by both the [crate::tmtc::pus_distrib::PusDistributor] and the
 /// [crate::tmtc::ccsds_distrib::CcsdsDistributor]  which allows to pass the respective packets in
 /// raw byte format into them.
-pub trait ReceivesTc: Downcast + Send {
+pub trait ReceivesTcBase: Send {
     type Error;
     fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error>;
 }
 
+#[cfg(feature = "alloc")]
+pub trait ReceivesTc: ReceivesTcBase + Downcast {}
+#[cfg(feature = "alloc")]
 impl_downcast!(ReceivesTc assoc Error);
 
 /// Generic trait for object which can receive CCSDS space packets, for fsrc-example ECSS PUS packets
