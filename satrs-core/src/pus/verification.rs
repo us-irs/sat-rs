@@ -94,7 +94,7 @@ pub use alloc_mod::{
     VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
 };
 
-use crate::seq_count::SequenceCountProvider;
+use crate::seq_count::SequenceCountProviderCore;
 #[cfg(all(feature = "crossbeam", feature = "std"))]
 pub use stdmod::CrossbeamVerifSender;
 #[cfg(feature = "std")]
@@ -340,7 +340,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateNone>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<VerificationToken<TcStateAccepted>, VerificationErrorWithToken<E, TcStateNone>>
     {
@@ -371,7 +371,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateNone>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateNone>> {
         let tm = self
@@ -399,7 +399,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateAccepted>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<VerificationToken<TcStateStarted>, VerificationErrorWithToken<E, TcStateAccepted>>
     {
@@ -432,7 +432,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateAccepted>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateAccepted>> {
         let tm = self
@@ -460,7 +460,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: &VerificationToken<TcStateStarted>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &[u8],
         step: impl EcssEnumeration,
     ) -> Result<(), EcssTmError<E>> {
@@ -486,7 +486,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateStarted>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
         params: FailParamsWithStep,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
         let tm = self
@@ -515,7 +515,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateStarted>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &[u8],
     ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
         let tm = self
@@ -544,7 +544,7 @@ impl VerificationReporterCore {
         buf: &mut [u8],
         token: VerificationToken<TcStateStarted>,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-        seq_counter: &mut (impl SequenceCountProvider<u16> + ?Sized),
+        seq_counter: &mut (impl SequenceCountProviderCore<u16> + ?Sized),
         params: FailParams,
     ) -> Result<(), VerificationErrorWithToken<E, TcStateStarted>> {
         let tm = self
@@ -665,7 +665,7 @@ impl VerificationReporterCore {
 mod alloc_mod {
     use super::*;
     use crate::pus::alloc_mod::EcssTmSender;
-    use crate::seq_count::SequenceCountProviderClonable;
+    use crate::seq_count::SequenceCountProvider;
     use alloc::boxed::Box;
     use alloc::vec;
     use alloc::vec::Vec;
@@ -673,7 +673,7 @@ mod alloc_mod {
     #[derive(Clone)]
     pub struct VerificationReporterCfg {
         apid: u16,
-        seq_counter: Box<dyn SequenceCountProviderClonable<u16> + Send>,
+        seq_counter: Box<dyn SequenceCountProvider<u16> + Send>,
         pub step_field_width: usize,
         pub fail_code_field_width: usize,
         pub max_fail_data_len: usize,
@@ -682,7 +682,7 @@ mod alloc_mod {
     impl VerificationReporterCfg {
         pub fn new(
             apid: u16,
-            seq_counter: Box<dyn SequenceCountProviderClonable<u16> + Send>,
+            seq_counter: Box<dyn SequenceCountProvider<u16> + Send>,
             step_field_width: usize,
             fail_code_field_width: usize,
             max_fail_data_len: usize,
@@ -705,7 +705,7 @@ mod alloc_mod {
     #[derive(Clone)]
     pub struct VerificationReporter {
         source_data_buf: Vec<u8>,
-        seq_counter: Box<dyn SequenceCountProviderClonable<u16> + Send + 'static>,
+        seq_counter: Box<dyn SequenceCountProvider<u16> + Send + 'static>,
         pub reporter: VerificationReporterCore,
     }
 

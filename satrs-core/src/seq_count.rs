@@ -3,7 +3,8 @@ use dyn_clone::DynClone;
 #[cfg(feature = "std")]
 pub use stdmod::*;
 
-pub trait SequenceCountProvider<Raw> {
+/// Core trait for objects which can provide a sequence count.
+pub trait SequenceCountProviderCore<Raw> {
     fn get(&self) -> Raw;
     fn increment(&mut self);
     fn get_and_increment(&mut self) -> Raw {
@@ -14,16 +15,18 @@ pub trait SequenceCountProvider<Raw> {
 }
 
 #[cfg(feature = "alloc")]
-pub trait SequenceCountProviderClonable<Raw>: SequenceCountProvider<Raw> + DynClone {}
+pub trait SequenceCountProvider<Raw>: SequenceCountProviderCore<Raw> + DynClone {}
 #[cfg(feature = "alloc")]
-dyn_clone::clone_trait_object!(SequenceCountProviderClonable<u16>);
+dyn_clone::clone_trait_object!(SequenceCountProvider<u16>);
+#[cfg(feature = "alloc")]
+impl<T, Raw> SequenceCountProvider<Raw> for T where T: SequenceCountProviderCore<Raw> + Clone {}
 
 #[derive(Default, Clone)]
 pub struct SimpleSeqCountProvider {
     seq_count: u16,
 }
 
-impl SequenceCountProvider<u16> for SimpleSeqCountProvider {
+impl SequenceCountProviderCore<u16> for SimpleSeqCountProvider {
     fn get(&self) -> u16 {
         self.seq_count
     }
@@ -37,9 +40,6 @@ impl SequenceCountProvider<u16> for SimpleSeqCountProvider {
     }
 }
 
-#[cfg(feature = "alloc")]
-impl SequenceCountProviderClonable<u16> for SimpleSeqCountProvider {}
-
 #[cfg(feature = "std")]
 pub mod stdmod {
     use super::*;
@@ -51,7 +51,7 @@ pub mod stdmod {
         seq_count: Arc<AtomicU16>,
     }
 
-    impl SequenceCountProvider<u16> for SyncSeqCountProvider {
+    impl SequenceCountProviderCore<u16> for SyncSeqCountProvider {
         fn get(&self) -> u16 {
             self.seq_count.load(Ordering::SeqCst)
         }
@@ -64,6 +64,4 @@ pub mod stdmod {
             self.seq_count.fetch_add(1, Ordering::SeqCst)
         }
     }
-
-    impl SequenceCountProviderClonable<u16> for SyncSeqCountProvider {}
 }
