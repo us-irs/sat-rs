@@ -45,13 +45,13 @@ impl SequenceCountProviderCore<u16> for SeqCountProviderSimple {
 use core::sync::atomic::{AtomicU16, Ordering};
 
 pub struct SeqCountProviderAtomicRef {
-    atomic: &'static AtomicU16,
+    atomic: AtomicU16,
     ordering: Ordering,
 }
 
 impl SeqCountProviderAtomicRef {
-    pub const fn new(atomic: &'static AtomicU16, ordering: Ordering) -> Self {
-        Self { atomic, ordering }
+    pub const fn new(ordering: Ordering) -> Self {
+        Self { atomic: AtomicU16::new(0), ordering }
     }
 }
 
