@@ -4,7 +4,7 @@
 //!  1. [CcsdsDistributor] component which dispatches received packets to a user-provided handler
 //!  2. [CcsdsPacketHandler] trait which should be implemented by the user-provided packet handler.
 //!
-//! The [CcsdsDistributor] implements the [ReceivesCcsdsTc] and [ReceivesTc] trait which allows to
+//! The [CcsdsDistributor] implements the [ReceivesCcsdsTc] and [ReceivesTcCore] trait which allows to
 //! pass raw or CCSDS packets to it. Upon receiving a packet, it performs the following steps:
 //!
 //! 1. It tries to identify the target Application Process Identifier (APID) based on the

@@ -5,9 +5,9 @@
 //!  2. [PusServiceProvider] trait which should be implemented by the user-provided PUS packet
 //!     handler.
 //!
-//! The [PusDistributor] implements the [ReceivesEcssPusTc], [ReceivesCcsdsTc] and the [ReceivesTc]
-//! trait which allows to pass raw packets, CCSDS packets and PUS TC packets into it.
-//! Upon receiving a packet, it performs the following steps:
+//! The [PusDistributor] implements the [ReceivesEcssPusTc], [ReceivesCcsdsTc] and the
+//! [ReceivesTcCore] trait which allows to pass raw packets, CCSDS packets and PUS TC packets into
+//! it. Upon receiving a packet, it performs the following steps:
 //!
 //! 1. It tries to extract the [SpHeader] and [PusTc] objects from the raw bytestream. If this
 //!    process fails, a [PusDistribError::PusError] is returned to the user.

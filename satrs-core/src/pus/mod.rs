@@ -44,10 +44,8 @@ impl<E> From<ByteConversionError> for EcssTmError<E> {
 
 /// Generic trait for a user supplied sender object.
 ///
-/// This sender object is responsible for sending telemetry to a TM sink. The [Downcast] trait
-/// is implemented to allow passing the sender as a boxed trait object and still retrieve the
-/// concrete type at a later point.
-pub trait EcssTmSenderBase: Send {
+/// This sender object is responsible for sending telemetry to a TM sink.
+pub trait EcssTmSenderCore: Send {
     type Error;
 
     fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmError<Self::Error>>;
@@ -57,7 +55,21 @@ pub trait EcssTmSenderBase: Send {
 pub mod alloc_mod {
     use super::*;
 
-    pub trait EcssTmSender: EcssTmSenderBase + Downcast + DynClone {}
+    /// Extension trait for [EcssTmSenderCore].
+    ///
+    /// It provides additional functionality, for example by implementing the [Downcast] trait
+    /// and the [DynClone] trait.
+    ///
+    /// [Downcast] is implemented to allow passing the sender as a boxed trait object and still
+    /// retrieve the concrete type at a later point.
+    ///
+    /// [DynClone] allows cloning the trait object as long as the boxed object implements
+    /// [Clone].
+    pub trait EcssTmSender: EcssTmSenderCore + Downcast + DynClone {}
+
+    /// Blanket implementation for all types which implement [EcssTmSenderCore] and are clonable.
+    impl<T> EcssTmSender for T where T: EcssTmSenderCore + Clone + 'static {}
+
     dyn_clone::clone_trait_object!(<T> EcssTmSender<Error=T>);
     impl_downcast!(EcssTmSender assoc Error);
 }

@@ -12,7 +12,7 @@ use std::vec::Vec;
 /// be declared upfront. This avoids dynamic allocation during run-time. The user can specify a TC
 /// receiver in form of a special trait object which implements [ReceivesTc]. Please note that the
 /// receiver should copy out the received data if it the data is required past the
-/// [ReceivesTc::pass_tc] call.
+/// [ReceivesTcCore::pass_tc] call.
 ///
 /// # Examples
 ///
