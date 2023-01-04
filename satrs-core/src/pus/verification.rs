@@ -192,10 +192,10 @@ impl RequestId {
 /// If a verification operation fails, the passed token will be returned as well. This allows
 /// re-trying the operation at a later point.
 #[derive(Debug, Clone)]
-pub struct VerificationOrSendErrorWithToken<E, T>(EcssTmErrorWithSend<E>, VerificationToken<T>);
+pub struct VerificationOrSendErrorWithToken<E, T>(pub EcssTmErrorWithSend<E>, pub VerificationToken<T>);
 
 #[derive(Debug, Clone)]
-pub struct VerificationErrorWithToken<T>(EcssTmError, VerificationToken<T>);
+pub struct VerificationErrorWithToken<T>(pub EcssTmError, pub VerificationToken<T>);
 
 impl<E, T> From<VerificationErrorWithToken<T>> for VerificationOrSendErrorWithToken<E, T> {
     fn from(value: VerificationErrorWithToken<T>) -> Self {
