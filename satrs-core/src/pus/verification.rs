@@ -523,7 +523,7 @@ impl VerificationReporterCore {
         )
     }
 
-    pub fn send_acceptance<'src_data, E>(
+    pub fn send_acceptance_success<'src_data, E>(
         &self,
         mut sendable: VerificationSendable<'src_data, TcStateNone, VerifSuccess>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
@@ -534,6 +534,19 @@ impl VerificationReporterCore {
             .send_tm(sendable.pus_tm.take().unwrap())
             .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
         Ok(sendable.send_success_acceptance_success(Some(seq_counter)))
+    }
+
+    pub fn send_acceptance_failure<'src_data, E>(
+        &self,
+        mut sendable: VerificationSendable<'src_data, TcStateNone, VerifFailure>,
+        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+    ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateNone>> {
+        sender
+            .send_tm(sendable.pus_tm.take().unwrap())
+            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
+        sendable.send_success_verif_failure(Some(seq_counter));
+        Ok(())
     }
 
     /// Package a PUS TM\[1, 2\] packet, see 8.1.2.2 of the PUS standard.
@@ -579,6 +592,21 @@ impl VerificationReporterCore {
         )
     }
 
+    pub fn send_start_success<'src_data, E>(
+        &self,
+        mut sendable: VerificationSendable<'src_data, TcStateAccepted, VerifSuccess>,
+        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+    ) -> Result<
+        VerificationToken<TcStateStarted>,
+        VerificationOrSendErrorWithToken<E, TcStateAccepted>,
+    > {
+        sender
+            .send_tm(sendable.pus_tm.take().unwrap())
+            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
+        Ok(sendable.send_success_start_success(Some(seq_counter)))
+    }
+
     /// Package and send a PUS TM\[1, 4\] packet, see 8.1.2.4 of the PUS standard.
     ///
     /// Requires a token previously acquired by calling [Self::acceptance_success]. It consumes
@@ -601,6 +629,19 @@ impl VerificationReporterCore {
             None::<&dyn EcssEnumeration>,
             &params,
         )
+    }
+
+    pub fn send_start_failure<'src_data, E>(
+        &self,
+        mut sendable: VerificationSendable<'src_data, TcStateAccepted, VerifFailure>,
+        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+    ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateAccepted>> {
+        sender
+            .send_tm(sendable.pus_tm.take().unwrap())
+            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
+        sendable.send_success_verif_failure(Some(seq_counter));
+        Ok(())
     }
 
     /// Package and send a PUS TM\[1, 5\] packet, see 8.1.2.5 of the PUS standard.
@@ -699,6 +740,32 @@ impl VerificationReporterCore {
             None::<&dyn EcssEnumeration>,
             &params,
         )
+    }
+
+    pub fn send_step_or_completion_success<'src_data, E>(
+        &self,
+        mut sendable: VerificationSendable<'src_data, TcStateStarted, VerifSuccess>,
+        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+    ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
+        sender
+            .send_tm(sendable.pus_tm.take().unwrap())
+            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
+        sendable.send_success_step_or_completion_success(Some(seq_counter));
+        Ok(())
+    }
+
+    pub fn send_step_or_completion_failure<'src_data, E>(
+        &self,
+        mut sendable: VerificationSendable<'src_data, TcStateStarted, VerifFailure>,
+        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+    ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
+        sender
+            .send_tm(sendable.pus_tm.take().unwrap())
+            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
+        sendable.send_success_verif_failure(Some(seq_counter));
+        Ok(())
     }
 
     fn create_pus_verif_success_tm<'src_data>(
