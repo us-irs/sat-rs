@@ -349,10 +349,6 @@ impl<'src_data, State, SuccessOrFailure> VerificationSendable<'src_data, State, 
     pub fn pus_tm_mut(&mut self) -> &mut PusTm<'src_data> {
         self.pus_tm.as_mut().unwrap()
     }
-
-    pub(crate) fn take_tm(&mut self) -> PusTm<'src_data> {
-        self.pus_tm.take().unwrap()
-    }
 }
 
 impl<'src_data, State> VerificationSendable<'src_data, State, VerifFailure> {
@@ -954,17 +950,14 @@ mod alloc_mod {
             VerificationToken<TcStateAccepted>,
             VerificationOrSendErrorWithToken<E, TcStateNone>,
         > {
-            let mut sendable = self.reporter.acceptance_success(
+            let sendable = self.reporter.acceptance_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
                 self.seq_counter.as_ref(),
                 time_stamp,
             )?;
-            sender
-                .send_tm(sendable.take_tm())
-                .map_err(|e| VerificationOrSendErrorWithToken(e, token))?;
-            let token = sendable.send_success_acceptance_success(Some(self.seq_counter.as_ref()));
-            Ok(token)
+            self.reporter
+                .send_acceptance_success(sendable, self.seq_counter.as_ref(), sender)
         }
 
         /// Package and send a PUS TM\[1, 2\] packet, see 8.1.2.2 of the PUS standard
@@ -974,17 +967,14 @@ mod alloc_mod {
             sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
             params: FailParams,
         ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateNone>> {
-            let mut sendable = self.reporter.acceptance_failure(
+            let sendable = self.reporter.acceptance_failure(
                 self.source_data_buf.as_mut_slice(),
                 token,
                 self.seq_counter.as_ref(),
                 params,
             )?;
-            sender
-                .send_tm(sendable.take_tm())
-                .map_err(|e| VerificationOrSendErrorWithToken(e, token))?;
-            sendable.send_success_verif_failure(Some(self.seq_counter.as_ref()));
-            Ok(())
+            self.reporter
+                .send_acceptance_failure(sendable, self.seq_counter.as_ref(), sender)
         }
 
         /// Package and send a PUS TM\[1, 3\] packet, see 8.1.2.3 of the PUS standard.
@@ -999,17 +989,14 @@ mod alloc_mod {
             VerificationToken<TcStateStarted>,
             VerificationOrSendErrorWithToken<E, TcStateAccepted>,
         > {
-            let mut sendable = self.reporter.start_success(
+            let sendable = self.reporter.start_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
                 self.seq_counter.as_mut(),
                 time_stamp,
             )?;
-            sender
-                .send_tm(sendable.take_tm())
-                .map_err(|e| VerificationOrSendErrorWithToken(e, token))?;
-            let token = sendable.send_success_start_success(Some(self.seq_counter.as_ref()));
-            Ok(token)
+            self.reporter
+                .send_start_success(sendable, self.seq_counter.as_ref(), sender)
         }
 
         /// Package and send a PUS TM\[1, 4\] packet, see 8.1.2.4 of the PUS standard.
@@ -1022,17 +1009,14 @@ mod alloc_mod {
             sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
             params: FailParams,
         ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateAccepted>> {
-            let mut sendable = self.reporter.start_failure(
+            let sendable = self.reporter.start_failure(
                 self.source_data_buf.as_mut_slice(),
                 token,
                 self.seq_counter.as_mut(),
                 params,
             )?;
-            sender
-                .send_tm(sendable.take_tm())
-                .map_err(|e| VerificationOrSendErrorWithToken(e, token))?;
-            sendable.send_success_verif_failure(Some(self.seq_counter.as_ref()));
-            Ok(())
+            self.reporter
+                .send_start_failure(sendable, self.seq_counter.as_ref(), sender)
         }
 
         /// Package and send a PUS TM\[1, 5\] packet, see 8.1.2.5 of the PUS standard.
@@ -1045,16 +1029,16 @@ mod alloc_mod {
             time_stamp: &[u8],
             step: impl EcssEnumeration,
         ) -> Result<(), EcssTmErrorWithSend<E>> {
-            let mut sendable = self.reporter.step_success(
+            let sendable = self.reporter.step_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
                 self.seq_counter.as_mut(),
                 time_stamp,
                 step,
             )?;
-            sender.send_tm(sendable.take_tm())?;
-            sendable.send_success_step_or_completion_success(Some(self.seq_counter.as_ref()));
-            Ok(())
+            self.reporter
+                .send_step_or_completion_success(sendable, self.seq_counter.as_ref(), sender)
+                .map_err(|e| e.0)
         }
 
         /// Package and send a PUS TM\[1, 6\] packet, see 8.1.2.6 of the PUS standard.
@@ -1067,17 +1051,17 @@ mod alloc_mod {
             sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
             params: FailParamsWithStep,
         ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
-            let mut sendable = self.reporter.step_failure(
+            let sendable = self.reporter.step_failure(
                 self.source_data_buf.as_mut_slice(),
                 token,
                 self.seq_counter.as_mut(),
                 params,
             )?;
-            sender
-                .send_tm(sendable.take_tm())
-                .map_err(|e| VerificationOrSendErrorWithToken(e, token))?;
-            sendable.send_success_verif_failure(Some(self.seq_counter.as_ref()));
-            Ok(())
+            self.reporter.send_step_or_completion_failure(
+                sendable,
+                self.seq_counter.as_ref(),
+                sender,
+            )
         }
 
         /// Package and send a PUS TM\[1, 7\] packet, see 8.1.2.7 of the PUS standard.
@@ -1090,17 +1074,17 @@ mod alloc_mod {
             sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
             time_stamp: &[u8],
         ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
-            let mut sendable = self.reporter.completion_success(
+            let sendable = self.reporter.completion_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
                 self.seq_counter.as_mut(),
                 time_stamp,
             )?;
-            sender
-                .send_tm(sendable.take_tm())
-                .map_err(|e| VerificationOrSendErrorWithToken(e, token))?;
-            sendable.send_success_step_or_completion_success(Some(self.seq_counter.as_ref()));
-            Ok(())
+            self.reporter.send_step_or_completion_success(
+                sendable,
+                self.seq_counter.as_ref(),
+                sender,
+            )
         }
 
         /// Package and send a PUS TM\[1, 8\] packet, see 8.1.2.8 of the PUS standard.
@@ -1113,17 +1097,17 @@ mod alloc_mod {
             sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
             params: FailParams,
         ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
-            let mut sendable = self.reporter.completion_failure(
+            let sendable = self.reporter.completion_failure(
                 self.source_data_buf.as_mut_slice(),
                 token,
                 self.seq_counter.as_mut(),
                 params,
             )?;
-            sender
-                .send_tm(sendable.take_tm())
-                .map_err(|e| VerificationOrSendErrorWithToken(e, token))?;
-            sendable.send_success_verif_failure(Some(self.seq_counter.as_ref()));
-            Ok(())
+            self.reporter.send_step_or_completion_failure(
+                sendable,
+                self.seq_counter.as_ref(),
+                sender,
+            )
         }
     }
 
