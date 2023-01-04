@@ -377,14 +377,14 @@ impl<State> From<VerificationSendable<'_, State>> for VerificationSendableErased
     }
 }
 
-impl<'slice, State> VerificationSendable<'slice, State> {
-    pub(crate) fn new(pus_tm: PusTm<'slice>, token: VerificationToken<State>) -> Self {
+impl<'src_data, State> VerificationSendable<'src_data, State> {
+    pub(crate) fn new(pus_tm: PusTm<'src_data>, token: VerificationToken<State>) -> Self {
         Self {
             inner: VerificationSendableErased { token: Some(token) },
             pus_tm: Some(pus_tm),
         }
     }
-    pub(crate) fn new_no_token(pus_tm: PusTm<'slice>) -> Self {
+    pub(crate) fn new_no_token(pus_tm: PusTm<'src_data>) -> Self {
         Self {
             inner: VerificationSendableErased { token: None },
             pus_tm: Some(pus_tm),
@@ -395,21 +395,21 @@ impl<'slice, State> VerificationSendable<'slice, State> {
         self.pus_tm.as_ref().unwrap().len_packed()
     }
 
-    pub fn pus_tm(&self) -> &PusTm<'slice> {
+    pub fn pus_tm(&self) -> &PusTm<'src_data> {
         self.pus_tm.as_ref().unwrap()
     }
 
-    pub fn pus_tm_mut(&mut self) -> &mut PusTm<'slice> {
+    pub fn pus_tm_mut(&mut self) -> &mut PusTm<'src_data> {
         self.pus_tm.as_mut().unwrap()
     }
 
     /// Release the PUS TM struct. This also releases the mutable slice reference,
     /// which can be useful or necessary before sending the data.
-    pub fn release_slice(self) -> VerificationSendableErased<State> {
-        self.into()
+    pub fn release_slice(mut self) -> (VerificationSendableErased<State>, PusTm<'src_data>) {
+        (self.inner, self.pus_tm.take().unwrap())
     }
 
-    pub(crate) fn take_tm(&mut self) -> PusTm<'slice> {
+    pub(crate) fn take_tm(&mut self) -> PusTm<'src_data> {
         self.pus_tm.take().unwrap()
     }
 
@@ -421,19 +421,19 @@ impl<'slice, State> VerificationSendable<'slice, State> {
     }
 }
 
-impl<'slice> VerificationSendable<'slice, TcStateNone> {
+impl<'src_data> VerificationSendable<'src_data, TcStateNone> {
     pub fn send_success_acceptance_success(
         self,
         seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
     ) -> VerificationToken<TcStateAccepted> {
         self.inner.send_success_acceptance_success(seq_counter)
     }
-    pub fn send_failure(self) -> (PusTm<'slice>, VerificationToken<TcStateNone>) {
+    pub fn send_failure(self) -> (PusTm<'src_data>, VerificationToken<TcStateNone>) {
         (self.pus_tm.unwrap(), self.inner.token.unwrap())
     }
 }
 
-impl<'slice> VerificationSendable<'slice, TcStateAccepted> {
+impl<'src_data> VerificationSendable<'src_data, TcStateAccepted> {
     pub fn send_success_start_success(
         self,
         seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
@@ -441,19 +441,19 @@ impl<'slice> VerificationSendable<'slice, TcStateAccepted> {
         self.inner.send_success_start_success(seq_counter)
     }
 
-    pub fn send_failure(self) -> (PusTm<'slice>, VerificationToken<TcStateAccepted>) {
+    pub fn send_failure(self) -> (PusTm<'src_data>, VerificationToken<TcStateAccepted>) {
         (self.pus_tm.unwrap(), self.inner.token.unwrap())
     }
 }
 
-impl<'slice> VerificationSendable<'slice, TcStateStarted> {
+impl<'src_data> VerificationSendable<'src_data, TcStateStarted> {
     pub fn send_success_step_or_completion_success(
         self,
         seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
     ) {
         increment_seq_counter(seq_counter);
     }
-    pub fn send_failure(self) -> (PusTm<'slice>, Option<VerificationToken<TcStateStarted>>) {
+    pub fn send_failure(self) -> (PusTm<'src_data>, Option<VerificationToken<TcStateStarted>>) {
         (self.pus_tm.unwrap(), self.inner.token)
     }
 }
@@ -498,14 +498,14 @@ impl VerificationReporterCore {
         VerificationToken::<TcStateNone>::new(req_id)
     }
 
-    fn sendable_success_no_step<'slice, State: Copy>(
+    fn sendable_success_no_step<'src_data, State: Copy>(
         &mut self,
-        buf: &'slice mut [u8],
+        buf: &'src_data mut [u8],
         subservice: u8,
         token: VerificationToken<State>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        time_stamp: &'slice [u8],
-    ) -> Result<VerificationSendable<'slice, State>, VerificationErrorWithToken<State>> {
+        time_stamp: &'src_data [u8],
+    ) -> Result<VerificationSendable<'src_data, State>, VerificationErrorWithToken<State>> {
         Ok(VerificationSendable::new(
             self.create_pus_verif_success_tm(
                 buf,
@@ -521,13 +521,13 @@ impl VerificationReporterCore {
     }
 
     /// Package a PUS TM\[1, 1\] packet, see 8.1.2.1 of the PUS standard.
-    pub fn acceptance_success<'slice>(
+    pub fn acceptance_success<'src_data>(
         &mut self,
-        buf: &'slice mut [u8],
+        buf: &'src_data mut [u8],
         token: VerificationToken<TcStateNone>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        time_stamp: &'slice [u8],
-    ) -> Result<VerificationSendable<'slice, TcStateNone>, VerificationErrorWithToken<TcStateNone>>
+        time_stamp: &'src_data [u8],
+    ) -> Result<VerificationSendable<'src_data, TcStateNone>, VerificationErrorWithToken<TcStateNone>>
     {
         self.sendable_success_no_step(
             buf,
@@ -539,13 +539,13 @@ impl VerificationReporterCore {
     }
 
     /// Package a PUS TM\[1, 2\] packet, see 8.1.2.2 of the PUS standard.
-    pub fn acceptance_failure<'slice>(
+    pub fn acceptance_failure<'src_data>(
         &mut self,
-        buf: &'slice mut [u8],
+        buf: &'src_data mut [u8],
         token: VerificationToken<TcStateNone>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        params: FailParams<'slice, '_>,
-    ) -> Result<VerificationSendable<'slice, TcStateNone>, VerificationErrorWithToken<TcStateNone>>
+        params: FailParams<'src_data, '_>,
+    ) -> Result<VerificationSendable<'src_data, TcStateNone>, VerificationErrorWithToken<TcStateNone>>
     {
         Ok(VerificationSendable::new(
             self.create_pus_verif_fail_tm(
@@ -564,14 +564,14 @@ impl VerificationReporterCore {
     /// Package and send a PUS TM\[1, 3\] packet, see 8.1.2.3 of the PUS standard.
     ///
     /// Requires a token previously acquired by calling [Self::acceptance_success].
-    pub fn start_success<'slice>(
+    pub fn start_success<'src_data>(
         &mut self,
-        buf: &'slice mut [u8],
+        buf: &'src_data mut [u8],
         token: VerificationToken<TcStateAccepted>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        time_stamp: &'slice [u8],
+        time_stamp: &'src_data [u8],
     ) -> Result<
-        VerificationSendable<'slice, TcStateAccepted>,
+        VerificationSendable<'src_data, TcStateAccepted>,
         VerificationErrorWithToken<TcStateAccepted>,
     > {
         self.sendable_success_no_step(
@@ -587,14 +587,14 @@ impl VerificationReporterCore {
     ///
     /// Requires a token previously acquired by calling [Self::acceptance_success]. It consumes
     /// the token because verification handling is done.
-    pub fn start_failure<'slice>(
+    pub fn start_failure<'src_data>(
         &mut self,
-        buf: &'slice mut [u8],
+        buf: &'src_data mut [u8],
         token: VerificationToken<TcStateAccepted>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        params: FailParams<'slice, '_>,
+        params: FailParams<'src_data, '_>,
     ) -> Result<
-        VerificationSendable<'slice, TcStateAccepted>,
+        VerificationSendable<'src_data, TcStateAccepted>,
         VerificationErrorWithToken<TcStateAccepted>,
     > {
         Ok(VerificationSendable::new(
@@ -614,14 +614,14 @@ impl VerificationReporterCore {
     /// Package and send a PUS TM\[1, 5\] packet, see 8.1.2.5 of the PUS standard.
     ///
     /// Requires a token previously acquired by calling [Self::start_success].
-    pub fn step_success<'slice>(
+    pub fn step_success<'src_data>(
         &mut self,
-        buf: &'slice mut [u8],
+        buf: &'src_data mut [u8],
         token: &VerificationToken<TcStateStarted>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        time_stamp: &'slice [u8],
+        time_stamp: &'src_data [u8],
         step: impl EcssEnumeration,
-    ) -> Result<VerificationSendable<'slice, TcStateStarted>, EcssTmError> {
+    ) -> Result<VerificationSendable<'src_data, TcStateStarted>, EcssTmError> {
         Ok(VerificationSendable::new_no_token(
             self.create_pus_verif_success_tm(
                 buf,
@@ -638,14 +638,14 @@ impl VerificationReporterCore {
     ///
     /// Requires a token previously acquired by calling [Self::start_success]. It consumes the
     /// token because verification handling is done.
-    pub fn step_failure<'slice>(
+    pub fn step_failure<'src_data>(
         &mut self,
-        buf: &'slice mut [u8],
+        buf: &'src_data mut [u8],
         token: VerificationToken<TcStateStarted>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        params: FailParamsWithStep<'slice, '_>,
+        params: FailParamsWithStep<'src_data, '_>,
     ) -> Result<
-        VerificationSendable<'slice, TcStateStarted>,
+        VerificationSendable<'src_data, TcStateStarted>,
         VerificationErrorWithToken<TcStateStarted>,
     > {
         Ok(VerificationSendable::new(
@@ -666,14 +666,14 @@ impl VerificationReporterCore {
     ///
     /// Requires a token previously acquired by calling [Self::start_success]. It consumes the
     /// token because verification handling is done.
-    pub fn completion_success<'slice>(
+    pub fn completion_success<'src_data>(
         &mut self,
-        buf: &'slice mut [u8],
+        buf: &'src_data mut [u8],
         token: VerificationToken<TcStateStarted>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        time_stamp: &'slice [u8],
+        time_stamp: &'src_data [u8],
     ) -> Result<
-        VerificationSendable<'slice, TcStateStarted>,
+        VerificationSendable<'src_data, TcStateStarted>,
         VerificationErrorWithToken<TcStateStarted>,
     > {
         self.sendable_success_no_step(
@@ -689,14 +689,14 @@ impl VerificationReporterCore {
     ///
     /// Requires a token previously acquired by calling [Self::start_success]. It consumes the
     /// token because verification handling is done.
-    pub fn completion_failure<'slice>(
+    pub fn completion_failure<'src_data>(
         &mut self,
-        buf: &'slice mut [u8],
+        buf: &'src_data mut [u8],
         token: VerificationToken<TcStateStarted>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        params: FailParams<'slice, '_>,
+        params: FailParams<'src_data, '_>,
     ) -> Result<
-        VerificationSendable<'slice, TcStateStarted>,
+        VerificationSendable<'src_data, TcStateStarted>,
         VerificationErrorWithToken<TcStateStarted>,
     > {
         Ok(VerificationSendable::new(
@@ -713,15 +713,15 @@ impl VerificationReporterCore {
         ))
     }
 
-    fn create_pus_verif_success_tm<'slice>(
+    fn create_pus_verif_success_tm<'src_data>(
         &mut self,
-        buf: &'slice mut [u8],
+        buf: &'src_data mut [u8],
         subservice: u8,
         msg_counter: u16,
         req_id: &RequestId,
-        time_stamp: &'slice [u8],
+        time_stamp: &'src_data [u8],
         step: Option<&(impl EcssEnumeration + ?Sized)>,
-    ) -> Result<PusTm<'slice>, EcssTmError> {
+    ) -> Result<PusTm<'src_data>, EcssTmError> {
         let mut source_data_len = size_of::<u32>();
         if let Some(step) = step {
             source_data_len += step.byte_width();
@@ -746,15 +746,15 @@ impl VerificationReporterCore {
         ))
     }
 
-    fn create_pus_verif_fail_tm<'slice>(
+    fn create_pus_verif_fail_tm<'src_data>(
         &mut self,
-        buf: &'slice mut [u8],
+        buf: &'src_data mut [u8],
         subservice: u8,
         msg_counter: u16,
         req_id: &RequestId,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
-        params: &FailParams<'slice, '_>,
-    ) -> Result<PusTm<'slice>, EcssTmError> {
+        params: &FailParams<'src_data, '_>,
+    ) -> Result<PusTm<'src_data>, EcssTmError> {
         let mut idx = 0;
         let mut source_data_len = RequestId::SIZE_AS_BYTES + params.failure_code.byte_width();
         if let Some(step) = step {
@@ -790,15 +790,15 @@ impl VerificationReporterCore {
         ))
     }
 
-    fn create_pus_verif_tm_base<'slice>(
+    fn create_pus_verif_tm_base<'src_data>(
         &mut self,
-        buf: &'slice mut [u8],
+        buf: &'src_data mut [u8],
         subservice: u8,
         msg_counter: u16,
         sp_header: &mut SpHeader,
-        time_stamp: &'slice [u8],
+        time_stamp: &'src_data [u8],
         source_data_len: usize,
-    ) -> PusTm<'slice> {
+    ) -> PusTm<'src_data> {
         let tm_sec_header =
             PusTmSecondaryHeader::new(1, subservice, msg_counter, self.dest_id, time_stamp);
         PusTm::new(
