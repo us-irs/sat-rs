@@ -310,25 +310,31 @@ pub(crate) fn increment_seq_counter(
     }
 }
 
+pub enum VerifSuccess {}
+pub enum VerifFailure {}
+
 /// Abstraction for a sendable PUS TM. The user is expected to send the TM packet to a TM sink.
 ///
 /// This struct generally mutably borrows the source data buffer.
-pub struct VerificationSendable<'src_data, State> {
+pub struct VerificationSendable<'src_data, State, SuccessOrFailure> {
     token: Option<VerificationToken<State>>,
     pus_tm: Option<PusTm<'src_data>>,
+    phantom: PhantomData<SuccessOrFailure>,
 }
 
-impl<'src_data, State> VerificationSendable<'src_data, State> {
+impl<'src_data, State, SuccessOrFailure> VerificationSendable<'src_data, State, SuccessOrFailure> {
     pub(crate) fn new(pus_tm: PusTm<'src_data>, token: VerificationToken<State>) -> Self {
         Self {
             token: Some(token),
             pus_tm: Some(pus_tm),
+            phantom: PhantomData,
         }
     }
     pub(crate) fn new_no_token(pus_tm: PusTm<'src_data>) -> Self {
         Self {
             token: None,
             pus_tm: Some(pus_tm),
+            phantom: PhantomData,
         }
     }
 
@@ -347,7 +353,9 @@ impl<'src_data, State> VerificationSendable<'src_data, State> {
     pub(crate) fn take_tm(&mut self) -> PusTm<'src_data> {
         self.pus_tm.take().unwrap()
     }
+}
 
+impl<'src_data, State> VerificationSendable<'src_data, State, VerifFailure> {
     pub fn send_success_verif_failure(
         self,
         seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
@@ -356,7 +364,13 @@ impl<'src_data, State> VerificationSendable<'src_data, State> {
     }
 }
 
-impl<'src_data> VerificationSendable<'src_data, TcStateNone> {
+impl<'src_data, State> VerificationSendable<'src_data, State, VerifFailure> {
+    pub fn send_failure(self) -> (PusTm<'src_data>, VerificationToken<State>) {
+        (self.pus_tm.unwrap(), self.token.unwrap())
+    }
+}
+
+impl<'src_data> VerificationSendable<'src_data, TcStateNone, VerifSuccess> {
     pub fn send_success_acceptance_success(
         self,
         seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
@@ -367,13 +381,9 @@ impl<'src_data> VerificationSendable<'src_data, TcStateNone> {
             req_id: self.token.unwrap().req_id(),
         }
     }
-
-    pub fn send_failure(self) -> (PusTm<'src_data>, VerificationToken<TcStateNone>) {
-        (self.pus_tm.unwrap(), self.token.unwrap())
-    }
 }
 
-impl<'src_data> VerificationSendable<'src_data, TcStateAccepted> {
+impl<'src_data> VerificationSendable<'src_data, TcStateAccepted, VerifSuccess> {
     pub fn send_success_start_success(
         self,
         seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
@@ -384,21 +394,14 @@ impl<'src_data> VerificationSendable<'src_data, TcStateAccepted> {
             req_id: self.token.unwrap().req_id(),
         }
     }
-
-    pub fn send_failure(self) -> (PusTm<'src_data>, VerificationToken<TcStateAccepted>) {
-        (self.pus_tm.unwrap(), self.token.unwrap())
-    }
 }
 
-impl<'src_data> VerificationSendable<'src_data, TcStateStarted> {
+impl<'src_data> VerificationSendable<'src_data, TcStateStarted, VerifSuccess> {
     pub fn send_success_step_or_completion_success(
         self,
         seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
     ) {
         increment_seq_counter(seq_counter);
-    }
-    pub fn send_failure(self) -> (PusTm<'src_data>, Option<VerificationToken<TcStateStarted>>) {
-        (self.pus_tm.unwrap(), self.token)
     }
 }
 
@@ -456,7 +459,10 @@ impl VerificationReporterCore {
         token: VerificationToken<State>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &'src_data [u8],
-    ) -> Result<VerificationSendable<'src_data, State>, VerificationErrorWithToken<State>> {
+    ) -> Result<
+        VerificationSendable<'src_data, State, VerifSuccess>,
+        VerificationErrorWithToken<State>,
+    > {
         Ok(VerificationSendable::new(
             self.create_pus_verif_success_tm(
                 src_data_buf,
@@ -479,7 +485,10 @@ impl VerificationReporterCore {
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         step: Option<&(impl EcssEnumeration + ?Sized)>,
         params: &FailParams<'src_data, '_>,
-    ) -> Result<VerificationSendable<'src_data, State>, VerificationErrorWithToken<State>> {
+    ) -> Result<
+        VerificationSendable<'src_data, State, VerifFailure>,
+        VerificationErrorWithToken<State>,
+    > {
         Ok(VerificationSendable::new(
             self.create_pus_verif_fail_tm(
                 src_data_buf,
@@ -501,8 +510,10 @@ impl VerificationReporterCore {
         token: VerificationToken<TcStateNone>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &'src_data [u8],
-    ) -> Result<VerificationSendable<'src_data, TcStateNone>, VerificationErrorWithToken<TcStateNone>>
-    {
+    ) -> Result<
+        VerificationSendable<'src_data, TcStateNone, VerifSuccess>,
+        VerificationErrorWithToken<TcStateNone>,
+    > {
         self.sendable_success_no_step(
             src_data_buf,
             Subservice::TmAcceptanceSuccess.into(),
@@ -514,7 +525,7 @@ impl VerificationReporterCore {
 
     pub fn send_acceptance<'src_data, E>(
         &self,
-        mut sendable: VerificationSendable<'src_data, TcStateNone>,
+        mut sendable: VerificationSendable<'src_data, TcStateNone, VerifSuccess>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<VerificationToken<TcStateAccepted>, VerificationOrSendErrorWithToken<E, TcStateNone>>
@@ -532,8 +543,10 @@ impl VerificationReporterCore {
         token: VerificationToken<TcStateNone>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         params: FailParams<'src_data, '_>,
-    ) -> Result<VerificationSendable<'src_data, TcStateNone>, VerificationErrorWithToken<TcStateNone>>
-    {
+    ) -> Result<
+        VerificationSendable<'src_data, TcStateNone, VerifFailure>,
+        VerificationErrorWithToken<TcStateNone>,
+    > {
         self.sendable_failure_no_step(
             src_data_buf,
             Subservice::TmAcceptanceFailure.into(),
@@ -554,7 +567,7 @@ impl VerificationReporterCore {
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &'src_data [u8],
     ) -> Result<
-        VerificationSendable<'src_data, TcStateAccepted>,
+        VerificationSendable<'src_data, TcStateAccepted, VerifSuccess>,
         VerificationErrorWithToken<TcStateAccepted>,
     > {
         self.sendable_success_no_step(
@@ -577,7 +590,7 @@ impl VerificationReporterCore {
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         params: FailParams<'src_data, '_>,
     ) -> Result<
-        VerificationSendable<'src_data, TcStateAccepted>,
+        VerificationSendable<'src_data, TcStateAccepted, VerifFailure>,
         VerificationErrorWithToken<TcStateAccepted>,
     > {
         self.sendable_failure_no_step(
@@ -600,7 +613,7 @@ impl VerificationReporterCore {
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &'src_data [u8],
         step: impl EcssEnumeration,
-    ) -> Result<VerificationSendable<'src_data, TcStateStarted>, EcssTmError> {
+    ) -> Result<VerificationSendable<'src_data, TcStateStarted, VerifSuccess>, EcssTmError> {
         Ok(VerificationSendable::new_no_token(
             self.create_pus_verif_success_tm(
                 src_data_buf,
@@ -624,7 +637,7 @@ impl VerificationReporterCore {
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         params: FailParamsWithStep<'src_data, '_>,
     ) -> Result<
-        VerificationSendable<'src_data, TcStateStarted>,
+        VerificationSendable<'src_data, TcStateStarted, VerifFailure>,
         VerificationErrorWithToken<TcStateStarted>,
     > {
         Ok(VerificationSendable::new(
@@ -652,7 +665,7 @@ impl VerificationReporterCore {
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: &'src_data [u8],
     ) -> Result<
-        VerificationSendable<'src_data, TcStateStarted>,
+        VerificationSendable<'src_data, TcStateStarted, VerifSuccess>,
         VerificationErrorWithToken<TcStateStarted>,
     > {
         self.sendable_success_no_step(
@@ -675,7 +688,7 @@ impl VerificationReporterCore {
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         params: FailParams<'src_data, '_>,
     ) -> Result<
-        VerificationSendable<'src_data, TcStateStarted>,
+        VerificationSendable<'src_data, TcStateStarted, VerifFailure>,
         VerificationErrorWithToken<TcStateStarted>,
     > {
         self.sendable_failure_no_step(
@@ -996,7 +1009,7 @@ mod alloc_mod {
             sender
                 .send_tm(sendable.take_tm())
                 .map_err(|e| VerificationOrSendErrorWithToken(e, token))?;
-            sendable.send_success_step_or_completion_success(Some(self.seq_counter.as_ref()));
+            sendable.send_success_verif_failure(Some(self.seq_counter.as_ref()));
             Ok(())
         }
 
@@ -1042,7 +1055,7 @@ mod alloc_mod {
             sender
                 .send_tm(sendable.take_tm())
                 .map_err(|e| VerificationOrSendErrorWithToken(e, token))?;
-            sendable.send_success_step_or_completion_success(Some(self.seq_counter.as_ref()));
+            sendable.send_success_verif_failure(Some(self.seq_counter.as_ref()));
             Ok(())
         }
     }
