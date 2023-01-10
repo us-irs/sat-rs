@@ -1,6 +1,6 @@
 [package]
 name = "satrs-core"
-version = "0.1.0"
+version = "0.1.0-pre0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -46,8 +46,7 @@ default-features = false
 optional = true
 
 [dependencies.spacepackets]
-git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
-# branch = "all_features"
+# git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
 version = "0.4.0"
 default-features = false
 
