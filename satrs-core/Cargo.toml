@@ -47,7 +47,8 @@ optional = true
 
 [dependencies.spacepackets]
 git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
-branch = "all_features"
+# branch = "all_features"
+version = "0.4.0"
 default-features = false
 
 [dev-dependencies]
