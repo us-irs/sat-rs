@@ -12,12 +12,11 @@ use satrs_core::pus::verification::{
 use satrs_core::res_code::ResultU16;
 use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use satrs_core::tmtc::{AddressableId, PusServiceProvider};
+use satrs_core::{
+    spacepackets::ecss::PusPacket, spacepackets::tc::PusTc, spacepackets::time::cds::TimeProvider,
+    spacepackets::time::TimeWriter, spacepackets::SpHeader,
+};
 use satrs_example::{hk_err, tmtc_err};
-use spacepackets::ecss::PusPacket;
-use spacepackets::tc::PusTc;
-use spacepackets::time::cds::TimeProvider;
-use spacepackets::time::TimeWriter;
-use spacepackets::SpHeader;
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 

@@ -1,9 +1,9 @@
 use satrs_core::pus::verification::RequestId;
+use satrs_core::{
+    spacepackets::ecss::PusPacket, spacepackets::tc::PusTc, spacepackets::tm::PusTm,
+    spacepackets::SpHeader,
+};
 use satrs_example::{OBSW_SERVER_ADDR, SERVER_PORT};
-use spacepackets::ecss::PusPacket;
-use spacepackets::tc::PusTc;
-use spacepackets::tm::PusTm;
-use spacepackets::SpHeader;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::time::Duration;
 

@@ -192,7 +192,10 @@ impl RequestId {
 /// If a verification operation fails, the passed token will be returned as well. This allows
 /// re-trying the operation at a later point.
 #[derive(Debug, Clone)]
-pub struct VerificationOrSendErrorWithToken<E, T>(pub EcssTmErrorWithSend<E>, pub VerificationToken<T>);
+pub struct VerificationOrSendErrorWithToken<E, T>(
+    pub EcssTmErrorWithSend<E>,
+    pub VerificationToken<T>,
+);
 
 #[derive(Debug, Clone)]
 pub struct VerificationErrorWithToken<T>(pub EcssTmError, pub VerificationToken<T>);

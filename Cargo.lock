@@ -552,7 +552,7 @@ checksum = "7b4b9743ed687d4b4bcedf9ff5eaa7398495ae14e61cba0a295704edbc7decde"
 
 [[package]]
 name = "satrs-core"
-version = "0.1.0"
+version = "0.1.0-pre0"
 dependencies = [
  "bus",
  "crossbeam-channel",
@@ -568,7 +568,7 @@ dependencies = [
  "postcard",
  "serde",
  "serde_json",
- "spacepackets 0.4.0 (git+https://egit.irs.uni-stuttgart.de/rust/spacepackets.git)",
+ "spacepackets 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zerocopy",
 ]
 
@@ -581,7 +581,6 @@ dependencies = [
  "delegate",
  "satrs-core",
  "satrs-mib",
- "spacepackets 0.4.0 (git+https://egit.irs.uni-stuttgart.de/rust/spacepackets.git?branch=all_features)",
  "zerocopy",
 ]
 
@@ -699,19 +698,8 @@ dependencies = [
 [[package]]
 name = "spacepackets"
 version = "0.4.0"
-source = "git+https://egit.irs.uni-stuttgart.de/rust/spacepackets.git?branch=all_features#03b94fbcde150af685837241a096d6b04f1f5b29"
-dependencies = [
- "chrono",
- "crc",
- "delegate",
- "num-traits",
- "zerocopy",
-]
-
-[[package]]
-name = "spacepackets"
-version = "0.4.0"
-source = "git+https://egit.irs.uni-stuttgart.de/rust/spacepackets.git#481de83fdb657b8de299b63f1b504299d5e85e31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9199251260fa674673a195bbe68703ba8d7ac0875d97df05cd4b5618218da054"
 dependencies = [
  "chrono",
  "crc",

@@ -24,11 +24,13 @@ use satrs_core::pus::verification::{
 };
 use satrs_core::pus::{EcssTmErrorWithSend, EcssTmSenderCore};
 use satrs_core::seq_count::SeqCountProviderSimple;
+use satrs_core::spacepackets::{
+    time::cds::TimeProvider,
+    time::TimeWriter,
+    tm::{PusTm, PusTmSecondaryHeader},
+    SequenceFlags, SpHeader,
+};
 use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
-use spacepackets::time::cds::TimeProvider;
-use spacepackets::time::TimeWriter;
-use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
-use spacepackets::{SequenceFlags, SpHeader};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};

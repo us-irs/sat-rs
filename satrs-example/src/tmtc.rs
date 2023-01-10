@@ -15,13 +15,10 @@ use crate::requests::RequestWithToken;
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::event_man::EventRequestWithToken;
 use satrs_core::pus::verification::StdVerifReporterWithSender;
+use satrs_core::spacepackets::{ecss::PusPacket, tc::PusTc, tm::PusTm, SpHeader};
 use satrs_core::tmtc::{
     CcsdsDistributor, CcsdsError, PusServiceProvider, ReceivesCcsdsTc, ReceivesEcssPusTc,
 };
-use spacepackets::ecss::PusPacket;
-use spacepackets::tc::PusTc;
-use spacepackets::tm::PusTm;
-use spacepackets::SpHeader;
 
 pub const PUS_APID: u16 = 0x02;
 
