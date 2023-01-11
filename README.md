@@ -12,3 +12,7 @@ Currently, it contains the following major subcrates:
    crate containing the core components of sat-rs
 3. The [`satrs-example`](https://egit.irs.uni-stuttgart.de/rust/satrs-launchpad/src/branch/main/satrs-example)
    crate which shows a simple example on-board software using various sat-rs components.
+
+The [`satrs-example-stm32f3-disco`](https://egit.irs.uni-stuttgart.de/rust/satrs-example-stm32f3-disco)
+crate contains an example of how components can be used in a bare-metal system with constrained
+resources.
