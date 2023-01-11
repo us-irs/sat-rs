@@ -1,6 +1,3 @@
 [submodule "spacepackets"]
 	path = spacepackets
 	url = https://egit.irs.uni-stuttgart.de/rust/spacepackets.git
-[submodule "satrs-core"]
-	path = satrs-core
-	url = https://egit.irs.uni-stuttgart.de/rust/satrs-core.git
