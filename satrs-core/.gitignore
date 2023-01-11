@@ -1,0 +1,5 @@
+/target
+
+# CLion
+/.idea/*
+!/.idea/runConfigurations
