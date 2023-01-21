@@ -568,7 +568,7 @@ dependencies = [
  "postcard",
  "serde",
  "serde_json",
- "spacepackets 0.5.0 (git+https://egit.irs.uni-stuttgart.de/rust/spacepackets.git?rev=1e9079307273e414a6333bf575322c1eb302c93e)",
+ "spacepackets 0.5.0 (git+https://egit.irs.uni-stuttgart.de/rust/spacepackets.git?rev=74e489bd074)",
  "zerocopy",
 ]
 
@@ -698,7 +698,7 @@ dependencies = [
 [[package]]
 name = "spacepackets"
 version = "0.5.0"
-source = "git+https://egit.irs.uni-stuttgart.de/rust/spacepackets.git?rev=1e9079307273e414a6333bf575322c1eb302c93e#1e9079307273e414a6333bf575322c1eb302c93e"
+source = "git+https://egit.irs.uni-stuttgart.de/rust/spacepackets.git?rev=74e489bd074#74e489bd074bbd8139a1c8740aa1670a2ef9b671"
 dependencies = [
  "chrono",
  "crc",
