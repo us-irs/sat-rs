@@ -181,7 +181,7 @@ impl EventReporterBase {
             subservice.into(),
             self.msg_count,
             self.dest_id,
-            time_stamp,
+            Some(time_stamp),
         );
         let mut current_idx = 0;
         event_id.write_to_be_bytes(&mut buf[0..event_id.byte_width()])?;

@@ -15,6 +15,8 @@ use spacepackets::{ByteConversionError, SizeMissmatch};
 pub mod event;
 pub mod event_man;
 pub mod hk;
+#[cfg(feature = "std")]
+pub mod scheduling;
 pub mod verification;
 
 #[derive(Debug, Clone)]

@@ -70,7 +70,7 @@ impl PusServiceProvider for PusReceiver {
         self.update_time_stamp();
         let accepted_token = self
             .verif_reporter
-            .acceptance_success(init_token, &self.time_stamp)
+            .acceptance_success(init_token, Some(&self.time_stamp))
             .expect("Acceptance success failure");
         if service == 17 {
             self.handle_test_service(pus_tc, accepted_token);
@@ -83,7 +83,7 @@ impl PusServiceProvider for PusReceiver {
             self.verif_reporter
                 .start_failure(
                     accepted_token,
-                    FailParams::new(&self.time_stamp, &tmtc_err::INVALID_PUS_SERVICE, None),
+                    FailParams::new(Some(&self.time_stamp), &tmtc_err::INVALID_PUS_SERVICE, None),
                 )
                 .expect("Start failure verification failed")
         }
@@ -100,20 +100,24 @@ impl PusReceiver {
             let addr = self.tm_store.add_pus_tm(&ping_reply);
             let start_token = self
                 .verif_reporter
-                .start_success(token, &self.time_stamp)
+                .start_success(token, Some(&self.time_stamp))
                 .expect("Error sending start success");
             self.tm_tx
                 .send(addr)
                 .expect("Sending TM to TM funnel failed");
             self.verif_reporter
-                .completion_success(start_token, &self.time_stamp)
+                .completion_success(start_token, Some(&self.time_stamp))
                 .expect("Error sending completion success");
         } else {
             self.update_time_stamp();
             self.verif_reporter
                 .start_failure(
                     token,
-                    FailParams::new(&self.time_stamp, &tmtc_err::INVALID_PUS_SUBSERVICE, None),
+                    FailParams::new(
+                        Some(&self.time_stamp),
+                        &tmtc_err::INVALID_PUS_SUBSERVICE,
+                        None,
+                    ),
                 )
                 .expect("Sending start failure TM failed");
         }
@@ -134,7 +138,7 @@ impl PusReceiver {
             self.verif_reporter
                 .start_failure(
                     token,
-                    FailParams::new(&self.time_stamp, &tmtc_err::NOT_ENOUGH_APP_DATA, None),
+                    FailParams::new(Some(&self.time_stamp), &tmtc_err::NOT_ENOUGH_APP_DATA, None),
                 )
                 .expect("Sending start failure TM failed");
             return;
@@ -148,7 +152,7 @@ impl PusReceiver {
             };
             self.update_time_stamp();
             self.verif_reporter
-                .start_failure(token, FailParams::new(&self.time_stamp, err, None))
+                .start_failure(token, FailParams::new(Some(&self.time_stamp), err, None))
                 .expect("Sending start failure TM failed");
             return;
         }
@@ -158,7 +162,7 @@ impl PusReceiver {
             self.verif_reporter
                 .start_failure(
                     token,
-                    FailParams::new(&self.time_stamp, &hk_err::UNKNOWN_TARGET_ID, None),
+                    FailParams::new(Some(&self.time_stamp), &hk_err::UNKNOWN_TARGET_ID, None),
                 )
                 .expect("Sending start failure TM failed");
             return;
@@ -183,7 +187,7 @@ impl PusReceiver {
                     .start_failure(
                         token,
                         FailParams::new(
-                            &self.time_stamp,
+                            Some(&self.time_stamp),
                             &hk_err::COLLECTION_INTERVAL_MISSING,
                             None,
                         ),
@@ -205,14 +209,14 @@ impl PusReceiver {
             verif_reporter
                 .start_failure(
                     token,
-                    FailParams::new(timestamp, failure_code, failure_data),
+                    FailParams::new(Some(timestamp), failure_code, failure_data),
                 )
                 .expect("Sending start failure TM failed");
         };
         let send_start_acceptance = |verif_reporter: &mut StdVerifReporterWithSender,
                                      timestamp: &[u8; 7]| {
             verif_reporter
-                .start_success(token, timestamp)
+                .start_success(token, Some(timestamp))
                 .expect("Sending start success TM failed")
         };
         if pus_tc.user_data().is_none() {

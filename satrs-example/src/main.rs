@@ -178,7 +178,7 @@ fn main() {
         let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
         let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
             reporter_event_handler
-                .completion_success(event_req.token, timestamp)
+                .completion_success(event_req.token, Some(timestamp))
                 .expect("Sending completion success failed");
         };
         loop {
@@ -246,10 +246,10 @@ fn main() {
                         },
                     }
                     let started_token = reporter_aocs
-                        .start_success(request.1, &timestamp)
+                        .start_success(request.1, Some(&timestamp))
                         .expect("Sending start success failed");
                     reporter_aocs
-                        .completion_success(started_token, &timestamp)
+                        .completion_success(started_token, Some(&timestamp))
                         .expect("Sending completion success failed");
                 }
                 Err(e) => match e {
