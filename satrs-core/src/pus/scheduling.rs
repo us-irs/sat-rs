@@ -1,12 +1,12 @@
 use crate::pool::StoreAddr;
-use std::collections::BTreeMap;
 use spacepackets::time::UnixTimestamp;
+use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub struct PusScheduler {
     tc_map: BTreeMap<UnixTimestamp, StoreAddr>,
     current_time: UnixTimestamp,
-    enabled: bool
+    enabled: bool,
 }
 
 impl PusScheduler {
@@ -14,7 +14,7 @@ impl PusScheduler {
         PusScheduler {
             tc_map: Default::default(),
             current_time: init_current_time,
-            enabled: true
+            enabled: true,
         }
     }
 
@@ -30,11 +30,16 @@ impl PusScheduler {
         self.enabled = false;
     }
 
+    pub fn reset(&mut self) {
+        self.enabled = false;
+        self.tc_map.clear();
+    }
+
     pub fn update_time(&mut self, current_time: UnixTimestamp) {
         self.current_time = current_time;
     }
 
-    pub fn insert_tc(&mut self, time_stamp: UnixTimestamp, addr: StoreAddr)  {
+    pub fn insert_tc(&mut self, time_stamp: UnixTimestamp, addr: StoreAddr) {
         self.tc_map.insert(time_stamp, addr);
     }
 }
@@ -42,10 +47,13 @@ impl PusScheduler {
 #[cfg(test)]
 mod tests {
     use crate::pus::scheduling::PusScheduler;
-    use std::collections::BTreeMap;
+    use spacepackets::time::UnixTimestamp;
 
     #[test]
     fn basic() {
-        let scheduler = PusScheduler::new();
+        let mut scheduler = PusScheduler::new(UnixTimestamp::new_only_seconds(0));
+        assert!(scheduler.is_enabled());
+        scheduler.disable();
+        assert!(!scheduler.is_enabled());
     }
 }

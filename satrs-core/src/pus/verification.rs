@@ -39,9 +39,9 @@
 //! let init_token = reporter.add_tc(&pus_tc_0);
 //!
 //! // Complete success sequence for a telecommand
-//! let accepted_token = reporter.acceptance_success(init_token, &EMPTY_STAMP).unwrap();
-//! let started_token = reporter.start_success(accepted_token, &EMPTY_STAMP).unwrap();
-//! reporter.completion_success(started_token, &EMPTY_STAMP).unwrap();
+//! let accepted_token = reporter.acceptance_success(init_token, Some(&EMPTY_STAMP)).unwrap();
+//! let started_token = reporter.start_success(accepted_token, Some(&EMPTY_STAMP)).unwrap();
+//! reporter.completion_success(started_token, Some(&EMPTY_STAMP)).unwrap();
 //!
 //! // Verify it arrives correctly on receiver end
 //! let mut tm_buf: [u8; 1024] = [0; 1024];
@@ -1427,7 +1427,7 @@ mod tests {
             assert_eq!(PusPacket::service(&tm), 1);
             assert!(tm.source_data().is_some());
             let mut time_stamp = [0; 7];
-            time_stamp.clone_from_slice(&tm.time_stamp()[0..7]);
+            time_stamp.clone_from_slice(&tm.timestamp().unwrap()[0..7]);
             let src_data = tm.source_data().unwrap();
             assert!(src_data.len() >= 4);
             let req_id = RequestId::from_bytes(&src_data[0..RequestId::SIZE_AS_BYTES]).unwrap();
@@ -1563,7 +1563,7 @@ mod tests {
     fn test_basic_acceptance_success() {
         let (mut b, tok) = base_init(false);
         let mut sender = TestSender::default();
-        b.vr.acceptance_success(tok, &mut sender, &EMPTY_STAMP)
+        b.vr.acceptance_success(tok, &mut sender, Some(&EMPTY_STAMP))
             .expect("Sending acceptance success failed");
         acceptance_check(&mut sender, &tok.req_id);
     }
@@ -1572,7 +1572,7 @@ mod tests {
     fn test_basic_acceptance_success_with_helper() {
         let (mut b, tok) = base_with_helper_init();
         b.helper
-            .acceptance_success(tok, &EMPTY_STAMP)
+            .acceptance_success(tok, Some(&EMPTY_STAMP))
             .expect("Sending acceptance success failed");
         let sender: &mut TestSender = b.helper.sender.downcast_mut().unwrap();
         acceptance_check(sender, &tok.req_id);
@@ -1583,7 +1583,7 @@ mod tests {
         let (mut b, tok) = base_init(false);
         let mut faulty_sender = FallibleSender::default();
         let res =
-            b.vr.acceptance_success(tok, &mut faulty_sender, &EMPTY_STAMP);
+            b.vr.acceptance_success(tok, &mut faulty_sender, Some(&EMPTY_STAMP));
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert_eq!(err.1, tok);
@@ -1619,7 +1619,7 @@ mod tests {
         let stamp_buf = [1, 2, 3, 4, 5, 6, 7];
         let mut sender = TestSender::default();
         let fail_code = EcssEnumU16::new(2);
-        let fail_params = FailParams::new(stamp_buf.as_slice(), &fail_code, None);
+        let fail_params = FailParams::new(Some(stamp_buf.as_slice()), &fail_code, None);
         b.vr.acceptance_failure(tok, &mut sender, fail_params)
             .expect("Sending acceptance success failed");
         acceptance_fail_check(&mut sender, tok.req_id, stamp_buf);
@@ -1631,7 +1631,7 @@ mod tests {
         b.rep().reporter.dest_id = 5;
         let stamp_buf = [1, 2, 3, 4, 5, 6, 7];
         let fail_code = EcssEnumU16::new(2);
-        let fail_params = FailParams::new(stamp_buf.as_slice(), &fail_code, None);
+        let fail_params = FailParams::new(Some(stamp_buf.as_slice()), &fail_code, None);
         b.helper
             .acceptance_failure(tok, fail_params)
             .expect("Sending acceptance success failed");
@@ -1648,8 +1648,11 @@ mod tests {
         let fail_data: [u8; 16] = [0; 16];
         // 4 req ID + 1 byte step + 2 byte error code + 8 byte fail data
         assert_eq!(b.rep().allowed_source_data_len(), 15);
-        let fail_params =
-            FailParams::new(stamp_buf.as_slice(), &fail_code, Some(fail_data.as_slice()));
+        let fail_params = FailParams::new(
+            Some(stamp_buf.as_slice()),
+            &fail_code,
+            Some(fail_data.as_slice()),
+        );
         let res = b.helper.acceptance_failure(tok, fail_params);
         assert!(res.is_err());
         let err_with_token = res.unwrap_err();
@@ -1681,7 +1684,11 @@ mod tests {
         let fail_data = EcssEnumU32::new(12);
         let mut fail_data_raw = [0; 4];
         fail_data.write_to_be_bytes(&mut fail_data_raw).unwrap();
-        let fail_params = FailParams::new(&EMPTY_STAMP, &fail_code, Some(fail_data_raw.as_slice()));
+        let fail_params = FailParams::new(
+            Some(&EMPTY_STAMP),
+            &fail_code,
+            Some(fail_data_raw.as_slice()),
+        );
         b.vr.acceptance_failure(tok, &mut sender, fail_params)
             .expect("Sending acceptance success failed");
         let cmp_info = TmInfo {
@@ -1739,10 +1746,14 @@ mod tests {
         let fail_data: i32 = -12;
         let mut fail_data_raw = [0; 4];
         fail_data_raw.copy_from_slice(fail_data.to_be_bytes().as_slice());
-        let fail_params = FailParams::new(&EMPTY_STAMP, &fail_code, Some(fail_data_raw.as_slice()));
+        let fail_params = FailParams::new(
+            Some(&EMPTY_STAMP),
+            &fail_code,
+            Some(fail_data_raw.as_slice()),
+        );
 
         let accepted_token =
-            b.vr.acceptance_success(tok, &mut sender, &EMPTY_STAMP)
+            b.vr.acceptance_success(tok, &mut sender, Some(&EMPTY_STAMP))
                 .expect("Sending acceptance success failed");
         let empty =
             b.vr.start_failure(accepted_token, &mut sender, fail_params)
@@ -1758,11 +1769,15 @@ mod tests {
         let fail_data: i32 = -12;
         let mut fail_data_raw = [0; 4];
         fail_data_raw.copy_from_slice(fail_data.to_be_bytes().as_slice());
-        let fail_params = FailParams::new(&EMPTY_STAMP, &fail_code, Some(fail_data_raw.as_slice()));
+        let fail_params = FailParams::new(
+            Some(&EMPTY_STAMP),
+            &fail_code,
+            Some(fail_data_raw.as_slice()),
+        );
 
         let accepted_token = b
             .helper
-            .acceptance_success(tok, &EMPTY_STAMP)
+            .acceptance_success(tok, Some(&EMPTY_STAMP))
             .expect("Sending acceptance success failed");
         let empty = b
             .helper
@@ -1834,18 +1849,18 @@ mod tests {
         let mut sender = TestSender::default();
         let accepted_token = b
             .rep()
-            .acceptance_success(tok, &mut sender, &EMPTY_STAMP)
+            .acceptance_success(tok, &mut sender, Some(&EMPTY_STAMP))
             .expect("Sending acceptance success failed");
         let started_token = b
             .rep()
-            .start_success(accepted_token, &mut sender, &[0, 1, 0, 1, 0, 1, 0])
+            .start_success(accepted_token, &mut sender, Some(&[0, 1, 0, 1, 0, 1, 0]))
             .expect("Sending start success failed");
         let mut empty = b
             .rep()
             .step_success(
                 &started_token,
                 &mut sender,
-                &EMPTY_STAMP,
+                Some(&EMPTY_STAMP),
                 EcssEnumU8::new(0),
             )
             .expect("Sending step 0 success failed");
@@ -1854,7 +1869,7 @@ mod tests {
             b.vr.step_success(
                 &started_token,
                 &mut sender,
-                &EMPTY_STAMP,
+                Some(&EMPTY_STAMP),
                 EcssEnumU8::new(1),
             )
             .expect("Sending step 1 success failed");
@@ -1868,20 +1883,20 @@ mod tests {
         let (mut b, tok) = base_with_helper_init();
         let accepted_token = b
             .helper
-            .acceptance_success(tok, &EMPTY_STAMP)
+            .acceptance_success(tok, Some(&EMPTY_STAMP))
             .expect("Sending acceptance success failed");
         let started_token = b
             .helper
-            .start_success(accepted_token, &[0, 1, 0, 1, 0, 1, 0])
+            .start_success(accepted_token, Some(&[0, 1, 0, 1, 0, 1, 0]))
             .expect("Sending start success failed");
         let mut empty = b
             .helper
-            .step_success(&started_token, &EMPTY_STAMP, EcssEnumU8::new(0))
+            .step_success(&started_token, Some(&EMPTY_STAMP), EcssEnumU8::new(0))
             .expect("Sending step 0 success failed");
         assert_eq!(empty, ());
         empty = b
             .helper
-            .step_success(&started_token, &EMPTY_STAMP, EcssEnumU8::new(1))
+            .step_success(&started_token, Some(&EMPTY_STAMP), EcssEnumU8::new(1))
             .expect("Sending step 1 success failed");
         assert_eq!(empty, ());
         let sender: &mut TestSender = b.helper.sender.downcast_mut().unwrap();
@@ -1967,23 +1982,23 @@ mod tests {
         fail_data_raw.copy_from_slice(fail_data.to_be_bytes().as_slice());
         let fail_step = EcssEnumU8::new(1);
         let fail_params = FailParamsWithStep::new(
-            &EMPTY_STAMP,
+            Some(&EMPTY_STAMP),
             &fail_step,
             &fail_code,
             Some(fail_data_raw.as_slice()),
         );
 
         let accepted_token =
-            b.vr.acceptance_success(tok, &mut sender, &EMPTY_STAMP)
+            b.vr.acceptance_success(tok, &mut sender, Some(&EMPTY_STAMP))
                 .expect("Sending acceptance success failed");
         let started_token =
-            b.vr.start_success(accepted_token, &mut sender, &[0, 1, 0, 1, 0, 1, 0])
+            b.vr.start_success(accepted_token, &mut sender, Some(&[0, 1, 0, 1, 0, 1, 0]))
                 .expect("Sending start success failed");
         let mut empty =
             b.vr.step_success(
                 &started_token,
                 &mut sender,
-                &EMPTY_STAMP,
+                Some(&EMPTY_STAMP),
                 EcssEnumU8::new(0),
             )
             .expect("Sending completion success failed");
@@ -2005,7 +2020,7 @@ mod tests {
         fail_data_raw.copy_from_slice(fail_data.to_be_bytes().as_slice());
         let fail_step = EcssEnumU8::new(1);
         let fail_params = FailParamsWithStep::new(
-            &EMPTY_STAMP,
+            Some(&EMPTY_STAMP),
             &fail_step,
             &fail_code,
             Some(fail_data_raw.as_slice()),
@@ -2013,15 +2028,15 @@ mod tests {
 
         let accepted_token = b
             .helper
-            .acceptance_success(tok, &EMPTY_STAMP)
+            .acceptance_success(tok, Some(&EMPTY_STAMP))
             .expect("Sending acceptance success failed");
         let started_token = b
             .helper
-            .start_success(accepted_token, &[0, 1, 0, 1, 0, 1, 0])
+            .start_success(accepted_token, Some(&[0, 1, 0, 1, 0, 1, 0]))
             .expect("Sending start success failed");
         let mut empty = b
             .helper
-            .step_success(&started_token, &EMPTY_STAMP, EcssEnumU8::new(0))
+            .step_success(&started_token, Some(&EMPTY_STAMP), EcssEnumU8::new(0))
             .expect("Sending completion success failed");
         assert_eq!(empty, ());
         empty = b
@@ -2085,13 +2100,13 @@ mod tests {
         let mut sender = TestSender::default();
         let req_id = tok.req_id;
         let fail_code = EcssEnumU32::new(0x1020);
-        let fail_params = FailParams::new(&EMPTY_STAMP, &fail_code, None);
+        let fail_params = FailParams::new(Some(&EMPTY_STAMP), &fail_code, None);
 
         let accepted_token =
-            b.vr.acceptance_success(tok, &mut sender, &EMPTY_STAMP)
+            b.vr.acceptance_success(tok, &mut sender, Some(&EMPTY_STAMP))
                 .expect("Sending acceptance success failed");
         let started_token =
-            b.vr.start_success(accepted_token, &mut sender, &[0, 1, 0, 1, 0, 1, 0])
+            b.vr.start_success(accepted_token, &mut sender, Some(&[0, 1, 0, 1, 0, 1, 0]))
                 .expect("Sending start success failed");
         let empty =
             b.vr.completion_failure(started_token, &mut sender, fail_params)
@@ -2105,15 +2120,15 @@ mod tests {
         let (mut b, tok) = base_with_helper_init();
         let req_id = tok.req_id;
         let fail_code = EcssEnumU32::new(0x1020);
-        let fail_params = FailParams::new(&EMPTY_STAMP, &fail_code, None);
+        let fail_params = FailParams::new(Some(&EMPTY_STAMP), &fail_code, None);
 
         let accepted_token = b
             .helper
-            .acceptance_success(tok, &EMPTY_STAMP)
+            .acceptance_success(tok, Some(&EMPTY_STAMP))
             .expect("Sending acceptance success failed");
         let started_token = b
             .helper
-            .start_success(accepted_token, &[0, 1, 0, 1, 0, 1, 0])
+            .start_success(accepted_token, Some(&[0, 1, 0, 1, 0, 1, 0]))
             .expect("Sending start success failed");
         let empty = b
             .helper
@@ -2173,13 +2188,13 @@ mod tests {
         let (mut b, tok) = base_init(false);
         let mut sender = TestSender::default();
         let accepted_token =
-            b.vr.acceptance_success(tok, &mut sender, &EMPTY_STAMP)
+            b.vr.acceptance_success(tok, &mut sender, Some(&EMPTY_STAMP))
                 .expect("Sending acceptance success failed");
         let started_token =
-            b.vr.start_success(accepted_token, &mut sender, &[0, 1, 0, 1, 0, 1, 0])
+            b.vr.start_success(accepted_token, &mut sender, Some(&[0, 1, 0, 1, 0, 1, 0]))
                 .expect("Sending start success failed");
         let empty =
-            b.vr.completion_success(started_token, &mut sender, &EMPTY_STAMP)
+            b.vr.completion_success(started_token, &mut sender, Some(&EMPTY_STAMP))
                 .expect("Sending completion success failed");
         assert_eq!(empty, ());
         completion_success_check(&mut sender, tok.req_id);
@@ -2190,15 +2205,15 @@ mod tests {
         let (mut b, tok) = base_with_helper_init();
         let accepted_token = b
             .helper
-            .acceptance_success(tok, &EMPTY_STAMP)
+            .acceptance_success(tok, Some(&EMPTY_STAMP))
             .expect("Sending acceptance success failed");
         let started_token = b
             .helper
-            .start_success(accepted_token, &[0, 1, 0, 1, 0, 1, 0])
+            .start_success(accepted_token, Some(&[0, 1, 0, 1, 0, 1, 0]))
             .expect("Sending start success failed");
         let empty = b
             .helper
-            .completion_success(started_token, &EMPTY_STAMP)
+            .completion_success(started_token, Some(&EMPTY_STAMP))
             .expect("Sending completion success failed");
         assert_eq!(empty, ());
         let sender: &mut TestSender = b.helper.sender.downcast_mut().unwrap();

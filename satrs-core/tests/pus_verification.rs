@@ -93,25 +93,25 @@ pub mod crossbeam_test {
 
             let token = reporter_with_sender_0.add_tc_with_req_id(req_id_0);
             accepted_token = reporter_with_sender_0
-                .acceptance_success(token, &FIXED_STAMP)
+                .acceptance_success(token, Some(&FIXED_STAMP))
                 .expect("Acceptance success failed");
 
             // Do some start handling here
             let started_token;
             started_token = reporter_with_sender_0
-                .start_success(accepted_token, &FIXED_STAMP)
+                .start_success(accepted_token, Some(&FIXED_STAMP))
                 .expect("Start success failed");
             // Do some step handling here
             reporter_with_sender_0
-                .step_success(&started_token, &FIXED_STAMP, EcssEnumU8::new(0))
+                .step_success(&started_token, Some(&FIXED_STAMP), EcssEnumU8::new(0))
                 .expect("Start success failed");
 
             // Finish up
             reporter_with_sender_0
-                .step_success(&started_token, &FIXED_STAMP, EcssEnumU8::new(1))
+                .step_success(&started_token, Some(&FIXED_STAMP), EcssEnumU8::new(1))
                 .expect("Start success failed");
             reporter_with_sender_0
-                .completion_success(started_token, &FIXED_STAMP)
+                .completion_success(started_token, Some(&FIXED_STAMP))
                 .expect("Completion success failed");
         });
 
@@ -131,13 +131,13 @@ pub mod crossbeam_test {
             let (tc, _) = PusTc::from_bytes(&tc_buf[0..tc_len]).unwrap();
             let token = reporter_with_sender_1.add_tc(&tc);
             let accepted_token = reporter_with_sender_1
-                .acceptance_success(token, &FIXED_STAMP)
+                .acceptance_success(token, Some(&FIXED_STAMP))
                 .expect("Acceptance success failed");
             let started_token = reporter_with_sender_1
-                .start_success(accepted_token, &FIXED_STAMP)
+                .start_success(accepted_token, Some(&FIXED_STAMP))
                 .expect("Start success failed");
             let fail_code = EcssEnumU16::new(2);
-            let params = FailParams::new(&FIXED_STAMP, &fail_code, None);
+            let params = FailParams::new(Some(&FIXED_STAMP), &fail_code, None);
             reporter_with_sender_1
                 .completion_failure(started_token, params)
                 .expect("Completion success failed");
