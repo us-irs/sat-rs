@@ -131,8 +131,8 @@ pub struct LocalPool {
 /// Simple address type used for transactions with the local pool.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct StoreAddr {
-    pool_idx: u16,
-    packet_idx: NumBlocks,
+    pub(crate) pool_idx: u16,
+    pub(crate) packet_idx: NumBlocks,
 }
 
 impl StoreAddr {
