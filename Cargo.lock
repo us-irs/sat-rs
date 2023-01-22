@@ -568,7 +568,7 @@ dependencies = [
  "postcard",
  "serde",
  "serde_json",
- "spacepackets 0.5.0 (git+https://egit.irs.uni-stuttgart.de/rust/spacepackets.git?rev=fc76a975c11c54697a30471ba0e921965af4de12)",
+ "spacepackets 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "zerocopy",
 ]
 
@@ -684,7 +684,7 @@ checksum = "a507befe795404456341dfab10cef66ead4c041f62b8b11bbb92bffe5d0953e0"
 
 [[package]]
 name = "spacepackets"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "chrono",
  "crc",
@@ -697,8 +697,9 @@ dependencies = [
 
 [[package]]
 name = "spacepackets"
-version = "0.5.0"
-source = "git+https://egit.irs.uni-stuttgart.de/rust/spacepackets.git?rev=fc76a975c11c54697a30471ba0e921965af4de12#fc76a975c11c54697a30471ba0e921965af4de12"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cfb97faa84378b4fe2f92021a95d3acce523df4673ce46636f1eff82013843f"
 dependencies = [
  "chrono",
  "crc",
