@@ -28,9 +28,9 @@ impl PusScheduler {
     pub fn num_scheduled_telecommands(&self) -> u64 {
         let mut num_entries = 0;
         for entries in &self.tc_map {
-            num_entries += entries.1.len();
+            num_entries += entries.1.len() as u64;
         }
-        num_entries.into()
+        num_entries
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -63,8 +63,12 @@ impl PusScheduler {
             return false;
         }
         match self.tc_map.entry(time_stamp) {
-            Entry::Vacant(e) => e.insert(vec![addr]),
-            Entry::Occupied(mut v) => v.get_mut().push(addr),
+            Entry::Vacant(e) => {
+                e.insert(vec![addr]);
+            },
+            Entry::Occupied(mut v) => {
+                v.get_mut().push(addr);
+            },
         }
         true
     }
