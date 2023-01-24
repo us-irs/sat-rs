@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 use std::time::SystemTimeError;
 use std::vec;
 use std::vec::Vec;
-use std::sync::{mpsc, Arc, RwLock};
 
 #[derive(Debug)]
 pub struct PusScheduler {
@@ -66,10 +65,10 @@ impl PusScheduler {
         match self.tc_map.entry(time_stamp) {
             Entry::Vacant(e) => {
                 e.insert(vec![addr]);
-            },
+            }
             Entry::Occupied(mut v) => {
                 v.get_mut().push(addr);
-            },
+            }
         }
         true
     }
@@ -98,15 +97,15 @@ impl PusScheduler {
 
 #[cfg(test)]
 mod tests {
-    use std::{println, vec};
-    use std::sync::mpsc;
-    use std::sync::mpsc::{channel, Receiver, TryRecvError};
     use crate::pool::StoreAddr;
     use crate::pus::scheduling::PusScheduler;
-    use spacepackets::time::UnixTimestamp;
-    use std::time::Duration;
     use spacepackets::ecss::PacketTypeCodes::UnsignedInt;
+    use spacepackets::time::UnixTimestamp;
+    use std::sync::mpsc;
+    use std::sync::mpsc::{channel, Receiver, TryRecvError};
+    use std::time::Duration;
     use std::vec::Vec;
+    use std::{println, vec};
 
     #[test]
     fn basic() {
@@ -142,7 +141,7 @@ mod tests {
 
         assert!(worked);
 
-        let worked =  scheduler.insert_tc(
+        let worked = scheduler.insert_tc(
             UnixTimestamp::new_only_seconds(300),
             StoreAddr {
                 pool_idx: 0,
@@ -164,13 +163,15 @@ mod tests {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
-        scheduler.insert_tc(
+        let worked = scheduler.insert_tc(
             UnixTimestamp::new_only_seconds(100),
             StoreAddr {
                 pool_idx: 0,
                 packet_idx: 1,
             },
         );
+
+        assert!(worked);
 
         let worked = scheduler.insert_tc(
             UnixTimestamp::new_only_seconds(100),
@@ -180,7 +181,9 @@ mod tests {
             },
         );
 
-        scheduler.insert_tc(
+        assert!(worked);
+
+        let worked = scheduler.insert_tc(
             UnixTimestamp::new_only_seconds(300),
             StoreAddr {
                 pool_idx: 0,
@@ -188,15 +191,16 @@ mod tests {
             },
         );
 
+        assert!(worked);
+
         assert_eq!(scheduler.num_scheduled_telecommands(), 3);
     }
-
 
     #[test]
     fn time() {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
-        let time = UnixTimestamp::new(1,2).unwrap();
+        let time = UnixTimestamp::new(1, 2).unwrap();
         scheduler.update_time(time);
         assert_eq!(scheduler.current_time(), &time);
     }
@@ -225,17 +229,20 @@ mod tests {
         let mut i = 0;
         let mut test_closure_1 = |boolvar: bool, store_addr: &StoreAddr| {
             assert_eq!(boolvar, true);
-            assert_eq!(store_addr, &StoreAddr {
-                pool_idx: 0,
-                packet_idx: 1,
-            });
+            assert_eq!(
+                store_addr,
+                &StoreAddr {
+                    pool_idx: 0,
+                    packet_idx: 1,
+                }
+            );
             i += 1;
         };
 
         // test 1: too early, no tcs
         scheduler.update_time(UnixTimestamp::new_only_seconds(99));
 
-        scheduler.release_telecommands( &mut test_closure_1);
+        scheduler.release_telecommands(&mut test_closure_1);
 
         // test 2: exact time stamp of tc, releases 1 tc
         scheduler.update_time(UnixTimestamp::new_only_seconds(100));
@@ -245,10 +252,13 @@ mod tests {
         // test 3, late timestamp, release 1 overdue tc
         let mut test_closure_2 = |boolvar: bool, store_addr: &StoreAddr| {
             assert_eq!(boolvar, true);
-            assert_eq!(store_addr, &StoreAddr {
-                pool_idx: 0,
-                packet_idx: 2,
-            });
+            assert_eq!(
+                store_addr,
+                &StoreAddr {
+                    pool_idx: 0,
+                    packet_idx: 2,
+                }
+            );
             i += 1;
         };
 
@@ -287,17 +297,20 @@ mod tests {
         let mut i = 0;
         let mut test_closure = |boolvar: bool, store_addr: &StoreAddr| {
             assert_eq!(boolvar, true);
-            assert_eq!(store_addr, &StoreAddr {
-                pool_idx: 0,
-                packet_idx: 1,
-            });
+            assert_eq!(
+                store_addr,
+                &StoreAddr {
+                    pool_idx: 0,
+                    packet_idx: 1,
+                }
+            );
             i += 1;
         };
 
         // test 1: too early, no tcs
         scheduler.update_time(UnixTimestamp::new_only_seconds(99));
 
-        scheduler.release_telecommands( &mut test_closure);
+        scheduler.release_telecommands(&mut test_closure);
 
         // test 2: exact time stamp of tc, releases 2 tc
         scheduler.update_time(UnixTimestamp::new_only_seconds(100));
