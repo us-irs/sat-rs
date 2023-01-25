@@ -13,7 +13,7 @@ for these systems.
 This project currently contains following crates:
 
 * [`satrs-core`](https://egit.irs.uni-stuttgart.de/rust/satrs-launchpad/src/branch/main/satrs-core):
-   Core components of sat-rs
+   Core components of sat-rs.
 * [`satrs-example`](https://egit.irs.uni-stuttgart.de/rust/satrs-launchpad/src/branch/main/satrs-example):
    Example of a simple example on-board software using various sat-rs components which can be run
    on a host computer or on any system with a standard runtime like a Raspberry Pi.
