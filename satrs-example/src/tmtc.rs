@@ -14,6 +14,7 @@ use crate::pus::PusReceiver;
 use crate::requests::RequestWithToken;
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::event_man::EventRequestWithToken;
+use satrs_core::pus::scheduling::PusScheduler;
 use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::spacepackets::{ecss::PusPacket, tc::PusTc, tm::PusTm, SpHeader};
 use satrs_core::tmtc::{
@@ -238,6 +239,10 @@ fn poll_tc_server(udp_tmtc_server: &mut UdpTmtcServer) -> bool {
             ReceiveResult::NothingReceived => false,
         },
     }
+}
+
+fn poll_tc_scheduler(scheduler: &mut PusScheduler) {
+    match scheduler.release_telecommands()
 }
 
 fn core_tm_handling(udp_tmtc_server: &mut UdpTmtcServer, recv_addr: &SocketAddr) {

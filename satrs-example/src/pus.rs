@@ -19,6 +19,9 @@ use satrs_core::{
 use satrs_example::{hk_err, tmtc_err};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
+use std::time::Duration;
+use satrs_core::pus::scheduling::{PusScheduler, ScheduleSubservice};
+use satrs_core::spacepackets::time::{CcsdsTimeProvider, UnixTimestamp};
 
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
@@ -31,6 +34,7 @@ pub struct PusReceiver {
     request_map: HashMap<u32, Sender<RequestWithToken>>,
     stamper: TimeProvider,
     time_stamp: [u8; 7],
+    scheduler: PusScheduler,
 }
 
 impl PusReceiver {
@@ -43,6 +47,7 @@ impl PusReceiver {
         event_request_tx: Sender<EventRequestWithToken>,
         request_map: HashMap<u32, Sender<RequestWithToken>>,
     ) -> Self {
+        let scheduler = PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         Self {
             tm_helper: PusTmWithCdsShortHelper::new(apid),
             tm_tx,
@@ -53,6 +58,7 @@ impl PusReceiver {
             request_map,
             stamper: TimeProvider::new_with_u16_days(0, 0),
             time_stamp: [0; 7],
+            scheduler
         }
     }
 }
@@ -78,6 +84,8 @@ impl PusServiceProvider for PusReceiver {
             self.handle_event_request(pus_tc, accepted_token);
         } else if service == 3 {
             self.handle_hk_request(pus_tc, accepted_token);
+        } else if service == 11 {
+            self.handle_scheduled_tc(pus_tc, accepted_token);
         } else {
             self.update_time_stamp();
             self.verif_reporter
@@ -201,6 +209,7 @@ impl PusReceiver {
             ));
         }
     }
+
     fn handle_event_request(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
         let send_start_failure = |verif_reporter: &mut StdVerifReporterWithSender,
                                   timestamp: &[u8; 7],
@@ -272,5 +281,87 @@ impl PusReceiver {
                 );
             }
         }
+    }
+
+    fn handle_scheduled_tc(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
+        if pus_tc.user_data().is_none() {
+            self.update_time_stamp();
+            self.verif_reporter
+                .start_failure(
+                    token,
+                    FailParams::new(Some(&self.time_stamp), &tmtc_err::NOT_ENOUGH_APP_DATA, None),
+                )
+                .expect("Sending start failure TM failed");
+            return;
+        }
+
+        self.update_time_stamp();
+
+        match pus_tc.subservice() {
+            1 => {
+                let start_token = self
+                    .verif_reporter
+                    .start_success(token, Some(&self.time_stamp))
+                    .expect("Error sending start success");
+                self.scheduler.enable();
+                if self.scheduler.is_enabled() {
+                    self.verif_reporter
+                        .completion_success(start_token, Some(&self.time_stamp))
+                        .expect("Error sending completion success");
+                } else {
+                    // TODO: ???
+                    //self.verif_reporter
+                    //    .completion_failure(start_token, &tmtc_err::NOT_ENOUGH_APP_DATA, none)
+                }
+            },
+            2 => {
+                let start_token = self
+                .verif_reporter
+                .start_success(token, Some(&self.time_stamp))
+                .expect("Error sending start success");
+                self.scheduler.disable();
+                if ! self.scheduler.is_enabled() {
+                    self.verif_reporter
+                        .completion_success(start_token, Some(&self.time_stamp))
+                        .expect("Error sending completion success");
+                } else {
+                    // TODO: ???
+                    //self.verif_reporter
+                    //    .completion_failure(start_token, &tmtc_err::NOT_ENOUGH_APP_DATA, none)
+                }
+            },
+            3 => {
+                let start_token = self
+                    .verif_reporter
+                    .start_success(token, Some(&self.time_stamp))
+                    .expect("Error sending start success");
+                self.scheduler.reset();
+                if !self.scheduler.is_enabled() && self.scheduler.num_scheduled_telecommands() == 0 {
+                    self.verif_reporter
+                        .completion_success(start_token, Some(&self.time_stamp))
+                        .expect("Error sending completion success");
+                } else {
+                    // TODO: ???
+                    //self.verif_reporter
+                    //    .completion_failure(start_token, &tmtc_err::NOT_ENOUGH_APP_DATA, none)
+                }
+            },
+            4 => {
+                self.update_time_stamp();
+                let unix_time = UnixTimestamp::new_only_seconds(self.stamper.unix_seconds());
+                let worked = self.scheduler.insert_tc(unix_time, );
+            },
+            _ => {
+                self.verif_reporter
+                .start_failure(
+                    token,
+                    FailParams::new(Some(&self.time_stamp), &tmtc_err::NOT_ENOUGH_APP_DATA, None),
+                )
+                .expect("Sending start failure TM failed");
+                return;
+            }
+        }
+
+
     }
 }

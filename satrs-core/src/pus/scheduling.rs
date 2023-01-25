@@ -7,6 +7,18 @@ use std::time::SystemTimeError;
 use std::vec;
 use std::vec::Vec;
 
+
+//TODO: Move to spacepackets
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum ScheduleSubservice {
+    EnableScheduling = 1,
+    DisableScheduling = 2,
+    ResetScheduling = 3,
+    InsertActivity = 4,
+    DeleteActivity = 5,
+
+}
+
 #[derive(Debug)]
 pub struct PusScheduler {
     tc_map: BTreeMap<UnixTimestamp, Vec<StoreAddr>>,
