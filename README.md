@@ -23,6 +23,8 @@ This project currently contains following crates:
    Example of a simple example on-board software using sat-rs components on a bare-metal system
    with constrained resources.
 
+Each project has its own `CHANGELOG.md`.
+
 # Related projects
  
  In addition to the crates in this repository, the sat-rs project also maintains several
