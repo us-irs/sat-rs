@@ -126,21 +126,30 @@ impl PusScheduler {
     /// Utility method which calls [Self::telecommands_to_release] and then calls a releaser
     /// closure for each telecommand which should be released. This function will also delete
     /// the telecommands from the holding store after calling the release closure.
-    pub fn release_telecommands<R: FnMut(bool, &StoreAddr)>(
+    ///
+    /// # Arguments
+    ///
+    /// * `releaser` - Closure where the first argument is whether the scheduler is enabled and
+    ///     the second argument is the store address. This closure should return whether the
+    ///     command should be deleted.
+    /// * `store` - The holding store of the telecommands.
+    pub fn release_telecommands<R: FnMut(bool, &StoreAddr) -> bool>(
         &mut self,
         mut releaser: R,
-        store: &mut impl PoolProvider,
+        tc_store: &mut impl PoolProvider,
     ) -> Result<u64, (u64, StoreError)> {
         let tcs_to_release = self.telecommands_to_release();
         let mut released_tcs = 0;
         let mut store_error = Ok(());
         for tc in tcs_to_release {
             for addr in tc.1 {
-                releaser(self.enabled, addr);
+                let should_delete = releaser(self.enabled, addr);
                 released_tcs += 1;
-                let res = store.delete(*addr);
-                if res.is_err() {
-                    store_error = res;
+                if should_delete {
+                    let res = tc_store.delete(*addr);
+                    if res.is_err() {
+                        store_error = res;
+                    }
                 }
             }
         }
@@ -273,6 +282,7 @@ mod tests {
         let mut i = 0;
         let mut test_closure_1 = |boolvar: bool, store_addr: &StoreAddr| {
             common_check(boolvar, store_addr, vec![first_addr], &mut i);
+            true
         };
 
         // test 1: too early, no tcs
@@ -294,6 +304,7 @@ mod tests {
         // test 3, late timestamp, release 1 overdue tc
         let mut test_closure_2 = |boolvar: bool, store_addr: &StoreAddr| {
             common_check(boolvar, store_addr, vec![second_addr], &mut i);
+            true
         };
 
         scheduler.update_time(UnixTimestamp::new_only_seconds(206));
@@ -328,6 +339,7 @@ mod tests {
         let mut i = 0;
         let mut test_closure = |boolvar: bool, store_addr: &StoreAddr| {
             common_check(boolvar, store_addr, vec![first_addr, second_addr], &mut i);
+            true
         };
 
         // test 1: too early, no tcs
