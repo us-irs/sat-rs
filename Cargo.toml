@@ -4,5 +4,8 @@ members = [
     "satrs-core",
     "satrs-mib",
     "satrs-example",
+]
+
+exclude = [
     "satrs-example-stm32f3-disco",
 ]
