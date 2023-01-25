@@ -1,3 +1,4 @@
+//! # PUS Service 11 Scheduling Module
 use crate::pool::{PoolProvider, StoreAddr, StoreError};
 use alloc::collections::btree_map::{Entry, Range};
 use alloc::vec;
@@ -10,7 +11,14 @@ use std::time::SystemTimeError;
 
 /// This is the core data structure for scheduling PUS telecommands with [alloc] support.
 ///
-/// The ECSS standard specifies that the PUS scheduler can be enabled and disabled.
+/// It is assumed that the actual telecommand data is stored in a separate TC pool offering
+/// a [crate::pool::PoolProvider] API. This data structure just tracks the store addresses and their
+/// release times and offers a convenient API to insert and release telecommands and perform
+/// other functionality specified by the ECSS standard in section 6.11. The time is tracked
+/// as a [spacepackets::time::UnixTimestamp] but the only requirement to the timekeeping of
+/// the user is that it is convertible to that timestamp.
+///
+/// The standard also specifies that the PUS scheduler can be enabled and disabled.
 /// A disabled scheduler should still delete commands where the execution time has been reached
 /// but should not release them to be executed.
 ///
