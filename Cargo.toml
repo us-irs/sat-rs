@@ -4,5 +4,5 @@ members = [
     "satrs-core",
     "satrs-mib",
     "satrs-example",
-    "spacepackets",
+    "satrs-example-stm32f3-disco",
 ]
