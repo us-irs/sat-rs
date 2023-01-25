@@ -17,8 +17,8 @@ This project currently contains following crates:
 * [`satrs-example`](https://egit.irs.uni-stuttgart.de/rust/satrs-launchpad/src/branch/main/satrs-example):
    Example of a simple example on-board software using various sat-rs components which can be run
    on a host computer or on any system with a standard runtime like a Raspberry Pi.
-* [`satrs-example-stm32f3-disco`](https://egit.irs.uni-stuttgart.de/rust/satrs-example-stm32f3-disco)
-   :Example of a simple example on-board software using sat-rs components on a bare-metal system
+* [`satrs-example-stm32f3-disco`](https://egit.irs.uni-stuttgart.de/rust/satrs-example-stm32f3-disco):
+   Example of a simple example on-board software using sat-rs components on a bare-metal system
    with constrained resources.
 
 # Related projects
