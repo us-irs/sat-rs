@@ -67,7 +67,7 @@ use spacepackets::ecss::{PusError, PusPacket};
 use spacepackets::tc::PusTc;
 use spacepackets::SpHeader;
 
-pub trait PusServiceProvider: Downcast + Send {
+pub trait PusServiceProvider: Downcast {
     type Error;
     fn handle_pus_tc_packet(
         &mut self,
@@ -78,12 +78,22 @@ pub trait PusServiceProvider: Downcast + Send {
 }
 downcast_rs::impl_downcast!(PusServiceProvider assoc Error);
 
+pub trait SendablePusServiceProvider: PusServiceProvider + Send {}
+
+impl<T: Send + PusServiceProvider> SendablePusServiceProvider for T {}
+
+downcast_rs::impl_downcast!(SendablePusServiceProvider assoc Error);
+
+/// Generic distributor object which dispatches received packets to a user provided handler.
+///
+/// This distributor expects the passed trait object to be [Send]able to allow more ergonomic
+/// usage with threads.
 pub struct PusDistributor<E> {
-    pub service_provider: Box<dyn PusServiceProvider<Error = E>>,
+    pub service_provider: Box<dyn SendablePusServiceProvider<Error = E>>,
 }
 
 impl<E> PusDistributor<E> {
-    pub fn new(service_provider: Box<dyn PusServiceProvider<Error = E>>) -> Self {
+    pub fn new(service_provider: Box<dyn SendablePusServiceProvider<Error = E>>) -> Self {
         PusDistributor { service_provider }
     }
 }
@@ -122,11 +132,13 @@ impl<E: 'static> ReceivesEcssPusTc for PusDistributor<E> {
 }
 
 impl<E: 'static> PusDistributor<E> {
-    pub fn service_provider_ref<T: PusServiceProvider<Error = E>>(&self) -> Option<&T> {
+    pub fn service_provider_ref<T: SendablePusServiceProvider<Error = E>>(&self) -> Option<&T> {
         self.service_provider.downcast_ref::<T>()
     }
 
-    pub fn service_provider_mut<T: PusServiceProvider<Error = E>>(&mut self) -> Option<&mut T> {
+    pub fn service_provider_mut<T: SendablePusServiceProvider<Error = E>>(
+        &mut self,
+    ) -> Option<&mut T> {
         self.service_provider.downcast_mut::<T>()
     }
 }

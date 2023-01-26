@@ -63,19 +63,20 @@ impl AddressableId {
 /// This trait is implemented by both the [crate::tmtc::pus_distrib::PusDistributor] and the
 /// [crate::tmtc::ccsds_distrib::CcsdsDistributor]  which allows to pass the respective packets in
 /// raw byte format into them.
-pub trait ReceivesTcCore: Send {
+pub trait ReceivesTcCore {
     type Error;
     fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error>;
 }
 
-/// Extension trait of [ReceivesTcCore] which allows downcasting by implementing [Downcast]
+/// Extension trait of [ReceivesTcCore] which allows downcasting by implementing [Downcast] and
+/// is also sendable.
 #[cfg(feature = "alloc")]
-pub trait ReceivesTc: ReceivesTcCore + Downcast {}
+pub trait ReceivesTc: ReceivesTcCore + Downcast + Send {}
 
 /// Blanket implementation to automatically implement [ReceivesTc] when the [alloc] feature
 /// is enabled.
 #[cfg(feature = "alloc")]
-impl<T> ReceivesTc for T where T: ReceivesTcCore + 'static {}
+impl<T> ReceivesTc for T where T: ReceivesTcCore + Send + 'static {}
 
 #[cfg(feature = "alloc")]
 impl_downcast!(ReceivesTc assoc Error);
