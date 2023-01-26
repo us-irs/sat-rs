@@ -62,10 +62,13 @@
 //! ```
 use crate::tmtc::{ReceivesCcsdsTc, ReceivesEcssPusTc, ReceivesTcCore};
 use alloc::boxed::Box;
+use core::fmt::{Display, Formatter};
 use downcast_rs::Downcast;
 use spacepackets::ecss::{PusError, PusPacket};
 use spacepackets::tc::PusTc;
 use spacepackets::SpHeader;
+#[cfg(feature = "std")]
+use std::error::Error;
 
 pub trait PusServiceProvider: Downcast {
     type Error;
@@ -102,6 +105,25 @@ impl<E> PusDistributor<E> {
 pub enum PusDistribError<E> {
     CustomError(E),
     PusError(PusError),
+}
+
+impl<E: Display> Display for PusDistribError<E> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        match self {
+            PusDistribError::CustomError(e) => write!(f, "{e}"),
+            PusDistribError::PusError(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<E: Error> Error for PusDistribError<E> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::CustomError(e) => e.source(),
+            Self::PusError(e) => e.source(),
+        }
+    }
 }
 
 impl<E: 'static> ReceivesTcCore for PusDistributor<E> {

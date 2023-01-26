@@ -222,7 +222,7 @@ fn poll_tc_server(udp_tmtc_server: &mut UdpTmtcServer) -> bool {
         Ok(_) => true,
         Err(e) => match e {
             ReceiveResult::ReceiverError(e) => match e {
-                CcsdsError::PacketError(e) => {
+                CcsdsError::ByteConversionError(e) => {
                     println!("Got packet error: {e:?}");
                     true
                 }
