@@ -280,7 +280,6 @@ fn poll_tc_server(udp_tmtc_server: &mut UdpTmtcServer) -> bool {
     }
 }
 
-
 fn core_tm_handling(udp_tmtc_server: &mut UdpTmtcServer, recv_addr: &SocketAddr) {
     while let Ok(addr) = udp_tmtc_server.tm_rx.try_recv() {
         let mut store_lock = udp_tmtc_server

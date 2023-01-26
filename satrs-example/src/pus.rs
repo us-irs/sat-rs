@@ -6,10 +6,12 @@ use satrs_core::pool::{StoreAddr, StoreError};
 use satrs_core::pus::event::Subservices;
 use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
 use satrs_core::pus::hk;
+use satrs_core::pus::scheduling::{PusScheduler, ScheduleSubservice};
 use satrs_core::pus::verification::{
     FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
 };
 use satrs_core::res_code::ResultU16;
+use satrs_core::spacepackets::time::{CcsdsTimeProvider, UnixTimestamp};
 use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use satrs_core::tmtc::{AddressableId, PusServiceProvider};
 use satrs_core::{
@@ -20,11 +22,8 @@ use satrs_example::{hk_err, tmtc_err};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
-use std::time::Duration;
-use satrs_core::pus::scheduling::{PusScheduler, ScheduleSubservice};
-use satrs_core::spacepackets::time::{CcsdsTimeProvider, UnixTimestamp};
 use std::sync::{Arc, LockResult, Mutex};
-
+use std::time::Duration;
 
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
@@ -315,7 +314,6 @@ impl PusReceiver {
                         .completion_success(start_token, Some(&self.time_stamp))
                         .expect("Error sending completion success");
                 } else {
-
                     panic!("Failed to enable scheduler");
                 }
             }
@@ -331,7 +329,6 @@ impl PusReceiver {
                         .completion_success(start_token, Some(&self.time_stamp))
                         .expect("Error sending completion success");
                 } else {
-
                     panic!("Failed to disable scheduler");
                 }
             }
@@ -366,10 +363,12 @@ impl PusReceiver {
                     .expect("Error sending start success");
                 match self.tc_source.tc_store.pool.write() {
                     Ok(mut pool) => {
-                        scheduler.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(
-                            pus_tc,
-                            pool.as_mut(),
-                        );
+                        scheduler
+                            .insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(
+                                pus_tc,
+                                pool.as_mut(),
+                            )
+                            .expect("TODO: panic message");
                     }
                     Err(_) => {}
                 }
