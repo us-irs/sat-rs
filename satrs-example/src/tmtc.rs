@@ -51,10 +51,10 @@ impl Display for MpscStoreAndSendError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             MpscStoreAndSendError::StoreError(s) => {
-                write!(f, "store error {}", s)
+                write!(f, "store error {s}")
             }
             MpscStoreAndSendError::SendError(s) => {
-                write!(f, "send error {}", s)
+                write!(f, "send error {s}")
             }
         }
     }
@@ -201,8 +201,8 @@ fn core_tmtc_loop(
                         .ok();
                 }
                 Err(e) => {
-                    println!("error creating PUS TC from raw data: {}", e);
-                    println!("raw data: {:x?}", data);
+                    println!("error creating PUS TC from raw data: {e}");
+                    println!("raw data: {data:x?}");
                 }
             }
         }
@@ -251,7 +251,7 @@ fn core_tm_handling(udp_tmtc_server: &mut UdpTmtcServer, recv_addr: &SocketAddr)
         if buf.len() > 9 {
             let service = buf[7];
             let subservice = buf[8];
-            println!("Sending PUS TM[{},{}]", service, subservice)
+            println!("Sending PUS TM[{service},{subservice}]")
         } else {
             println!("Sending PUS TM");
         }

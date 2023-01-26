@@ -14,16 +14,13 @@ fn main() {
     let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
     let client = UdpSocket::bind("127.0.0.1:7302").expect("Connecting to UDP server failed");
     let tc_req_id = RequestId::new(&pus_tc);
-    println!(
-        "Packing and sending PUS ping command TC[17,1] with request ID {}",
-        tc_req_id
-    );
+    println!("Packing and sending PUS ping command TC[17,1] with request ID {tc_req_id}");
     let size = pus_tc
         .write_to_bytes(&mut buf)
         .expect("Creating PUS TC failed");
     client
         .send_to(&buf[0..size], addr)
-        .unwrap_or_else(|_| panic!("Sending to {:?} failed", addr));
+        .unwrap_or_else(|_| panic!("Sending to {addr:?} failed"));
     client
         .set_read_timeout(Some(Duration::from_secs(2)))
         .expect("Setting read timeout failed");
@@ -44,33 +41,21 @@ fn main() {
                     }
                     let req_id = RequestId::from_bytes(src_data).unwrap();
                     if pus_tm.subservice() == 1 {
-                        println!(
-                            "Received TM[1,1] acceptance success for request ID {}",
-                            req_id
-                        )
+                        println!("Received TM[1,1] acceptance success for request ID {req_id}")
                     } else if pus_tm.subservice() == 2 {
-                        println!(
-                            "Received TM[1,2] acceptance failure for request ID {}",
-                            req_id
-                        )
+                        println!("Received TM[1,2] acceptance failure for request ID {req_id}")
                     } else if pus_tm.subservice() == 3 {
-                        println!("Received TM[1,3] start success for request ID {}", req_id)
+                        println!("Received TM[1,3] start success for request ID {req_id}")
                     } else if pus_tm.subservice() == 4 {
-                        println!("Received TM[1,2] start failure for request ID {}", req_id)
+                        println!("Received TM[1,2] start failure for request ID {req_id}")
                     } else if pus_tm.subservice() == 5 {
-                        println!("Received TM[1,5] step success for request ID {}", req_id)
+                        println!("Received TM[1,5] step success for request ID {req_id}")
                     } else if pus_tm.subservice() == 6 {
-                        println!("Received TM[1,6] step failure for request ID {}", req_id)
+                        println!("Received TM[1,6] step failure for request ID {req_id}")
                     } else if pus_tm.subservice() == 7 {
-                        println!(
-                            "Received TM[1,7] completion success for request ID {}",
-                            req_id
-                        )
+                        println!("Received TM[1,7] completion success for request ID {req_id}")
                     } else if pus_tm.subservice() == 8 {
-                        println!(
-                            "Received TM[1,8] completion failure for request ID {}",
-                            req_id
-                        );
+                        println!("Received TM[1,8] completion failure for request ID {req_id}");
                     }
                 } else {
                     println!(

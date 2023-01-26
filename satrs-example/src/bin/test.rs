@@ -49,7 +49,7 @@ fn main() {
     let jh0 = thread::spawn(move || {
         let data = r0.recv().unwrap();
         let raw = data.get_data();
-        println!("Received data {:?}", raw);
+        println!("Received data {raw:?}");
     });
     let jh1 = thread::spawn(|| {});
     jh0.join().unwrap();
