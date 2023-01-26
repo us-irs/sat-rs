@@ -1,3 +1,5 @@
+extern crate core;
+
 mod ccsds;
 mod hk;
 mod pus;

@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
+use std::rc::Rc;
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
+use std::sync::{Arc, LockResult, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -40,6 +42,12 @@ pub struct TmArgs {
 pub struct TcArgs {
     pub tc_source: PusTcSource,
     pub tc_receiver: Receiver<StoreAddr>,
+}
+
+impl TcArgs {
+    fn split(self) -> (PusTcSource, Receiver<StoreAddr>) {
+        (self.tc_source, self.tc_receiver)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,6 +161,10 @@ impl ReceivesCcsdsTc for PusTcSource {
     }
 }
 pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
+    let mut scheduler = Arc::new(Mutex::new(
+        PusScheduler::new_with_current_init_time(Duration::from_secs(5)).unwrap(),
+    ));
+    let mut sched_clone = scheduler.clone();
     let mut pus_receiver = PusReceiver::new(
         PUS_APID,
         tm_args.tm_sink_sender,
@@ -161,6 +173,7 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
         tc_args.tc_source.clone(),
         args.event_request_tx,
         args.request_map,
+        sched_clone,
     );
     let ccsds_receiver = CcsdsReceiver {
         tc_source: tc_args.tc_source.clone(),
@@ -174,22 +187,48 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
         tm_rx: tm_args.tm_server_rx,
         tm_store: tm_args.tm_store.pool.clone(),
     };
+
+    let mut test_closure = |boolvar: bool, store_addr: &StoreAddr| true;
+    let (mut tc_source, mut tc_receiver) = tc_args.split();
+
     loop {
-        core_tmtc_loop(&mut udp_tmtc_server, &mut tc_args, &mut pus_receiver);
+        let mut tmtc_sched = scheduler.clone();
+        core_tmtc_loop(
+            &mut udp_tmtc_server,
+            &mut tc_source,
+            &mut tc_receiver,
+            &mut pus_receiver,
+            tmtc_sched,
+        );
         thread::sleep(Duration::from_millis(400));
     }
 }
 
 fn core_tmtc_loop(
     udp_tmtc_server: &mut UdpTmtcServer,
-    tc_args: &mut TcArgs,
+    tc_source: &mut PusTcSource,
+    tc_receiver: &mut Receiver<StoreAddr>,
     pus_receiver: &mut PusReceiver,
+    scheduler: Arc<Mutex<PusScheduler>>,
 ) {
+    let releaser = |enabled: bool, addr: &StoreAddr| {
+        tc_source.tc_source.send(*addr);
+        true
+    };
+
+    let mut scheduler = scheduler.lock().expect("Lock of scheduler failed");
+    match tc_source.tc_store.pool.write() {
+        Ok(mut pool) => match scheduler.release_telecommands(releaser, pool.as_mut()) {
+            Ok(_) => {}
+            Err(_) => {}
+        },
+        Err(_) => {}
+    }
+
     while poll_tc_server(udp_tmtc_server) {}
-    match tc_args.tc_receiver.try_recv() {
+    match tc_receiver.try_recv() {
         Ok(addr) => {
-            let pool = tc_args
-                .tc_source
+            let pool = tc_source
                 .tc_store
                 .pool
                 .read()
@@ -241,9 +280,6 @@ fn poll_tc_server(udp_tmtc_server: &mut UdpTmtcServer) -> bool {
     }
 }
 
-fn poll_tc_scheduler(scheduler: &mut PusScheduler) {
-    match scheduler.release_telecommands()
-}
 
 fn core_tm_handling(udp_tmtc_server: &mut UdpTmtcServer, recv_addr: &SocketAddr) {
     while let Ok(addr) = udp_tmtc_server.tm_rx.try_recv() {

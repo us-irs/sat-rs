@@ -2,7 +2,7 @@ use crate::hk::{CollectionIntervalFactor, HkRequest};
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{PusTcSource, TmStore};
 use satrs_core::events::EventU32;
-use satrs_core::pool::StoreAddr;
+use satrs_core::pool::{StoreAddr, StoreError};
 use satrs_core::pus::event::Subservices;
 use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
 use satrs_core::pus::hk;
@@ -13,15 +13,18 @@ use satrs_core::res_code::ResultU16;
 use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use satrs_core::tmtc::{AddressableId, PusServiceProvider};
 use satrs_core::{
-    spacepackets::ecss::PusPacket, spacepackets::tc::PusTc, spacepackets::time::cds::TimeProvider,
-    spacepackets::time::TimeWriter, spacepackets::SpHeader,
+    spacepackets, spacepackets::ecss::PusPacket, spacepackets::tc::PusTc,
+    spacepackets::time::cds::TimeProvider, spacepackets::time::TimeWriter, spacepackets::SpHeader,
 };
 use satrs_example::{hk_err, tmtc_err};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 use satrs_core::pus::scheduling::{PusScheduler, ScheduleSubservice};
 use satrs_core::spacepackets::time::{CcsdsTimeProvider, UnixTimestamp};
+use std::sync::{Arc, LockResult, Mutex};
+
 
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
@@ -34,7 +37,7 @@ pub struct PusReceiver {
     request_map: HashMap<u32, Sender<RequestWithToken>>,
     stamper: TimeProvider,
     time_stamp: [u8; 7],
-    scheduler: PusScheduler,
+    scheduler: Arc<Mutex<PusScheduler>>,
 }
 
 impl PusReceiver {
@@ -46,8 +49,8 @@ impl PusReceiver {
         tc_source: PusTcSource,
         event_request_tx: Sender<EventRequestWithToken>,
         request_map: HashMap<u32, Sender<RequestWithToken>>,
+        scheduler: Arc<Mutex<PusScheduler>>,
     ) -> Self {
-        let scheduler = PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         Self {
             tm_helper: PusTmWithCdsShortHelper::new(apid),
             tm_tx,
@@ -58,7 +61,7 @@ impl PusReceiver {
             request_map,
             stamper: TimeProvider::new_with_u16_days(0, 0),
             time_stamp: [0; 7],
-            scheduler
+            scheduler,
         }
     }
 }
@@ -299,69 +302,95 @@ impl PusReceiver {
 
         match pus_tc.subservice() {
             1 => {
+                let mut scheduler = self.scheduler.lock().expect("Lock of scheduler failed");
+
                 let start_token = self
                     .verif_reporter
                     .start_success(token, Some(&self.time_stamp))
                     .expect("Error sending start success");
-                self.scheduler.enable();
-                if self.scheduler.is_enabled() {
+
+                scheduler.enable();
+                if scheduler.is_enabled() {
                     self.verif_reporter
                         .completion_success(start_token, Some(&self.time_stamp))
                         .expect("Error sending completion success");
                 } else {
-                    // TODO: ???
-                    //self.verif_reporter
-                    //    .completion_failure(start_token, &tmtc_err::NOT_ENOUGH_APP_DATA, none)
+
+                    panic!("Failed to enable scheduler");
                 }
-            },
+            }
             2 => {
-                let start_token = self
-                .verif_reporter
-                .start_success(token, Some(&self.time_stamp))
-                .expect("Error sending start success");
-                self.scheduler.disable();
-                if ! self.scheduler.is_enabled() {
-                    self.verif_reporter
-                        .completion_success(start_token, Some(&self.time_stamp))
-                        .expect("Error sending completion success");
-                } else {
-                    // TODO: ???
-                    //self.verif_reporter
-                    //    .completion_failure(start_token, &tmtc_err::NOT_ENOUGH_APP_DATA, none)
-                }
-            },
-            3 => {
+                let mut scheduler = self.scheduler.lock().expect("Lock of scheduler failed");
                 let start_token = self
                     .verif_reporter
                     .start_success(token, Some(&self.time_stamp))
                     .expect("Error sending start success");
-                self.scheduler.reset();
-                if !self.scheduler.is_enabled() && self.scheduler.num_scheduled_telecommands() == 0 {
+                scheduler.disable();
+                if !scheduler.is_enabled() {
                     self.verif_reporter
                         .completion_success(start_token, Some(&self.time_stamp))
                         .expect("Error sending completion success");
                 } else {
-                    // TODO: ???
-                    //self.verif_reporter
-                    //    .completion_failure(start_token, &tmtc_err::NOT_ENOUGH_APP_DATA, none)
+
+                    panic!("Failed to disable scheduler");
                 }
-            },
+            }
+            3 => {
+                let mut scheduler = self.scheduler.lock().expect("Lock of scheduler failed");
+
+                let start_token = self
+                    .verif_reporter
+                    .start_success(token, Some(&self.time_stamp))
+                    .expect("Error sending start success");
+                match self.tc_source.tc_store.pool.write() {
+                    Ok(mut pool) => {
+                        match scheduler.reset(pool.as_mut()) {
+                            Ok(_) => {
+                                self.verif_reporter
+                                    .completion_success(start_token, Some(&self.time_stamp))
+                                    .expect("Error sending completion success");
+                            }
+                            Err(_) => {
+                                // TODO
+                            }
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
             4 => {
-                self.update_time_stamp();
-                let unix_time = UnixTimestamp::new_only_seconds(self.stamper.unix_seconds());
-                let worked = self.scheduler.insert_tc(unix_time, );
-            },
+                let mut scheduler = self.scheduler.lock().expect("Lock of scheduler failed");
+                let start_token = self
+                    .verif_reporter
+                    .start_success(token, Some(&self.time_stamp))
+                    .expect("Error sending start success");
+                match self.tc_source.tc_store.pool.write() {
+                    Ok(mut pool) => {
+                        scheduler.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(
+                            pus_tc,
+                            pool.as_mut(),
+                        );
+                    }
+                    Err(_) => {}
+                }
+
+                //let addr = self.tc_source.tc_store.add_pus_tc().unwrap();
+                //let unix_time = UnixTimestamp::new_only_seconds(self.stamper.unix_seconds());
+                //let worked = self.scheduler.insert_tc(unix_time, );
+            }
             _ => {
                 self.verif_reporter
-                .start_failure(
-                    token,
-                    FailParams::new(Some(&self.time_stamp), &tmtc_err::NOT_ENOUGH_APP_DATA, None),
-                )
-                .expect("Sending start failure TM failed");
+                    .start_failure(
+                        token,
+                        FailParams::new(
+                            Some(&self.time_stamp),
+                            &tmtc_err::NOT_ENOUGH_APP_DATA,
+                            None,
+                        ),
+                    )
+                    .expect("Sending start failure TM failed");
                 return;
             }
         }
-
-
     }
 }
