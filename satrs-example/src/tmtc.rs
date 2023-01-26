@@ -164,6 +164,7 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
     let mut scheduler = Arc::new(Mutex::new(
         PusScheduler::new_with_current_init_time(Duration::from_secs(5)).unwrap(),
     ));
+
     let mut sched_clone = scheduler.clone();
     let mut pus_receiver = PusReceiver::new(
         PUS_APID,
@@ -175,10 +176,13 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
         args.request_map,
         sched_clone,
     );
+
     let ccsds_receiver = CcsdsReceiver {
         tc_source: tc_args.tc_source.clone(),
     };
+
     let ccsds_distributor = CcsdsDistributor::new(Box::new(ccsds_receiver));
+
     let udp_tc_server = UdpTcServer::new(args.sock_addr, 2048, Box::new(ccsds_distributor))
         .expect("Creating UDP TMTC server failed");
 
