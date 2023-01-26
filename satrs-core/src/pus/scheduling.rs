@@ -15,7 +15,7 @@ use std::vec::Vec;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScheduleError {
     PusError(PusError),
-    TimeMarginTooShort,
+    TimeMarginTooShort(UnixTimestamp, UnixTimestamp),
     NestedScheduledTC,
     StoreError(StoreError),
     TCDataEmpty,
@@ -24,7 +24,26 @@ pub enum ScheduleError {
 
 impl Display for ScheduleError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        todo!()
+        match self {
+            ScheduleError::PusError(e) => {
+                write!(f, "Pus Error: {}", e)
+            }
+            ScheduleError::TimeMarginTooShort(current_time, timestamp) => {
+                write!(f, "Error: time margin too short, current time: {:?}, time stamp: {:?}", current_time, timestamp)
+            }
+            ScheduleError::NestedScheduledTC => {
+                write!(f, "Error: nested scheduling is not allowed")
+            }
+            ScheduleError::StoreError(e) => {
+                write!(f, "Store Error: {}", e)
+            }
+            ScheduleError::TCDataEmpty => {
+                write!(f, "Error: empty TC Data field")
+            }
+            ScheduleError::TimestampError(e) => {
+                write!(f, "Timestamp Error: {}", e)
+            }
+        }
     }
 }
 
@@ -137,7 +156,7 @@ impl PusScheduler {
         addr: StoreAddr,
     ) -> Result<(), ScheduleError> {
         if time_stamp < self.current_time + self.time_margin {
-            return Err(ScheduleError::TimeMarginTooShort);
+            return Err(ScheduleError::TimeMarginTooShort(self.current_time, time_stamp));
         }
         match self.tc_map.entry(time_stamp) {
             Entry::Vacant(e) => {
@@ -259,7 +278,7 @@ mod tests {
     use crate::pus::scheduling::{PusScheduler, ScheduleError};
     use spacepackets::ecss::PacketTypeCodes::UnsignedInt;
     use spacepackets::tc::PusTc;
-    use spacepackets::time::UnixTimestamp;
+    use spacepackets::time::{cds, TimeWriter, UnixTimestamp};
     use spacepackets::{CcsdsPacket, SpHeader};
     use std::sync::mpsc;
     use std::sync::mpsc::{channel, Receiver, TryRecvError};
@@ -478,12 +497,15 @@ mod tests {
         assert_eq!(i, 2);
     }
 
-    fn scheduled_tc() -> PusTc<'static> {
-        let contained_tc = base_ping_tc_simple_ctor();
-        let len = contained_tc.total_len() as u16;
-        let mut sph = SpHeader::tc_unseg(0x02, 0x34, len).unwrap();
+    fn scheduled_tc(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
+        let cds_time = cds::TimeProvider::from_unix_secs_with_u16_days(&timestamp).unwrap();
 
-        PusTc::new_simple(&mut sph, 11, 4, contained_tc.raw(), true)
+        let len_time_stamp = cds_time.write_to_bytes(buf).unwrap();
+
+        let len_packet = base_ping_tc_simple_ctor().write_to_bytes(&mut buf[len_time_stamp..]).unwrap();
+        let mut sph = SpHeader::tc_unseg(0x02, 0x34, len_packet as u16).unwrap();
+
+        PusTc::new_simple(&mut sph, 11, 4, Some(&buf[..len_packet +len_time_stamp]), true)
     }
 
     fn base_ping_tc_simple_ctor() -> PusTc<'static> {
@@ -524,17 +546,20 @@ mod tests {
 
         let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
 
-        let tc = scheduled_tc();
+        let mut buf: [u8; 32] = [0; 32];
+        let tc = scheduled_tc(UnixTimestamp::new_only_seconds(100), &mut buf);
 
-        if let Some(data) = tc.user_data() {
+        let addr = match scheduler
+            .insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool) {
+            Ok(addr) => {
+                addr
+            }
+            Err(e) => {
+                println!("{}", e);
+                panic!();
+            }
+        };
 
-        } else {
-            panic!();
-        }
-
-        let addr = scheduler
-            .insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool)
-            .unwrap();
 
         assert_eq!(scheduler.num_scheduled_telecommands(), 1);
 
