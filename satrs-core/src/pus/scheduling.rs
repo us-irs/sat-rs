@@ -1,9 +1,9 @@
 //! # PUS Service 11 Scheduling Module
 use crate::pool::{PoolProvider, StoreAddr, StoreError};
 use alloc::collections::btree_map::{Entry, Range};
-use core::fmt::{Debug, Display, Formatter};
 use alloc::vec;
 use alloc::vec::Vec;
+use core::fmt::{Debug, Display, Formatter};
 use core::time::Duration;
 use spacepackets::ecss::{PusError, PusPacket};
 use spacepackets::tc::{GenericPusTcSecondaryHeader, PusTc};
@@ -11,10 +11,9 @@ use spacepackets::time::cds::DaysLen24Bits;
 use spacepackets::time::{CcsdsTimeProvider, TimeReader, TimestampError, UnixTimestamp};
 use std::collections::BTreeMap;
 #[cfg(feature = "std")]
-use std::time::SystemTimeError;
-#[cfg(feature = "std")]
 use std::error::Error;
-
+#[cfg(feature = "std")]
+use std::time::SystemTimeError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScheduleError {
@@ -24,6 +23,8 @@ pub enum ScheduleError {
     StoreError(StoreError),
     TCDataEmpty,
     TimestampError(TimestampError),
+    WrongSubservice,
+    WrongService,
 }
 
 impl Display for ScheduleError {
@@ -33,7 +34,11 @@ impl Display for ScheduleError {
                 write!(f, "Pus Error: {}", e)
             }
             ScheduleError::TimeMarginTooShort(current_time, timestamp) => {
-                write!(f, "Error: time margin too short, current time: {:?}, time stamp: {:?}", current_time, timestamp)
+                write!(
+                    f,
+                    "Error: time margin too short, current time: {:?}, time stamp: {:?}",
+                    current_time, timestamp
+                )
             }
             ScheduleError::NestedScheduledTC => {
                 write!(f, "Error: nested scheduling is not allowed")
@@ -46,6 +51,12 @@ impl Display for ScheduleError {
             }
             ScheduleError::TimestampError(e) => {
                 write!(f, "Timestamp Error: {}", e)
+            }
+            ScheduleError::WrongService => {
+                write!(f, "Error: Service not 11.")
+            }
+            ScheduleError::WrongSubservice => {
+                write!(f, "Error: Subservice not 4.")
             }
         }
     }
@@ -70,7 +81,7 @@ impl From<TimestampError> for ScheduleError {
 }
 
 #[cfg(feature = "std")]
-impl Error for ScheduleError{}
+impl Error for ScheduleError {}
 
 //TODO: Move to spacepackets
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -186,7 +197,10 @@ impl PusScheduler {
         addr: StoreAddr,
     ) -> Result<(), ScheduleError> {
         if time_stamp < self.current_time + self.time_margin {
-            return Err(ScheduleError::TimeMarginTooShort(self.current_time, time_stamp));
+            return Err(ScheduleError::TimeMarginTooShort(
+                self.current_time,
+                time_stamp,
+            ));
         }
         match self.tc_map.entry(time_stamp) {
             Entry::Vacant(e) => {
@@ -228,6 +242,12 @@ impl PusScheduler {
         pus_tc: &PusTc,
         pool: &mut (impl PoolProvider + ?Sized),
     ) -> Result<StoreAddr, ScheduleError> {
+        if PusPacket::service(pus_tc) != 11 {
+            return Err(ScheduleError::WrongService);
+        }
+        if PusPacket::subservice(pus_tc) != 4 {
+            return Err(ScheduleError::WrongSubservice);
+        }
         return if let Some(user_data) = pus_tc.user_data() {
             let mut stamp: TimeStamp = TimeReader::from_bytes(user_data)?;
             let unix_stamp = stamp.unix_stamp();
@@ -279,7 +299,6 @@ impl PusScheduler {
         &mut self,
         mut releaser: R,
         tc_store: &mut (impl PoolProvider + ?Sized),
-
     ) -> Result<u64, (u64, StoreError)> {
         let tcs_to_release = self.telecommands_to_release();
         let mut released_tcs = 0;
@@ -305,22 +324,23 @@ impl PusScheduler {
 
 #[cfg(test)]
 mod tests {
-    use alloc::rc::Rc;
-    use core::borrow::BorrowMut;
     use crate::pool::{LocalPool, PoolCfg, PoolProvider, StoreAddr};
     use crate::pus::scheduling::{PusScheduler, ScheduleError};
+    use crate::tmtc::ccsds_distrib::tests::generate_ping_tc;
+    use alloc::rc::Rc;
+    use core::borrow::BorrowMut;
     use spacepackets::ecss::PacketTypeCodes::UnsignedInt;
+    use spacepackets::ecss::PusPacket;
     use spacepackets::tc::PusTc;
     use spacepackets::time::{cds, TimeWriter, UnixTimestamp};
     use spacepackets::{CcsdsPacket, SpHeader};
+    use std::cell::RefCell;
     use std::sync::mpsc;
     use std::sync::mpsc::{channel, Receiver, TryRecvError};
     use std::time::Duration;
+    use std::vec::Vec;
     #[allow(unused_imports)]
     use std::{println, vec};
-    use std::cell::RefCell;
-    use spacepackets::ecss::PusPacket;
-    use std::vec::Vec;
 
     #[test]
     fn basic() {
@@ -443,7 +463,6 @@ mod tests {
         let second_addr = pool.add(&[5, 6, 7]).unwrap();
         scheduler.insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(200), second_addr);
 
-
         let mut i = 0;
         let mut test_closure_1 = |boolvar: bool, store_addr: &StoreAddr| {
             common_check(boolvar, store_addr, vec![first_addr], &mut i);
@@ -502,7 +521,6 @@ mod tests {
         let second_addr = pool.add(&[2, 2, 2]).unwrap();
         scheduler.insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(100), second_addr);
 
-
         let mut i = 0;
         let mut test_closure = |boolvar: bool, store_addr: &StoreAddr| {
             common_check(boolvar, store_addr, vec![first_addr, second_addr], &mut i);
@@ -542,10 +560,56 @@ mod tests {
 
         let len_time_stamp = cds_time.write_to_bytes(buf).unwrap();
 
-        let len_packet = base_ping_tc_simple_ctor().write_to_bytes(&mut buf[len_time_stamp..]).unwrap();
+        let len_packet = base_ping_tc_simple_ctor()
+            .write_to_bytes(&mut buf[len_time_stamp..])
+            .unwrap();
         let mut sph = SpHeader::tc_unseg(0x02, 0x34, len_packet as u16).unwrap();
 
-        PusTc::new_simple(&mut sph, 11, 4, Some(&buf[..len_packet +len_time_stamp]), true)
+        PusTc::new_simple(
+            &mut sph,
+            11,
+            4,
+            Some(&buf[..len_packet + len_time_stamp]),
+            true,
+        )
+    }
+
+    fn wrong_tc_service(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
+        let cds_time = cds::TimeProvider::from_unix_secs_with_u16_days(&timestamp).unwrap();
+
+        let len_time_stamp = cds_time.write_to_bytes(buf).unwrap();
+
+        let len_packet = base_ping_tc_simple_ctor()
+            .write_to_bytes(&mut buf[len_time_stamp..])
+            .unwrap();
+        let mut sph = SpHeader::tc_unseg(0x02, 0x34, len_packet as u16).unwrap();
+
+        PusTc::new_simple(
+            &mut sph,
+            12,
+            4,
+            Some(&buf[..len_packet + len_time_stamp]),
+            true,
+        )
+    }
+
+    fn wrong_tc_subservice(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
+        let cds_time = cds::TimeProvider::from_unix_secs_with_u16_days(&timestamp).unwrap();
+
+        let len_time_stamp = cds_time.write_to_bytes(buf).unwrap();
+
+        let len_packet = base_ping_tc_simple_ctor()
+            .write_to_bytes(&mut buf[len_time_stamp..])
+            .unwrap();
+        let mut sph = SpHeader::tc_unseg(0x02, 0x34, len_packet as u16).unwrap();
+
+        PusTc::new_simple(
+            &mut sph,
+            11,
+            5,
+            Some(&buf[..len_packet + len_time_stamp]),
+            true,
+        )
     }
 
     fn base_ping_tc_simple_ctor() -> PusTc<'static> {
@@ -553,59 +617,24 @@ mod tests {
         PusTc::new_simple(&mut sph, 17, 1, None, true)
     }
 
-    /*
     #[test]
     fn insert_unwrapped_tc() {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
         let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
-
-
-        let addr = scheduler.insert_unwrapped_tc(UnixTimestamp::new_only_seconds(100), &[1,2,3], &mut pool).unwrap();
-
-        assert_eq!(scheduler.num_scheduled_telecommands(), 1);
-
-        scheduler.update_time(UnixTimestamp::new_only_seconds(101));
-
-        let mut i = 0;
-        let mut test_closure = |boolvar: bool, store_addr: &StoreAddr| {
-            common_check(boolvar, store_addr, vec![addr], &mut i);
-            true
-        };
-
-        scheduler.release_telecommands(&mut test_closure, &mut pool).unwrap();
-    }
-
-     */
-
-    #[test]
-    fn insert_wrapped_tc() {
-        let mut scheduler =
-            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
-
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
-
         let mut buf: [u8; 32] = [0; 32];
-        let tc = scheduled_tc(UnixTimestamp::new_only_seconds(100), &mut buf);
+        let len = base_ping_tc_simple_ctor().write_to_bytes(&mut buf).unwrap();
 
-        let addr = match scheduler
-            .insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool) {
-            Ok(addr) => {
-                addr
-            }
-            Err(e) => {
-                println!("{}", e);
-                panic!();
-            }
-        };
+        let addr = scheduler
+            .insert_unwrapped_tc(UnixTimestamp::new_only_seconds(100), &buf[..len], &mut pool)
+            .unwrap();
 
         assert!(pool.has_element_at(&addr).unwrap());
 
-        println!("test1");
         let data = pool.read(&addr).unwrap();
-        let check_tc = PusTc::from_bytes(&buf).expect("incorrect Pus tc raw data");
-        assert_eq!(&check_tc.0.raw().unwrap()[cds::MIN_CDS_FIELD_LEN..], data);
+        let check_tc = PusTc::from_bytes(&data).expect("incorrect Pus tc raw data");
+        assert_eq!(check_tc.0, base_ping_tc_simple_ctor());
 
         assert_eq!(scheduler.num_scheduled_telecommands(), 1);
 
@@ -618,36 +647,96 @@ mod tests {
             common_check(boolvar, store_addr, vec![addr], &mut i);
             // check that tc remains unchanged
             addr_vec.push(*store_addr);
-            true
+            false
         };
 
-
         scheduler
-            .release_telecommands(&mut test_closure,  &mut pool)
+            .release_telecommands(&mut test_closure, &mut pool)
             .unwrap();
 
-        println!("test2");
-
         let data = pool.read(&addr_vec[0]).unwrap();
-        let check_tc = PusTc::from_bytes(&buf).expect("incorrect Pus tc raw data");
-        assert_eq!(&check_tc.0.raw().unwrap()[cds::MIN_CDS_FIELD_LEN..], data);
-
+        let check_tc = PusTc::from_bytes(&data).expect("incorrect Pus tc raw data");
+        assert_eq!(check_tc.0, base_ping_tc_simple_ctor());
     }
 
-    /*
     #[test]
+    fn insert_wrapped_tc() {
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+
+        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+
+        let mut buf: [u8; 32] = [0; 32];
+        let tc = scheduled_tc(UnixTimestamp::new_only_seconds(100), &mut buf);
+
+        let addr = match scheduler
+            .insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool)
+        {
+            Ok(addr) => addr,
+            Err(e) => {
+                println!("{}", e);
+                panic!();
+            }
+        };
+
+        assert!(pool.has_element_at(&addr).unwrap());
+
+        let data = pool.read(&addr).unwrap();
+        let check_tc = PusTc::from_bytes(&data).expect("incorrect Pus tc raw data");
+        assert_eq!(check_tc.0, base_ping_tc_simple_ctor());
+
+        assert_eq!(scheduler.num_scheduled_telecommands(), 1);
+
+        scheduler.update_time(UnixTimestamp::new_only_seconds(101));
+
+        let mut addr_vec = vec::Vec::new();
+
+        let mut i = 0;
+        let mut test_closure = |boolvar: bool, store_addr: &StoreAddr| {
+            common_check(boolvar, store_addr, vec![addr], &mut i);
+            // check that tc remains unchanged
+            addr_vec.push(*store_addr);
+            false
+        };
+
+        scheduler
+            .release_telecommands(&mut test_closure, &mut pool)
+            .unwrap();
+
+        let data = pool.read(&addr_vec[0]).unwrap();
+        let check_tc = PusTc::from_bytes(&data).expect("incorrect Pus tc raw data");
+        assert_eq!(check_tc.0, base_ping_tc_simple_ctor());
+    }
+
+    #[test]
+    #[should_panic]
+    fn insert_wrong_service() {
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+
+        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+
+        let mut buf: [u8; 32] = [0; 32];
+        let tc = wrong_tc_service(UnixTimestamp::new_only_seconds(100), &mut buf);
+
+        let addr = scheduler
+            .insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool)
+            .unwrap();
+    }
+
+    #[test]
+    #[should_panic]
     fn insert_wrong_subservice() {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
         let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
 
-        let tc = base_ping_tc_simple_ctor();
+        let mut buf: [u8; 32] = [0; 32];
+        let tc = wrong_tc_subservice(UnixTimestamp::new_only_seconds(100), &mut buf);
 
-        let addr = scheduler.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>( &tc, &mut pool).unwrap();
-
-        assert_eq!(scheduler.num_scheduled_telecommands(), 0);
+        let addr = scheduler
+            .insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool)
+            .unwrap();
     }
-
-     */
 }
