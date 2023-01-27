@@ -20,14 +20,15 @@ fn threaded_usage() {
     });
 
     let jh1 = thread::spawn(move || {
-        let mut pool_access = shared_clone.write().unwrap();
         let addr;
         {
             addr = rx.recv().expect("Receiving store address failed");
+            let mut pool_access = shared_clone.write().unwrap();
             let pg = PoolGuard::new(pool_access.deref_mut(), addr);
             let read_res = pg.read().expect("Reading failed");
             assert_eq!(read_res, DUMMY_DATA);
         }
+        let pool_access = shared_clone.read().unwrap();
         assert!(!pool_access.has_element_at(&addr).expect("Invalid address"));
     });
     jh0.join().unwrap();

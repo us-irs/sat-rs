@@ -86,8 +86,11 @@
 //! ```
 use crate::tmtc::{ReceivesCcsdsTc, ReceivesTcCore};
 use alloc::boxed::Box;
+use core::fmt::{Display, Formatter};
 use downcast_rs::Downcast;
 use spacepackets::{ByteConversionError, CcsdsPacket, SizeMissmatch, SpHeader};
+#[cfg(feature = "std")]
+use std::error::Error;
 
 /// Generic trait for a handler or dispatcher object handling CCSDS packets.
 ///
@@ -99,7 +102,7 @@ use spacepackets::{ByteConversionError, CcsdsPacket, SizeMissmatch, SpHeader};
 /// This trait automatically implements the [downcast_rs::Downcast] to allow a more convenient API
 /// to cast trait objects back to their concrete type after the handler was passed to the
 /// distributor.
-pub trait CcsdsPacketHandler: Downcast + Send {
+pub trait CcsdsPacketHandler: Downcast {
     type Error;
 
     fn valid_apids(&self) -> &'static [u16];
@@ -114,18 +117,46 @@ pub trait CcsdsPacketHandler: Downcast + Send {
 
 downcast_rs::impl_downcast!(CcsdsPacketHandler assoc Error);
 
+pub trait SendableCcsdsPacketHandler: CcsdsPacketHandler + Send {}
+
+impl<T: CcsdsPacketHandler + Send> SendableCcsdsPacketHandler for T {}
+
+downcast_rs::impl_downcast!(SendableCcsdsPacketHandler assoc Error);
+
 /// The CCSDS distributor dispatches received CCSDS packets to a user provided packet handler.
+///
+/// The passed APID handler is required to be [Send]able to allow more ergonomic usage with
+/// threads.
 pub struct CcsdsDistributor<E> {
     /// User provided APID handler stored as a generic trait object.
     /// It can be cast back to the original concrete type using the [Self::apid_handler_ref] or
     /// the [Self::apid_handler_mut] method.
-    pub apid_handler: Box<dyn CcsdsPacketHandler<Error = E>>,
+    pub apid_handler: Box<dyn SendableCcsdsPacketHandler<Error = E>>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CcsdsError<E> {
     CustomError(E),
-    PacketError(ByteConversionError),
+    ByteConversionError(ByteConversionError),
+}
+
+impl<E: Display> Display for CcsdsError<E> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::CustomError(e) => write!(f, "{e}"),
+            Self::ByteConversionError(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<E: Error> Error for CcsdsError<E> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::CustomError(e) => e.source(),
+            Self::ByteConversionError(e) => e.source(),
+        }
+    }
 }
 
 impl<E: 'static> ReceivesCcsdsTc for CcsdsDistributor<E> {
@@ -141,7 +172,7 @@ impl<E: 'static> ReceivesTcCore for CcsdsDistributor<E> {
 
     fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
         if tc_raw.len() < 7 {
-            return Err(CcsdsError::PacketError(
+            return Err(CcsdsError::ByteConversionError(
                 ByteConversionError::FromSliceTooSmall(SizeMissmatch {
                     found: tc_raw.len(),
                     expected: 7,
@@ -149,26 +180,26 @@ impl<E: 'static> ReceivesTcCore for CcsdsDistributor<E> {
             ));
         }
         let (sp_header, _) =
-            SpHeader::from_be_bytes(tc_raw).map_err(|e| CcsdsError::PacketError(e))?;
+            SpHeader::from_be_bytes(tc_raw).map_err(|e| CcsdsError::ByteConversionError(e))?;
         self.dispatch_ccsds(&sp_header, tc_raw)
     }
 }
 
 impl<E: 'static> CcsdsDistributor<E> {
-    pub fn new(apid_handler: Box<dyn CcsdsPacketHandler<Error = E>>) -> Self {
+    pub fn new(apid_handler: Box<dyn SendableCcsdsPacketHandler<Error = E>>) -> Self {
         CcsdsDistributor { apid_handler }
     }
 
     /// This function can be used to retrieve a reference to the concrete instance of the APID
     /// handler after it was passed to the distributor. See the
     /// [module documentation][crate::tmtc::ccsds_distrib] for an fsrc-example.
-    pub fn apid_handler_ref<T: CcsdsPacketHandler<Error = E>>(&self) -> Option<&T> {
+    pub fn apid_handler_ref<T: SendableCcsdsPacketHandler<Error = E>>(&self) -> Option<&T> {
         self.apid_handler.downcast_ref::<T>()
     }
 
     /// This function can be used to retrieve a mutable reference to the concrete instance of the
     /// APID handler after it was passed to the distributor.
-    pub fn apid_handler_mut<T: CcsdsPacketHandler<Error = E>>(&mut self) -> Option<&mut T> {
+    pub fn apid_handler_mut<T: SendableCcsdsPacketHandler<Error = E>>(&mut self) -> Option<&mut T> {
         self.apid_handler.downcast_mut::<T>()
     }
 

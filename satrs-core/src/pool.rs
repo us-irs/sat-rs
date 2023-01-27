@@ -153,10 +153,10 @@ impl Display for StoreIdError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
             StoreIdError::InvalidSubpool(pool) => {
-                write!(f, "invalid subpool, index: {}", pool)
+                write!(f, "invalid subpool, index: {pool}")
             }
             StoreIdError::InvalidPacketIdx(packet_idx) => {
-                write!(f, "invalid packet index: {}", packet_idx)
+                write!(f, "invalid packet index: {packet_idx}")
             }
         }
     }
@@ -183,19 +183,19 @@ impl Display for StoreError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
             StoreError::DataTooLarge(size) => {
-                write!(f, "data to store with size {} is too large", size)
+                write!(f, "data to store with size {size} is too large")
             }
             StoreError::StoreFull(u16) => {
-                write!(f, "store is too full. index for full subpool: {}", u16)
+                write!(f, "store is too full. index for full subpool: {u16}")
             }
             StoreError::InvalidStoreId(id_e, addr) => {
-                write!(f, "invalid store ID: {}, address: {:?}", id_e, addr)
+                write!(f, "invalid store ID: {id_e}, address: {addr:?}")
             }
             StoreError::DataDoesNotExist(addr) => {
-                write!(f, "no data exists at address {:?}", addr)
+                write!(f, "no data exists at address {addr:?}")
             }
             StoreError::InternalError(e) => {
-                write!(f, "internal error: {}", e)
+                write!(f, "internal error: {e}")
             }
         }
     }
@@ -330,14 +330,12 @@ impl LocalPool {
     fn write(&mut self, addr: &StoreAddr, data: &[u8]) -> Result<(), StoreError> {
         let packet_pos = self.raw_pos(addr).ok_or_else(|| {
             StoreError::InternalError(format!(
-                "write: Error in raw_pos func with address {:?}",
-                addr
+                "write: Error in raw_pos func with address {addr:?}"
             ))
         })?;
         let subpool = self.pool.get_mut(addr.pool_idx as usize).ok_or_else(|| {
             StoreError::InternalError(format!(
-                "write: Error retrieving pool slice with address {:?}",
-                addr
+                "write: Error retrieving pool slice with address {addr:?}"
             ))
         })?;
         let pool_slice = &mut subpool[packet_pos..packet_pos + data.len()];

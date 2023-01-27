@@ -522,9 +522,9 @@ impl VerificationReporterCore {
         )
     }
 
-    pub fn send_acceptance_success<'src_data, E>(
+    pub fn send_acceptance_success<E>(
         &self,
-        mut sendable: VerificationSendable<'src_data, TcStateNone, VerifSuccess>,
+        mut sendable: VerificationSendable<'_, TcStateNone, VerifSuccess>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<VerificationToken<TcStateAccepted>, VerificationOrSendErrorWithToken<E, TcStateNone>>
@@ -535,9 +535,9 @@ impl VerificationReporterCore {
         Ok(sendable.send_success_acceptance_success(Some(seq_counter)))
     }
 
-    pub fn send_acceptance_failure<'src_data, E>(
+    pub fn send_acceptance_failure<E>(
         &self,
-        mut sendable: VerificationSendable<'src_data, TcStateNone, VerifFailure>,
+        mut sendable: VerificationSendable<'_, TcStateNone, VerifFailure>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateNone>> {
@@ -591,9 +591,9 @@ impl VerificationReporterCore {
         )
     }
 
-    pub fn send_start_success<'src_data, E>(
+    pub fn send_start_success<E>(
         &self,
-        mut sendable: VerificationSendable<'src_data, TcStateAccepted, VerifSuccess>,
+        mut sendable: VerificationSendable<'_, TcStateAccepted, VerifSuccess>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<
@@ -630,9 +630,9 @@ impl VerificationReporterCore {
         )
     }
 
-    pub fn send_start_failure<'src_data, E>(
+    pub fn send_start_failure<E>(
         &self,
-        mut sendable: VerificationSendable<'src_data, TcStateAccepted, VerifFailure>,
+        mut sendable: VerificationSendable<'_, TcStateAccepted, VerifFailure>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateAccepted>> {
@@ -741,9 +741,9 @@ impl VerificationReporterCore {
         )
     }
 
-    pub fn send_step_or_completion_success<'src_data, E>(
+    pub fn send_step_or_completion_success<E>(
         &self,
-        mut sendable: VerificationSendable<'src_data, TcStateStarted, VerifSuccess>,
+        mut sendable: VerificationSendable<'_, TcStateStarted, VerifSuccess>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
@@ -754,9 +754,9 @@ impl VerificationReporterCore {
         Ok(())
     }
 
-    pub fn send_step_or_completion_failure<'src_data, E>(
+    pub fn send_step_or_completion_failure<E>(
         &self,
-        mut sendable: VerificationSendable<'src_data, TcStateStarted, VerifFailure>,
+        mut sendable: VerificationSendable<'_, TcStateStarted, VerifFailure>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {

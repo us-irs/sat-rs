@@ -60,10 +60,10 @@ impl Display for MpscStoreAndSendError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             MpscStoreAndSendError::StoreError(s) => {
-                write!(f, "store error {}", s)
+                write!(f, "store error {s}")
             }
             MpscStoreAndSendError::SendError(s) => {
-                write!(f, "send error {}", s)
+                write!(f, "send error {s}")
             }
         }
     }
@@ -245,8 +245,8 @@ fn core_tmtc_loop(
                         .ok();
                 }
                 Err(e) => {
-                    println!("error creating PUS TC from raw data: {}", e);
-                    println!("raw data: {:x?}", data);
+                    println!("error creating PUS TC from raw data: {e}");
+                    println!("raw data: {data:x?}");
                 }
             }
         }
@@ -266,7 +266,7 @@ fn poll_tc_server(udp_tmtc_server: &mut UdpTmtcServer) -> bool {
         Ok(_) => true,
         Err(e) => match e {
             ReceiveResult::ReceiverError(e) => match e {
-                CcsdsError::PacketError(e) => {
+                CcsdsError::ByteConversionError(e) => {
                     println!("Got packet error: {e:?}");
                     true
                 }
@@ -295,7 +295,7 @@ fn core_tm_handling(udp_tmtc_server: &mut UdpTmtcServer, recv_addr: &SocketAddr)
         if buf.len() > 9 {
             let service = buf[7];
             let subservice = buf[8];
-            println!("Sending PUS TM[{},{}]", service, subservice)
+            println!("Sending PUS TM[{service},{subservice}]")
         } else {
             println!("Sending PUS TM");
         }
