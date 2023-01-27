@@ -193,14 +193,15 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
         tm_store: tm_args.tm_store.pool.clone(),
     };
 
-    let (mut tc_source, mut tc_receiver) = tc_args.split();
+    //let (mut tc_source, mut tc_receiver) = tc_args.split();
 
     loop {
         let mut tmtc_sched = scheduler.clone();
         core_tmtc_loop(
             &mut udp_tmtc_server,
-            &mut tc_source,
-            &mut tc_receiver,
+            &mut tc_args,
+            //&mut tc_source,
+            //&mut tc_receiver,
             &mut pus_receiver,
             tmtc_sched,
         );
@@ -210,28 +211,29 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
 
 fn core_tmtc_loop(
     udp_tmtc_server: &mut UdpTmtcServer,
-    tc_source: &mut PusTcSource,
-    tc_receiver: &mut Receiver<StoreAddr>,
+    tc_args: &mut TcArgs,
+    //tc_source: &mut PusTcSource,
+    //tc_receiver: &mut Receiver<StoreAddr>,
     pus_receiver: &mut PusReceiver,
     scheduler: Rc<RefCell<PusScheduler>>,
 ) {
     let releaser = |enabled: bool, addr: &StoreAddr| -> bool {
-        match tc_source.tc_source.send(*addr) {
+        match tc_args.tc_source.tc_source.send(*addr) {
             Ok(_) => true,
             Err(_) => false,
         }
     };
 
     let mut scheduler = scheduler.borrow_mut();
-    let mut pool = tc_source.tc_store.pool.write().expect("error locking pool");
+    let mut pool = tc_args.tc_source.tc_store.pool.write().expect("error locking pool");
     scheduler
         .release_telecommands(releaser, pool.as_mut())
         .expect("error releasing tc");
 
     while poll_tc_server(udp_tmtc_server) {}
-    match tc_receiver.try_recv() {
+    match tc_args.tc_receiver.try_recv() {
         Ok(addr) => {
-            let pool = tc_source
+            let pool = tc_args.tc_source
                 .tc_store
                 .pool
                 .read()
