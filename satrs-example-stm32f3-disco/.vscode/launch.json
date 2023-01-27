@@ -1,0 +1,66 @@
+{
+    /* 
+     * Requires the Rust Language Server (RLS) and Cortex-Debug extensions
+     * https://marketplace.visualstudio.com/items?itemName=rust-lang.rust
+     * https://marketplace.visualstudio.com/items?itemName=marus25.cortex-debug
+     */
+    "version": "0.2.0",
+    "configurations": [
+        {
+            /* Launches debug session for currently open example */
+            "type": "cortex-debug",
+            "request": "launch",
+            "name": "Debug",
+            "servertype": "openocd",
+            "cwd": "${workspaceRoot}",
+            "preLaunchTask": "cargo build",
+            "runToEntryPoint": "true",
+            "executable": "./target/thumbv7em-none-eabihf/debug/satrs-example-stm32f3-disco",
+            "preLaunchCommands": ["break rust_begin_unwind"],
+            "device": "STM32F303VCT6",
+            "configFiles": [
+                "${workspaceRoot}/.vscode/openocd-helpers.tcl",
+                "interface/stlink.cfg",
+                "target/stm32f3x.cfg"
+            ],
+            "svdFile": "${env:HOME}/.svd/STM32F303.svd",
+            "swoConfig": {
+                "enabled": true,
+                "cpuFrequency": 8000000,
+                "swoFrequency": 2000000,
+                "source": "probe",
+                "decoders": [
+                    { "type": "console", "label": "ITM", "port": 0 }
+                ]
+            }
+        },
+        {
+            /* Launches debug session for currently open example */
+            "type": "cortex-debug",
+            "request": "launch",
+            "name": "Release",
+            "servertype": "openocd",
+            "cwd": "${workspaceRoot}",
+            "preLaunchTask": "cargo build",
+            "runToEntryPoint": "true",
+            "executable": "./target/thumbv7em-none-eabihf/release/satrs-example-stm32f3-disco",
+            "preLaunchCommands": ["break rust_begin_unwind"],
+            "device": "STM32F303VCT6",
+            "configFiles": [
+                "${workspaceRoot}/.vscode/openocd-helpers.tcl",
+                "interface/stlink.cfg",
+                "target/stm32f3x.cfg"
+            ],
+            "svdFile": "${env:HOME}/.svd/STM32F303.svd",
+            "swoConfig": {
+                "enabled": true,
+                "cpuFrequency": 8000000,
+                "swoFrequency": 2000000,
+                "source": "probe",
+                "decoders": [
+                    { "type": "console", "label": "ITM", "port": 0 }
+                ]
+            }
+        }
+    ]
+}

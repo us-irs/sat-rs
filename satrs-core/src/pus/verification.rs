@@ -1,4 +1,4 @@
-//! # PUS Verification Service 1 Module
+//! # PUS Service 1 Verification Module
 //!
 //! This module allows packaging and sending PUS Service 1 packets. It is conforming to section
 //! 8 of the PUS standard ECSS-E-ST-70-41C.

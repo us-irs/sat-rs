@@ -1,8 +1,4 @@
-//! All PUS support modules
-//!
-//! Currenty includes:
-//!
-//!  1. PUS Verification Service 1 module inside [verification]. Requires [alloc] support.
+//! # PUS support modules
 #[cfg(feature = "alloc")]
 use downcast_rs::{impl_downcast, Downcast};
 #[cfg(feature = "alloc")]
@@ -18,6 +14,9 @@ pub mod hk;
 #[cfg(feature = "std")]
 pub mod scheduling;
 pub mod verification;
+
+#[cfg(feature = "alloc")]
+pub use alloc_mod::*;
 
 #[derive(Debug, Clone)]
 pub enum EcssTmErrorWithSend<E> {
@@ -65,7 +64,7 @@ pub trait EcssTmSenderCore: Send {
 }
 
 #[cfg(feature = "alloc")]
-pub mod alloc_mod {
+mod alloc_mod {
     use super::*;
 
     /// Extension trait for [EcssTmSenderCore].
@@ -78,6 +77,8 @@ pub mod alloc_mod {
     ///
     /// [DynClone] allows cloning the trait object as long as the boxed object implements
     /// [Clone].
+    #[cfg(feature = "alloc")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
     pub trait EcssTmSender: EcssTmSenderCore + Downcast + DynClone {}
 
     /// Blanket implementation for all types which implement [EcssTmSenderCore] and are clonable.

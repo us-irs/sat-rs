@@ -9,7 +9,7 @@ pub use stdmod::*;
 ///
 /// The core functions are not mutable on purpose to allow easier usage with
 /// static structs when using the interior mutability pattern. This can be achieved by using
-/// [Cell], [RefCell] or atomic types.
+/// [Cell], [core::cell::RefCell] or atomic types.
 pub trait SequenceCountProviderCore<Raw> {
     fn get(&self) -> Raw;
 
