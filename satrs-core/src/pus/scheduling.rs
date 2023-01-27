@@ -709,7 +709,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
     fn insert_wrong_service() {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
@@ -719,13 +718,19 @@ mod tests {
         let mut buf: [u8; 32] = [0; 32];
         let tc = wrong_tc_service(UnixTimestamp::new_only_seconds(100), &mut buf);
 
-        let addr = scheduler
-            .insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool)
-            .unwrap();
+        match scheduler.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool) {
+            Ok(_) => {
+                panic!();
+            }
+            Err(e) => {
+                if e != ScheduleError::WrongService {
+                    panic!();
+                }
+            }
+        }
     }
 
     #[test]
-    #[should_panic]
     fn insert_wrong_subservice() {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
@@ -735,8 +740,15 @@ mod tests {
         let mut buf: [u8; 32] = [0; 32];
         let tc = wrong_tc_subservice(UnixTimestamp::new_only_seconds(100), &mut buf);
 
-        let addr = scheduler
-            .insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool)
-            .unwrap();
+        match scheduler.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool) {
+            Ok(_) => {
+                panic!();
+            }
+            Err(e) => {
+                if e != ScheduleError::WrongSubservice {
+                    panic!();
+                }
+            }
+        }
     }
 }

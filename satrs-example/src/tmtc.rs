@@ -1,6 +1,7 @@
 use satrs_core::events::EventU32;
 use satrs_core::hal::host::udp_server::{ReceiveResult, UdpTcServer};
 use satrs_core::params::Params;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -161,7 +162,7 @@ impl ReceivesCcsdsTc for PusTcSource {
     }
 }
 pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
-    let mut scheduler = Arc::new(Mutex::new(
+    let mut scheduler = Rc::new(RefCell::new(
         PusScheduler::new_with_current_init_time(Duration::from_secs(5)).unwrap(),
     ));
 
@@ -192,7 +193,6 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
         tm_store: tm_args.tm_store.pool.clone(),
     };
 
-    let mut test_closure = |boolvar: bool, store_addr: &StoreAddr| true;
     let (mut tc_source, mut tc_receiver) = tc_args.split();
 
     loop {
@@ -213,21 +213,20 @@ fn core_tmtc_loop(
     tc_source: &mut PusTcSource,
     tc_receiver: &mut Receiver<StoreAddr>,
     pus_receiver: &mut PusReceiver,
-    scheduler: Arc<Mutex<PusScheduler>>,
+    scheduler: Rc<RefCell<PusScheduler>>,
 ) {
-    let releaser = |enabled: bool, addr: &StoreAddr| {
-        tc_source.tc_source.send(*addr);
-        true
+    let releaser = |enabled: bool, addr: &StoreAddr| -> bool {
+        match tc_source.tc_source.send(*addr) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
     };
 
-    let mut scheduler = scheduler.lock().expect("Lock of scheduler failed");
-    match tc_source.tc_store.pool.write() {
-        Ok(mut pool) => match scheduler.release_telecommands(releaser, pool.as_mut()) {
-            Ok(_) => {}
-            Err(_) => {}
-        },
-        Err(_) => {}
-    }
+    let mut scheduler = scheduler.borrow_mut();
+    let mut pool = tc_source.tc_store.pool.write().expect("error locking pool");
+    scheduler
+        .release_telecommands(releaser, pool.as_mut())
+        .expect("error releasing tc");
 
     while poll_tc_server(udp_tmtc_server) {}
     match tc_receiver.try_recv() {
