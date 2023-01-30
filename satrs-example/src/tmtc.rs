@@ -229,6 +229,7 @@ fn core_tmtc_loop(
     scheduler
         .release_telecommands(releaser, pool.as_mut())
         .expect("error releasing tc");
+    drop(pool);
 
     while poll_tc_server(udp_tmtc_server) {}
     match tc_args.tc_receiver.try_recv() {
@@ -263,6 +264,7 @@ fn core_tmtc_loop(
 }
 
 fn poll_tc_server(udp_tmtc_server: &mut UdpTmtcServer) -> bool {
+
     match udp_tmtc_server.udp_tc_server.try_recv_tc() {
         Ok(_) => true,
         Err(e) => match e {

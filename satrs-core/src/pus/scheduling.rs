@@ -19,9 +19,9 @@ use std::time::SystemTimeError;
 pub enum ScheduleError {
     PusError(PusError),
     TimeMarginTooShort(UnixTimestamp, UnixTimestamp),
-    NestedScheduledTC,
+    NestedScheduledTc,
     StoreError(StoreError),
-    TCDataEmpty,
+    TcDataEmpty,
     TimestampError(TimestampError),
     WrongSubservice,
     WrongService,
@@ -40,14 +40,14 @@ impl Display for ScheduleError {
                     current_time, timestamp
                 )
             }
-            ScheduleError::NestedScheduledTC => {
+            ScheduleError::NestedScheduledTc => {
                 write!(f, "Error: nested scheduling is not allowed")
             }
             ScheduleError::StoreError(e) => {
                 write!(f, "Store Error: {}", e)
             }
-            ScheduleError::TCDataEmpty => {
-                write!(f, "Error: empty TC Data field")
+            ScheduleError::TcDataEmpty => {
+                write!(f, "Error: empty Tc Data field")
             }
             ScheduleError::TimestampError(e) => {
                 write!(f, "Timestamp Error: {}", e)
@@ -134,7 +134,6 @@ impl PusScheduler {
     }
 
     /// Like [Self::new], but sets the `init_current_time` parameter to the current system time.
-
     #[cfg(feature = "std")]
     #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
     pub fn new_with_current_init_time(time_margin: Duration) -> Result<Self, SystemTimeError> {
@@ -221,8 +220,7 @@ impl PusScheduler {
     ) -> Result<StoreAddr, ScheduleError> {
         let check_tc = PusTc::from_bytes(tc)?;
         if PusPacket::service(&check_tc.0) == 11 && PusPacket::subservice(&check_tc.0) == 4 {
-            // TODO: should not be able to schedule a scheduled tc
-            return Err(ScheduleError::NestedScheduledTC);
+            return Err(ScheduleError::NestedScheduledTc);
         }
 
         match pool.add(tc) {
@@ -254,7 +252,7 @@ impl PusScheduler {
             let stamp_len = stamp.len_as_bytes();
             self.insert_unwrapped_tc(unix_stamp, &user_data[stamp_len..], pool)
         } else {
-            Err(ScheduleError::TCDataEmpty)
+            Err(ScheduleError::TcDataEmpty)
         };
     }
 
