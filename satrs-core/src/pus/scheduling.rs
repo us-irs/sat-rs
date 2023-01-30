@@ -10,6 +10,7 @@ use spacepackets::tc::{GenericPusTcSecondaryHeader, PusTc};
 use spacepackets::time::cds::DaysLen24Bits;
 use spacepackets::time::{CcsdsTimeProvider, TimeReader, TimestampError, UnixTimestamp};
 use std::collections::BTreeMap;
+use std::dbg;
 #[cfg(feature = "std")]
 use std::error::Error;
 #[cfg(feature = "std")]
@@ -285,13 +286,14 @@ impl PusScheduler {
 
     /// Utility method which calls [Self::telecommands_to_release] and then calls a releaser
     /// closure for each telecommand which should be released. This function will also delete
-    /// the telecommands from the holding store after calling the release closure.
+    /// the telecommands from the holding store after calling the release closure, if the scheduler
+    /// is disabled.
     ///
     /// # Arguments
     ///
     /// * `releaser` - Closure where the first argument is whether the scheduler is enabled and
     ///     the second argument is the store address. This closure should return whether the
-    ///     command should be deleted.
+    ///     command should be deleted if the scheduler is disabled to prevent memory leaks.
     /// * `store` - The holding store of the telecommands.
     pub fn release_telecommands<R: FnMut(bool, &StoreAddr) -> bool>(
         &mut self,
@@ -305,7 +307,7 @@ impl PusScheduler {
             for addr in tc.1 {
                 let should_delete = releaser(self.enabled, addr);
                 released_tcs += 1;
-                if should_delete {
+                if should_delete && !self.is_enabled() {
                     let res = tc_store.delete(*addr);
                     if res.is_err() {
                         store_error = res;
@@ -447,6 +449,16 @@ mod tests {
         assert!(expected_store_addrs.contains(store_addr));
         *counter += 1;
     }
+    fn common_check_disabled(
+        enabled: bool,
+        store_addr: &StoreAddr,
+        expected_store_addrs: Vec<StoreAddr>,
+        counter: &mut usize,
+    ) {
+        assert_eq!(enabled, false);
+        assert!(expected_store_addrs.contains(store_addr));
+        *counter += 1;
+    }
 
     #[test]
     fn release_basic() {
@@ -481,7 +493,7 @@ mod tests {
             .release_telecommands(&mut test_closure_1, &mut pool)
             .expect("deletion failed");
         assert_eq!(released, 1);
-        assert!(!pool.has_element_at(&first_addr).unwrap());
+        assert!(pool.has_element_at(&first_addr).unwrap());
 
         // test 3, late timestamp, release 1 overdue tc
         let mut test_closure_2 = |boolvar: bool, store_addr: &StoreAddr| {
@@ -495,7 +507,7 @@ mod tests {
             .release_telecommands(&mut test_closure_2, &mut pool)
             .expect("deletion failed");
         assert_eq!(released, 1);
-        assert!(!pool.has_element_at(&second_addr).unwrap());
+        assert!(pool.has_element_at(&second_addr).unwrap());
 
         //test 4: no tcs left
         scheduler
@@ -540,14 +552,74 @@ mod tests {
             .release_telecommands(&mut test_closure, &mut pool)
             .expect("deletion failed");
         assert_eq!(released, 2);
-        assert!(!pool.has_element_at(&first_addr).unwrap());
-        assert!(!pool.has_element_at(&second_addr).unwrap());
+        assert!(pool.has_element_at(&first_addr).unwrap());
+        assert!(pool.has_element_at(&second_addr).unwrap());
 
         //test 3: no tcs left
         released = scheduler
             .release_telecommands(&mut test_closure, &mut pool)
             .expect("deletion failed");
         assert_eq!(released, 0);
+
+        // check that 2 total tcs have been released
+        assert_eq!(i, 2);
+    }
+
+    #[test]
+    fn release_with_scheduler_disabled() {
+        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+
+        scheduler.disable();
+
+        let first_addr = pool.add(&[2, 2, 2]).unwrap();
+
+        scheduler.insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(100), first_addr);
+
+        let second_addr = pool.add(&[5, 6, 7]).unwrap();
+        scheduler.insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(200), second_addr);
+
+        let mut i = 0;
+        let mut test_closure_1 = |boolvar: bool, store_addr: &StoreAddr| {
+            common_check_disabled(boolvar, store_addr, vec![first_addr], &mut i);
+            true
+        };
+
+        // test 1: too early, no tcs
+        scheduler.update_time(UnixTimestamp::new_only_seconds(99));
+
+        scheduler
+            .release_telecommands(&mut test_closure_1, &mut pool)
+            .expect("deletion failed");
+
+        // test 2: exact time stamp of tc, releases 1 tc
+        scheduler.update_time(UnixTimestamp::new_only_seconds(100));
+
+        let mut released = scheduler
+            .release_telecommands(&mut test_closure_1, &mut pool)
+            .expect("deletion failed");
+        assert_eq!(released, 1);
+        assert!(!pool.has_element_at(&first_addr).unwrap());
+
+        // test 3, late timestamp, release 1 overdue tc
+        let mut test_closure_2 = |boolvar: bool, store_addr: &StoreAddr| {
+            common_check_disabled(boolvar, store_addr, vec![second_addr], &mut i);
+            true
+        };
+
+        scheduler.update_time(UnixTimestamp::new_only_seconds(206));
+
+        released = scheduler
+            .release_telecommands(&mut test_closure_2, &mut pool)
+            .expect("deletion failed");
+        assert_eq!(released, 1);
+        assert!(!pool.has_element_at(&second_addr).unwrap());
+
+        //test 4: no tcs left
+        scheduler
+            .release_telecommands(&mut test_closure_2, &mut pool)
+            .expect("deletion failed");
 
         // check that 2 total tcs have been released
         assert_eq!(i, 2);

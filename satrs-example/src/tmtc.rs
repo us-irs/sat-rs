@@ -195,11 +195,13 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
 
     //let (mut tc_source, mut tc_receiver) = tc_args.split();
 
+    let mut tc_buf: [u8; 4096] = [0; 4096];
     loop {
         let mut tmtc_sched = scheduler.clone();
         core_tmtc_loop(
             &mut udp_tmtc_server,
             &mut tc_args,
+            &mut tc_buf,
             //&mut tc_source,
             //&mut tc_receiver,
             &mut pus_receiver,
@@ -212,6 +214,7 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
 fn core_tmtc_loop(
     udp_tmtc_server: &mut UdpTmtcServer,
     tc_args: &mut TcArgs,
+    tc_buf: &mut [u8],
     //tc_source: &mut PusTcSource,
     //tc_receiver: &mut Receiver<StoreAddr>,
     pus_receiver: &mut PusReceiver,
@@ -224,23 +227,40 @@ fn core_tmtc_loop(
         }
     };
 
+    let mut pool = tc_args
+        .tc_source
+        .tc_store
+        .pool
+        .write()
+        .expect("error locking pool");
+
     let mut scheduler = scheduler.borrow_mut();
-    let mut pool = tc_args.tc_source.tc_store.pool.write().expect("error locking pool");
-    scheduler
-        .release_telecommands(releaser, pool.as_mut())
-        .expect("error releasing tc");
+    scheduler.update_time_from_now().unwrap();
+    match scheduler.release_telecommands(releaser, pool.as_mut()) {
+        Ok(released_tcs) => {
+            if released_tcs > 0 {
+                println!("{} Tc(s) released from scheduler", released_tcs);
+            }
+        }
+        Err(_) => {}
+    }
+    //.expect("error releasing tc");
     drop(pool);
+    drop(scheduler);
 
     while poll_tc_server(udp_tmtc_server) {}
     match tc_args.tc_receiver.try_recv() {
         Ok(addr) => {
-            let pool = tc_args.tc_source
+            let pool = tc_args
+                .tc_source
                 .tc_store
                 .pool
                 .read()
                 .expect("locking tc pool failed");
             let data = pool.read(&addr).expect("reading pool failed");
-            match PusTc::from_bytes(data) {
+            tc_buf[0..data.len()].copy_from_slice(data);
+            drop(pool);
+            match PusTc::from_bytes(tc_buf) {
                 Ok((pus_tc, _)) => {
                     pus_receiver
                         .handle_pus_tc_packet(pus_tc.service(), pus_tc.sp_header(), &pus_tc)
@@ -248,7 +268,7 @@ fn core_tmtc_loop(
                 }
                 Err(e) => {
                     println!("error creating PUS TC from raw data: {e}");
-                    println!("raw data: {data:x?}");
+                    println!("raw data: {tc_buf:x?}");
                 }
             }
         }
@@ -264,7 +284,6 @@ fn core_tmtc_loop(
 }
 
 fn poll_tc_server(udp_tmtc_server: &mut UdpTmtcServer) -> bool {
-
     match udp_tmtc_server.udp_tc_server.try_recv_tc() {
         Ok(_) => true,
         Err(e) => match e {

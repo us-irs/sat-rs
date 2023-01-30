@@ -287,8 +287,18 @@ impl PusReceiver {
     }
 
     fn handle_scheduled_tc(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
-        self.update_time_stamp();
+        if pus_tc.user_data().is_none() {
+            self.update_time_stamp();
+            self.verif_reporter
+                .start_failure(
+                    token,
+                    FailParams::new(Some(&self.time_stamp), &tmtc_err::NOT_ENOUGH_APP_DATA, None),
+                )
+                .expect("Sending start failure TM failed");
+            return;
+        }
 
+        self.update_time_stamp();
         match pus_tc.subservice() {
             1 => {
                 let start_token = self
@@ -305,6 +315,7 @@ impl PusReceiver {
                 } else {
                     panic!("Failed to enable scheduler");
                 }
+                drop(scheduler);
             }
             2 => {
                 let start_token = self
@@ -321,6 +332,7 @@ impl PusReceiver {
                 } else {
                     panic!("Failed to disable scheduler");
                 }
+                drop(scheduler);
             }
             3 => {
                 let start_token = self
@@ -328,7 +340,6 @@ impl PusReceiver {
                     .start_success(token, Some(&self.time_stamp))
                     .expect("Error sending start success");
 
-                let mut scheduler = self.scheduler.borrow_mut();
                 let mut pool = self
                     .tc_source
                     .tc_store
@@ -336,9 +347,11 @@ impl PusReceiver {
                     .write()
                     .expect("Locking pool failed");
 
+                let mut scheduler = self.scheduler.borrow_mut();
                 scheduler
                     .reset(pool.as_mut())
                     .expect("Error resetting TC Pool");
+                drop(scheduler);
 
                 self.verif_reporter
                     .completion_success(start_token, Some(&self.time_stamp))
@@ -350,19 +363,19 @@ impl PusReceiver {
                     .start_success(token, Some(&self.time_stamp))
                     .expect("Error sending start success");
 
-                let mut scheduler = self.scheduler.borrow_mut();
                 let mut pool = self
                     .tc_source
                     .tc_store
                     .pool
                     .write()
                     .expect("Locking pool failed");
+                let mut scheduler = self.scheduler.borrow_mut();
                 scheduler
-                    .insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(
-                        pus_tc,
-                        pool.as_mut(),
-                    )
+                    .insert_wrapped_tc::<TimeProvider>(pus_tc, pool.as_mut())
                     .expect("TODO: panic message");
+                let time =
+                    TimeProvider::from_bytes_with_u16_days(&pus_tc.user_data().unwrap()).unwrap();
+                drop(scheduler);
 
                 self.verif_reporter
                     .completion_success(start_token, Some(&self.time_stamp))
