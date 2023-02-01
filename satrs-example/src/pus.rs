@@ -6,6 +6,7 @@ use satrs_core::pool::StoreAddr;
 use satrs_core::pus::event::Subservices;
 use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
 use satrs_core::pus::hk;
+use satrs_core::pus::scheduling::PusScheduler;
 use satrs_core::pus::verification::{
     FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
 };
@@ -17,7 +18,9 @@ use satrs_core::{
     spacepackets::time::TimeWriter, spacepackets::SpHeader,
 };
 use satrs_example::{hk_err, tmtc_err};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::mpsc::Sender;
 
 pub struct PusReceiver {
@@ -31,6 +34,7 @@ pub struct PusReceiver {
     request_map: HashMap<u32, Sender<RequestWithToken>>,
     stamper: TimeProvider,
     time_stamp: [u8; 7],
+    scheduler: Rc<RefCell<PusScheduler>>,
 }
 
 impl PusReceiver {
@@ -42,6 +46,7 @@ impl PusReceiver {
         tc_source: PusTcSource,
         event_request_tx: Sender<EventRequestWithToken>,
         request_map: HashMap<u32, Sender<RequestWithToken>>,
+        scheduler: Rc<RefCell<PusScheduler>>,
     ) -> Self {
         Self {
             tm_helper: PusTmWithCdsShortHelper::new(apid),
@@ -53,6 +58,7 @@ impl PusReceiver {
             request_map,
             stamper: TimeProvider::new_with_u16_days(0, 0),
             time_stamp: [0; 7],
+            scheduler,
         }
     }
 }
@@ -78,6 +84,8 @@ impl PusServiceProvider for PusReceiver {
             self.handle_event_request(pus_tc, accepted_token);
         } else if service == 3 {
             self.handle_hk_request(pus_tc, accepted_token);
+        } else if service == 11 {
+            self.handle_scheduled_tc(pus_tc, accepted_token);
         } else {
             self.update_time_stamp();
             self.verif_reporter
@@ -201,6 +209,7 @@ impl PusReceiver {
             ));
         }
     }
+
     fn handle_event_request(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
         let send_start_failure = |verif_reporter: &mut StdVerifReporterWithSender,
                                   timestamp: &[u8; 7],
@@ -270,6 +279,114 @@ impl PusReceiver {
                     &tmtc_err::INVALID_PUS_SUBSERVICE,
                     None,
                 );
+            }
+        }
+    }
+
+    fn handle_scheduled_tc(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
+        if pus_tc.user_data().is_none() {
+            self.update_time_stamp();
+            self.verif_reporter
+                .start_failure(
+                    token,
+                    FailParams::new(Some(&self.time_stamp), &tmtc_err::NOT_ENOUGH_APP_DATA, None),
+                )
+                .expect("Sending start failure TM failed");
+            return;
+        }
+
+        self.update_time_stamp();
+        match pus_tc.subservice() {
+            1 => {
+                let start_token = self
+                    .verif_reporter
+                    .start_success(token, Some(&self.time_stamp))
+                    .expect("Error sending start success");
+
+                let mut scheduler = self.scheduler.borrow_mut();
+                scheduler.enable();
+                if scheduler.is_enabled() {
+                    self.verif_reporter
+                        .completion_success(start_token, Some(&self.time_stamp))
+                        .expect("Error sending completion success");
+                } else {
+                    panic!("Failed to enable scheduler");
+                }
+                drop(scheduler);
+            }
+            2 => {
+                let start_token = self
+                    .verif_reporter
+                    .start_success(token, Some(&self.time_stamp))
+                    .expect("Error sending start success");
+
+                let mut scheduler = self.scheduler.borrow_mut();
+                scheduler.disable();
+                if !scheduler.is_enabled() {
+                    self.verif_reporter
+                        .completion_success(start_token, Some(&self.time_stamp))
+                        .expect("Error sending completion success");
+                } else {
+                    panic!("Failed to disable scheduler");
+                }
+                drop(scheduler);
+            }
+            3 => {
+                let start_token = self
+                    .verif_reporter
+                    .start_success(token, Some(&self.time_stamp))
+                    .expect("Error sending start success");
+
+                let mut pool = self
+                    .tc_source
+                    .tc_store
+                    .pool
+                    .write()
+                    .expect("Locking pool failed");
+
+                let mut scheduler = self.scheduler.borrow_mut();
+                scheduler
+                    .reset(pool.as_mut())
+                    .expect("Error resetting TC Pool");
+                drop(scheduler);
+
+                self.verif_reporter
+                    .completion_success(start_token, Some(&self.time_stamp))
+                    .expect("Error sending completion success");
+            }
+            4 => {
+                let start_token = self
+                    .verif_reporter
+                    .start_success(token, Some(&self.time_stamp))
+                    .expect("Error sending start success");
+
+                let mut pool = self
+                    .tc_source
+                    .tc_store
+                    .pool
+                    .write()
+                    .expect("Locking pool failed");
+                let mut scheduler = self.scheduler.borrow_mut();
+                scheduler
+                    .insert_wrapped_tc::<TimeProvider>(pus_tc, pool.as_mut())
+                    .expect("TODO: panic message");
+                drop(scheduler);
+
+                self.verif_reporter
+                    .completion_success(start_token, Some(&self.time_stamp))
+                    .expect("Error sending completion success");
+            }
+            _ => {
+                self.verif_reporter
+                    .start_failure(
+                        token,
+                        FailParams::new(
+                            Some(&self.time_stamp),
+                            &tmtc_err::NOT_ENOUGH_APP_DATA,
+                            None,
+                        ),
+                    )
+                    .expect("Sending start failure TM failed");
             }
         }
     }

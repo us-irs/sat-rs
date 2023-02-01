@@ -1,10 +1,12 @@
 use satrs_core::events::EventU32;
 use satrs_core::hal::host::udp_server::{ReceiveResult, UdpTcServer};
 use satrs_core::params::Params;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
+use std::rc::Rc;
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
@@ -14,6 +16,7 @@ use crate::pus::PusReceiver;
 use crate::requests::RequestWithToken;
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::event_man::EventRequestWithToken;
+use satrs_core::pus::scheduling::PusScheduler;
 use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::spacepackets::{ecss::PusPacket, tc::PusTc, tm::PusTm, SpHeader};
 use satrs_core::tmtc::{
@@ -39,6 +42,12 @@ pub struct TmArgs {
 pub struct TcArgs {
     pub tc_source: PusTcSource,
     pub tc_receiver: Receiver<StoreAddr>,
+}
+
+impl TcArgs {
+    fn split(self) -> (PusTcSource, Receiver<StoreAddr>) {
+        (self.tc_source, self.tc_receiver)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,6 +161,11 @@ impl ReceivesCcsdsTc for PusTcSource {
     }
 }
 pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
+    let scheduler = Rc::new(RefCell::new(
+        PusScheduler::new_with_current_init_time(Duration::from_secs(5)).unwrap(),
+    ));
+
+    let sched_clone = scheduler.clone();
     let mut pus_receiver = PusReceiver::new(
         PUS_APID,
         tm_args.tm_sink_sender,
@@ -160,11 +174,15 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
         tc_args.tc_source.clone(),
         args.event_request_tx,
         args.request_map,
+        sched_clone,
     );
+
     let ccsds_receiver = CcsdsReceiver {
         tc_source: tc_args.tc_source.clone(),
     };
+
     let ccsds_distributor = CcsdsDistributor::new(Box::new(ccsds_receiver));
+
     let udp_tc_server = UdpTcServer::new(args.sock_addr, 2048, Box::new(ccsds_distributor))
         .expect("Creating UDP TMTC server failed");
 
@@ -173,8 +191,17 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
         tm_rx: tm_args.tm_server_rx,
         tm_store: tm_args.tm_store.pool.clone(),
     };
+
+    let mut tc_buf: [u8; 4096] = [0; 4096];
     loop {
-        core_tmtc_loop(&mut udp_tmtc_server, &mut tc_args, &mut pus_receiver);
+        let tmtc_sched = scheduler.clone();
+        core_tmtc_loop(
+            &mut udp_tmtc_server,
+            &mut tc_args,
+            &mut tc_buf,
+            &mut pus_receiver,
+            tmtc_sched,
+        );
         thread::sleep(Duration::from_millis(400));
     }
 }
@@ -182,8 +209,34 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
 fn core_tmtc_loop(
     udp_tmtc_server: &mut UdpTmtcServer,
     tc_args: &mut TcArgs,
+    tc_buf: &mut [u8],
     pus_receiver: &mut PusReceiver,
+    scheduler: Rc<RefCell<PusScheduler>>,
 ) {
+    let releaser = |enabled: bool, addr: &StoreAddr| -> bool {
+        tc_args.tc_source.tc_source.send(*addr).is_ok()
+    };
+
+    let mut pool = tc_args
+        .tc_source
+        .tc_store
+        .pool
+        .write()
+        .expect("error locking pool");
+
+    let mut scheduler = scheduler.borrow_mut();
+    scheduler.update_time_from_now().unwrap();
+    match scheduler.release_telecommands(releaser, pool.as_mut()) {
+        Ok(released_tcs) => {
+            if released_tcs > 0 {
+                println!("{} Tc(s) released from scheduler", released_tcs);
+            }
+        }
+        Err(_) => {}
+    }
+    drop(pool);
+    drop(scheduler);
+
     while poll_tc_server(udp_tmtc_server) {}
     match tc_args.tc_receiver.try_recv() {
         Ok(addr) => {
@@ -194,7 +247,9 @@ fn core_tmtc_loop(
                 .read()
                 .expect("locking tc pool failed");
             let data = pool.read(&addr).expect("reading pool failed");
-            match PusTc::from_bytes(data) {
+            tc_buf[0..data.len()].copy_from_slice(data);
+            drop(pool);
+            match PusTc::from_bytes(tc_buf) {
                 Ok((pus_tc, _)) => {
                     pus_receiver
                         .handle_pus_tc_packet(pus_tc.service(), pus_tc.sp_header(), &pus_tc)
@@ -202,7 +257,7 @@ fn core_tmtc_loop(
                 }
                 Err(e) => {
                     println!("error creating PUS TC from raw data: {e}");
-                    println!("raw data: {data:x?}");
+                    println!("raw data: {tc_buf:x?}");
                 }
             }
         }
