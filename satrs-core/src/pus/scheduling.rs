@@ -6,11 +6,10 @@ use alloc::vec::Vec;
 use core::fmt::{Debug, Display, Formatter};
 use core::time::Duration;
 use spacepackets::ecss::{PusError, PusPacket};
-use spacepackets::tc::{GenericPusTcSecondaryHeader, PusTc};
+use spacepackets::tc::PusTc;
 use spacepackets::time::cds::DaysLen24Bits;
 use spacepackets::time::{CcsdsTimeProvider, TimeReader, TimestampError, UnixTimestamp};
 use std::collections::BTreeMap;
-use std::dbg;
 #[cfg(feature = "std")]
 use std::error::Error;
 #[cfg(feature = "std")]
@@ -85,7 +84,7 @@ impl From<TimestampError> for ScheduleError {
 impl Error for ScheduleError {}
 
 //TODO: Move to spacepackets
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum ScheduleSubservice {
     EnableScheduling = 1,
     DisableScheduling = 2,
@@ -229,9 +228,7 @@ impl PusScheduler {
                 self.insert_unwrapped_and_stored_tc(time_stamp, addr)?;
                 Ok(addr)
             }
-            Err(err) => {
-                return Err(err.into());
-            }
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -248,7 +245,7 @@ impl PusScheduler {
             return Err(ScheduleError::WrongSubservice);
         }
         return if let Some(user_data) = pus_tc.user_data() {
-            let mut stamp: TimeStamp = TimeReader::from_bytes(user_data)?;
+            let stamp: TimeStamp = TimeReader::from_bytes(user_data)?;
             let unix_stamp = stamp.unix_stamp();
             let stamp_len = stamp.len_as_bytes();
             self.insert_unwrapped_tc(unix_stamp, &user_data[stamp_len..], pool)

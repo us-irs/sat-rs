@@ -8,7 +8,6 @@ use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
-use std::sync::{Arc, LockResult, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -162,11 +161,11 @@ impl ReceivesCcsdsTc for PusTcSource {
     }
 }
 pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
-    let mut scheduler = Rc::new(RefCell::new(
+    let scheduler = Rc::new(RefCell::new(
         PusScheduler::new_with_current_init_time(Duration::from_secs(5)).unwrap(),
     ));
 
-    let mut sched_clone = scheduler.clone();
+    let sched_clone = scheduler.clone();
     let mut pus_receiver = PusReceiver::new(
         PUS_APID,
         tm_args.tm_sink_sender,
@@ -193,17 +192,13 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
         tm_store: tm_args.tm_store.pool.clone(),
     };
 
-    //let (mut tc_source, mut tc_receiver) = tc_args.split();
-
     let mut tc_buf: [u8; 4096] = [0; 4096];
     loop {
-        let mut tmtc_sched = scheduler.clone();
+        let tmtc_sched = scheduler.clone();
         core_tmtc_loop(
             &mut udp_tmtc_server,
             &mut tc_args,
             &mut tc_buf,
-            //&mut tc_source,
-            //&mut tc_receiver,
             &mut pus_receiver,
             tmtc_sched,
         );
@@ -215,16 +210,11 @@ fn core_tmtc_loop(
     udp_tmtc_server: &mut UdpTmtcServer,
     tc_args: &mut TcArgs,
     tc_buf: &mut [u8],
-    //tc_source: &mut PusTcSource,
-    //tc_receiver: &mut Receiver<StoreAddr>,
     pus_receiver: &mut PusReceiver,
     scheduler: Rc<RefCell<PusScheduler>>,
 ) {
     let releaser = |enabled: bool, addr: &StoreAddr| -> bool {
-        match tc_args.tc_source.tc_source.send(*addr) {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        tc_args.tc_source.tc_source.send(*addr).is_ok()
     };
 
     let mut pool = tc_args
@@ -244,7 +234,6 @@ fn core_tmtc_loop(
         }
         Err(_) => {}
     }
-    //.expect("error releasing tc");
     drop(pool);
     drop(scheduler);
 

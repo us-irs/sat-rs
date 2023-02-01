@@ -2,29 +2,26 @@ use crate::hk::{CollectionIntervalFactor, HkRequest};
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{PusTcSource, TmStore};
 use satrs_core::events::EventU32;
-use satrs_core::pool::{StoreAddr, StoreError};
+use satrs_core::pool::StoreAddr;
 use satrs_core::pus::event::Subservices;
 use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
 use satrs_core::pus::hk;
-use satrs_core::pus::scheduling::{PusScheduler, ScheduleSubservice};
+use satrs_core::pus::scheduling::PusScheduler;
 use satrs_core::pus::verification::{
     FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
 };
 use satrs_core::res_code::ResultU16;
-use satrs_core::spacepackets::time::{CcsdsTimeProvider, UnixTimestamp};
 use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use satrs_core::tmtc::{AddressableId, PusServiceProvider};
 use satrs_core::{
-    spacepackets, spacepackets::ecss::PusPacket, spacepackets::tc::PusTc,
-    spacepackets::time::cds::TimeProvider, spacepackets::time::TimeWriter, spacepackets::SpHeader,
+    spacepackets::ecss::PusPacket, spacepackets::tc::PusTc, spacepackets::time::cds::TimeProvider,
+    spacepackets::time::TimeWriter, spacepackets::SpHeader,
 };
 use satrs_example::{hk_err, tmtc_err};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, LockResult, Mutex};
-use std::time::Duration;
 
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
@@ -373,17 +370,11 @@ impl PusReceiver {
                 scheduler
                     .insert_wrapped_tc::<TimeProvider>(pus_tc, pool.as_mut())
                     .expect("TODO: panic message");
-                let time =
-                    TimeProvider::from_bytes_with_u16_days(&pus_tc.user_data().unwrap()).unwrap();
                 drop(scheduler);
 
                 self.verif_reporter
                     .completion_success(start_token, Some(&self.time_stamp))
                     .expect("Error sending completion success");
-
-                //let addr = self.tc_source.tc_store.add_pus_tc().unwrap();
-                //let unix_time = UnixTimestamp::new_only_seconds(self.stamper.unix_seconds());
-                //let worked = self.scheduler.insert_tc(unix_time, );
             }
             _ => {
                 self.verif_reporter
@@ -396,7 +387,6 @@ impl PusReceiver {
                         ),
                     )
                     .expect("Sending start failure TM failed");
-                return;
             }
         }
     }
