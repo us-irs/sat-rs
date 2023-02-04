@@ -161,6 +161,7 @@ impl ReceivesCcsdsTc for PusTcSource {
         Ok(())
     }
 }
+
 pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
     let scheduler = Rc::new(RefCell::new(
         PusScheduler::new_with_current_init_time(Duration::from_secs(5)).unwrap(),
