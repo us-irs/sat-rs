@@ -1,2 +1,2 @@
-# tmtccmd == 4.0.0a2
--e git+https://github.com/robamu-org/tmtccmd@97e5e51101a08b21472b3ddecc2063359f7e307a#egg=tmtccmd
+tmtccmd == 4.0.0rc0
+# -e git+https://github.com/robamu-org/tmtccmd@97e5e51101a08b21472b3ddecc2063359f7e307a#egg=tmtccmd

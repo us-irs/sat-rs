@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Example client for the sat-rs example application"""
 import enum
+import logging
 import struct
 import sys
 import time
@@ -23,14 +24,14 @@ from tmtccmd.com import ComInterface
 from tmtccmd.config import (
     default_json_path,
     SetupParams,
-    TmTcCfgHookBase,
+    HookBase,
     TmtcDefinitionWrapper,
     CoreServiceList,
     OpCodeEntry,
     params_to_procedure_conversion,
 )
 from tmtccmd.config import PreArgsParsingWrapper, SetupWrapper
-from tmtccmd.logging import get_console_logger
+from tmtccmd.logging import add_colorlog_console_logger
 from tmtccmd.logging.pus import (
     RegularTmtcLogWrapper,
     RawTmtcTimedLogWrapper,
@@ -43,6 +44,7 @@ from tmtccmd.tc import (
     FeedWrapper,
     SendCbParams,
     DefaultPusQueueHelper,
+    QueueWrapper,
 )
 from tmtccmd.tm.pus_5_fsfw_event import Service5Tm
 from tmtccmd.util import FileSeqCountProvider, PusFileSeqCountProvider
@@ -50,12 +52,12 @@ from tmtccmd.util.obj_id import ObjectIdDictT
 
 from tmtccmd.util.tmtc_printer import FsfwTmTcPrinter
 
-LOGGER = get_console_logger()
+_LOGGER = logging.getLogger(__name__)
 
 EXAMPLE_PUS_APID = 0x02
 
 
-class SatRsConfigHook(TmTcCfgHookBase):
+class SatRsConfigHook(HookBase):
     def __init__(self, json_cfg_path: str):
         super().__init__(json_cfg_path=json_cfg_path)
 
@@ -95,7 +97,7 @@ class SatRsConfigHook(TmTcCfgHookBase):
         defs.add_service(
             name=CoreServiceList.SERVICE_3,
             info="PUS Service 3 Housekeeping",
-            op_code_entry=srv_3
+            op_code_entry=srv_3,
         )
         srv_11 = OpCodeEntry()
         srv_11.add("0", "Scheduled TC Test")
@@ -107,7 +109,7 @@ class SatRsConfigHook(TmTcCfgHookBase):
         return defs
 
     def perform_mode_operation(self, tmtc_backend: CcsdsTmtcBackend, mode: int):
-        LOGGER.info("Mode operation hook was called")
+        _LOGGER.info("Mode operation hook was called")
         pass
 
     def get_object_ids(self) -> ObjectIdDictT:
@@ -130,22 +132,26 @@ class PusHandler(SpecificApidHandlerBase):
 
     def handle_tm(self, packet: bytes, _user_args: any):
         try:
-            tm_packet = PusTelemetry.unpack(packet, time_reader=CdsShortTimestamp.empty())
+            tm_packet = PusTelemetry.unpack(
+                packet, time_reader=CdsShortTimestamp.empty()
+            )
         except ValueError as e:
-            LOGGER.warning("Could not generate PUS TM object from raw data")
-            LOGGER.warning(f"Raw Packet: [{packet.hex(sep=',')}], REPR: {packet!r}")
+            _LOGGER.warning("Could not generate PUS TM object from raw data")
+            _LOGGER.warning(f"Raw Packet: [{packet.hex(sep=',')}], REPR: {packet!r}")
             raise e
         service = tm_packet.service
         dedicated_handler = False
         if service == 1:
-            tm_packet = Service1Tm.unpack(data=packet, params=UnpackParams(CdsShortTimestamp.empty(), 1, 2))
+            tm_packet = Service1Tm.unpack(
+                data=packet, params=UnpackParams(CdsShortTimestamp.empty(), 1, 2)
+            )
             res = self.verif_wrapper.add_tm(tm_packet)
             if res is None:
-                LOGGER.info(
+                _LOGGER.info(
                     f"Received Verification TM[{tm_packet.service}, {tm_packet.subservice}] "
                     f"with Request ID {tm_packet.tc_req_id.as_u32():#08x}"
                 )
-                LOGGER.warning(
+                _LOGGER.warning(
                     f"No matching telecommand found for {tm_packet.tc_req_id}"
                 )
             else:
@@ -153,8 +159,8 @@ class PusHandler(SpecificApidHandlerBase):
                 self.verif_wrapper.log_to_file(tm_packet, res)
             dedicated_handler = True
         if service == 3:
-            LOGGER.info("No handling for HK packets implemented")
-            LOGGER.info(f"Raw packet: 0x[{packet.hex(sep=',')}]")
+            _LOGGER.info("No handling for HK packets implemented")
+            _LOGGER.info(f"Raw packet: 0x[{packet.hex(sep=',')}]")
             pus_tm = PusTelemetry.unpack(packet, time_reader=CdsShortTimestamp.empty())
             if pus_tm.subservice == 25:
                 if len(pus_tm.source_data) < 8:
@@ -164,26 +170,31 @@ class PusHandler(SpecificApidHandlerBase):
         if service == 5:
             tm_packet = Service5Tm.unpack(packet, time_reader=CdsShortTimestamp.empty())
         if service == 17:
-            tm_packet = Service17Tm.unpack(packet, time_reader=CdsShortTimestamp.empty())
+            tm_packet = Service17Tm.unpack(
+                packet, time_reader=CdsShortTimestamp.empty()
+            )
             dedicated_handler = True
             if tm_packet.subservice == 2:
                 self.printer.file_logger.info("Received Ping Reply TM[17,2]")
-                LOGGER.info("Received Ping Reply TM[17,2]")
+                _LOGGER.info("Received Ping Reply TM[17,2]")
             else:
                 self.printer.file_logger.info(
                     f"Received Test Packet with unknown subservice {tm_packet.subservice}"
                 )
-                LOGGER.info(
+                _LOGGER.info(
                     f"Received Test Packet with unknown subservice {tm_packet.subservice}"
                 )
         if tm_packet is None:
-            LOGGER.info(
+            _LOGGER.info(
                 f"The service {service} is not implemented in Telemetry Factory"
             )
-            tm_packet = PusTelemetry.unpack(packet)
+            tm_packet = PusTelemetry.unpack(
+                packet, time_reader=CdsShortTimestamp.empty()
+            )
         self.raw_logger.log_tm(tm_packet)
         if not dedicated_handler and tm_packet is not None:
-            self.printer.handle_long_tm_print(packet_if=tm_packet, info_if=tm_packet)
+            pass
+            # self.printer.handle_long_tm_print(packet_if=tm_packet, info_if=tm_packet)
 
 
 def make_addressable_id(target_id: int, unique_id: int) -> bytes:
@@ -214,11 +225,11 @@ class TcHandler(TcHandlerBase):
         self.seq_count_provider = seq_count_provider
         self.verif_wrapper = verif_wrapper
         self.queue_helper = DefaultPusQueueHelper(
-            queue_wrapper=None,
+            queue_wrapper=QueueWrapper.empty(),
             tc_sched_timestamp_len=CdsShortTimestamp.TIMESTAMP_SIZE,
             seq_cnt_provider=seq_count_provider,
             pus_verificator=self.verif_wrapper.pus_verificator,
-            default_pus_apid=EXAMPLE_PUS_APID
+            default_pus_apid=EXAMPLE_PUS_APID,
         )
 
     def send_cb(self, send_params: SendCbParams):
@@ -227,16 +238,16 @@ class TcHandler(TcHandlerBase):
             if entry_helper.entry_type == TcQueueEntryType.PUS_TC:
                 pus_tc_wrapper = entry_helper.to_pus_tc_entry()
                 raw_tc = pus_tc_wrapper.pus_tc.pack()
-                LOGGER.info(f"Sending {pus_tc_wrapper.pus_tc}")
+                _LOGGER.info(f"Sending {pus_tc_wrapper.pus_tc}")
                 send_params.com_if.send(raw_tc)
         elif entry_helper.entry_type == TcQueueEntryType.LOG:
             log_entry = entry_helper.to_log_entry()
-            LOGGER.info(log_entry.log_str)
+            _LOGGER.info(log_entry.log_str)
 
     def queue_finished_cb(self, helper: ProcedureWrapper):
         if helper.proc_type == TcProcedureType.DEFAULT:
             def_proc = helper.to_def_procedure()
-            LOGGER.info(
+            _LOGGER.info(
                 f"Queue handling finished for service {def_proc.service} and "
                 f"op code {def_proc.op_code}"
             )
@@ -253,40 +264,45 @@ class TcHandler(TcHandlerBase):
                 or service == CoreServiceList.SERVICE_17_ALT
             ):
                 q.add_log_cmd("Sending PUS ping telecommand")
-                return q.add_pus_tc(
-                    PusTelecommand(service=17, subservice=1)
-                )
+                return q.add_pus_tc(PusTelecommand(service=17, subservice=1))
             if service == CoreServiceList.SERVICE_11:
                 q.add_log_cmd("Sending PUS scheduled TC telecommand")
                 crt_time = CdsShortTimestamp.from_now()
                 time_stamp = crt_time + datetime.timedelta(seconds=10)
                 time_stamp = time_stamp.pack()
                 return q.add_pus_tc(
-                    create_time_tagged_cmd(time_stamp, PusTelecommand(service=17, subservice=1), apid=EXAMPLE_PUS_APID)
+                    create_time_tagged_cmd(
+                        time_stamp,
+                        PusTelecommand(service=17, subservice=1),
+                        apid=EXAMPLE_PUS_APID,
+                    )
                 )
             if service == CoreServiceList.SERVICE_3:
                 if op_code in HkOpCodes.GENERATE_ONE_SHOT:
                     q.add_log_cmd("Sending HK one shot request")
                     q.add_pus_tc(
-                        generate_one_hk_command(make_addressable_id(RequestTargetId.ACS, AcsHkIds.MGM_SET))
+                        generate_one_hk_command(
+                            make_addressable_id(RequestTargetId.ACS, AcsHkIds.MGM_SET)
+                        )
                     )
                 pass
 
 
 def main():
+    add_colorlog_console_logger(_LOGGER)
     tmtccmd.init_printout(False)
     hook_obj = SatRsConfigHook(json_cfg_path=default_json_path())
     parser_wrapper = PreArgsParsingWrapper()
     parser_wrapper.create_default_parent_parser()
     parser_wrapper.create_default_parser()
     parser_wrapper.add_def_proc_args()
-    post_args_wrapper = parser_wrapper.parse(hook_obj)
     params = SetupParams()
+    post_args_wrapper = parser_wrapper.parse(hook_obj, params)
     proc_wrapper = ProcedureParamsWrapper()
     if post_args_wrapper.use_gui:
-        post_args_wrapper.set_params_without_prompts(params, proc_wrapper)
+        post_args_wrapper.set_params_without_prompts(proc_wrapper)
     else:
-        post_args_wrapper.set_params_with_prompts(params, proc_wrapper)
+        post_args_wrapper.set_params_with_prompts(proc_wrapper)
     params.apid = EXAMPLE_PUS_APID
     setup_args = SetupWrapper(
         hook_obj=hook_obj, setup_params=params, proc_param_wrapper=proc_wrapper
@@ -296,7 +312,9 @@ def main():
     printer = FsfwTmTcPrinter(tmtc_logger.logger)
     raw_logger = RawTmtcTimedLogWrapper(when=TimedLogWhen.PER_HOUR, interval=1)
     verificator = PusVerificator()
-    verification_wrapper = VerificationWrapper(verificator, LOGGER, printer.file_logger)
+    verification_wrapper = VerificationWrapper(
+        verificator, _LOGGER, printer.file_logger
+    )
     # Create primary TM handler and add it to the CCSDS Packet Handler
     tm_handler = PusHandler(verification_wrapper, printer, raw_logger)
     ccsds_handler = CcsdsTmHandler(generic_handler=None)
@@ -320,7 +338,7 @@ def main():
             if state.request == BackendRequest.TERMINATION_NO_ERROR:
                 sys.exit(0)
             elif state.request == BackendRequest.DELAY_IDLE:
-                LOGGER.info("TMTC Client in IDLE mode")
+                _LOGGER.info("TMTC Client in IDLE mode")
                 time.sleep(3.0)
             elif state.request == BackendRequest.DELAY_LISTENER:
                 time.sleep(0.8)

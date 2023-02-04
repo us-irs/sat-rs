@@ -45,6 +45,7 @@ pub struct TcArgs {
 }
 
 impl TcArgs {
+    #[allow(dead_code)]
     fn split(self) -> (PusTcSource, Receiver<StoreAddr>) {
         (self.tc_source, self.tc_receiver)
     }
@@ -214,7 +215,14 @@ fn core_tmtc_loop(
     scheduler: Rc<RefCell<PusScheduler>>,
 ) {
     let releaser = |enabled: bool, addr: &StoreAddr| -> bool {
-        tc_args.tc_source.tc_source.send(*addr).is_ok()
+        if enabled {
+            tc_args
+                .tc_source
+                .tc_source
+                .send(*addr)
+                .expect("sending TC to TC source failed");
+        }
+        true
     };
 
     let mut pool = tc_args
