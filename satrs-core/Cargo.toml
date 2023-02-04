@@ -56,7 +56,7 @@ optional = true
 # version = "0.5.2"
 # path = "../spacepackets"
 git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
-rev = "cfa5f8099c95389628440a1611766e3b178fcdb3"
+rev = "7aa3432f167d3b5d888a4aa0606780188d74f567"
 
 default-features = false
 

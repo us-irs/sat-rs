@@ -7,7 +7,7 @@ default-run = "satrs-example"
 
 [dependencies]
 crossbeam-channel = "0.5"
-delegate = "0.8"
+delegate = "0.9"
 zerocopy = "0.6"
 csv = "1"
 

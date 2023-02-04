@@ -190,13 +190,14 @@ impl PusReceiver {
                 .send(RequestWithToken(Request::HkRequest(request), token))
                 .unwrap_or_else(|_| panic!("Sending HK request {request:?} failed"));
         };
-        if PusPacket::subservice(pus_tc) == hk::Subservice::TcEnableGeneration as u8 {
+        if PusPacket::subservice(pus_tc) == hk::Subservice::TcEnableHkGeneration as u8 {
             send_request(HkRequest::Enable(addressable_id));
-        } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcDisableGeneration as u8 {
+        } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcDisableHkGeneration as u8 {
             send_request(HkRequest::Disable(addressable_id));
         } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcGenerateOneShotHk as u8 {
             send_request(HkRequest::OneShot(addressable_id));
-        } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcModifyCollectionInterval as u8
+        } else if PusPacket::subservice(pus_tc)
+            == hk::Subservice::TcModifyHkCollectionInterval as u8
         {
             if user_data.len() < 12 {
                 self.update_time_stamp();
