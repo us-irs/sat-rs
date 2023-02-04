@@ -29,6 +29,6 @@ Each project has its own `CHANGELOG.md`.
  In addition to the crates in this repository, the sat-rs project also maintains other libraries.
 
  * [`spacepackets`](https://egit.irs.uni-stuttgart.de/rust/spacepackets): Basic ECSS and CCSDS
-   packet protocol implementations. This repository is re-expored in the
+   packet protocol implementations. This repository is re-exported in the
    [`satrs-core`](https://egit.irs.uni-stuttgart.de/rust/satrs-launchpad/src/branch/main/satrs-core)
    crate.
