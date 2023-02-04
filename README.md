@@ -1,8 +1,7 @@
 sat-rs launchpad
 =========
 
-This is the prototyping repository for the initial version of a
-Rust Flight Software Framework.
+This is the prototyping repository for the initial version of the sat-rs framework.
 
 Its primary goal is to provide re-usable components to write on-board software for remote
 systems like rovers or satellites. It is specifically written for the special requirements
