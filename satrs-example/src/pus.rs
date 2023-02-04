@@ -3,7 +3,7 @@ use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{PusTcSource, TmStore};
 use satrs_core::events::EventU32;
 use satrs_core::pool::StoreAddr;
-use satrs_core::pus::event::Subservices;
+use satrs_core::pus::event;
 use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
 use satrs_core::pus::hk;
 use satrs_core::pus::scheduling::PusScheduler;
@@ -37,28 +37,37 @@ pub struct PusReceiver {
     scheduler: Rc<RefCell<PusScheduler>>,
 }
 
+pub struct PusTmArgs {
+    /// All telemetry is sent with this sender handle.
+    pub tm_tx: Sender<StoreAddr>,
+    /// All TM to be sent is stored here
+    pub tm_store: TmStore,
+    /// All verification reporting is done with this reporter.
+    pub verif_reporter: StdVerifReporterWithSender,
+}
+
+pub struct PusTcArgs {
+    pub event_request_tx: Sender<EventRequestWithToken>,
+    /// Request routing helper. Maps targeted request to their recipient.
+    pub request_map: HashMap<u32, Sender<RequestWithToken>>,
+    /// Required for scheduling of telecommands.
+    pub tc_source: PusTcSource,
+    pub scheduler: Rc<RefCell<PusScheduler>>,
+}
+
 impl PusReceiver {
-    pub fn new(
-        apid: u16,
-        tm_tx: Sender<StoreAddr>,
-        tm_store: TmStore,
-        verif_reporter: StdVerifReporterWithSender,
-        tc_source: PusTcSource,
-        event_request_tx: Sender<EventRequestWithToken>,
-        request_map: HashMap<u32, Sender<RequestWithToken>>,
-        scheduler: Rc<RefCell<PusScheduler>>,
-    ) -> Self {
+    pub fn new(apid: u16, tm_arguments: PusTmArgs, tc_arguments: PusTcArgs) -> Self {
         Self {
             tm_helper: PusTmWithCdsShortHelper::new(apid),
-            tm_tx,
-            tm_store,
-            verif_reporter,
-            tc_source,
-            event_request_tx,
-            request_map,
+            tm_tx: tm_arguments.tm_tx,
+            tm_store: tm_arguments.tm_store,
+            verif_reporter: tm_arguments.verif_reporter,
+            tc_source: tc_arguments.tc_source,
+            event_request_tx: tc_arguments.event_request_tx,
+            request_map: tc_arguments.request_map,
             stamper: TimeProvider::new_with_u16_days(0, 0),
             time_stamp: [0; 7],
-            scheduler,
+            scheduler: tc_arguments.scheduler,
         }
     }
 }
@@ -251,7 +260,7 @@ impl PusReceiver {
         }
         let event_id = EventU32::from(u32::from_be_bytes(app_data.try_into().unwrap()));
         match PusPacket::subservice(pus_tc).try_into() {
-            Ok(Subservices::TcEnableEventGeneration) => {
+            Ok(event::Subservice::TcEnableEventGeneration) => {
                 self.update_time_stamp();
                 let start_token = send_start_acceptance(&mut self.verif_reporter, &self.time_stamp);
                 self.event_request_tx
@@ -261,7 +270,7 @@ impl PusReceiver {
                     })
                     .expect("Sending event request failed");
             }
-            Ok(Subservices::TcDisableEventGeneration) => {
+            Ok(event::Subservice::TcDisableEventGeneration) => {
                 self.update_time_stamp();
                 let start_token = send_start_acceptance(&mut self.verif_reporter, &self.time_stamp);
                 self.event_request_tx

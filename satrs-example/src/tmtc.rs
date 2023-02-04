@@ -12,7 +12,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::ccsds::CcsdsReceiver;
-use crate::pus::PusReceiver;
+use crate::pus::{PusReceiver, PusTcArgs, PusTmArgs};
 use crate::requests::RequestWithToken;
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::event_man::EventRequestWithToken;
@@ -167,16 +167,18 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
     ));
 
     let sched_clone = scheduler.clone();
-    let mut pus_receiver = PusReceiver::new(
-        PUS_APID,
-        tm_args.tm_sink_sender,
-        tm_args.tm_store.clone(),
-        args.verif_reporter,
-        tc_args.tc_source.clone(),
-        args.event_request_tx,
-        args.request_map,
-        sched_clone,
-    );
+    let pus_tm_args = PusTmArgs {
+        tm_tx: tm_args.tm_sink_sender,
+        tm_store: tm_args.tm_store.clone(),
+        verif_reporter: args.verif_reporter,
+    };
+    let pus_tc_args = PusTcArgs {
+        event_request_tx: args.event_request_tx,
+        request_map: args.request_map,
+        tc_source: tc_args.tc_source.clone(),
+        scheduler: sched_clone,
+    };
+    let mut pus_receiver = PusReceiver::new(PUS_APID, pus_tm_args, pus_tc_args);
 
     let ccsds_receiver = CcsdsReceiver {
         tc_source: tc_args.tc_source.clone(),
@@ -234,13 +236,10 @@ fn core_tmtc_loop(
 
     let mut scheduler = scheduler.borrow_mut();
     scheduler.update_time_from_now().unwrap();
-    match scheduler.release_telecommands(releaser, pool.as_mut()) {
-        Ok(released_tcs) => {
-            if released_tcs > 0 {
-                println!("{} Tc(s) released from scheduler", released_tcs);
-            }
+    if let Ok(released_tcs) = scheduler.release_telecommands(releaser, pool.as_mut()) {
+        if released_tcs > 0 {
+            println!("{} Tc(s) released from scheduler", released_tcs);
         }
-        Err(_) => {}
     }
     drop(pool);
     drop(scheduler);

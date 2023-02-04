@@ -88,6 +88,7 @@ use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
 use spacepackets::{SpHeader, MAX_APID};
 
 pub use crate::seq_count::SeqCountProviderSimple;
+pub use spacepackets::ecss::verification::*;
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::{
@@ -102,24 +103,6 @@ pub use stdmod::{
     MpscVerifSender, SharedStdVerifReporterWithSender, StdVerifReporterWithSender,
     StdVerifSenderError,
 };
-
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub enum Subservice {
-    TmAcceptanceSuccess = 1,
-    TmAcceptanceFailure = 2,
-    TmStartSuccess = 3,
-    TmStartFailure = 4,
-    TmStepSuccess = 5,
-    TmStepFailure = 6,
-    TmCompletionSuccess = 7,
-    TmCompletionFailure = 8,
-}
-
-impl From<Subservice> for u8 {
-    fn from(enumeration: Subservice) -> Self {
-        enumeration as u8
-    }
-}
 
 /// This is a request identifier as specified in 5.4.11.2 c. of the PUS standard
 /// This field equivalent to the first two bytes of the CCSDS space packet header.

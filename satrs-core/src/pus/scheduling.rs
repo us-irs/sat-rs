@@ -83,16 +83,6 @@ impl From<TimestampError> for ScheduleError {
 #[cfg(feature = "std")]
 impl Error for ScheduleError {}
 
-//TODO: Move to spacepackets
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub enum ScheduleSubservice {
-    EnableScheduling = 1,
-    DisableScheduling = 2,
-    ResetScheduling = 3,
-    InsertActivity = 4,
-    DeleteActivity = 5,
-}
-
 /// This is the core data structure for scheduling PUS telecommands with [alloc] support.
 ///
 /// It is assumed that the actual telecommand data is stored in a separate TC pool offering
@@ -323,17 +313,9 @@ impl PusScheduler {
 mod tests {
     use crate::pool::{LocalPool, PoolCfg, PoolProvider, StoreAddr};
     use crate::pus::scheduling::{PusScheduler, ScheduleError};
-    use crate::tmtc::ccsds_distrib::tests::generate_ping_tc;
-    use alloc::rc::Rc;
-    use core::borrow::BorrowMut;
-    use spacepackets::ecss::PacketTypeCodes::UnsignedInt;
-    use spacepackets::ecss::PusPacket;
     use spacepackets::tc::PusTc;
     use spacepackets::time::{cds, TimeWriter, UnixTimestamp};
-    use spacepackets::{CcsdsPacket, SpHeader};
-    use std::cell::RefCell;
-    use std::sync::mpsc;
-    use std::sync::mpsc::{channel, Receiver, TryRecvError};
+    use spacepackets::SpHeader;
     use std::time::Duration;
     use std::vec::Vec;
     #[allow(unused_imports)]
@@ -404,7 +386,7 @@ mod tests {
             )
             .unwrap();
 
-        let worked = scheduler
+        scheduler
             .insert_unwrapped_and_stored_tc(
                 UnixTimestamp::new_only_seconds(100),
                 StoreAddr {
@@ -414,7 +396,7 @@ mod tests {
             )
             .unwrap();
 
-        let worked = scheduler
+        scheduler
             .insert_unwrapped_and_stored_tc(
                 UnixTimestamp::new_only_seconds(300),
                 StoreAddr {
@@ -465,10 +447,14 @@ mod tests {
 
         let first_addr = pool.add(&[2, 2, 2]).unwrap();
 
-        scheduler.insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(100), first_addr);
+        scheduler
+            .insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(100), first_addr)
+            .expect("insertion failed");
 
         let second_addr = pool.add(&[5, 6, 7]).unwrap();
-        scheduler.insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(200), second_addr);
+        scheduler
+            .insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(200), second_addr)
+            .expect("insertion failed");
 
         let mut i = 0;
         let mut test_closure_1 = |boolvar: bool, store_addr: &StoreAddr| {
@@ -523,10 +509,14 @@ mod tests {
 
         let first_addr = pool.add(&[2, 2, 2]).unwrap();
 
-        scheduler.insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(100), first_addr);
+        scheduler
+            .insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(100), first_addr)
+            .expect("insertion failed");
 
         let second_addr = pool.add(&[2, 2, 2]).unwrap();
-        scheduler.insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(100), second_addr);
+        scheduler
+            .insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(100), second_addr)
+            .expect("insertion failed");
 
         let mut i = 0;
         let mut test_closure = |boolvar: bool, store_addr: &StoreAddr| {
@@ -572,10 +562,14 @@ mod tests {
 
         let first_addr = pool.add(&[2, 2, 2]).unwrap();
 
-        scheduler.insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(100), first_addr);
+        scheduler
+            .insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(100), first_addr)
+            .expect("insertion failed");
 
         let second_addr = pool.add(&[5, 6, 7]).unwrap();
-        scheduler.insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(200), second_addr);
+        scheduler
+            .insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(200), second_addr)
+            .expect("insertion failed");
 
         let mut i = 0;
         let mut test_closure_1 = |boolvar: bool, store_addr: &StoreAddr| {

@@ -18,7 +18,7 @@ use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, EventRequest, EventRequestWithToken,
     PusEventDispatcher,
 };
-use satrs_core::pus::hk::Subservice;
+use satrs_core::pus::hk::Subservice as HkSubservice;
 use satrs_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
 };
@@ -229,7 +229,7 @@ fn main() {
                                             .unwrap();
                                     let sec_header = PusTmSecondaryHeader::new_simple(
                                         3,
-                                        Subservice::TmHkPacket as u8,
+                                        HkSubservice::TmHkPacket as u8,
                                         &timestamp,
                                     );
                                     let mut buf: [u8; 8] = [0; 8];

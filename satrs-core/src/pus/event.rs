@@ -7,56 +7,8 @@ use spacepackets::{SpHeader, MAX_APID};
 use crate::pus::EcssTmSenderCore;
 #[cfg(feature = "alloc")]
 pub use allocvec::EventReporter;
+pub use spacepackets::ecss::event::*;
 
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub enum Subservices {
-    TmInfoReport = 1,
-    TmLowSeverityReport = 2,
-    TmMediumSeverityReport = 3,
-    TmHighSeverityReport = 4,
-    TcEnableEventGeneration = 5,
-    TcDisableEventGeneration = 6,
-    TcReportDisabledList = 7,
-    TmDisabledEventsReport = 8,
-}
-
-impl From<Subservices> for u8 {
-    fn from(enumeration: Subservices) -> Self {
-        enumeration as u8
-    }
-}
-
-impl TryFrom<u8> for Subservices {
-    type Error = ();
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            x if x == Subservices::TmInfoReport as u8 => Ok(Subservices::TmInfoReport),
-            x if x == Subservices::TmLowSeverityReport as u8 => {
-                Ok(Subservices::TmLowSeverityReport)
-            }
-            x if x == Subservices::TmMediumSeverityReport as u8 => {
-                Ok(Subservices::TmMediumSeverityReport)
-            }
-            x if x == Subservices::TmHighSeverityReport as u8 => {
-                Ok(Subservices::TmHighSeverityReport)
-            }
-            x if x == Subservices::TcEnableEventGeneration as u8 => {
-                Ok(Subservices::TcEnableEventGeneration)
-            }
-            x if x == Subservices::TcDisableEventGeneration as u8 => {
-                Ok(Subservices::TcDisableEventGeneration)
-            }
-            x if x == Subservices::TcReportDisabledList as u8 => {
-                Ok(Subservices::TcReportDisabledList)
-            }
-            x if x == Subservices::TmDisabledEventsReport as u8 => {
-                Ok(Subservices::TmDisabledEventsReport)
-            }
-            _ => Err(()),
-        }
-    }
-}
 pub struct EventReporterBase {
     msg_count: u16,
     apid: u16,
@@ -85,7 +37,7 @@ impl EventReporterBase {
     ) -> Result<(), EcssTmErrorWithSend<E>> {
         self.generate_and_send_generic_tm(
             buf,
-            Subservices::TmInfoReport,
+            Subservice::TmInfoReport,
             sender,
             time_stamp,
             event_id,
@@ -103,7 +55,7 @@ impl EventReporterBase {
     ) -> Result<(), EcssTmErrorWithSend<E>> {
         self.generate_and_send_generic_tm(
             buf,
-            Subservices::TmLowSeverityReport,
+            Subservice::TmLowSeverityReport,
             sender,
             time_stamp,
             event_id,
@@ -121,7 +73,7 @@ impl EventReporterBase {
     ) -> Result<(), EcssTmErrorWithSend<E>> {
         self.generate_and_send_generic_tm(
             buf,
-            Subservices::TmMediumSeverityReport,
+            Subservice::TmMediumSeverityReport,
             sender,
             time_stamp,
             event_id,
@@ -139,7 +91,7 @@ impl EventReporterBase {
     ) -> Result<(), EcssTmErrorWithSend<E>> {
         self.generate_and_send_generic_tm(
             buf,
-            Subservices::TmHighSeverityReport,
+            Subservice::TmHighSeverityReport,
             sender,
             time_stamp,
             event_id,
@@ -150,7 +102,7 @@ impl EventReporterBase {
     fn generate_and_send_generic_tm<E>(
         &mut self,
         buf: &mut [u8],
-        subservice: Subservices,
+        subservice: Subservice,
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
@@ -165,7 +117,7 @@ impl EventReporterBase {
     fn generate_generic_event_tm<'a>(
         &'a self,
         buf: &'a mut [u8],
-        subservice: Subservices,
+        subservice: Subservice,
         time_stamp: &'a [u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
@@ -332,12 +284,12 @@ mod tests {
         }
     }
 
-    fn severity_to_subservice(severity: Severity) -> Subservices {
+    fn severity_to_subservice(severity: Severity) -> Subservice {
         match severity {
-            Severity::INFO => Subservices::TmInfoReport,
-            Severity::LOW => Subservices::TmLowSeverityReport,
-            Severity::MEDIUM => Subservices::TmMediumSeverityReport,
-            Severity::HIGH => Subservices::TmHighSeverityReport,
+            Severity::INFO => Subservice::TmInfoReport,
+            Severity::LOW => Subservice::TmLowSeverityReport,
+            Severity::MEDIUM => Subservice::TmMediumSeverityReport,
+            Severity::HIGH => Subservice::TmHighSeverityReport,
         }
     }
 
