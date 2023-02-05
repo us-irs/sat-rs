@@ -226,6 +226,8 @@ impl PusScheduler {
         }
     }
 
+    /// Insert a telecommand based on the fully wrapped time-tagged telecommand. The timestamp
+    /// provider needs to be supplied via a generic.
     pub fn insert_wrapped_tc<TimeStamp: CcsdsTimeProvider + TimeReader>(
         &mut self,
         pus_tc: &PusTc,
@@ -247,6 +249,8 @@ impl PusScheduler {
         };
     }
 
+    /// Insert a telecommand based on the fully wrapped time-tagged telecommand using a CDS
+    /// short timestamp with 16-bit length of days field.
     pub fn insert_wrapped_tc_cds_short(
         &mut self,
         pus_tc: &PusTc,
@@ -255,6 +259,8 @@ impl PusScheduler {
         self.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(pus_tc, pool)
     }
 
+    /// Insert a telecommand based on the fully wrapped time-tagged telecommand using a CDS
+    /// long timestamp with a 24-bit length of days field.
     pub fn insert_wrapped_tc_cds_long(
         &mut self,
         pus_tc: &PusTc,
@@ -263,6 +269,7 @@ impl PusScheduler {
         self.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider<DaysLen24Bits>>(pus_tc, pool)
     }
 
+    /// Retrieve all telecommands which should be release based on the current time.
     pub fn telecommands_to_release(&self) -> Range<'_, UnixTimestamp, Vec<StoreAddr>> {
         self.tc_map.range(..=self.current_time)
     }
@@ -314,7 +321,7 @@ impl PusScheduler {
 
 #[cfg(test)]
 mod tests {
-    use crate::pool::{LocalPool, PoolCfg, PoolProvider, StoreAddr};
+    use crate::pool::{LocalPool, PoolCfg, PoolProvider, StoreAddr, StoreError};
     use crate::pus::scheduling::{PusScheduler, ScheduleError};
     use spacepackets::tc::PusTc;
     use spacepackets::time::{cds, TimeWriter, UnixTimestamp};
@@ -732,8 +739,7 @@ mod tests {
         let addr = match scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool) {
             Ok(addr) => addr,
             Err(e) => {
-                println!("{}", e);
-                panic!();
+                panic!("unexpected error {e}");
             }
         };
 
@@ -747,7 +753,7 @@ mod tests {
 
         scheduler.update_time(UnixTimestamp::new_only_seconds(101));
 
-        let mut addr_vec = vec::Vec::new();
+        let mut addr_vec = Vec::new();
 
         let mut i = 0;
         let mut test_closure = |boolvar: bool, store_addr: &StoreAddr| {
@@ -878,6 +884,88 @@ mod tests {
                 assert_eq!(release_time, UnixTimestamp::new_only_seconds(4));
             }
             _ => panic!("unexepcted error {err}"),
+        }
+    }
+
+    #[test]
+    fn test_store_error_propagation_release() {
+        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+        let first_addr = pool.add(&[2, 2, 2]).unwrap();
+        scheduler
+            .insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(100), first_addr)
+            .expect("insertion failed");
+
+        let mut i = 0;
+        let test_closure_1 = |boolvar: bool, store_addr: &StoreAddr| {
+            common_check_disabled(boolvar, store_addr, vec![first_addr], &mut i);
+            true
+        };
+
+        // premature deletion
+        pool.delete(first_addr).expect("deletion failed");
+        // scheduler will only auto-delete if it is disabled.
+        scheduler.disable();
+        scheduler.update_time(UnixTimestamp::new_only_seconds(100));
+        let release_res = scheduler.release_telecommands(test_closure_1, &mut pool);
+        assert!(release_res.is_err());
+        let err = release_res.unwrap_err();
+        assert_eq!(err.0, 1);
+        match err.1 {
+            StoreError::DataDoesNotExist(addr) => {
+                assert_eq!(first_addr, addr);
+            }
+            _ => panic!("unexpected error {}", err.1)
+        }
+    }
+
+    #[test]
+    fn test_store_error_propagation_reset() {
+        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+        let first_addr = pool.add(&[2, 2, 2]).unwrap();
+        scheduler
+            .insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(100), first_addr)
+            .expect("insertion failed");
+
+        // premature deletion
+        pool.delete(first_addr).expect("deletion failed");
+        let reset_res = scheduler.reset(&mut pool);
+        assert!(reset_res.is_err());
+        let err = reset_res.unwrap_err();
+        match err {
+            StoreError::DataDoesNotExist(addr) => {
+                assert_eq!(addr, first_addr);
+            },
+            _ => panic!("unexpected error {err}")
+        }
+    }
+
+    #[test]
+    fn insert_full_store_test() {
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+
+        let mut pool = LocalPool::new(PoolCfg::new(vec![(1, 64)]));
+
+        let mut buf: [u8; 32] = [0; 32];
+        // Store is full after this.
+        pool.add(&[0, 1, 2]).unwrap();
+        let tc = scheduled_tc(UnixTimestamp::new_only_seconds(100), &mut buf);
+
+        let insert_res = scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool);
+        assert!(insert_res.is_err());
+        let err = insert_res.unwrap_err();
+        match err {
+            ScheduleError::StoreError(e) => {
+                match e {
+                    StoreError::StoreFull(_) => {}
+                    _ => panic!("unexpected store error {e}")
+                }
+            }
+            _ => panic!("unexpected error {err}")
         }
     }
 }
