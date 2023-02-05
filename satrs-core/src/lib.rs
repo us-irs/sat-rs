@@ -34,5 +34,6 @@ pub mod pus;
 pub mod res_code;
 pub mod seq_count;
 pub mod tmtc;
+pub mod power;
 
 pub use spacepackets;
