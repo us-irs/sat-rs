@@ -21,7 +21,7 @@ pub enum SwitchState {
     Off = 0,
     On = 1,
     Unknown = 2,
-    Faulty = 3
+    Faulty = 3,
 }
 
 pub type SwitchId = u16;
@@ -33,10 +33,16 @@ pub trait PowerSwitcher {
     fn send_switch_on_cmd(&mut self, switch_id: SwitchId) -> Result<(), Self::Error>;
     fn send_switch_off_cmd(&mut self, switch_id: SwitchId) -> Result<(), Self::Error>;
 
-    fn switch_on<T: PowerSwitch>(&mut self, switch: &mut T) -> Result<(), <T as PowerSwitch>::Error> {
+    fn switch_on<T: PowerSwitch>(
+        &mut self,
+        switch: &mut T,
+    ) -> Result<(), <T as PowerSwitch>::Error> {
         switch.switch_on()
     }
-    fn switch_off<T: PowerSwitch>(&mut self, switch: &mut T) -> Result<(), <T as PowerSwitch>::Error> {
+    fn switch_off<T: PowerSwitch>(
+        &mut self,
+        switch: &mut T,
+    ) -> Result<(), <T as PowerSwitch>::Error> {
         switch.switch_off()
     }
 

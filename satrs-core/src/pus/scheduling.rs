@@ -18,7 +18,11 @@ use std::time::SystemTimeError;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScheduleError {
     PusError(PusError),
-    TimeMarginTooShort(UnixTimestamp, UnixTimestamp),
+    /// The release time is within the time-margin added on top of the current time.
+    /// The first parameter is the current time, the second one the time margin, and the third one
+    /// the release time.
+    ReleaseTimeInTimeMargin(UnixTimestamp, Duration, UnixTimestamp),
+    /// Nested time-tagged commands are not allowed.
     NestedScheduledTc,
     StoreError(StoreError),
     TcDataEmpty,
@@ -33,11 +37,10 @@ impl Display for ScheduleError {
             ScheduleError::PusError(e) => {
                 write!(f, "Pus Error: {}", e)
             }
-            ScheduleError::TimeMarginTooShort(current_time, timestamp) => {
+            ScheduleError::ReleaseTimeInTimeMargin(current_time, margin, timestamp) => {
                 write!(
                     f,
-                    "Error: time margin too short, current time: {:?}, time stamp: {:?}",
-                    current_time, timestamp
+                    "Error: time margin too short, current time: {current_time:?}, time margin: {margin:?}, release time: {timestamp:?}"
                 )
             }
             ScheduleError::NestedScheduledTc => {
@@ -186,8 +189,9 @@ impl PusScheduler {
         addr: StoreAddr,
     ) -> Result<(), ScheduleError> {
         if time_stamp < self.current_time + self.time_margin {
-            return Err(ScheduleError::TimeMarginTooShort(
+            return Err(ScheduleError::ReleaseTimeInTimeMargin(
                 self.current_time,
+                self.time_margin,
                 time_stamp,
             ));
         }
@@ -222,7 +226,6 @@ impl PusScheduler {
         }
     }
 
-    // <T: FnMut(&[u8]) -> (&dyn CcsdsTimeProvider)>
     pub fn insert_wrapped_tc<TimeStamp: CcsdsTimeProvider + TimeReader>(
         &mut self,
         pus_tc: &PusTc,
@@ -321,6 +324,62 @@ mod tests {
     #[allow(unused_imports)]
     use std::{println, vec};
 
+    fn pus_tc_base(timestamp: UnixTimestamp, buf: &mut [u8]) -> (SpHeader, usize) {
+        let cds_time = cds::TimeProvider::from_unix_secs_with_u16_days(&timestamp).unwrap();
+        let len_time_stamp = cds_time.write_to_bytes(buf).unwrap();
+        let len_packet = base_ping_tc_simple_ctor()
+            .write_to_bytes(&mut buf[len_time_stamp..])
+            .unwrap();
+        (
+            SpHeader::tc_unseg(0x02, 0x34, len_packet as u16).unwrap(),
+            len_packet + len_time_stamp,
+        )
+    }
+
+    fn scheduled_tc(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
+        let (mut sph, len_app_data) = pus_tc_base(timestamp, buf);
+        PusTc::new_simple(&mut sph, 11, 4, Some(&buf[..len_app_data]), true)
+    }
+
+    fn wrong_tc_service(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
+        let (mut sph, len_app_data) = pus_tc_base(timestamp, buf);
+        PusTc::new_simple(&mut sph, 12, 4, Some(&buf[..len_app_data]), true)
+    }
+
+    fn wrong_tc_subservice(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
+        let (mut sph, len_app_data) = pus_tc_base(timestamp, buf);
+        PusTc::new_simple(&mut sph, 11, 5, Some(&buf[..len_app_data]), true)
+    }
+
+    fn double_wrapped_time_tagged_tc(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
+        let cds_time = cds::TimeProvider::from_unix_secs_with_u16_days(&timestamp).unwrap();
+        let len_time_stamp = cds_time.write_to_bytes(buf).unwrap();
+        let mut sph = SpHeader::tc_unseg(0x02, 0x34, 0).unwrap();
+        // app data should not matter, double wrapped time-tagged commands should be rejected right
+        // away
+        let inner_time_tagged_tc = PusTc::new_simple(&mut sph, 11, 4, None, true);
+        let packet_len = inner_time_tagged_tc
+            .write_to_bytes(&mut buf[len_time_stamp..])
+            .expect("writing inner time tagged tc failed");
+        PusTc::new_simple(
+            &mut sph,
+            11,
+            4,
+            Some(&buf[..len_time_stamp + packet_len]),
+            true,
+        )
+    }
+
+    fn invalid_time_tagged_cmd() -> PusTc<'static> {
+        let mut sph = SpHeader::tc_unseg(0x02, 0x34, 1).unwrap();
+        PusTc::new_simple(&mut sph, 11, 4, None, true)
+    }
+
+    fn base_ping_tc_simple_ctor() -> PusTc<'static> {
+        let mut sph = SpHeader::tc_unseg(0x02, 0x34, 0).unwrap();
+        PusTc::new_simple(&mut sph, 17, 1, None, true)
+    }
+
     #[test]
     fn basic() {
         let mut scheduler =
@@ -328,6 +387,8 @@ mod tests {
         assert!(scheduler.is_enabled());
         scheduler.disable();
         assert!(!scheduler.is_enabled());
+        scheduler.enable();
+        assert!(scheduler.is_enabled());
     }
 
     #[test]
@@ -616,68 +677,6 @@ mod tests {
         assert_eq!(i, 2);
     }
 
-    fn scheduled_tc(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
-        let cds_time = cds::TimeProvider::from_unix_secs_with_u16_days(&timestamp).unwrap();
-
-        let len_time_stamp = cds_time.write_to_bytes(buf).unwrap();
-
-        let len_packet = base_ping_tc_simple_ctor()
-            .write_to_bytes(&mut buf[len_time_stamp..])
-            .unwrap();
-        let mut sph = SpHeader::tc_unseg(0x02, 0x34, len_packet as u16).unwrap();
-
-        PusTc::new_simple(
-            &mut sph,
-            11,
-            4,
-            Some(&buf[..len_packet + len_time_stamp]),
-            true,
-        )
-    }
-
-    fn wrong_tc_service(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
-        let cds_time = cds::TimeProvider::from_unix_secs_with_u16_days(&timestamp).unwrap();
-
-        let len_time_stamp = cds_time.write_to_bytes(buf).unwrap();
-
-        let len_packet = base_ping_tc_simple_ctor()
-            .write_to_bytes(&mut buf[len_time_stamp..])
-            .unwrap();
-        let mut sph = SpHeader::tc_unseg(0x02, 0x34, len_packet as u16).unwrap();
-
-        PusTc::new_simple(
-            &mut sph,
-            12,
-            4,
-            Some(&buf[..len_packet + len_time_stamp]),
-            true,
-        )
-    }
-
-    fn wrong_tc_subservice(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
-        let cds_time = cds::TimeProvider::from_unix_secs_with_u16_days(&timestamp).unwrap();
-
-        let len_time_stamp = cds_time.write_to_bytes(buf).unwrap();
-
-        let len_packet = base_ping_tc_simple_ctor()
-            .write_to_bytes(&mut buf[len_time_stamp..])
-            .unwrap();
-        let mut sph = SpHeader::tc_unseg(0x02, 0x34, len_packet as u16).unwrap();
-
-        PusTc::new_simple(
-            &mut sph,
-            11,
-            5,
-            Some(&buf[..len_packet + len_time_stamp]),
-            true,
-        )
-    }
-
-    fn base_ping_tc_simple_ctor() -> PusTc<'static> {
-        let mut sph = SpHeader::tc_unseg(0x02, 0x34, 0).unwrap();
-        PusTc::new_simple(&mut sph, 17, 1, None, true)
-    }
-
     #[test]
     fn insert_unwrapped_tc() {
         let mut scheduler =
@@ -701,7 +700,7 @@ mod tests {
 
         scheduler.update_time(UnixTimestamp::new_only_seconds(101));
 
-        let mut addr_vec = vec::Vec::new();
+        let mut addr_vec = Vec::new();
 
         let mut i = 0;
         let mut test_closure = |boolvar: bool, store_addr: &StoreAddr| {
@@ -730,9 +729,7 @@ mod tests {
         let mut buf: [u8; 32] = [0; 32];
         let tc = scheduled_tc(UnixTimestamp::new_only_seconds(100), &mut buf);
 
-        let addr = match scheduler
-            .insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool)
-        {
+        let addr = match scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool) {
             Ok(addr) => addr,
             Err(e) => {
                 println!("{}", e);
@@ -779,7 +776,7 @@ mod tests {
         let mut buf: [u8; 32] = [0; 32];
         let tc = wrong_tc_service(UnixTimestamp::new_only_seconds(100), &mut buf);
 
-        let err = scheduler.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool);
+        let err = scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool);
         assert!(err.is_err());
         let err = err.unwrap_err();
         match err {
@@ -800,7 +797,7 @@ mod tests {
         let mut buf: [u8; 32] = [0; 32];
         let tc = wrong_tc_subservice(UnixTimestamp::new_only_seconds(100), &mut buf);
 
-        let err = scheduler.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool);
+        let err = scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool);
         assert!(err.is_err());
         let err = err.unwrap_err();
         match err {
@@ -808,6 +805,79 @@ mod tests {
             _ => {
                 panic!("unexpected error")
             }
+        }
+    }
+
+    #[test]
+    fn insert_wrapped_tc_faulty_app_data() {
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let tc = invalid_time_tagged_cmd();
+        let insert_res = scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool);
+        assert!(insert_res.is_err());
+        let err = insert_res.unwrap_err();
+        match err {
+            ScheduleError::TcDataEmpty => {}
+            _ => panic!("unexpected error {err}"),
+        }
+    }
+
+    #[test]
+    fn insert_doubly_wrapped_time_tagged_cmd() {
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut buf: [u8; 64] = [0; 64];
+        let tc = double_wrapped_time_tagged_tc(UnixTimestamp::new_only_seconds(50), &mut buf);
+        let insert_res = scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool);
+        assert!(insert_res.is_err());
+        let err = insert_res.unwrap_err();
+        match err {
+            ScheduleError::NestedScheduledTc => {}
+            _ => panic!("unexpected error {err}"),
+        }
+    }
+
+    #[test]
+    fn test_ctor_from_current() {
+        let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
+            .expect("creation from current time failed");
+        let current_time = scheduler.current_time;
+        assert!(current_time.unix_seconds > 0);
+    }
+
+    #[test]
+    fn test_update_from_current() {
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+        assert_eq!(scheduler.current_time.unix_seconds, 0);
+        scheduler
+            .update_time_from_now()
+            .expect("updating scheduler time from now failed");
+        assert!(scheduler.current_time.unix_seconds > 0);
+    }
+
+    #[test]
+    fn release_time_within_time_margin() {
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+
+        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+
+        let mut buf: [u8; 32] = [0; 32];
+
+        let tc = scheduled_tc(UnixTimestamp::new_only_seconds(4), &mut buf);
+        let insert_res = scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool);
+        assert!(insert_res.is_err());
+        let err = insert_res.unwrap_err();
+        match err {
+            ScheduleError::ReleaseTimeInTimeMargin(curr_time, margin, release_time) => {
+                assert_eq!(curr_time, UnixTimestamp::new_only_seconds(0));
+                assert_eq!(margin, Duration::from_secs(5));
+                assert_eq!(release_time, UnixTimestamp::new_only_seconds(4));
+            }
+            _ => panic!("unexepcted error {err}"),
         }
     }
 }
