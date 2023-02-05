@@ -159,7 +159,6 @@ impl PusScheduler {
     /// The holding store for the telecommands needs to be passed so all the stored telecommands
     /// can be deleted to avoid a memory leak. If at last one deletion operation fails, the error
     /// will be returned but the method will still try to delete all the commands in the schedule.
-
     pub fn reset(&mut self, store: &mut (impl PoolProvider + ?Sized)) -> Result<(), StoreError> {
         self.enabled = false;
         let mut deletion_ok = Ok(());
