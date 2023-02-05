@@ -779,14 +779,13 @@ mod tests {
         let mut buf: [u8; 32] = [0; 32];
         let tc = wrong_tc_service(UnixTimestamp::new_only_seconds(100), &mut buf);
 
-        match scheduler.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool) {
-            Ok(_) => {
-                panic!();
-            }
-            Err(e) => {
-                if e != ScheduleError::WrongService {
-                    panic!();
-                }
+        let err = scheduler.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool);
+        assert!(err.is_err());
+        let err = err.unwrap_err();
+        match err {
+            ScheduleError::WrongService => {}
+            _ => {
+                panic!("unexpected error")
             }
         }
     }
@@ -801,14 +800,13 @@ mod tests {
         let mut buf: [u8; 32] = [0; 32];
         let tc = wrong_tc_subservice(UnixTimestamp::new_only_seconds(100), &mut buf);
 
-        match scheduler.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool) {
-            Ok(_) => {
-                panic!();
-            }
-            Err(e) => {
-                if e != ScheduleError::WrongSubservice {
-                    panic!();
-                }
+        let err = scheduler.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(&tc, &mut pool);
+        assert!(err.is_err());
+        let err = err.unwrap_err();
+        match err {
+            ScheduleError::WrongSubservice => {}
+            _ => {
+                panic!("unexpected error")
             }
         }
     }
