@@ -149,6 +149,8 @@ impl PusScheduler {
         self.enabled = true;
     }
 
+    /// A disabled scheduler should still delete commands where the execution time has been reached
+    /// but should not release them to be executed.
     pub fn disable(&mut self) {
         self.enabled = false;
     }
@@ -182,6 +184,8 @@ impl PusScheduler {
         &self.current_time
     }
 
+    /// Insert a telecommand which was already unwrapped from the outer Service 11 packet and stored
+    /// inside the telecommand packet pool.
     pub fn insert_unwrapped_and_stored_tc(
         &mut self,
         time_stamp: UnixTimestamp,
@@ -205,6 +209,8 @@ impl PusScheduler {
         Ok(())
     }
 
+    /// Insert a telecommand which was already unwrapped from the outer Service 11 packet but still
+    /// needs to be stored inside the telecommand pool.
     pub fn insert_unwrapped_tc(
         &mut self,
         time_stamp: UnixTimestamp,
