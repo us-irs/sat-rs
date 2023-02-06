@@ -59,3 +59,49 @@ pub trait PowerSwitcher {
     /// see the switch changed.
     fn switch_delay_ms(&self) -> u32;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::boxed::Box;
+    use crate::power::PowerSwitcher;
+
+
+    struct Pcdu {
+        switch_rx: std::sync::mpsc::Receiver<(SwitchId, u16)>
+    }
+    enum DeviceState {
+        OFF,
+        SwitchingPower,
+        ON,
+        SETUP,
+        IDLE
+    }
+    struct MyComplexDevice {
+        power_switcher: Box<dyn PowerSwitcher<Error=()>>,
+        switch_id: SwitchId,
+        some_state: u16,
+        dev_state: DeviceState,
+        mode: u32,
+        submode: u16,
+    }
+
+    impl MyComplexDevice {
+        pub fn periodic_op(&mut self) {
+            // .. mode command coming in
+            let mode = 1;
+            if mode == 1 {
+                if self.dev_state == DeviceState::OFF {
+                    self.power_switcher.send_switch_on_cmd(self.switch_id).expect("sending siwthc cmd failed");
+                    self.dev_state = DeviceState::SwitchingPower;
+                }
+                if self.dev_state == DeviceState::SwitchingPower {
+                    if self.power_switcher.get_is_switch_on() {
+                        self.dev_state = DeviceState::ON;
+                        self.mode = 1;
+                    }
+                }
+            }
+        }
+    }
+}
