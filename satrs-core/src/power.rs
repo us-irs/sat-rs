@@ -47,10 +47,10 @@ pub trait PowerSwitcher {
     }
 
     /// Retrieve the switch state
-    fn get_switch_state(&mut self, switch_id: SwitchId) -> SwitchState;
+    fn get_switch_state(&mut self, switch_id: SwitchId) -> Result<SwitchState, Self::Error>;
 
-    fn get_is_switch_on(&mut self, switch_id: SwitchId) -> bool {
-        self.get_switch_state(switch_id) == SwitchState::On
+    fn get_is_switch_on(&mut self, switch_id: SwitchId) -> Result<bool, Self::Error> {
+        Ok(self.get_switch_state(switch_id)? == SwitchState::On)
     }
 
     /// The maximum delay it will take to change a switch.
