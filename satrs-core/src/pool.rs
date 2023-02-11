@@ -257,6 +257,14 @@ pub trait PoolProvider {
     /// Delete data inside the pool given a [StoreAddr]
     fn delete(&mut self, addr: StoreAddr) -> Result<(), StoreError>;
     fn has_element_at(&self, addr: &StoreAddr) -> Result<bool, StoreError>;
+
+    /// Retrieve the length of the data at the given store address.
+    fn len_of_data(&self, addr: &StoreAddr) -> Result<usize, StoreError> {
+        if !self.has_element_at(addr)? {
+            return Err(StoreError::DataDoesNotExist(*addr));
+        }
+        return Ok(self.read(addr)?.len());
+    }
 }
 
 impl LocalPool {
