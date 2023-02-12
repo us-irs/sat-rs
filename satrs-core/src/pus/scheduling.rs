@@ -11,7 +11,7 @@ use spacepackets::ecss::scheduling::TimeWindowType;
 use spacepackets::ecss::{PusError, PusPacket};
 use spacepackets::tc::{GenericPusTcSecondaryHeader, PusTc};
 use spacepackets::time::cds::DaysLen24Bits;
-use spacepackets::time::{CcsdsTimeProvider, TimeReader, TimestampError, UnixTimestamp};
+use spacepackets::time::{CcsdsTimeProvider, cds, TimeReader, TimestampError, UnixTimestamp};
 use spacepackets::CcsdsPacket;
 use std::collections::BTreeMap;
 #[cfg(feature = "std")]
@@ -425,7 +425,9 @@ impl PusScheduler {
     }
 
     /// This function uses [Self::retrieve_by_time_filter] to extract all scheduled commands inside
-    /// the time range and then deletes them from the provided store.
+    /// the time range and then deletes them from the provided store. Like specified in the
+    /// documentation of [Self::retrieve_by_time_filter], the range extraction for deletion is
+    /// always inclusive.
     pub fn delete_by_time_filter<TimeProvider: CcsdsTimeProvider + Clone>(
         &mut self,
         time_window: TimeWindow<TimeProvider>,
@@ -434,6 +436,7 @@ impl PusScheduler {
         let range = self.retrieve_by_time_filter(time_window);
         let mut del_packets = 0;
         let mut res_if_fails = None;
+        let mut keys_to_delete = Vec::new();
         for time_bucket in range {
             for tc in time_bucket.1 {
                 match pool.delete(tc.addr) {
@@ -441,6 +444,10 @@ impl PusScheduler {
                     Err(e) => res_if_fails = Some(e),
                 }
             }
+            keys_to_delete.push(*time_bucket.0);
+        }
+        for key in keys_to_delete {
+            self.tc_map.remove(&key);
         }
         if let Some(err) = res_if_fails {
             return Err((del_packets, err));
@@ -448,11 +455,19 @@ impl PusScheduler {
         Ok(del_packets)
     }
 
+    /// Deletes all the scheduled commands. This also deletes the packets from the passed TC pool.
+    pub fn delete_all(&mut self, pool: &mut (impl PoolProvider + ?Sized)) -> Result<u64, (u64, StoreError)> {
+        self.delete_by_time_filter(TimeWindow::<cds::TimeProvider>::new_select_all(), pool)
+    }
+
+    /// Retrieve a range over all scheduled commands.
     pub fn retrieve_all(&mut self) -> Range<'_, UnixTimestamp, Vec<TcInfo>> {
         self.tc_map.range(..)
     }
 
     /// This retrieves scheduled telecommands which are inside the provided time window.
+    /// It should be noted that the ranged extraction is always inclusive. For example, a range
+    /// from 50 to 100 unix seconds would also include command scheduled at 100 unix seconds.
     pub fn retrieve_by_time_filter<TimeProvider: CcsdsTimeProvider>(
         &mut self,
         time_window: TimeWindow<TimeProvider>,
@@ -1466,7 +1481,7 @@ mod tests {
     }
 
     #[test]
-    fn test_time_window_retrieval_select_to_stamp() {
+    fn test_time_window_retrieval_select_to_time() {
         let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
@@ -1497,7 +1512,7 @@ mod tests {
     }
 
     #[test]
-    fn test_time_window_retrieval_select_from_to_stamp() {
+    fn test_time_window_retrieval_select_from_time_to_time() {
         let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
@@ -1523,11 +1538,80 @@ mod tests {
                 assert_eq!(time_bucket.1.len(), 1);
                 assert_eq!(time_bucket.1[0].request_id, tc_info_1.request_id());
             } else if idx == 1 {
-                assert_eq!(*time_bucket.0, UnixTimestamp::new_only_seconds(15 0));
+                assert_eq!(*time_bucket.0, UnixTimestamp::new_only_seconds(150));
                 assert_eq!(time_bucket.1.len(), 1);
                 assert_eq!(time_bucket.1[0].request_id, tc_info_2.request_id());
             }
         }
         assert_eq!(tcs_in_range, 2);
+    }
+
+    #[test]
+    fn test_deletion_all() {
+        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+        insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
+        insert_command_with_release_time(&mut pool, &mut scheduler, 0, 100);
+        assert_eq!(scheduler.num_scheduled_telecommands(), 2);
+        let del_res = scheduler.delete_all(&mut pool);
+        assert!(del_res.is_ok());
+        assert_eq!(del_res.unwrap(), 2);
+        assert_eq!(scheduler.num_scheduled_telecommands(), 0);
+        // Contrary to reset, this does not disable the scheduler.
+        assert!(scheduler.is_enabled());
+
+        insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
+        insert_command_with_release_time(&mut pool, &mut scheduler, 0, 100);
+        assert_eq!(scheduler.num_scheduled_telecommands(), 2);
+        let del_res = scheduler.delete_by_time_filter(TimeWindow::<cds::TimeProvider>::new_select_all(), &mut pool);
+        assert!(del_res.is_ok());
+        assert_eq!(del_res.unwrap(), 2);
+        assert_eq!(scheduler.num_scheduled_telecommands(), 0);
+        // Contrary to reset, this does not disable the scheduler.
+        assert!(scheduler.is_enabled());
+    }
+
+    #[test]
+    fn test_deletion_from_start_time() {
+        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+        insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
+        let cmd_0_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 100);
+        let cmd_1_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 150);
+        assert_eq!(scheduler.num_scheduled_telecommands(), 3);
+        let start_stamp =
+            cds::TimeProvider::from_unix_secs_with_u16_days(&UnixTimestamp::new_only_seconds(100))
+                .expect("creating start stamp failed");
+        let time_window = TimeWindow::new_from_time(&start_stamp);
+        let del_res = scheduler.delete_by_time_filter(time_window, &mut pool);
+        assert!(del_res.is_ok());
+        assert_eq!(del_res.unwrap(), 2);
+        assert_eq!(scheduler.num_scheduled_telecommands(), 1);
+        assert!(!pool.has_element_at(&cmd_0_to_delete.addr()).unwrap());
+        assert!(!pool.has_element_at(&cmd_1_to_delete.addr()).unwrap());
+    }
+
+    #[test]
+    fn test_deletion_to_end_time() {
+        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+        let cmd_0_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
+        let cmd_1_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 100);
+        insert_command_with_release_time(&mut pool, &mut scheduler, 0, 150);
+        assert_eq!(scheduler.num_scheduled_telecommands(), 3);
+
+        let end_stamp =
+            cds::TimeProvider::from_unix_secs_with_u16_days(&UnixTimestamp::new_only_seconds(100))
+                .expect("creating start stamp failed");
+        let time_window = TimeWindow::new_from_time(&end_stamp);
+        let del_res = scheduler.delete_by_time_filter(time_window, &mut pool);
+        assert!(del_res.is_ok());
+        assert_eq!(del_res.unwrap(), 2);
+        assert_eq!(scheduler.num_scheduled_telecommands(), 1);
+        assert!(!pool.has_element_at(&cmd_0_to_delete.addr()).unwrap());
+        assert!(!pool.has_element_at(&cmd_1_to_delete.addr()).unwrap());
     }
 }
