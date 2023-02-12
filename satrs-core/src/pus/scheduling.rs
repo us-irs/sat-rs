@@ -1,4 +1,7 @@
 //! # PUS Service 11 Scheduling Module
+//!
+//! The core data structure of this module is the [PusScheduler]. This structure can be used
+//! to perform the scheduling of telecommands like specified in the ECSS standard.
 use crate::pool::{PoolProvider, StoreAddr, StoreError};
 use alloc::collections::btree_map::{Entry, Range};
 use alloc::vec;
@@ -11,7 +14,7 @@ use spacepackets::ecss::scheduling::TimeWindowType;
 use spacepackets::ecss::{PusError, PusPacket};
 use spacepackets::tc::{GenericPusTcSecondaryHeader, PusTc};
 use spacepackets::time::cds::DaysLen24Bits;
-use spacepackets::time::{CcsdsTimeProvider, cds, TimeReader, TimestampError, UnixTimestamp};
+use spacepackets::time::{cds, CcsdsTimeProvider, TimeReader, TimestampError, UnixTimestamp};
 use spacepackets::CcsdsPacket;
 use std::collections::BTreeMap;
 #[cfg(feature = "std")]
@@ -411,7 +414,7 @@ impl PusScheduler {
         pus_tc: &PusTc,
         pool: &mut (impl PoolProvider + ?Sized),
     ) -> Result<TcInfo, ScheduleError> {
-        self.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(pus_tc, pool)
+        self.insert_wrapped_tc::<cds::TimeProvider>(pus_tc, pool)
     }
 
     /// Insert a telecommand based on the fully wrapped time-tagged telecommand using a CDS
@@ -421,13 +424,17 @@ impl PusScheduler {
         pus_tc: &PusTc,
         pool: &mut (impl PoolProvider + ?Sized),
     ) -> Result<TcInfo, ScheduleError> {
-        self.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider<DaysLen24Bits>>(pus_tc, pool)
+        self.insert_wrapped_tc::<cds::TimeProvider<DaysLen24Bits>>(pus_tc, pool)
     }
 
     /// This function uses [Self::retrieve_by_time_filter] to extract all scheduled commands inside
-    /// the time range and then deletes them from the provided store. Like specified in the
-    /// documentation of [Self::retrieve_by_time_filter], the range extraction for deletion is
-    /// always inclusive.
+    /// the time range and then deletes them from the provided store.
+    ///
+    /// Like specified in the documentation of [Self::retrieve_by_time_filter], the range extraction
+    /// for deletion is always inclusive.
+    ///
+    /// This function returns the number of deleted commands on success. In case any deletion fails,
+    /// the last deletion will be supplied in addition to the number of deleted commands.
     pub fn delete_by_time_filter<TimeProvider: CcsdsTimeProvider + Clone>(
         &mut self,
         time_window: TimeWindow<TimeProvider>,
@@ -456,7 +463,13 @@ impl PusScheduler {
     }
 
     /// Deletes all the scheduled commands. This also deletes the packets from the passed TC pool.
-    pub fn delete_all(&mut self, pool: &mut (impl PoolProvider + ?Sized)) -> Result<u64, (u64, StoreError)> {
+    ///
+    /// This function returns the number of deleted commands on success. In case any deletion fails,
+    /// the last deletion will be supplied in addition to the number of deleted commands.
+    pub fn delete_all(
+        &mut self,
+        pool: &mut (impl PoolProvider + ?Sized),
+    ) -> Result<u64, (u64, StoreError)> {
         self.delete_by_time_filter(TimeWindow::<cds::TimeProvider>::new_select_all(), pool)
     }
 
@@ -466,6 +479,7 @@ impl PusScheduler {
     }
 
     /// This retrieves scheduled telecommands which are inside the provided time window.
+    ///
     /// It should be noted that the ranged extraction is always inclusive. For example, a range
     /// from 50 to 100 unix seconds would also include command scheduled at 100 unix seconds.
     pub fn retrieve_by_time_filter<TimeProvider: CcsdsTimeProvider>(
@@ -1564,7 +1578,8 @@ mod tests {
         insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
         insert_command_with_release_time(&mut pool, &mut scheduler, 0, 100);
         assert_eq!(scheduler.num_scheduled_telecommands(), 2);
-        let del_res = scheduler.delete_by_time_filter(TimeWindow::<cds::TimeProvider>::new_select_all(), &mut pool);
+        let del_res = scheduler
+            .delete_by_time_filter(TimeWindow::<cds::TimeProvider>::new_select_all(), &mut pool);
         assert!(del_res.is_ok());
         assert_eq!(del_res.unwrap(), 2);
         assert_eq!(scheduler.num_scheduled_telecommands(), 0);
@@ -1606,12 +1621,41 @@ mod tests {
         let end_stamp =
             cds::TimeProvider::from_unix_secs_with_u16_days(&UnixTimestamp::new_only_seconds(100))
                 .expect("creating start stamp failed");
-        let time_window = TimeWindow::new_from_time(&end_stamp);
+        let time_window = TimeWindow::new_to_time(&end_stamp);
         let del_res = scheduler.delete_by_time_filter(time_window, &mut pool);
         assert!(del_res.is_ok());
         assert_eq!(del_res.unwrap(), 2);
         assert_eq!(scheduler.num_scheduled_telecommands(), 1);
         assert!(!pool.has_element_at(&cmd_0_to_delete.addr()).unwrap());
         assert!(!pool.has_element_at(&cmd_1_to_delete.addr()).unwrap());
+    }
+
+    #[test]
+    fn test_deletion_from_start_time_to_end_time() {
+        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+        let cmd_out_of_range_0 = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
+        let cmd_0_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 100);
+        let cmd_1_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 150);
+        let cmd_out_of_range_1 =
+            insert_command_with_release_time(&mut pool, &mut scheduler, 0, 200);
+        assert_eq!(scheduler.num_scheduled_telecommands(), 4);
+
+        let start_stamp =
+            cds::TimeProvider::from_unix_secs_with_u16_days(&UnixTimestamp::new_only_seconds(100))
+                .expect("creating start stamp failed");
+        let end_stamp =
+            cds::TimeProvider::from_unix_secs_with_u16_days(&UnixTimestamp::new_only_seconds(150))
+                .expect("creating end stamp failed");
+        let time_window = TimeWindow::new_from_time_to_time(&start_stamp, &end_stamp);
+        let del_res = scheduler.delete_by_time_filter(time_window, &mut pool);
+        assert!(del_res.is_ok());
+        assert_eq!(del_res.unwrap(), 2);
+        assert_eq!(scheduler.num_scheduled_telecommands(), 2);
+        assert!(pool.has_element_at(&cmd_out_of_range_0.addr()).unwrap());
+        assert!(!pool.has_element_at(&cmd_0_to_delete.addr()).unwrap());
+        assert!(!pool.has_element_at(&cmd_1_to_delete.addr()).unwrap());
+        assert!(pool.has_element_at(&cmd_out_of_range_1.addr()).unwrap());
     }
 }
