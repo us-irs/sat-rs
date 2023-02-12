@@ -300,7 +300,7 @@ impl PusScheduler {
         time_stamp: UnixTimestamp,
         tc: &[u8],
         pool: &mut (impl PoolProvider + ?Sized),
-    ) -> Result<StoreAddr, ScheduleError> {
+    ) -> Result<TcInfo, ScheduleError> {
         let check_tc = PusTc::from_bytes(tc)?;
         if PusPacket::service(&check_tc.0) == 11 && PusPacket::subservice(&check_tc.0) == 4 {
             return Err(ScheduleError::NestedScheduledTc);
@@ -309,8 +309,9 @@ impl PusScheduler {
 
         match pool.add(tc) {
             Ok(addr) => {
-                self.insert_unwrapped_and_stored_tc(time_stamp, TcInfo::new(addr, req_id))?;
-                Ok(addr)
+                let info = TcInfo::new(addr, req_id);
+                self.insert_unwrapped_and_stored_tc(time_stamp, info)?;
+                Ok(info)
             }
             Err(err) => Err(err.into()),
         }
@@ -322,7 +323,7 @@ impl PusScheduler {
         &mut self,
         pus_tc: &PusTc,
         pool: &mut (impl PoolProvider + ?Sized),
-    ) -> Result<StoreAddr, ScheduleError> {
+    ) -> Result<TcInfo, ScheduleError> {
         if PusPacket::service(pus_tc) != 11 {
             return Err(ScheduleError::WrongService);
         }
@@ -345,7 +346,7 @@ impl PusScheduler {
         &mut self,
         pus_tc: &PusTc,
         pool: &mut (impl PoolProvider + ?Sized),
-    ) -> Result<StoreAddr, ScheduleError> {
+    ) -> Result<TcInfo, ScheduleError> {
         self.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider>(pus_tc, pool)
     }
 
@@ -355,7 +356,7 @@ impl PusScheduler {
         &mut self,
         pus_tc: &PusTc,
         pool: &mut (impl PoolProvider + ?Sized),
-    ) -> Result<StoreAddr, ScheduleError> {
+    ) -> Result<TcInfo, ScheduleError> {
         self.insert_wrapped_tc::<spacepackets::time::cds::TimeProvider<DaysLen24Bits>>(pus_tc, pool)
     }
 
@@ -921,7 +922,7 @@ mod tests {
         let mut buf: [u8; 32] = [0; 32];
         let (addr, _) = ping_tc_to_store(&mut pool, &mut buf, 0, None);
 
-        let addr = scheduler
+        let info = scheduler
             .insert_unwrapped_tc(
                 UnixTimestamp::new_only_seconds(100),
                 &buf[..pool.len_of_data(&addr).unwrap()],
@@ -929,9 +930,9 @@ mod tests {
             )
             .unwrap();
 
-        assert!(pool.has_element_at(&addr).unwrap());
+        assert!(pool.has_element_at(&info.addr).unwrap());
 
-        let data = pool.read(&addr).unwrap();
+        let data = pool.read(&info.addr).unwrap();
         let check_tc = PusTc::from_bytes(&data).expect("incorrect Pus tc raw data");
         assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, None));
 
@@ -943,7 +944,7 @@ mod tests {
 
         let mut i = 0;
         let mut test_closure = |boolvar: bool, tc_info: &TcInfo| {
-            common_check(boolvar, &tc_info.addr, vec![addr], &mut i);
+            common_check(boolvar, &tc_info.addr, vec![info.addr], &mut i);
             // check that tc remains unchanged
             addr_vec.push(tc_info.addr);
             false
@@ -968,16 +969,16 @@ mod tests {
         let mut buf: [u8; 32] = [0; 32];
         let tc = scheduled_tc(UnixTimestamp::new_only_seconds(100), &mut buf);
 
-        let addr = match scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool) {
+        let info = match scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool) {
             Ok(addr) => addr,
             Err(e) => {
                 panic!("unexpected error {e}");
             }
         };
 
-        assert!(pool.has_element_at(&addr).unwrap());
+        assert!(pool.has_element_at(&info.addr).unwrap());
 
-        let data = pool.read(&addr).unwrap();
+        let data = pool.read(&info.addr).unwrap();
         let check_tc = PusTc::from_bytes(&data).expect("incorrect Pus tc raw data");
         assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, None));
 
@@ -989,7 +990,7 @@ mod tests {
 
         let mut i = 0;
         let mut test_closure = |boolvar: bool, tc_info: &TcInfo| {
-            common_check(boolvar, &tc_info.addr, vec![addr], &mut i);
+            common_check(boolvar, &tc_info.addr, vec![info.addr], &mut i);
             // check that tc remains unchanged
             addr_vec.push(tc_info.addr);
             false
