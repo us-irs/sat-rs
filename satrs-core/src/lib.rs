@@ -1,4 +1,4 @@
-//! # Core components of the Flight Software Rust Crate (FSRC) collection
+//! # Core components of the sat-rs framework
 //!
 //! This is a collection of Rust crates which can be used to build On-Board Software for remote
 //! systems like satellites of rovers. It has special support for space tailored protocols
