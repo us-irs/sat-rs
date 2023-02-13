@@ -16,7 +16,7 @@ use crate::pus::{PusReceiver, PusTcArgs, PusTmArgs};
 use crate::requests::RequestWithToken;
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::event_man::EventRequestWithToken;
-use satrs_core::pus::scheduling::PusScheduler;
+use satrs_core::pus::scheduling::{PusScheduler, TcInfo};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::spacepackets::{ecss::PusPacket, tc::PusTc, tm::PusTm, SpHeader};
 use satrs_core::tmtc::{
@@ -218,12 +218,12 @@ fn core_tmtc_loop(
     pus_receiver: &mut PusReceiver,
     scheduler: Rc<RefCell<PusScheduler>>,
 ) {
-    let releaser = |enabled: bool, addr: &StoreAddr| -> bool {
+    let releaser = |enabled: bool, info: &TcInfo| -> bool {
         if enabled {
             tc_args
                 .tc_source
                 .tc_source
-                .send(*addr)
+                .send(info.addr())
                 .expect("sending TC to TC source failed");
         }
         true
@@ -240,7 +240,7 @@ fn core_tmtc_loop(
     scheduler.update_time_from_now().unwrap();
     if let Ok(released_tcs) = scheduler.release_telecommands(releaser, pool.as_mut()) {
         if released_tcs > 0 {
-            println!("{} Tc(s) released from scheduler", released_tcs);
+            println!("{released_tcs} TC(s) released from scheduler");
         }
     }
     drop(pool);

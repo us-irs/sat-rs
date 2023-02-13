@@ -79,6 +79,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::{Display, Formatter};
 use delegate::delegate;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "std")]
 use std::boxed::Box;
 #[cfg(feature = "std")]
@@ -130,6 +132,7 @@ pub struct LocalPool {
 
 /// Simple address type used for transactions with the local pool.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StoreAddr {
     pub(crate) pool_idx: u16,
     pub(crate) packet_idx: NumBlocks,
@@ -144,6 +147,7 @@ impl StoreAddr {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum StoreIdError {
     InvalidSubpool(u16),
     InvalidPacketIdx(u16),
@@ -166,6 +170,7 @@ impl Display for StoreIdError {
 impl Error for StoreIdError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum StoreError {
     /// Requested data block is too large
     DataTooLarge(usize),
@@ -252,6 +257,14 @@ pub trait PoolProvider {
     /// Delete data inside the pool given a [StoreAddr]
     fn delete(&mut self, addr: StoreAddr) -> Result<(), StoreError>;
     fn has_element_at(&self, addr: &StoreAddr) -> Result<bool, StoreError>;
+
+    /// Retrieve the length of the data at the given store address.
+    fn len_of_data(&self, addr: &StoreAddr) -> Result<usize, StoreError> {
+        if !self.has_element_at(addr)? {
+            return Err(StoreError::DataDoesNotExist(*addr));
+        }
+        return Ok(self.read(addr)?.len());
+    }
 }
 
 impl LocalPool {
