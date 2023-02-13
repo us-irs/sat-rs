@@ -177,6 +177,7 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
         event_request_tx: args.event_request_tx,
         request_map: args.request_map,
         tc_source: tc_args.tc_source.clone(),
+        event_sender: args.event_sender,
         scheduler: sched_clone,
     };
     let mut pus_receiver = PusReceiver::new(PUS_APID, pus_tm_args, pus_tc_args);

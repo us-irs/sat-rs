@@ -1,4 +1,3 @@
-use crate::hk::{CollectionIntervalFactor, HkRequest};
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{PusTcSource, TmStore};
 use satrs_core::events::EventU32;
@@ -17,11 +16,13 @@ use satrs_core::{
     spacepackets::ecss::PusPacket, spacepackets::tc::PusTc, spacepackets::time::cds::TimeProvider,
     spacepackets::time::TimeWriter, spacepackets::SpHeader,
 };
-use satrs_example::{hk_err, tmtc_err};
+use satrs_example::{hk_err, tmtc_err, TEST_EVENT};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
+use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
+use satrs_core::params::Params;
 
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
@@ -31,6 +32,7 @@ pub struct PusReceiver {
     #[allow(dead_code)]
     tc_source: PusTcSource,
     event_request_tx: Sender<EventRequestWithToken>,
+    event_sender: Sender<(EventU32, Option<Params>)>,
     request_map: HashMap<u32, Sender<RequestWithToken>>,
     stamper: TimeProvider,
     time_stamp: [u8; 7],
@@ -52,6 +54,7 @@ pub struct PusTcArgs {
     pub request_map: HashMap<u32, Sender<RequestWithToken>>,
     /// Required for scheduling of telecommands.
     pub tc_source: PusTcSource,
+    pub event_sender: Sender<(EventU32, Option<Params>)>,
     pub scheduler: Rc<RefCell<PusScheduler>>,
 }
 
@@ -64,6 +67,7 @@ impl PusReceiver {
             verif_reporter: tm_arguments.verif_reporter,
             tc_source: tc_arguments.tc_source,
             event_request_tx: tc_arguments.event_request_tx,
+            event_sender: tc_arguments.event_sender,
             request_map: tc_arguments.request_map,
             stamper: TimeProvider::new_with_u16_days(0, 0),
             time_stamp: [0; 7],
@@ -110,33 +114,47 @@ impl PusServiceProvider for PusReceiver {
 
 impl PusReceiver {
     fn handle_test_service(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
-        if PusPacket::subservice(pus_tc) == 1 {
-            println!("Received PUS ping command TC[17,1]");
-            println!("Sending ping reply PUS TM[17,2]");
-            let ping_reply = self.tm_helper.create_pus_tm_timestamp_now(17, 2, None);
-            let addr = self.tm_store.add_pus_tm(&ping_reply);
-            let start_token = self
-                .verif_reporter
-                .start_success(token, Some(&self.time_stamp))
-                .expect("Error sending start success");
-            self.tm_tx
-                .send(addr)
-                .expect("Sending TM to TM funnel failed");
-            self.verif_reporter
-                .completion_success(start_token, Some(&self.time_stamp))
-                .expect("Error sending completion success");
-        } else {
-            self.update_time_stamp();
-            self.verif_reporter
-                .start_failure(
-                    token,
-                    FailParams::new(
-                        Some(&self.time_stamp),
-                        &tmtc_err::INVALID_PUS_SUBSERVICE,
-                        None,
-                    ),
-                )
-                .expect("Sending start failure TM failed");
+        match PusPacket::subservice(pus_tc) {
+            1 => {
+                println!("Received PUS ping command TC[17,1]");
+                println!("Sending ping reply PUS TM[17,2]");
+                let start_token = self
+                    .verif_reporter
+                    .start_success(token, Some(&self.time_stamp))
+                    .expect("Error sending start success");
+                let ping_reply = self.tm_helper.create_pus_tm_timestamp_now(17, 2, None);
+                let addr = self.tm_store.add_pus_tm(&ping_reply);
+                self.tm_tx
+                    .send(addr)
+                    .expect("Sending TM to TM funnel failed");
+                self.verif_reporter
+                    .completion_success(start_token, Some(&self.time_stamp))
+                    .expect("Error sending completion success");
+            }
+            128 => {
+                self.update_time_stamp();
+                self.event_sender.send((TEST_EVENT.into(), None)).expect("Sending test event failed");
+                let start_token = self
+                    .verif_reporter
+                    .start_success(token, Some(&self.time_stamp))
+                    .expect("Error sending start success");
+                self.verif_reporter
+                    .completion_success(start_token, Some(&self.time_stamp))
+                    .expect("Error sending completion success");
+            }
+            _ => {
+                self.update_time_stamp();
+                self.verif_reporter
+                    .start_failure(
+                        token,
+                        FailParams::new(
+                            Some(&self.time_stamp),
+                            &tmtc_err::INVALID_PUS_SUBSERVICE,
+                            None,
+                        ),
+                    )
+                    .expect("Sending start failure TM failed");
+            }
         }
     }
 

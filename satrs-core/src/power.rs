@@ -27,7 +27,7 @@ pub enum SwitchState {
 pub type SwitchId = u16;
 
 /// Generic trait for a device capable of turning on and off switches.
-pub trait PowerSwitcher {
+pub trait PowerSwitcherCommandSender {
     type Error;
 
     fn send_switch_on_cmd(&mut self, switch_id: SwitchId) -> Result<(), Self::Error>;
@@ -46,6 +46,11 @@ pub trait PowerSwitcher {
         switch.switch_off()
     }
 
+}
+
+pub trait PowerSwitchInfo {
+    type Error;
+
     /// Retrieve the switch state
     fn get_switch_state(&mut self, switch_id: SwitchId) -> Result<SwitchState, Self::Error>;
 
@@ -60,11 +65,15 @@ pub trait PowerSwitcher {
     fn switch_delay_ms(&self) -> u32;
 }
 
+pub trait PowerSwitchProvider: PowerSwitcherCommandSender + PowerSwitchInfo {
+    type Error;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::boxed::Box;
-    use crate::power::PowerSwitcher;
+    use crate::power::PowerSwitcherCommandSender;
 
 
     struct Pcdu {
@@ -78,7 +87,7 @@ mod tests {
         IDLE
     }
     struct MyComplexDevice {
-        power_switcher: Box<dyn PowerSwitcher<Error=()>>,
+        power_switcher: Box<dyn PowerSwitcherCommandSender<Error=()>>,
         switch_id: SwitchId,
         some_state: u16,
         dev_state: DeviceState,

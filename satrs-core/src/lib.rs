@@ -35,5 +35,7 @@ pub mod pus;
 pub mod res_code;
 pub mod seq_count;
 pub mod tmtc;
+pub mod request;
+pub mod hk;
 
 pub use spacepackets;
