@@ -104,8 +104,11 @@ pub use stdmod::{
     StdVerifSenderError,
 };
 
-/// This is a request identifier as specified in 5.4.11.2 c. of the PUS standard
+/// This is a request identifier as specified in 5.4.11.2 c. of the PUS standard.
+///
 /// This field equivalent to the first two bytes of the CCSDS space packet header.
+/// This version of the request ID is supplied in the verification reports and does not contain
+/// the source ID.
 #[derive(Debug, Eq, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RequestId {
