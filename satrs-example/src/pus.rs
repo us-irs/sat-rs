@@ -11,13 +11,13 @@ use satrs_core::pus::verification::{
     FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
 };
 use satrs_core::res_code::ResultU16;
+use satrs_core::spacepackets::ecss::scheduling;
 use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use satrs_core::tmtc::{AddressableId, PusServiceProvider};
 use satrs_core::{
     spacepackets::ecss::PusPacket, spacepackets::tc::PusTc, spacepackets::time::cds::TimeProvider,
     spacepackets::time::TimeWriter, spacepackets::SpHeader,
 };
-use satrs_core::spacepackets::ecss::scheduling;
 use satrs_example::{hk_err, tmtc_err};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -405,9 +405,7 @@ impl PusReceiver {
                     .completion_success(start_token, Some(&self.time_stamp))
                     .expect("Error sending completion success");
             }
-            _ => {
-
-            }
+            _ => {}
         }
     }
 }
