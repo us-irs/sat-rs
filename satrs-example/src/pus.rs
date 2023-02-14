@@ -1,6 +1,8 @@
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{PusTcSource, TmStore};
 use satrs_core::events::EventU32;
+use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
+use satrs_core::params::Params;
 use satrs_core::pool::StoreAddr;
 use satrs_core::pus::event;
 use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
@@ -21,8 +23,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
-use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
-use satrs_core::params::Params;
 
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
@@ -133,7 +133,9 @@ impl PusReceiver {
             }
             128 => {
                 self.update_time_stamp();
-                self.event_sender.send((TEST_EVENT.into(), None)).expect("Sending test event failed");
+                self.event_sender
+                    .send((TEST_EVENT.into(), None))
+                    .expect("Sending test event failed");
                 let start_token = self
                     .verif_reporter
                     .start_success(token, Some(&self.time_stamp))

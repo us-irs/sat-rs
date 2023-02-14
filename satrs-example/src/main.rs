@@ -4,7 +4,7 @@ mod pus;
 mod requests;
 mod tmtc;
 
-use crate::hk::{AcsHkIds};
+use crate::hk::AcsHkIds;
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{
     core_tmtc_task, OtherArgs, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, TmStore, PUS_APID,
@@ -13,6 +13,7 @@ use satrs_core::event_man::{
     EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
 };
 use satrs_core::events::EventU32;
+use satrs_core::hk::HkRequest;
 use satrs_core::pool::{LocalPool, PoolCfg, StoreAddr};
 use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, EventRequest, EventRequestWithToken,
@@ -37,7 +38,6 @@ use std::sync::mpsc::{channel, TryRecvError};
 use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-use satrs_core::hk::HkRequest;
 
 #[derive(Clone)]
 struct EventTmSender {
@@ -245,7 +245,6 @@ fn main() {
                             HkRequest::Disable(_) => {}
                             HkRequest::ModifyCollectionInterval(_, _) => {}
                         },
-                        _ => {}
                     }
                     let started_token = reporter_aocs
                         .start_success(request.1, Some(&timestamp))

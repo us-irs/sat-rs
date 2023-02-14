@@ -1,5 +1,5 @@
+use satrs_core::events::{EventU32TypedSev, SeverityInfo};
 use std::net::Ipv4Addr;
-use satrs_core::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
 
 use satrs_mib::res_code::{ResultU16, ResultU16Info};
 use satrs_mib::resultcode;
@@ -51,5 +51,3 @@ pub mod hk_err {
     #[resultcode]
     pub const COLLECTION_INTERVAL_MISSING: ResultU16 = ResultU16::const_new(GroupId::Hk as u8, 3);
 }
-
-

@@ -45,7 +45,6 @@ pub trait PowerSwitcherCommandSender {
     ) -> Result<(), <T as PowerSwitch>::Error> {
         switch.switch_off()
     }
-
 }
 
 pub trait PowerSwitchInfo {
@@ -72,22 +71,21 @@ pub trait PowerSwitchProvider: PowerSwitcherCommandSender + PowerSwitchInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::boxed::Box;
     use crate::power::PowerSwitcherCommandSender;
-
+    use std::boxed::Box;
 
     struct Pcdu {
-        switch_rx: std::sync::mpsc::Receiver<(SwitchId, u16)>
+        switch_rx: std::sync::mpsc::Receiver<(SwitchId, u16)>,
     }
     enum DeviceState {
         OFF,
         SwitchingPower,
         ON,
         SETUP,
-        IDLE
+        IDLE,
     }
     struct MyComplexDevice {
-        power_switcher: Box<dyn PowerSwitcherCommandSender<Error=()>>,
+        power_switcher: Box<dyn PowerSwitcherCommandSender<Error = ()>>,
         switch_id: SwitchId,
         some_state: u16,
         dev_state: DeviceState,
@@ -101,7 +99,9 @@ mod tests {
             let mode = 1;
             if mode == 1 {
                 if self.dev_state == DeviceState::OFF {
-                    self.power_switcher.send_switch_on_cmd(self.switch_id).expect("sending siwthc cmd failed");
+                    self.power_switcher
+                        .send_switch_on_cmd(self.switch_id)
+                        .expect("sending siwthc cmd failed");
                     self.dev_state = DeviceState::SwitchingPower;
                 }
                 if self.dev_state == DeviceState::SwitchingPower {
