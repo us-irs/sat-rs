@@ -12,6 +12,7 @@ use satrs_core::pus::verification::{
     FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
 };
 use satrs_core::res_code::ResultU16;
+use satrs_core::spacepackets::ecss::scheduling;
 use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use satrs_core::tmtc::{AddressableId, PusServiceProvider};
 use satrs_core::{
@@ -326,8 +327,26 @@ impl PusReceiver {
         }
 
         self.update_time_stamp();
-        match pus_tc.subservice() {
-            1 => {
+
+        let subservice: scheduling::Subservice = match pus_tc.subservice().try_into() {
+            Ok(subservice) => subservice,
+            Err(_) => {
+                self.verif_reporter
+                    .start_failure(
+                        token,
+                        FailParams::new(
+                            Some(&self.time_stamp),
+                            &tmtc_err::NOT_ENOUGH_APP_DATA,
+                            None,
+                        ),
+                    )
+                    .expect("Sending start failure TM failed");
+                return;
+            }
+        };
+
+        match subservice {
+            scheduling::Subservice::TcEnableScheduling => {
                 let start_token = self
                     .verif_reporter
                     .start_success(token, Some(&self.time_stamp))
@@ -344,7 +363,7 @@ impl PusReceiver {
                 }
                 drop(scheduler);
             }
-            2 => {
+            scheduling::Subservice::TcDisableScheduling => {
                 let start_token = self
                     .verif_reporter
                     .start_success(token, Some(&self.time_stamp))
@@ -361,7 +380,7 @@ impl PusReceiver {
                 }
                 drop(scheduler);
             }
-            3 => {
+            scheduling::Subservice::TcResetScheduling => {
                 let start_token = self
                     .verif_reporter
                     .start_success(token, Some(&self.time_stamp))
@@ -384,7 +403,7 @@ impl PusReceiver {
                     .completion_success(start_token, Some(&self.time_stamp))
                     .expect("Error sending completion success");
             }
-            4 => {
+            scheduling::Subservice::TcInsertActivity => {
                 let start_token = self
                     .verif_reporter
                     .start_success(token, Some(&self.time_stamp))
@@ -406,18 +425,7 @@ impl PusReceiver {
                     .completion_success(start_token, Some(&self.time_stamp))
                     .expect("Error sending completion success");
             }
-            _ => {
-                self.verif_reporter
-                    .start_failure(
-                        token,
-                        FailParams::new(
-                            Some(&self.time_stamp),
-                            &tmtc_err::NOT_ENOUGH_APP_DATA,
-                            None,
-                        ),
-                    )
-                    .expect("Sending start failure TM failed");
-            }
+            _ => {}
         }
     }
 }
