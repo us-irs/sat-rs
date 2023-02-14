@@ -4,7 +4,7 @@ mod pus;
 mod requests;
 mod tmtc;
 
-use crate::hk::{AcsHkIds, HkRequest};
+use crate::hk::AcsHkIds;
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{
     core_tmtc_task, OtherArgs, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, TmStore, PUS_APID,
@@ -13,6 +13,7 @@ use satrs_core::event_man::{
     EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
 };
 use satrs_core::events::EventU32;
+use satrs_core::hk::HkRequest;
 use satrs_core::pool::{LocalPool, PoolCfg, StoreAddr};
 use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, EventRequest, EventRequestWithToken,

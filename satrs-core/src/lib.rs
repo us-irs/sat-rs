@@ -25,6 +25,7 @@ pub mod events;
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod executable;
 pub mod hal;
+pub mod hk;
 pub mod objects;
 pub mod params;
 #[cfg(feature = "alloc")]
@@ -32,6 +33,7 @@ pub mod params;
 pub mod pool;
 pub mod power;
 pub mod pus;
+pub mod request;
 pub mod res_code;
 pub mod seq_count;
 pub mod tmtc;
