@@ -39,7 +39,11 @@ pub mod tmtc_err {
     #[resultcode]
     pub const PUS_SERVICE_NOT_IMPLEMENTED: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 2);
 
-    #[resultcode(info = "Not enough data inside the TC application data field")]
+    #[resultcode(
+        info = "Not enough data inside the TC application data field. Optionally includes: \
+          8 bytes of failure data containing 2 failure parameters, \
+          P1 (u32 big endian): Expected data length, P2: Found data length"
+    )]
     pub const NOT_ENOUGH_APP_DATA: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 2);
 
     pub const TMTC_RESULTS: &[ResultU16Info] = &[
