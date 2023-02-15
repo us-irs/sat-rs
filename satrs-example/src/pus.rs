@@ -526,6 +526,19 @@ impl PusReceiver {
                 .expect("Sending start failure TM failed");
         }
         let app_data = app_data.unwrap();
+        let mut invalid_subservice_handler = || {
+            self.tm_args
+                .verif_reporter
+                .start_failure(
+                    token,
+                    FailParams::new(
+                        Some(self.stamp_helper.stamp()),
+                        &tmtc_err::INVALID_PUS_SUBSERVICE,
+                        Some(&[PusPacket::subservice(pus_tc)]),
+                    ),
+                )
+                .expect("Sending start failure TM failed");
+        };
         let subservice = mode::Subservice::try_from(PusPacket::subservice(pus_tc));
         if let Ok(subservice) = subservice {
             let forward_mode_request = |target_id, mode_request: ModeRequest| match self
@@ -540,6 +553,7 @@ impl PusReceiver {
                         .expect("sending mode request failed");
                 }
             };
+            let mut valid_subservice = true;
             match subservice {
                 Subservice::TcSetMode => {
                     let target_id = u32::from_be_bytes(app_data[0..4].try_into().unwrap());
@@ -585,21 +599,19 @@ impl PusReceiver {
                     forward_mode_request(target_id, ModeRequest::AnnounceModeRecursive(target_id));
                 }
                 _ => {
-                    warn!("Can not process mode request with subservice {subservice:?}")
+                    warn!("Can not process mode request with subservice {subservice:?}");
+                    invalid_subservice_handler();
+                    valid_subservice = false;
                 }
             }
+            if valid_subservice {
+                self.tm_args
+                    .verif_reporter
+                    .start_success(token, Some(self.stamp_helper.stamp()))
+                    .expect("sending start success TM failed");
+            }
         } else {
-            self.tm_args
-                .verif_reporter
-                .start_failure(
-                    token,
-                    FailParams::new(
-                        Some(self.stamp_helper.stamp()),
-                        &tmtc_err::INVALID_PUS_SUBSERVICE,
-                        Some(&[PusPacket::subservice(pus_tc)]),
-                    ),
-                )
-                .expect("Sending start failure TM failed");
+            invalid_subservice_handler();
         }
     }
 }
