@@ -1,10 +1,14 @@
 mod ccsds;
 mod hk;
+mod logging;
 mod pus;
 mod requests;
 mod tmtc;
 
+use log::{info, warn};
+
 use crate::hk::AcsHkIds;
+use crate::logging::setup_logger;
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{
     core_tmtc_task, OtherArgs, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, TmStore, PUS_APID,
@@ -66,6 +70,7 @@ impl EcssTmSenderCore for EventTmSender {
 }
 
 fn main() {
+    setup_logger().expect("setting up logging with fern failed");
     println!("Running OBSW example");
     let tm_pool = LocalPool::new(PoolCfg::new(vec![
         (30, 32),
@@ -151,12 +156,12 @@ fn main() {
     let aocs_to_funnel = tm_funnel_tx.clone();
     let mut aocs_tm_store = tm_store.clone();
 
-    println!("Starting TMTC task");
+    info!("Starting TMTC task");
     let jh0 = thread::spawn(move || {
         core_tmtc_task(core_args, tc_args, tm_args);
     });
 
-    println!("Starting TM funnel task");
+    info!("Starting TM funnel task");
     let jh1 = thread::spawn(move || {
         let tm_funnel = TmFunnel {
             tm_server_tx,
@@ -172,7 +177,7 @@ fn main() {
         }
     });
 
-    println!("Starting event handling task");
+    info!("Starting event handling task");
     let jh2 = thread::spawn(move || {
         let mut timestamp: [u8; 7] = [0; 7];
         let mut sender = EventTmSender::new(tm_store, tm_funnel_tx);
@@ -211,14 +216,14 @@ fn main() {
         }
     });
 
-    println!("Starting AOCS thread");
+    info!("Starting AOCS thread");
     let jh3 = thread::spawn(move || {
         let mut timestamp: [u8; 7] = [0; 7];
         let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
         loop {
             match acs_thread_rx.try_recv() {
                 Ok(request) => {
-                    println!("ACS thread: Received HK request {:?}", request.0);
+                    info!("ACS thread: Received HK request {:?}", request.0);
                     update_time(&mut time_provider, &mut timestamp);
                     match request.0 {
                         Request::HkRequest(hk_req) => match hk_req {
@@ -246,7 +251,7 @@ fn main() {
                             HkRequest::ModifyCollectionInterval(_, _) => {}
                         },
                         Request::ModeRequest(_mode_req) => {
-                            println!("mode request handling not implemented yet")
+                            warn!("mode request handling not implemented yet")
                         }
                     }
                     let started_token = reporter_aocs
@@ -259,7 +264,7 @@ fn main() {
                 Err(e) => match e {
                     TryRecvError::Empty => {}
                     TryRecvError::Disconnected => {
-                        println!("ACS thread: Message Queue TX disconnected!")
+                        warn!("ACS thread: Message Queue TX disconnected!")
                     }
                 },
             }

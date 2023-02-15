@@ -186,7 +186,8 @@ impl PusReceiver {
                     .expect("Error sending completion success");
             }
             128 => {
-                self.tc_args.event_sender
+                self.tc_args
+                    .event_sender
                     .send((TEST_EVENT.into(), None))
                     .expect("Sending test event failed");
                 let start_token = self
@@ -247,7 +248,11 @@ impl PusReceiver {
             return;
         }
         let addressable_id = AddressableId::from_raw_be(user_data).unwrap();
-        if !self.tc_args.request_map.contains_key(&addressable_id.target_id) {
+        if !self
+            .tc_args
+            .request_map
+            .contains_key(&addressable_id.target_id)
+        {
             self.tm_args
                 .verif_reporter
                 .start_failure(
@@ -262,7 +267,11 @@ impl PusReceiver {
             return;
         }
         let send_request = |request: HkRequest| {
-            let sender = self.tc_args.request_map.get(&addressable_id.target_id).unwrap();
+            let sender = self
+                .tc_args
+                .request_map
+                .get(&addressable_id.target_id)
+                .unwrap();
             sender
                 .send(RequestWithToken(Request::HkRequest(request), token))
                 .unwrap_or_else(|_| panic!("Sending HK request {request:?} failed"));
@@ -338,7 +347,8 @@ impl PusReceiver {
                     &mut self.tm_args.verif_reporter,
                     self.stamp_helper.stamp(),
                 );
-                self.tc_args.event_request_tx
+                self.tc_args
+                    .event_request_tx
                     .send(EventRequestWithToken {
                         request: EventRequest::Enable(event_id),
                         token: start_token,
@@ -350,7 +360,8 @@ impl PusReceiver {
                     &mut self.tm_args.verif_reporter,
                     self.stamp_helper.stamp(),
                 );
-                self.tc_args.event_request_tx
+                self.tc_args
+                    .event_request_tx
                     .send(EventRequestWithToken {
                         request: EventRequest::Disable(event_id),
                         token: start_token,
@@ -530,8 +541,7 @@ impl PusReceiver {
                                     &tmtc_err::NOT_ENOUGH_APP_DATA,
                                     Some(
                                         format!(
-                                            "expected {} bytes, found {}",
-                                            min_len, app_data_len
+                                            "expected {min_len} bytes, found {app_data_len}"
                                         )
                                         .as_bytes(),
                                     ),

@@ -6,6 +6,9 @@ authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
 default-run = "satrs-example"
 
 [dependencies]
+fern = "0.6"
+chrono = "0.4"
+log = "0.4"
 crossbeam-channel = "0.5"
 delegate = "0.9"
 zerocopy = "0.6"
