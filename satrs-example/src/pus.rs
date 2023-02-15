@@ -33,13 +33,8 @@ use std::sync::mpsc::Sender;
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
     pub tm_args: PusTmArgs,
-    #[allow(dead_code)]
-    tc_source: PusTcSource,
+    pub tc_args: PusTcArgs,
     stamp_helper: TimeStampHelper,
-    event_request_tx: Sender<EventRequestWithToken>,
-    event_sender: Sender<(EventU32, Option<Params>)>,
-    request_map: HashMap<u32, Sender<RequestWithToken>>,
-    scheduler: Rc<RefCell<PusScheduler>>,
 }
 
 pub struct PusTmArgs {
@@ -49,6 +44,12 @@ pub struct PusTmArgs {
     pub tm_store: TmStore,
     /// All verification reporting is done with this reporter.
     pub verif_reporter: StdVerifReporterWithSender,
+}
+
+impl PusTmArgs {
+    fn vr(&mut self) -> &mut StdVerifReporterWithSender {
+        &mut self.verif_reporter
+    }
 }
 
 pub struct PusTcArgs {
@@ -93,12 +94,8 @@ impl PusReceiver {
         Self {
             tm_helper: PusTmWithCdsShortHelper::new(apid),
             tm_args: tm_arguments,
-            tc_source: tc_arguments.tc_source,
-            event_request_tx: tc_arguments.event_request_tx,
-            event_sender: tc_arguments.event_sender,
-            request_map: tc_arguments.request_map,
+            tc_args: tc_arguments,
             stamp_helper: TimeStampHelper::new(),
-            scheduler: tc_arguments.scheduler,
         }
     }
 }
@@ -116,7 +113,7 @@ impl PusServiceProvider for PusReceiver {
         self.stamp_helper.update_from_now();
         let accepted_token = self
             .tm_args
-            .verif_reporter
+            .vr()
             .acceptance_success(init_token, Some(self.stamp_helper.stamp()))
             .expect("Acceptance success failure");
         let service = PusServiceId::try_from(service);
@@ -189,7 +186,7 @@ impl PusReceiver {
                     .expect("Error sending completion success");
             }
             128 => {
-                self.event_sender
+                self.tc_args.event_sender
                     .send((TEST_EVENT.into(), None))
                     .expect("Sending test event failed");
                 let start_token = self
@@ -250,7 +247,7 @@ impl PusReceiver {
             return;
         }
         let addressable_id = AddressableId::from_raw_be(user_data).unwrap();
-        if !self.request_map.contains_key(&addressable_id.target_id) {
+        if !self.tc_args.request_map.contains_key(&addressable_id.target_id) {
             self.tm_args
                 .verif_reporter
                 .start_failure(
@@ -265,7 +262,7 @@ impl PusReceiver {
             return;
         }
         let send_request = |request: HkRequest| {
-            let sender = self.request_map.get(&addressable_id.target_id).unwrap();
+            let sender = self.tc_args.request_map.get(&addressable_id.target_id).unwrap();
             sender
                 .send(RequestWithToken(Request::HkRequest(request), token))
                 .unwrap_or_else(|_| panic!("Sending HK request {request:?} failed"));
@@ -341,7 +338,7 @@ impl PusReceiver {
                     &mut self.tm_args.verif_reporter,
                     self.stamp_helper.stamp(),
                 );
-                self.event_request_tx
+                self.tc_args.event_request_tx
                     .send(EventRequestWithToken {
                         request: EventRequest::Enable(event_id),
                         token: start_token,
@@ -353,7 +350,7 @@ impl PusReceiver {
                     &mut self.tm_args.verif_reporter,
                     self.stamp_helper.stamp(),
                 );
-                self.event_request_tx
+                self.tc_args.event_request_tx
                     .send(EventRequestWithToken {
                         request: EventRequest::Disable(event_id),
                         token: start_token,
@@ -413,7 +410,7 @@ impl PusReceiver {
                     .start_success(token, Some(self.stamp_helper.stamp()))
                     .expect("Error sending start success");
 
-                let mut scheduler = self.scheduler.borrow_mut();
+                let mut scheduler = self.tc_args.scheduler.borrow_mut();
                 scheduler.enable();
                 if scheduler.is_enabled() {
                     self.tm_args
@@ -431,7 +428,7 @@ impl PusReceiver {
                     .start_success(token, Some(self.stamp_helper.stamp()))
                     .expect("Error sending start success");
 
-                let mut scheduler = self.scheduler.borrow_mut();
+                let mut scheduler = self.tc_args.scheduler.borrow_mut();
                 scheduler.disable();
                 if !scheduler.is_enabled() {
                     self.tm_args
@@ -450,13 +447,14 @@ impl PusReceiver {
                     .expect("Error sending start success");
 
                 let mut pool = self
+                    .tc_args
                     .tc_source
                     .tc_store
                     .pool
                     .write()
                     .expect("Locking pool failed");
 
-                let mut scheduler = self.scheduler.borrow_mut();
+                let mut scheduler = self.tc_args.scheduler.borrow_mut();
                 scheduler
                     .reset(pool.as_mut())
                     .expect("Error resetting TC Pool");
@@ -475,12 +473,13 @@ impl PusReceiver {
                     .expect("error sending start success");
 
                 let mut pool = self
+                    .tc_args
                     .tc_source
                     .tc_store
                     .pool
                     .write()
                     .expect("locking pool failed");
-                let mut scheduler = self.scheduler.borrow_mut();
+                let mut scheduler = self.tc_args.scheduler.borrow_mut();
                 scheduler
                     .insert_wrapped_tc::<TimeProvider>(pus_tc, pool.as_mut())
                     .expect("insertion of activity into pool failed");
@@ -550,7 +549,7 @@ impl PusReceiver {
                     let mode_request = Request::ModeRequest(ModeRequest::SetMode(
                         ModeCommand::new(target_id, mode_submode),
                     ));
-                    match self.request_map.get(&target_id) {
+                    match self.tc_args.request_map.get(&target_id) {
                         None => {}
                         Some(sender_to_recipient) => {
                             sender_to_recipient
