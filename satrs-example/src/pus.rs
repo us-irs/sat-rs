@@ -1,5 +1,6 @@
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{PusTcSource, TmStore};
+use log::warn;
 use satrs_core::events::EventU32;
 use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
 use satrs_core::mode::{ModeAndSubmode, ModeCommand, ModeRequest};
@@ -527,6 +528,18 @@ impl PusReceiver {
         let app_data = app_data.unwrap();
         let subservice = mode::Subservice::try_from(PusPacket::subservice(pus_tc));
         if let Ok(subservice) = subservice {
+            let forward_mode_request = |target_id, mode_request: ModeRequest| match self
+                .tc_args
+                .request_map
+                .get(&target_id)
+            {
+                None => warn!("not mode request recipient for target ID {target_id} found"),
+                Some(sender_to_recipient) => {
+                    sender_to_recipient
+                        .send(RequestWithToken(Request::ModeRequest(mode_request), token))
+                        .expect("sending mode request failed");
+                }
+            };
             match subservice {
                 Subservice::TcSetMode => {
                     let target_id = u32::from_be_bytes(app_data[0..4].try_into().unwrap());
@@ -540,10 +553,8 @@ impl PusReceiver {
                                     Some(self.stamp_helper.stamp()),
                                     &tmtc_err::NOT_ENOUGH_APP_DATA,
                                     Some(
-                                        format!(
-                                            "expected {min_len} bytes, found {app_data_len}"
-                                        )
-                                        .as_bytes(),
+                                        format!("expected {min_len} bytes, found {app_data_len}")
+                                            .as_bytes(),
                                     ),
                                 ),
                             )
@@ -556,24 +567,26 @@ impl PusReceiver {
                             .unwrap(),
                     )
                     .unwrap();
-                    let mode_request = Request::ModeRequest(ModeRequest::SetMode(
-                        ModeCommand::new(target_id, mode_submode),
-                    ));
-                    match self.tc_args.request_map.get(&target_id) {
-                        None => {}
-                        Some(sender_to_recipient) => {
-                            sender_to_recipient
-                                .send(RequestWithToken(mode_request, token))
-                                .expect("sending mode request failed");
-                        }
-                    }
+                    forward_mode_request(
+                        target_id,
+                        ModeRequest::SetMode(ModeCommand::new(target_id, mode_submode)),
+                    );
                 }
-                Subservice::TcReadMode => {}
-                Subservice::TcAnnounceMode => {}
-                Subservice::TcAnnounceModeRecursive => {}
-                Subservice::TmModeReply => {}
-                Subservice::TmCantReachMode => {}
-                Subservice::TmWrongModeReply => {}
+                Subservice::TcReadMode => {
+                    let target_id = u32::from_be_bytes(app_data[0..4].try_into().unwrap());
+                    forward_mode_request(target_id, ModeRequest::ReadMode(target_id));
+                }
+                Subservice::TcAnnounceMode => {
+                    let target_id = u32::from_be_bytes(app_data[0..4].try_into().unwrap());
+                    forward_mode_request(target_id, ModeRequest::AnnounceMode(target_id));
+                }
+                Subservice::TcAnnounceModeRecursive => {
+                    let target_id = u32::from_be_bytes(app_data[0..4].try_into().unwrap());
+                    forward_mode_request(target_id, ModeRequest::AnnounceModeRecursive(target_id));
+                }
+                _ => {
+                    warn!("Can not process mode request with subservice {subservice:?}")
+                }
             }
         } else {
             self.tm_args
