@@ -3,9 +3,10 @@ use satrs_core::mode::ModeRequest;
 use satrs_core::pus::verification::{TcStateAccepted, VerificationToken};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[non_exhaustive]
 pub enum Request {
     HkRequest(HkRequest),
-    ModeRequest(ModeRequest)
+    ModeRequest(ModeRequest),
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]

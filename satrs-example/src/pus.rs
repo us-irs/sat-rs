@@ -2,13 +2,18 @@ use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{PusTcSource, TmStore};
 use satrs_core::events::EventU32;
 use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
+use satrs_core::mode::{ModeAndSubmode, ModeCommand, ModeRequest};
 use satrs_core::params::Params;
 use satrs_core::pool::StoreAddr;
 use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
 use satrs_core::pus::hk;
-use satrs_core::pus::scheduling::PusScheduler;
 use satrs_core::pus::mode;
-use satrs_core::pus::verification::{pus_11_generic_tc_check, FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken, StdVerifSenderError};
+use satrs_core::pus::mode::Subservice;
+use satrs_core::pus::scheduling::PusScheduler;
+use satrs_core::pus::verification::{
+    pus_11_generic_tc_check, FailParams, StdVerifReporterWithSender, TcStateAccepted,
+    VerificationToken,
+};
 use satrs_core::pus::{event, GenericTcCheckError};
 use satrs_core::res_code::ResultU16;
 use satrs_core::spacepackets::ecss::{scheduling, PusServiceId};
@@ -24,9 +29,6 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
-use satrs_core::mode::{ModeCommand, ModeAndSubmode, ModeRequest};
-use satrs_core::pus::mode::Subservice;
-use satrs_core::spacepackets::tc::GenericPusTcSecondaryHeader;
 
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
@@ -99,14 +101,6 @@ impl PusReceiver {
             scheduler: tc_arguments.scheduler,
         }
     }
-
-    fn vr_and_stamp(&mut self) -> (&mut StdVerifReporterWithSender, &[u8]) {
-        (&mut self.tm_args.verif_reporter, self.stamp())
-    }
-
-    fn stamp(&self) -> &[u8] {
-        self.stamp_helper.stamp()
-    }
 }
 
 impl PusServiceProvider for PusReceiver {
@@ -120,9 +114,10 @@ impl PusServiceProvider for PusReceiver {
     ) -> Result<(), Self::Error> {
         let init_token = self.tm_args.verif_reporter.add_tc(pus_tc);
         self.stamp_helper.update_from_now();
-        let (vr, stamp) = self.vr_and_stamp();
-        let accepted_token = vr
-            .acceptance_success(init_token, Some(stamp))
+        let accepted_token = self
+            .tm_args
+            .verif_reporter
+            .acceptance_success(init_token, Some(self.stamp_helper.stamp()))
             .expect("Acceptance success failure");
         let service = PusServiceId::try_from(service);
         match service {
@@ -131,11 +126,13 @@ impl PusServiceProvider for PusReceiver {
                 PusServiceId::Housekeeping => self.handle_hk_request(pus_tc, accepted_token),
                 PusServiceId::Event => self.handle_event_request(pus_tc, accepted_token),
                 PusServiceId::Scheduling => self.handle_scheduled_tc(pus_tc, accepted_token),
-                _ => vr
+                _ => self
+                    .tm_args
+                    .verif_reporter
                     .start_failure(
                         accepted_token,
                         FailParams::new(
-                            Some(stamp),
+                            Some(self.stamp_helper.stamp()),
                             &tmtc_err::PUS_SERVICE_NOT_IMPLEMENTED,
                             Some(&[standard_service as u8]),
                         ),
@@ -151,7 +148,8 @@ impl PusServiceProvider for PusReceiver {
                         CustomPusServiceId::Health => {}
                     }
                 } else {
-                    vr
+                    self.tm_args
+                        .verif_reporter
                         .start_failure(
                             accepted_token,
                             FailParams::new(
@@ -170,40 +168,47 @@ impl PusServiceProvider for PusReceiver {
 
 impl PusReceiver {
     fn handle_test_service(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
-        let (vr, stamp) = self.vr_and_stamp();
         match PusPacket::subservice(pus_tc) {
             1 => {
                 println!("Received PUS ping command TC[17,1]");
                 println!("Sending ping reply PUS TM[17,2]");
-                let start_token = vr
-                    .start_success(token, Some(stamp))
+                let start_token = self
+                    .tm_args
+                    .verif_reporter
+                    .start_success(token, Some(self.stamp_helper.stamp()))
                     .expect("Error sending start success");
                 let ping_reply = self.tm_helper.create_pus_tm_timestamp_now(17, 2, None);
                 let addr = self.tm_args.tm_store.add_pus_tm(&ping_reply);
-                self.tm_args.tm_tx
+                self.tm_args
+                    .tm_tx
                     .send(addr)
                     .expect("Sending TM to TM funnel failed");
-                vr
-                    .completion_success(start_token, Some(stamp))
+                self.tm_args
+                    .verif_reporter
+                    .completion_success(start_token, Some(self.stamp_helper.stamp()))
                     .expect("Error sending completion success");
             }
             128 => {
                 self.event_sender
                     .send((TEST_EVENT.into(), None))
                     .expect("Sending test event failed");
-                let start_token = vr
-                    .start_success(token, Some(stamp))
+                let start_token = self
+                    .tm_args
+                    .verif_reporter
+                    .start_success(token, Some(self.stamp_helper.stamp()))
                     .expect("Error sending start success");
-                vr
-                    .completion_success(start_token, Some(stamp))
+                self.tm_args
+                    .verif_reporter
+                    .completion_success(start_token, Some(self.stamp_helper.stamp()))
                     .expect("Error sending completion success");
             }
             _ => {
-                vr
+                self.tm_args
+                    .verif_reporter
                     .start_failure(
                         token,
                         FailParams::new(
-                            Some(stamp),
+                            Some(self.stamp_helper.stamp()),
                             &tmtc_err::INVALID_PUS_SUBSERVICE,
                             None,
                         ),
@@ -214,12 +219,13 @@ impl PusReceiver {
     }
 
     fn handle_hk_request(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
-        let (vr, stamp) = self.vr_and_stamp();
         if pus_tc.user_data().is_none() {
-            vr.start_failure(
+            self.tm_args
+                .verif_reporter
+                .start_failure(
                     token,
                     FailParams::new(
-                        Some(stamp),
+                        Some(self.stamp_helper.stamp()),
                         &tmtc_err::NOT_ENOUGH_APP_DATA,
                         None,
                     ),
@@ -234,20 +240,23 @@ impl PusReceiver {
             } else {
                 &hk_err::UNIQUE_ID_MISSING
             };
-            vr
+            self.tm_args
+                .verif_reporter
                 .start_failure(
                     token,
-                    FailParams::new(Some(stamp), err, None),
+                    FailParams::new(Some(self.stamp_helper.stamp()), err, None),
                 )
                 .expect("Sending start failure TM failed");
             return;
         }
         let addressable_id = AddressableId::from_raw_be(user_data).unwrap();
         if !self.request_map.contains_key(&addressable_id.target_id) {
-            vr.start_failure(
+            self.tm_args
+                .verif_reporter
+                .start_failure(
                     token,
                     FailParams::new(
-                        Some(stamp),
+                        Some(self.stamp_helper.stamp()),
                         &hk_err::UNKNOWN_TARGET_ID,
                         None,
                     ),
@@ -271,10 +280,12 @@ impl PusReceiver {
             == hk::Subservice::TcModifyHkCollectionInterval as u8
         {
             if user_data.len() < 12 {
-                vr.start_failure(
+                self.tm_args
+                    .verif_reporter
+                    .start_failure(
                         token,
                         FailParams::new(
-                            Some(stamp),
+                            Some(self.stamp_helper.stamp()),
                             &hk_err::COLLECTION_INTERVAL_MISSING,
                             None,
                         ),
@@ -294,24 +305,20 @@ impl PusReceiver {
                                   timestamp: &[u8],
                                   failure_code: &ResultU16,
                                   failure_data: Option<&[u8]>| {
-            vr
-                .start_failure(
-                    token,
-                    FailParams::new(Some(timestamp), failure_code, failure_data),
-                )
-                .expect("Sending start failure TM failed");
+            vr.start_failure(
+                token,
+                FailParams::new(Some(timestamp), failure_code, failure_data),
+            )
+            .expect("Sending start failure TM failed");
         };
-        let send_start_acceptance = |vr: &mut StdVerifReporterWithSender,
-                                     timestamp: &[u8]| {
-            vr
-                .start_success(token, Some(timestamp))
+        let send_start_acceptance = |vr: &mut StdVerifReporterWithSender, timestamp: &[u8]| {
+            vr.start_success(token, Some(timestamp))
                 .expect("Sending start success TM failed")
         };
-        let (vr, stamp) = self.vr_and_stamp();
         if pus_tc.user_data().is_none() {
             send_start_failure(
-                vr,
-                stamp,
+                &mut self.tm_args.verif_reporter,
+                self.stamp_helper.stamp(),
                 &tmtc_err::NOT_ENOUGH_APP_DATA,
                 None,
             );
@@ -320,8 +327,8 @@ impl PusReceiver {
         let app_data = pus_tc.user_data().unwrap();
         if app_data.len() < 4 {
             send_start_failure(
-                vr,
-                stamp,
+                &mut self.tm_args.verif_reporter,
+                self.stamp_helper.stamp(),
                 &tmtc_err::NOT_ENOUGH_APP_DATA,
                 None,
             );
@@ -330,8 +337,10 @@ impl PusReceiver {
         let event_id = EventU32::from(u32::from_be_bytes(app_data.try_into().unwrap()));
         match PusPacket::subservice(pus_tc).try_into() {
             Ok(event::Subservice::TcEnableEventGeneration) => {
-                let start_token =
-                    send_start_acceptance(vr, stamp);
+                let start_token = send_start_acceptance(
+                    &mut self.tm_args.verif_reporter,
+                    self.stamp_helper.stamp(),
+                );
                 self.event_request_tx
                     .send(EventRequestWithToken {
                         request: EventRequest::Enable(event_id),
@@ -340,8 +349,10 @@ impl PusReceiver {
                     .expect("Sending event request failed");
             }
             Ok(event::Subservice::TcDisableEventGeneration) => {
-                let start_token =
-                    send_start_acceptance(vr, stamp);
+                let start_token = send_start_acceptance(
+                    &mut self.tm_args.verif_reporter,
+                    self.stamp_helper.stamp(),
+                );
                 self.event_request_tx
                     .send(EventRequestWithToken {
                         request: EventRequest::Disable(event_id),
@@ -351,8 +362,8 @@ impl PusReceiver {
             }
             _ => {
                 send_start_failure(
-                    vr,
-                    stamp,
+                    &mut self.tm_args.verif_reporter,
+                    self.stamp_helper.stamp(),
                     &tmtc_err::INVALID_PUS_SUBSERVICE,
                     None,
                 );
@@ -361,16 +372,16 @@ impl PusReceiver {
     }
 
     fn handle_scheduled_tc(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
-        let (vr, stamp) = self.vr_and_stamp();
         let subservice = match pus_11_generic_tc_check(pus_tc) {
             Ok(subservice) => subservice,
             Err(e) => match e {
                 GenericTcCheckError::NotEnoughAppData => {
-                    vr
+                    self.tm_args
+                        .verif_reporter
                         .start_failure(
                             token,
                             FailParams::new(
-                                Some(stamp),
+                                Some(self.stamp_helper.stamp()),
                                 &tmtc_err::NOT_ENOUGH_APP_DATA,
                                 None,
                             ),
@@ -379,10 +390,12 @@ impl PusReceiver {
                     return;
                 }
                 GenericTcCheckError::InvalidSubservice => {
-                    vr.start_failure(
+                    self.tm_args
+                        .verif_reporter
+                        .start_failure(
                             token,
                             FailParams::new(
-                                Some(stamp),
+                                Some(self.stamp_helper.stamp()),
                                 &tmtc_err::INVALID_PUS_SUBSERVICE,
                                 None,
                             ),
@@ -394,39 +407,46 @@ impl PusReceiver {
         };
         match subservice {
             scheduling::Subservice::TcEnableScheduling => {
-                let start_token =
-                    vr
-                    .start_success(token, Some(stamp))
+                let start_token = self
+                    .tm_args
+                    .verif_reporter
+                    .start_success(token, Some(self.stamp_helper.stamp()))
                     .expect("Error sending start success");
 
                 let mut scheduler = self.scheduler.borrow_mut();
                 scheduler.enable();
                 if scheduler.is_enabled() {
-                    vr
-                        .completion_success(start_token, Some(stamp))
+                    self.tm_args
+                        .verif_reporter
+                        .completion_success(start_token, Some(self.stamp_helper.stamp()))
                         .expect("Error sending completion success");
                 } else {
                     panic!("Failed to enable scheduler");
                 }
             }
             scheduling::Subservice::TcDisableScheduling => {
-                let start_token =vr
-                    .start_success(token, Some(stamp))
+                let start_token = self
+                    .tm_args
+                    .verif_reporter
+                    .start_success(token, Some(self.stamp_helper.stamp()))
                     .expect("Error sending start success");
 
                 let mut scheduler = self.scheduler.borrow_mut();
                 scheduler.disable();
                 if !scheduler.is_enabled() {
-                    vr
-                        .completion_success(start_token, Some(stamp))
+                    self.tm_args
+                        .verif_reporter
+                        .completion_success(start_token, Some(self.stamp_helper.stamp()))
                         .expect("Error sending completion success");
                 } else {
                     panic!("Failed to disable scheduler");
                 }
             }
             scheduling::Subservice::TcResetScheduling => {
-                let start_token = vr
-                    .start_success(token, Some(stamp))
+                let start_token = self
+                    .tm_args
+                    .verif_reporter
+                    .start_success(token, Some(self.stamp_helper.stamp()))
                     .expect("Error sending start success");
 
                 let mut pool = self
@@ -442,12 +462,16 @@ impl PusReceiver {
                     .expect("Error resetting TC Pool");
                 drop(scheduler);
 
-                vr.completion_success(start_token, Some(stamp))
+                self.tm_args
+                    .verif_reporter
+                    .completion_success(start_token, Some(self.stamp_helper.stamp()))
                     .expect("Error sending completion success");
             }
             scheduling::Subservice::TcInsertActivity => {
-                let start_token = vr
-                    .start_success(token, Some(stamp))
+                let start_token = self
+                    .tm_args
+                    .verif_reporter
+                    .start_success(token, Some(self.stamp_helper.stamp()))
                     .expect("error sending start success");
 
                 let mut pool = self
@@ -462,8 +486,9 @@ impl PusReceiver {
                     .expect("insertion of activity into pool failed");
                 drop(scheduler);
 
-                vr
-                    .completion_success(start_token, Some(stamp))
+                self.tm_args
+                    .verif_reporter
+                    .completion_success(start_token, Some(self.stamp_helper.stamp()))
                     .expect("sending completion success failed");
             }
             _ => {}
@@ -471,19 +496,20 @@ impl PusReceiver {
     }
 
     fn handle_mode_service(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
-        let (vr, stamp) = self.vr_and_stamp();
         let mut app_data_len = 0;
         let app_data = pus_tc.user_data();
         if app_data.is_some() {
             app_data_len = pus_tc.user_data().unwrap().len();
         }
         if app_data_len < 4 {
-            vr
+            self.tm_args
+                .verif_reporter
                 .start_failure(
                     token,
                     FailParams::new(
-                        Some(stamp), &tmtc_err::NOT_ENOUGH_APP_DATA,
-                        Some(format!("expected {} bytes, found {}", 4, app_data_len).as_bytes())
+                        Some(self.stamp_helper.stamp()),
+                        &tmtc_err::NOT_ENOUGH_APP_DATA,
+                        Some(format!("expected {} bytes, found {}", 4, app_data_len).as_bytes()),
                     ),
                 )
                 .expect("Sending start failure TM failed");
@@ -496,22 +522,40 @@ impl PusReceiver {
                     let target_id = u32::from_be_bytes(app_data[0..4].try_into().unwrap());
                     let min_len = ModeAndSubmode::raw_len() + 4;
                     if app_data_len < min_len {
-                        vr.start_failure(
+                        self.tm_args
+                            .verif_reporter
+                            .start_failure(
                                 token,
                                 FailParams::new(
-                                    Some(stamp), &tmtc_err::NOT_ENOUGH_APP_DATA,
-                                    Some(format!("expected {} bytes, found {}", min_len, app_data_len).as_bytes())
+                                    Some(self.stamp_helper.stamp()),
+                                    &tmtc_err::NOT_ENOUGH_APP_DATA,
+                                    Some(
+                                        format!(
+                                            "expected {} bytes, found {}",
+                                            min_len, app_data_len
+                                        )
+                                        .as_bytes(),
+                                    ),
                                 ),
                             )
                             .expect("Sending start failure TM failed");
                     }
                     // Should never fail after size check
-                    let mode_submode = ModeAndSubmode::from_be_bytes(app_data[4..4 + ModeAndSubmode::raw_len()].try_into().unwrap()).unwrap();
-                    let mode_request = Request::ModeRequest(ModeRequest::SetMode(ModeCommand::new(target_id, mode_submode)));
+                    let mode_submode = ModeAndSubmode::from_be_bytes(
+                        app_data[4..4 + ModeAndSubmode::raw_len()]
+                            .try_into()
+                            .unwrap(),
+                    )
+                    .unwrap();
+                    let mode_request = Request::ModeRequest(ModeRequest::SetMode(
+                        ModeCommand::new(target_id, mode_submode),
+                    ));
                     match self.request_map.get(&target_id) {
                         None => {}
                         Some(sender_to_recipient) => {
-                            sender_to_recipient.send(RequestWithToken(mode_request, token)).expect("sending mode request failed");
+                            sender_to_recipient
+                                .send(RequestWithToken(mode_request, token))
+                                .expect("sending mode request failed");
                         }
                     }
                 }
@@ -523,11 +567,14 @@ impl PusReceiver {
                 Subservice::TmWrongModeReply => {}
             }
         } else {
-            vr.start_failure(
+            self.tm_args
+                .verif_reporter
+                .start_failure(
                     token,
                     FailParams::new(
-                        Some(stamp), &tmtc_err::INVALID_PUS_SUBSERVICE,
-                        Some(&[PusPacket::subservice(pus_tc)])
+                        Some(self.stamp_helper.stamp()),
+                        &tmtc_err::INVALID_PUS_SUBSERVICE,
+                        Some(&[PusPacket::subservice(pus_tc)]),
                     ),
                 )
                 .expect("Sending start failure TM failed");

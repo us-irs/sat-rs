@@ -1,5 +1,5 @@
-use core::mem::size_of;
 use crate::tmtc::TargetId;
+use core::mem::size_of;
 use serde::{Deserialize, Serialize};
 use spacepackets::{ByteConversionError, SizeMissmatch};
 
@@ -12,17 +12,11 @@ pub struct ModeAndSubmode {
 
 impl ModeAndSubmode {
     pub const fn new_mode_only(mode: u32) -> Self {
-        Self {
-            mode,
-            submode: 0
-        }
+        Self { mode, submode: 0 }
     }
 
     pub const fn new(mode: u32, submode: u16) -> Self {
-        Self {
-            mode,
-            submode
-        }
+        Self { mode, submode }
     }
 
     pub fn raw_len() -> usize {
@@ -33,12 +27,12 @@ impl ModeAndSubmode {
         if buf.len() < 6 {
             return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
                 expected: 6,
-                found: buf.len()
+                found: buf.len(),
             }));
         }
         Ok(Self {
             mode: u32::from_be_bytes(buf[0..4].try_into().unwrap()),
-            submode: u16::from_be_bytes(buf[4..6].try_into().unwrap())
+            submode: u16::from_be_bytes(buf[4..6].try_into().unwrap()),
         })
     }
 }
@@ -53,7 +47,7 @@ impl ModeCommand {
     pub const fn new(address: TargetId, mode_submode: ModeAndSubmode) -> Self {
         Self {
             address,
-            mode_submode
+            mode_submode,
         }
     }
 }

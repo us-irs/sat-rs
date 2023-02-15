@@ -245,6 +245,9 @@ fn main() {
                             HkRequest::Disable(_) => {}
                             HkRequest::ModifyCollectionInterval(_, _) => {}
                         },
+                        Request::ModeRequest(_mode_req) => {
+                            println!("mode request handling not implemented yet")
+                        }
                     }
                     let started_token = reporter_aocs
                         .start_success(request.1, Some(&timestamp))
