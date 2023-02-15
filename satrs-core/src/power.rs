@@ -32,19 +32,6 @@ pub trait PowerSwitcherCommandSender {
 
     fn send_switch_on_cmd(&mut self, switch_id: SwitchId) -> Result<(), Self::Error>;
     fn send_switch_off_cmd(&mut self, switch_id: SwitchId) -> Result<(), Self::Error>;
-
-    fn switch_on<T: PowerSwitch>(
-        &mut self,
-        switch: &mut T,
-    ) -> Result<(), <T as PowerSwitch>::Error> {
-        switch.switch_on()
-    }
-    fn switch_off<T: PowerSwitch>(
-        &mut self,
-        switch: &mut T,
-    ) -> Result<(), <T as PowerSwitch>::Error> {
-        switch.switch_off()
-    }
 }
 
 pub trait PowerSwitchInfo {

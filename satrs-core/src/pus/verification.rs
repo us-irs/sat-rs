@@ -72,8 +72,11 @@
 //! The [integration test](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-core/tests/verification_test.rs)
 //! for the verification module contains examples how this module could be used in a more complex
 //! context involving multiple threads
-use crate::pus::{source_buffer_large_enough, EcssTmError, EcssTmErrorWithSend, EcssTmSenderCore};
-use core::fmt::{Display, Formatter};
+use crate::pus::{
+    source_buffer_large_enough, EcssTmError, EcssTmErrorWithSend, EcssTmSenderCore,
+    GenericTcCheckError,
+};
+use core::fmt::{Debug, Display, Formatter};
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::mem::size_of;
@@ -81,7 +84,7 @@ use core::mem::size_of;
 use delegate::delegate;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use spacepackets::ecss::EcssEnumeration;
+use spacepackets::ecss::{scheduling, EcssEnumeration, PusPacket};
 use spacepackets::tc::PusTc;
 use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
@@ -1364,6 +1367,21 @@ mod stdmod {
             }
         }
     }
+}
+
+pub fn pus_11_generic_tc_check(
+    pus_tc: &PusTc,
+) -> Result<scheduling::Subservice, GenericTcCheckError> {
+    if pus_tc.user_data().is_none() {
+        return Err(GenericTcCheckError::NotEnoughAppData);
+    }
+    let subservice: scheduling::Subservice = match pus_tc.subservice().try_into() {
+        Ok(subservice) => subservice,
+        Err(_) => {
+            return Err(GenericTcCheckError::InvalidSubservice);
+        }
+    };
+    Ok(subservice)
 }
 
 #[cfg(test)]

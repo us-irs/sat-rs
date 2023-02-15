@@ -26,6 +26,7 @@ pub mod events;
 pub mod executable;
 pub mod hal;
 pub mod hk;
+pub mod mode;
 pub mod objects;
 pub mod params;
 #[cfg(feature = "alloc")]

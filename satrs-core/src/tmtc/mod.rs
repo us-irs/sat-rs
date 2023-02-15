@@ -23,10 +23,12 @@ pub use ccsds_distrib::{CcsdsDistributor, CcsdsError, CcsdsPacketHandler};
 #[cfg(feature = "alloc")]
 pub use pus_distrib::{PusDistributor, PusServiceProvider};
 
+pub type TargetId = u32;
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AddressableId {
-    pub target_id: u32,
+    pub target_id: TargetId,
     pub unique_id: u32,
 }
 

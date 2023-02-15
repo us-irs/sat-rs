@@ -11,6 +11,7 @@ use spacepackets::{ByteConversionError, SizeMissmatch};
 pub mod event;
 pub mod event_man;
 pub mod hk;
+pub mod mode;
 #[cfg(feature = "std")]
 pub mod scheduling;
 pub mod verification;
@@ -86,6 +87,12 @@ mod alloc_mod {
 
     dyn_clone::clone_trait_object!(<T> EcssTmSender<Error=T>);
     impl_downcast!(EcssTmSender assoc Error);
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum GenericTcCheckError {
+    NotEnoughAppData,
+    InvalidSubservice,
 }
 
 pub(crate) fn source_buffer_large_enough(cap: usize, len: usize) -> Result<(), EcssTmError> {
