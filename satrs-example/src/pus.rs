@@ -55,7 +55,7 @@ impl PusTmArgs {
 
 pub struct PusTcArgs {
     pub event_request_tx: Sender<EventRequestWithToken>,
-    /// Request routing helper. Maps targeted request to their recipient.
+    /// Request routing helper. Maps targeted requests to their recipient.
     pub request_map: HashMap<TargetId, Sender<RequestWithToken>>,
     /// Required for scheduling of telecommands.
     pub tc_source: PusTcSource,
