@@ -1,8 +1,16 @@
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use satrs_core::events::{EventU32TypedSev, SeverityInfo};
 use std::net::Ipv4Addr;
 
 use satrs_mib::res_code::{ResultU16, ResultU16Info};
 use satrs_mib::resultcode;
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug, TryFromPrimitive, IntoPrimitive)]
+#[repr(u8)]
+pub enum CustomPusServiceId {
+    Mode = 200,
+    Health = 201,
+}
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum RequestTargetId {
@@ -28,6 +36,8 @@ pub mod tmtc_err {
     pub const INVALID_PUS_SERVICE: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 0);
     #[resultcode]
     pub const INVALID_PUS_SUBSERVICE: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 1);
+    #[resultcode]
+    pub const PUS_SERVICE_NOT_IMPLEMENTED: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 2);
 
     #[resultcode(info = "Not enough data inside the TC application data field")]
     pub const NOT_ENOUGH_APP_DATA: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 2);

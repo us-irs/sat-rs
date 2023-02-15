@@ -88,6 +88,12 @@ mod alloc_mod {
     impl_downcast!(EcssTmSender assoc Error);
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum GenericTcCheckError {
+    NotEnoughAppData,
+    InvalidSubservice,
+}
+
 pub(crate) fn source_buffer_large_enough(cap: usize, len: usize) -> Result<(), EcssTmError> {
     if len > cap {
         return Err(EcssTmError::ByteConversionError(

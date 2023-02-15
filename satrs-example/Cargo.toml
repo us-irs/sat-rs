@@ -10,6 +10,7 @@ crossbeam-channel = "0.5"
 delegate = "0.9"
 zerocopy = "0.6"
 csv = "1"
+num_enum = "0.5"
 
 [dependencies.satrs-core]
 path = "../satrs-core"
