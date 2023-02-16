@@ -59,11 +59,11 @@ impl ModeCommand {
         self.mode_submode
     }
 
-    pub fn get_mode(&self) -> u32 {
+    pub fn mode(&self) -> u32 {
         self.mode_submode.mode
     }
 
-    pub fn get_submode(&self) -> u16 {
+    pub fn submode(&self) -> u16 {
         self.mode_submode.submode
     }
 }
