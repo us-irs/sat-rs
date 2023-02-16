@@ -50,6 +50,22 @@ impl ModeCommand {
             mode_submode,
         }
     }
+
+    pub fn address(&self) -> TargetId {
+        self.address
+    }
+
+    pub fn mode_submode(&self) -> ModeAndSubmode {
+        self.mode_submode
+    }
+
+    pub fn mode(&self) -> u32 {
+        self.mode_submode.mode
+    }
+
+    pub fn submode(&self) -> u16 {
+        self.mode_submode.submode
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
