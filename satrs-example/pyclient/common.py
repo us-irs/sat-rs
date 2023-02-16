@@ -8,9 +8,9 @@ EXAMPLE_PUS_APID = 0x02
 
 
 class EventSeverity(enum.IntEnum):
-    INFO = (0,)
-    LOW = (1,)
-    MEDIUM = (2,)
+    INFO = 0
+    LOW = 1
+    MEDIUM = 2
     HIGH = 3
 
 
