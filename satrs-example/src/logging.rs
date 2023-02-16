@@ -4,7 +4,7 @@ pub fn setup_logger() -> Result<(), fern::InitError> {
             out.finish(format_args!(
                 "{}[{}][{}] {}",
                 chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
-                std::thread::current().name().expect("unnamed_thread"),
+                record.target(), //(std::thread::current().name().expect("unnamed_thread"),
                 record.level(),
                 message
             ))

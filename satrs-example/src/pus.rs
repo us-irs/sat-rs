@@ -1,6 +1,6 @@
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{PusTcSource, TmStore};
-use log::warn;
+use log::{info, warn};
 use satrs_core::events::EventU32;
 use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
 use satrs_core::mode::{ModeAndSubmode, ModeCommand, ModeRequest};
@@ -168,8 +168,8 @@ impl PusReceiver {
     fn handle_test_service(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
         match PusPacket::subservice(pus_tc) {
             1 => {
-                println!("Received PUS ping command TC[17,1]");
-                println!("Sending ping reply PUS TM[17,2]");
+                info!("Received PUS ping command TC[17,1]");
+                info!("Sending ping reply PUS TM[17,2]");
                 let start_token = self
                     .tm_args
                     .verif_reporter
@@ -187,6 +187,7 @@ impl PusReceiver {
                     .expect("Error sending completion success");
             }
             128 => {
+                info!("Generating test event");
                 self.tc_args
                     .event_sender
                     .send((TEST_EVENT.into(), None))

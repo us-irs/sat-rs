@@ -109,23 +109,34 @@ fn main() {
         8,
     )
     .unwrap();
+    // Every software component which needs to generate verification telemetry, gets a cloned
+    // verification reporter.
     let verif_reporter = VerificationReporterWithSender::new(&verif_cfg, Box::new(verif_sender));
+    let mut reporter_event_handler = verif_reporter.clone();
+    let mut reporter_aocs = verif_reporter.clone();
 
     // Create event handling components
+    // These sender handles are used to send event requests, for example to enable or disable
+    // certain events
     let (event_request_tx, event_request_rx) = channel::<EventRequestWithToken>();
+    // The sender handle is the primary sender handle for all components which want to create events.
+    // The event manager will receive the RX handle to receive all the events.
     let (event_sender, event_man_rx) = channel();
     let event_recv = MpscEventReceiver::<EventU32>::new(event_man_rx);
     let mut event_man = EventManagerWithMpscQueue::new(Box::new(event_recv));
+
+    // All events sent to the manager are routed to the PUS event manager, which generates PUS event
+    // telemetry for each event.
     let event_reporter = EventReporter::new(PUS_APID, 128).unwrap();
     let pus_tm_backend = DefaultPusMgmtBackendProvider::<EventU32>::default();
     let mut pus_event_dispatcher =
         PusEventDispatcher::new(event_reporter, Box::new(pus_tm_backend));
     let (pus_event_man_tx, pus_event_man_rx) = channel();
     let pus_event_man_send_provider = MpscEventU32SendProvider::new(1, pus_event_man_tx);
-    let mut reporter_event_handler = verif_reporter.clone();
-    let mut reporter_aocs = verif_reporter.clone();
     event_man.subscribe_all(pus_event_man_send_provider.id());
+    event_man.add_sender(pus_event_man_send_provider);
 
+    // Some request are targetable. This map is used to retrieve sender handles based on a target ID.
     let mut request_map = HashMap::new();
     let (acs_thread_tx, acs_thread_rx) = channel::<RequestWithToken>();
     request_map.insert(RequestTargetId::AcsSubsystem as u32, acs_thread_tx);
@@ -157,120 +168,151 @@ fn main() {
     let mut aocs_tm_store = tm_store.clone();
 
     info!("Starting TMTC task");
-    let jh0 = thread::spawn(move || {
-        core_tmtc_task(core_args, tc_args, tm_args);
-    });
+    let jh0 = thread::Builder::new()
+        .name("TMTC".to_string())
+        .spawn(move || {
+            core_tmtc_task(core_args, tc_args, tm_args);
+        })
+        .unwrap();
 
     info!("Starting TM funnel task");
-    let jh1 = thread::spawn(move || {
-        let tm_funnel = TmFunnel {
-            tm_server_tx,
-            tm_funnel_rx,
-        };
-        loop {
-            if let Ok(addr) = tm_funnel.tm_funnel_rx.recv() {
-                tm_funnel
-                    .tm_server_tx
-                    .send(addr)
-                    .expect("Sending TM to server failed");
+    let jh1 = thread::Builder::new()
+        .name("TM Funnel".to_string())
+        .spawn(move || {
+            let tm_funnel = TmFunnel {
+                tm_server_tx,
+                tm_funnel_rx,
+            };
+            loop {
+                if let Ok(addr) = tm_funnel.tm_funnel_rx.recv() {
+                    tm_funnel
+                        .tm_server_tx
+                        .send(addr)
+                        .expect("Sending TM to server failed");
+                }
             }
-        }
-    });
+        })
+        .unwrap();
 
     info!("Starting event handling task");
-    let jh2 = thread::spawn(move || {
-        let mut timestamp: [u8; 7] = [0; 7];
-        let mut sender = EventTmSender::new(tm_store, tm_funnel_tx);
-        let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
-        let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
-            reporter_event_handler
-                .completion_success(event_req.token, Some(timestamp))
-                .expect("Sending completion success failed");
-        };
-        loop {
-            if let Ok(event_req) = event_request_rx.try_recv() {
-                match event_req.request {
-                    EventRequest::Enable(event) => {
-                        pus_event_dispatcher
-                            .enable_tm_for_event(&event)
-                            .expect("Enabling TM failed");
-                        update_time(&mut time_provider, &mut timestamp);
-                        report_completion(event_req, &timestamp);
-                    }
-                    EventRequest::Disable(event) => {
-                        pus_event_dispatcher
-                            .disable_tm_for_event(&event)
-                            .expect("Disabling TM failed");
-                        update_time(&mut time_provider, &mut timestamp);
-                        report_completion(event_req, &timestamp);
-                    }
-                }
-            }
-            if let Ok((event, _param)) = pus_event_man_rx.try_recv() {
-                update_time(&mut time_provider, &mut timestamp);
-                pus_event_dispatcher
-                    .generate_pus_event_tm_generic(&mut sender, &timestamp, event, None)
-                    .expect("Sending TM as event failed");
-            }
-            thread::sleep(Duration::from_millis(400));
-        }
-    });
-
-    info!("Starting AOCS thread");
-    let jh3 = thread::spawn(move || {
-        let mut timestamp: [u8; 7] = [0; 7];
-        let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
-        loop {
-            match acs_thread_rx.try_recv() {
-                Ok(request) => {
-                    info!("ACS thread: Received HK request {:?}", request.0);
-                    update_time(&mut time_provider, &mut timestamp);
-                    match request.0 {
-                        Request::HkRequest(hk_req) => match hk_req {
-                            HkRequest::OneShot(address) => {
-                                assert_eq!(address.target_id, RequestTargetId::AcsSubsystem as u32);
-                                if address.unique_id == AcsHkIds::TestMgmSet as u32 {
-                                    let mut sp_header =
-                                        SpHeader::tm(PUS_APID, SequenceFlags::Unsegmented, 0, 0)
-                                            .unwrap();
-                                    let sec_header = PusTmSecondaryHeader::new_simple(
-                                        3,
-                                        HkSubservice::TmHkPacket as u8,
-                                        &timestamp,
-                                    );
-                                    let mut buf: [u8; 8] = [0; 8];
-                                    address.write_to_be_bytes(&mut buf).unwrap();
-                                    let pus_tm =
-                                        PusTm::new(&mut sp_header, sec_header, Some(&buf), true);
-                                    let addr = aocs_tm_store.add_pus_tm(&pus_tm);
-                                    aocs_to_funnel.send(addr).expect("Sending HK TM failed");
-                                }
-                            }
-                            HkRequest::Enable(_) => {}
-                            HkRequest::Disable(_) => {}
-                            HkRequest::ModifyCollectionInterval(_, _) => {}
-                        },
-                        Request::ModeRequest(_mode_req) => {
-                            warn!("mode request handling not implemented yet")
+    let jh2 = thread::Builder::new()
+        .name("Event".to_string())
+        .spawn(move || {
+            let mut timestamp: [u8; 7] = [0; 7];
+            let mut sender = EventTmSender::new(tm_store, tm_funnel_tx);
+            let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
+            let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
+                reporter_event_handler
+                    .completion_success(event_req.token, Some(timestamp))
+                    .expect("Sending completion success failed");
+            };
+            loop {
+                // handle event requests
+                if let Ok(event_req) = event_request_rx.try_recv() {
+                    match event_req.request {
+                        EventRequest::Enable(event) => {
+                            pus_event_dispatcher
+                                .enable_tm_for_event(&event)
+                                .expect("Enabling TM failed");
+                            update_time(&mut time_provider, &mut timestamp);
+                            report_completion(event_req, &timestamp);
+                        }
+                        EventRequest::Disable(event) => {
+                            pus_event_dispatcher
+                                .disable_tm_for_event(&event)
+                                .expect("Disabling TM failed");
+                            update_time(&mut time_provider, &mut timestamp);
+                            report_completion(event_req, &timestamp);
                         }
                     }
-                    let started_token = reporter_aocs
-                        .start_success(request.1, Some(&timestamp))
-                        .expect("Sending start success failed");
-                    reporter_aocs
-                        .completion_success(started_token, Some(&timestamp))
-                        .expect("Sending completion success failed");
                 }
-                Err(e) => match e {
-                    TryRecvError::Empty => {}
-                    TryRecvError::Disconnected => {
-                        warn!("ACS thread: Message Queue TX disconnected!")
-                    }
-                },
+
+                // Perform the event routing.
+                event_man
+                    .try_event_handling()
+                    .expect("event handling failed");
+
+                // Perform the generation of PUS event packets
+                if let Ok((event, _param)) = pus_event_man_rx.try_recv() {
+                    update_time(&mut time_provider, &mut timestamp);
+                    pus_event_dispatcher
+                        .generate_pus_event_tm_generic(&mut sender, &timestamp, event, None)
+                        .expect("Sending TM as event failed");
+                }
+                thread::sleep(Duration::from_millis(400));
             }
-            thread::sleep(Duration::from_millis(500));
-        }
-    });
+        })
+        .unwrap();
+
+    info!("Starting AOCS thread");
+    let jh3 = thread::Builder::new()
+        .name("AOCS".to_string())
+        .spawn(move || {
+            let mut timestamp: [u8; 7] = [0; 7];
+            let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
+            loop {
+                match acs_thread_rx.try_recv() {
+                    Ok(request) => {
+                        info!("ACS thread: Received HK request {:?}", request.0);
+                        update_time(&mut time_provider, &mut timestamp);
+                        match request.0 {
+                            Request::HkRequest(hk_req) => match hk_req {
+                                HkRequest::OneShot(address) => {
+                                    assert_eq!(
+                                        address.target_id,
+                                        RequestTargetId::AcsSubsystem as u32
+                                    );
+                                    if address.unique_id == AcsHkIds::TestMgmSet as u32 {
+                                        let mut sp_header = SpHeader::tm(
+                                            PUS_APID,
+                                            SequenceFlags::Unsegmented,
+                                            0,
+                                            0,
+                                        )
+                                        .unwrap();
+                                        let sec_header = PusTmSecondaryHeader::new_simple(
+                                            3,
+                                            HkSubservice::TmHkPacket as u8,
+                                            &timestamp,
+                                        );
+                                        let mut buf: [u8; 8] = [0; 8];
+                                        address.write_to_be_bytes(&mut buf).unwrap();
+                                        let pus_tm = PusTm::new(
+                                            &mut sp_header,
+                                            sec_header,
+                                            Some(&buf),
+                                            true,
+                                        );
+                                        let addr = aocs_tm_store.add_pus_tm(&pus_tm);
+                                        aocs_to_funnel.send(addr).expect("Sending HK TM failed");
+                                    }
+                                }
+                                HkRequest::Enable(_) => {}
+                                HkRequest::Disable(_) => {}
+                                HkRequest::ModifyCollectionInterval(_, _) => {}
+                            },
+                            Request::ModeRequest(_mode_req) => {
+                                warn!("mode request handling not implemented yet")
+                            }
+                        }
+                        let started_token = reporter_aocs
+                            .start_success(request.1, Some(&timestamp))
+                            .expect("Sending start success failed");
+                        reporter_aocs
+                            .completion_success(started_token, Some(&timestamp))
+                            .expect("Sending completion success failed");
+                    }
+                    Err(e) => match e {
+                        TryRecvError::Empty => {}
+                        TryRecvError::Disconnected => {
+                            warn!("ACS thread: Message Queue TX disconnected!")
+                        }
+                    },
+                }
+                thread::sleep(Duration::from_millis(500));
+            }
+        })
+        .unwrap();
 
     jh0.join().expect("Joining UDP TMTC server thread failed");
     jh1.join().expect("Joining TM Funnel thread failed");

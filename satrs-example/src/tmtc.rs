@@ -1,3 +1,4 @@
+use log::info;
 use satrs_core::events::EventU32;
 use satrs_core::hal::host::udp_server::{ReceiveResult, UdpTcServer};
 use satrs_core::params::Params;
@@ -240,7 +241,7 @@ fn core_tmtc_loop(
     scheduler.update_time_from_now().unwrap();
     if let Ok(released_tcs) = scheduler.release_telecommands(releaser, pool.as_mut()) {
         if released_tcs > 0 {
-            println!("{released_tcs} TC(s) released from scheduler");
+            info!("{released_tcs} TC(s) released from scheduler");
         }
     }
     drop(pool);
@@ -315,9 +316,9 @@ fn core_tm_handling(udp_tmtc_server: &mut UdpTmtcServer, recv_addr: &SocketAddr)
         if buf.len() > 9 {
             let service = buf[7];
             let subservice = buf[8];
-            println!("Sending PUS TM[{service},{subservice}]")
+            info!("Sending PUS TM[{service},{subservice}]")
         } else {
-            println!("Sending PUS TM");
+            info!("Sending PUS TM");
         }
         udp_tmtc_server
             .udp_tc_server
