@@ -1,12 +1,16 @@
 //! # Core components of the sat-rs framework
 //!
-//! This is a collection of Rust crates which can be used to build On-Board Software for remote
-//! systems like satellites of rovers. It has special support for space tailored protocols
-//! like the ones provided by CCSDS and ECSS.
+//! You can find more information about the sat-rs framework on the
+//! [homepage](https://egit.irs.uni-stuttgart.de/rust/sat-rs).
 //!
-//! The crates can generally be used in a `no_std` environment, but some crates expect that the
-//! [alloc](https://doc.rust-lang.org/alloc) crate is available to allow boxed trait objects.
-//! These are used to supply user code to the crates.
+//! ## Overview
+//!
+//! The core modules of this crate include
+//!
+//!  - The [event manager][event_man] module which provides a publish and
+//!    and subscribe to route events.
+//!  - The [pus] module which provides special support for projects using
+//!    the [ECSS PUS C standard](https://ecss.nl/standard/ecss-e-st-70-41c-space-engineering-telemetry-and-telecommand-packet-utilization-15-april-2016/).
 #![no_std]
 #![cfg_attr(doc_cfg, feature(doc_cfg))]
 #[cfg(feature = "alloc")]
