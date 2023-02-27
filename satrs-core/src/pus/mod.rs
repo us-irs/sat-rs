@@ -19,9 +19,12 @@ pub mod verification;
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
 
+#[cfg(feature = "std")]
+pub use std_mod::*;
+
 #[derive(Debug, Clone)]
 pub enum EcssTmErrorWithSend<E> {
-    /// Errors related to sending the verification telemetry to a TM recipient
+    /// Errors related to sending the telemetry to a TM recipient
     SendError(E),
     EcssTmError(EcssTmError),
 }
@@ -32,7 +35,7 @@ impl<E> From<EcssTmError> for EcssTmErrorWithSend<E> {
     }
 }
 
-/// Generic error type which is also able to wrap a user send error with the user supplied type E.
+/// Generic error type for PUS TM handling.
 #[derive(Debug, Clone)]
 pub enum EcssTmError {
     /// Errors related to the time stamp format of the telemetry
@@ -61,7 +64,7 @@ impl From<ByteConversionError> for EcssTmError {
 pub trait EcssTmSenderCore: Send {
     type Error;
 
-    fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmErrorWithSend<Self::Error>>;
+    fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error>;
 }
 
 #[cfg(feature = "alloc")]
@@ -87,6 +90,111 @@ mod alloc_mod {
 
     dyn_clone::clone_trait_object!(<T> EcssTmSender<Error=T>);
     impl_downcast!(EcssTmSender assoc Error);
+}
+
+#[cfg(feature = "std")]
+pub mod std_mod {
+    use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr, StoreError};
+    use crate::pus::EcssTmSenderCore;
+    use alloc::vec::Vec;
+    use spacepackets::ecss::PusError;
+    use spacepackets::tm::PusTm;
+    use std::sync::mpsc::SendError;
+    use std::sync::{mpsc, RwLockWriteGuard};
+
+    #[derive(Debug, Clone)]
+    pub enum MpscPusInStoreSendError {
+        LockError,
+        PusError(PusError),
+        StoreError(StoreError),
+        SendError(SendError<StoreAddr>),
+        RxDisconnected(StoreAddr),
+    }
+
+    impl From<PusError> for MpscPusInStoreSendError {
+        fn from(value: PusError) -> Self {
+            MpscPusInStoreSendError::PusError(value)
+        }
+    }
+    impl From<SendError<StoreAddr>> for MpscPusInStoreSendError {
+        fn from(value: SendError<StoreAddr>) -> Self {
+            MpscPusInStoreSendError::SendError(value)
+        }
+    }
+    impl From<StoreError> for MpscPusInStoreSendError {
+        fn from(value: StoreError) -> Self {
+            MpscPusInStoreSendError::StoreError(value)
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct MpscTmInStoreSender {
+        store_helper: SharedPool,
+        sender: mpsc::Sender<StoreAddr>,
+        pub ignore_poison_errors: bool,
+    }
+
+    impl EcssTmSenderCore for MpscTmInStoreSender {
+        type Error = MpscPusInStoreSendError;
+
+        fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
+            let operation = |mut store: RwLockWriteGuard<ShareablePoolProvider>| {
+                let (addr, slice) = store.free_element(tm.len_packed())?;
+                tm.write_to_bytes(slice)?;
+                self.sender.send(addr)?;
+                Ok(())
+            };
+            match self.store_helper.write() {
+                Ok(pool) => operation(pool),
+                Err(e) => {
+                    if self.ignore_poison_errors {
+                        operation(e.into_inner())
+                    } else {
+                        Err(MpscPusInStoreSendError::LockError)
+                    }
+                }
+            }
+        }
+    }
+
+    impl MpscTmInStoreSender {
+        pub fn new(store_helper: SharedPool, sender: mpsc::Sender<StoreAddr>) -> Self {
+            Self {
+                store_helper,
+                sender,
+                ignore_poison_errors: false,
+            }
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum MpscAsVecSenderError {
+        PusError(PusError),
+        SendError(SendError<Vec<u8>>),
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct MpscTmAsVecSender {
+        sender: mpsc::Sender<Vec<u8>>,
+    }
+
+    impl MpscTmAsVecSender {
+        pub fn new(sender: mpsc::Sender<Vec<u8>>) -> Self {
+            Self { sender }
+        }
+    }
+    impl EcssTmSenderCore for MpscTmAsVecSender {
+        type Error = MpscAsVecSenderError;
+        fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
+            let mut vec = Vec::new();
+            tm.append_to_vec(&mut vec)
+                .map_err(MpscAsVecSenderError::PusError)?;
+            self.sender
+                .send(vec)
+                .map_err(MpscAsVecSenderError::SendError)?;
+            Ok(())
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

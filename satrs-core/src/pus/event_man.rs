@@ -238,32 +238,13 @@ pub mod alloc_mod {
 mod tests {
     use super::*;
     use crate::events::SeverityInfo;
-    use spacepackets::tm::PusTm;
-    use std::sync::mpsc::{channel, SendError, TryRecvError};
-    use std::vec::Vec;
+    use crate::pus::MpscTmAsVecSender;
+    use std::sync::mpsc::{channel, TryRecvError};
 
     const INFO_EVENT: EventU32TypedSev<SeverityInfo> =
         EventU32TypedSev::<SeverityInfo>::const_new(1, 0);
     const LOW_SEV_EVENT: EventU32 = EventU32::const_new(Severity::LOW, 1, 5);
     const EMPTY_STAMP: [u8; 7] = [0; 7];
-
-    #[derive(Clone)]
-    struct EventTmSender {
-        sender: std::sync::mpsc::Sender<Vec<u8>>,
-    }
-
-    impl EcssTmSenderCore for EventTmSender {
-        type Error = SendError<Vec<u8>>;
-        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmErrorWithSend<Self::Error>> {
-            let mut vec = Vec::new();
-            tm.append_to_vec(&mut vec)
-                .map_err(|e| EcssTmErrorWithSend::EcssTmError(e.into()))?;
-            self.sender
-                .send(vec)
-                .map_err(EcssTmErrorWithSend::SendError)?;
-            Ok(())
-        }
-    }
 
     fn create_basic_man() -> PusEventDispatcher<(), EventU32> {
         let reporter = EventReporter::new(0x02, 128).expect("Creating event repoter failed");
@@ -275,7 +256,7 @@ mod tests {
     fn test_basic() {
         let mut event_man = create_basic_man();
         let (event_tx, event_rx) = channel();
-        let mut sender = EventTmSender { sender: event_tx };
+        let mut sender = MpscTmAsVecSender::new(event_tx);
         let event_sent = event_man
             .generate_pus_event_tm(&mut sender, &EMPTY_STAMP, INFO_EVENT, None)
             .expect("Sending info event failed");
@@ -289,7 +270,7 @@ mod tests {
     fn test_disable_event() {
         let mut event_man = create_basic_man();
         let (event_tx, event_rx) = channel();
-        let mut sender = EventTmSender { sender: event_tx };
+        let mut sender = MpscTmAsVecSender::new(event_tx);
         let res = event_man.disable_tm_for_event(&LOW_SEV_EVENT);
         assert!(res.is_ok());
         assert!(res.unwrap());
@@ -312,7 +293,7 @@ mod tests {
     fn test_reenable_event() {
         let mut event_man = create_basic_man();
         let (event_tx, event_rx) = channel();
-        let mut sender = EventTmSender { sender: event_tx };
+        let mut sender = MpscTmAsVecSender::new(event_tx);
         let mut res = event_man.disable_tm_for_event_with_sev(&INFO_EVENT);
         assert!(res.is_ok());
         assert!(res.unwrap());

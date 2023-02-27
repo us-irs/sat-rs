@@ -102,10 +102,7 @@ use crate::seq_count::SequenceCountProviderCore;
 #[cfg(all(feature = "crossbeam", feature = "std"))]
 pub use stdmod::CrossbeamVerifSender;
 #[cfg(feature = "std")]
-pub use stdmod::{
-    MpscVerifSender, SharedStdVerifReporterWithSender, StdVerifReporterWithSender,
-    StdVerifSenderError,
-};
+pub use stdmod::{MpscVerifSender, SharedStdVerifReporterWithSender, StdVerifReporterWithSender};
 
 /// This is a request identifier as specified in 5.4.11.2 c. of the PUS standard.
 ///
@@ -520,7 +517,12 @@ impl VerificationReporterCore {
     {
         sender
             .send_tm(sendable.pus_tm.take().unwrap())
-            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
+            .map_err(|e| {
+                VerificationOrSendErrorWithToken(
+                    EcssTmErrorWithSend::SendError(e),
+                    sendable.token.unwrap(),
+                )
+            })?;
         Ok(sendable.send_success_acceptance_success(Some(seq_counter)))
     }
 
@@ -532,7 +534,12 @@ impl VerificationReporterCore {
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateNone>> {
         sender
             .send_tm(sendable.pus_tm.take().unwrap())
-            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
+            .map_err(|e| {
+                VerificationOrSendErrorWithToken(
+                    EcssTmErrorWithSend::SendError(e),
+                    sendable.token.unwrap(),
+                )
+            })?;
         sendable.send_success_verif_failure(Some(seq_counter));
         Ok(())
     }
@@ -591,7 +598,12 @@ impl VerificationReporterCore {
     > {
         sender
             .send_tm(sendable.pus_tm.take().unwrap())
-            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
+            .map_err(|e| {
+                VerificationOrSendErrorWithToken(
+                    EcssTmErrorWithSend::SendError(e),
+                    sendable.token.unwrap(),
+                )
+            })?;
         Ok(sendable.send_success_start_success(Some(seq_counter)))
     }
 
@@ -627,7 +639,12 @@ impl VerificationReporterCore {
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateAccepted>> {
         sender
             .send_tm(sendable.pus_tm.take().unwrap())
-            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
+            .map_err(|e| {
+                VerificationOrSendErrorWithToken(
+                    EcssTmErrorWithSend::SendError(e),
+                    sendable.token.unwrap(),
+                )
+            })?;
         sendable.send_success_verif_failure(Some(seq_counter));
         Ok(())
     }
@@ -738,7 +755,12 @@ impl VerificationReporterCore {
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
         sender
             .send_tm(sendable.pus_tm.take().unwrap())
-            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
+            .map_err(|e| {
+                VerificationOrSendErrorWithToken(
+                    EcssTmErrorWithSend::SendError(e),
+                    sendable.token.unwrap(),
+                )
+            })?;
         sendable.send_success_step_or_completion_success(Some(seq_counter));
         Ok(())
     }
@@ -751,7 +773,12 @@ impl VerificationReporterCore {
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
         sender
             .send_tm(sendable.pus_tm.take().unwrap())
-            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
+            .map_err(|e| {
+                VerificationOrSendErrorWithToken(
+                    EcssTmErrorWithSend::SendError(e),
+                    sendable.token.unwrap(),
+                )
+            })?;
         sendable.send_success_verif_failure(Some(seq_counter));
         Ok(())
     }
@@ -1223,32 +1250,14 @@ mod alloc_mod {
 mod stdmod {
     use super::alloc_mod::VerificationReporterWithSender;
     use super::*;
-    use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr, StoreError};
+    use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr};
+    use crate::pus::MpscPusInStoreSendError;
     use delegate::delegate;
     use spacepackets::tm::PusTm;
     use std::sync::{mpsc, Arc, Mutex, RwLockWriteGuard};
 
-    pub type StdVerifReporterWithSender = VerificationReporterWithSender<StdVerifSenderError>;
+    pub type StdVerifReporterWithSender = VerificationReporterWithSender<MpscPusInStoreSendError>;
     pub type SharedStdVerifReporterWithSender = Arc<Mutex<StdVerifReporterWithSender>>;
-
-    #[derive(Debug, Eq, PartialEq, Clone)]
-    pub enum StdVerifSenderError {
-        PoisonError,
-        StoreError(StoreError),
-        RxDisconnected(StoreAddr),
-    }
-
-    impl From<StoreError> for StdVerifSenderError {
-        fn from(e: StoreError) -> Self {
-            StdVerifSenderError::StoreError(e)
-        }
-    }
-
-    impl From<StoreError> for EcssTmErrorWithSend<StdVerifSenderError> {
-        fn from(e: StoreError) -> Self {
-            EcssTmErrorWithSend::SendError(e.into())
-        }
-    }
 
     trait SendBackend: Send {
         fn send(&self, addr: StoreAddr) -> Result<(), StoreAddr>;
@@ -1297,11 +1306,11 @@ mod stdmod {
 
     //noinspection RsTraitImplementation
     impl EcssTmSenderCore for MpscVerifSender {
-        type Error = StdVerifSenderError;
+        type Error = MpscPusInStoreSendError;
 
         delegate!(
             to self.base {
-                fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmErrorWithSend<StdVerifSenderError>>;
+                fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error>;
             }
         );
     }
@@ -1332,25 +1341,26 @@ mod stdmod {
     //noinspection RsTraitImplementation
     #[cfg(feature = "crossbeam")]
     impl EcssTmSenderCore for CrossbeamVerifSender {
-        type Error = StdVerifSenderError;
+        type Error = MpscPusInStoreSendError;
 
         delegate!(
             to self.base {
-                fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmErrorWithSend<StdVerifSenderError>>;
+                fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error>;
             }
         );
     }
 
     impl<S: SendBackend + Clone + 'static> EcssTmSenderCore for StdSenderBase<S> {
-        type Error = StdVerifSenderError;
-        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmErrorWithSend<Self::Error>> {
+        type Error = MpscPusInStoreSendError;
+        fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
             let operation = |mut mg: RwLockWriteGuard<ShareablePoolProvider>| {
                 let (addr, buf) = mg.free_element(tm.len_packed())?;
-                tm.write_to_bytes(buf).map_err(EcssTmError::PusError)?;
+                tm.write_to_bytes(buf)
+                    .map_err(MpscPusInStoreSendError::PusError)?;
                 drop(mg);
-                self.tx.send(addr).map_err(|_| {
-                    EcssTmErrorWithSend::SendError(StdVerifSenderError::RxDisconnected(addr))
-                })?;
+                self.tx
+                    .send(addr)
+                    .map_err(|_| MpscPusInStoreSendError::RxDisconnected(addr))?;
                 Ok(())
             };
             match self.tm_store.write() {
@@ -1359,9 +1369,7 @@ mod stdmod {
                     if self.ignore_poison_error {
                         operation(poison_error.into_inner())
                     } else {
-                        Err(EcssTmErrorWithSend::SendError(
-                            StdVerifSenderError::PoisonError,
-                        ))
+                        Err(MpscPusInStoreSendError::LockError)
                     }
                 }
             }
@@ -1427,7 +1435,7 @@ mod tests {
 
     impl EcssTmSenderCore for TestSender {
         type Error = ();
-        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmErrorWithSend<Self::Error>> {
+        fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
             assert_eq!(PusPacket::service(&tm), 1);
             assert!(tm.source_data().is_some());
             let mut time_stamp = [0; 7];
@@ -1457,8 +1465,8 @@ mod tests {
 
     impl EcssTmSenderCore for FallibleSender {
         type Error = DummyError;
-        fn send_tm(&mut self, _: PusTm) -> Result<(), EcssTmErrorWithSend<DummyError>> {
-            Err(EcssTmErrorWithSend::SendError(DummyError {}))
+        fn send_tm(&mut self, _: PusTm) -> Result<(), Self::Error> {
+            Err(DummyError {})
         }
     }
 

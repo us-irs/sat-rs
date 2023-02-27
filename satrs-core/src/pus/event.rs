@@ -109,7 +109,9 @@ impl EventReporterBase {
         aux_data: Option<&[u8]>,
     ) -> Result<(), EcssTmErrorWithSend<E>> {
         let tm = self.generate_generic_event_tm(buf, subservice, time_stamp, event_id, aux_data)?;
-        sender.send_tm(tm)?;
+        sender
+            .send_tm(tm)
+            .map_err(|e| EcssTmErrorWithSend::SendError(e))?;
         self.msg_count += 1;
         Ok(())
     }
@@ -266,7 +268,7 @@ mod tests {
     impl EcssTmSenderCore for TestSender {
         type Error = ();
 
-        fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmErrorWithSend<()>> {
+        fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
             assert!(tm.source_data().is_some());
             let src_data = tm.source_data().unwrap();
             assert!(src_data.len() >= 4);

@@ -7,8 +7,8 @@ use satrs_core::params::{Params, ParamsHeapless, WritableToBeBytes};
 use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, PusEventDispatcher,
 };
-use satrs_core::pus::{EcssTmErrorWithSend, EcssTmSenderCore};
-use spacepackets::ecss::PusPacket;
+use satrs_core::pus::EcssTmSenderCore;
+use spacepackets::ecss::{PusError, PusPacket};
 use spacepackets::tm::PusTm;
 use std::sync::mpsc::{channel, SendError, TryRecvError};
 use std::thread;
@@ -18,20 +18,26 @@ const INFO_EVENT: EventU32TypedSev<SeverityInfo> =
 const LOW_SEV_EVENT: EventU32 = EventU32::const_new(Severity::LOW, 1, 5);
 const EMPTY_STAMP: [u8; 7] = [0; 7];
 
+#[derive(Debug, Clone)]
+pub enum CustomTmSenderError {
+    SendError(SendError<Vec<u8>>),
+    PusError(PusError),
+}
+
 #[derive(Clone)]
 struct EventTmSender {
     sender: std::sync::mpsc::Sender<Vec<u8>>,
 }
 
 impl EcssTmSenderCore for EventTmSender {
-    type Error = SendError<Vec<u8>>;
-    fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmErrorWithSend<Self::Error>> {
+    type Error = CustomTmSenderError;
+    fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
         let mut vec = Vec::new();
         tm.append_to_vec(&mut vec)
-            .map_err(|e| EcssTmErrorWithSend::EcssTmError(e.into()))?;
+            .map_err(|e| CustomTmSenderError::PusError(e))?;
         self.sender
             .send(vec)
-            .map_err(EcssTmErrorWithSend::SendError)?;
+            .map_err(CustomTmSenderError::SendError)?;
         Ok(())
     }
 }
