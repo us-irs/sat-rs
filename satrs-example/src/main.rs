@@ -18,7 +18,7 @@ use satrs_core::event_man::{
 };
 use satrs_core::events::EventU32;
 use satrs_core::hk::HkRequest;
-use satrs_core::pool::{LocalPool, PoolCfg, StoreAddr};
+use satrs_core::pool::{LocalPool, PoolCfg};
 use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, EventRequest, EventRequestWithToken,
     PusEventDispatcher,
@@ -27,7 +27,7 @@ use satrs_core::pus::hk::Subservice as HkSubservice;
 use satrs_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
 };
-use satrs_core::pus::{EcssTmErrorWithSend, EcssTmSenderCore};
+use satrs_core::pus::MpscTmInStoreSender;
 use satrs_core::seq_count::SeqCountProviderSimple;
 use satrs_core::spacepackets::{
     time::cds::TimeProvider,
@@ -40,35 +40,9 @@ use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};
-use std::sync::{mpsc, Arc, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-
-#[derive(Clone)]
-struct EventTmSender {
-    store_helper: TmStore,
-    sender: mpsc::Sender<StoreAddr>,
-}
-
-impl EventTmSender {
-    fn new(store_helper: TmStore, sender: mpsc::Sender<StoreAddr>) -> Self {
-        Self {
-            store_helper,
-            sender,
-        }
-    }
-}
-
-impl EcssTmSenderCore for EventTmSender {
-    type Error = mpsc::SendError<StoreAddr>;
-
-    fn send_tm(&mut self, tm: PusTm) -> Result<(), EcssTmErrorWithSend<Self::Error>> {
-        let addr = self.store_helper.add_pus_tm(&tm);
-        self.sender
-            .send(addr)
-            .map_err(EcssTmErrorWithSend::SendError)
-    }
-}
 
 fn main() {
     setup_logger().expect("setting up logging with fern failed");
@@ -200,7 +174,7 @@ fn main() {
         .name("Event".to_string())
         .spawn(move || {
             let mut timestamp: [u8; 7] = [0; 7];
-            let mut sender = EventTmSender::new(tm_store, tm_funnel_tx);
+            let mut sender = MpscTmInStoreSender::new(tm_store.pool, tm_funnel_tx);
             let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
             let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
                 reporter_event_handler
