@@ -35,6 +35,7 @@ use satrs_core::spacepackets::{
     tm::{PusTm, PusTmSecondaryHeader},
     SequenceFlags, SpHeader,
 };
+use satrs_core::tmtc::AddressableId;
 use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -253,16 +254,19 @@ fn main() {
             loop {
                 match acs_thread_rx.try_recv() {
                     Ok(request) => {
-                        info!("ACS thread: Received HK request {:?}", request.0);
+                        info!(
+                            "ACS thread: Received HK request {:?}",
+                            request.targeted_request
+                        );
                         update_time(&mut time_provider, &mut timestamp);
-                        match request.0 {
+                        match request.targeted_request.request {
                             Request::HkRequest(hk_req) => match hk_req {
-                                HkRequest::OneShot(address) => {
-                                    assert_eq!(
-                                        address.target_id,
-                                        RequestTargetId::AcsSubsystem as u32
-                                    );
-                                    if address.unique_id == AcsHkIds::TestMgmSet as u32 {
+                                HkRequest::OneShot(unique_id) => {
+                                    let target = request.targeted_request.target_id;
+                                    assert_eq!(target, RequestTargetId::AcsSubsystem as u32);
+                                    if request.targeted_request.target_id
+                                        == AcsHkIds::TestMgmSet as u32
+                                    {
                                         let mut sp_header = SpHeader::tm(
                                             PUS_APID,
                                             SequenceFlags::Unsegmented,
@@ -276,7 +280,11 @@ fn main() {
                                             &timestamp,
                                         );
                                         let mut buf: [u8; 8] = [0; 8];
-                                        address.write_to_be_bytes(&mut buf).unwrap();
+                                        let addressable_id = AddressableId {
+                                            target_id: target,
+                                            unique_id,
+                                        };
+                                        addressable_id.write_to_be_bytes(&mut buf).unwrap();
                                         let pus_tm = PusTm::new(
                                             &mut sp_header,
                                             sec_header,
@@ -296,7 +304,7 @@ fn main() {
                             }
                         }
                         let started_token = reporter_aocs
-                            .start_success(request.1, Some(&timestamp))
+                            .start_success(request.token, Some(&timestamp))
                             .expect("Sending start success failed");
                         reporter_aocs
                             .completion_success(started_token, Some(&timestamp))

@@ -1,5 +1,3 @@
-use crate::tmtc::AddressableId;
-
 pub type CollectionIntervalFactor = u32;
 pub type UniqueId = u32;
 
@@ -14,5 +12,5 @@ pub enum HkRequest {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct TargetedHkRequest {
     target: u32,
-    hk_request: HkRequest
+    hk_request: HkRequest,
 }

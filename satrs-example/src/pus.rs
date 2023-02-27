@@ -3,7 +3,7 @@ use crate::tmtc::{PusTcSource, TmStore};
 use log::{info, warn};
 use satrs_core::events::EventU32;
 use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
-use satrs_core::mode::{ModeAndSubmode, ModeCommand, ModeRequest};
+use satrs_core::mode::{ModeAndSubmode, ModeRequest};
 use satrs_core::params::Params;
 use satrs_core::pool::StoreAddr;
 use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
@@ -268,22 +268,35 @@ impl PusReceiver {
                 .expect("Sending start failure TM failed");
             return;
         }
-        let send_request = |request: HkRequest| {
+        let send_request = |target: TargetId, request: HkRequest| {
             let sender = self
                 .tc_args
                 .request_map
                 .get(&addressable_id.target_id)
                 .unwrap();
             sender
-                .send(RequestWithToken(Request::HkRequest(request), token))
+                .send(RequestWithToken::new(
+                    target,
+                    Request::HkRequest(request),
+                    token,
+                ))
                 .unwrap_or_else(|_| panic!("Sending HK request {request:?} failed"));
         };
         if PusPacket::subservice(pus_tc) == hk::Subservice::TcEnableHkGeneration as u8 {
-            send_request(HkRequest::Enable(addressable_id));
+            send_request(
+                addressable_id.target_id,
+                HkRequest::Enable(addressable_id.unique_id),
+            );
         } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcDisableHkGeneration as u8 {
-            send_request(HkRequest::Disable(addressable_id));
+            send_request(
+                addressable_id.target_id,
+                HkRequest::Disable(addressable_id.unique_id),
+            );
         } else if PusPacket::subservice(pus_tc) == hk::Subservice::TcGenerateOneShotHk as u8 {
-            send_request(HkRequest::OneShot(addressable_id));
+            send_request(
+                addressable_id.target_id,
+                HkRequest::OneShot(addressable_id.unique_id),
+            );
         } else if PusPacket::subservice(pus_tc)
             == hk::Subservice::TcModifyHkCollectionInterval as u8
         {
@@ -301,10 +314,13 @@ impl PusReceiver {
                     .expect("Sending start failure TM failed");
                 return;
             }
-            send_request(HkRequest::ModifyCollectionInterval(
-                addressable_id,
-                CollectionIntervalFactor::from_be_bytes(user_data[8..12].try_into().unwrap()),
-            ));
+            send_request(
+                addressable_id.target_id,
+                HkRequest::ModifyCollectionInterval(
+                    addressable_id.unique_id,
+                    CollectionIntervalFactor::from_be_bytes(user_data[8..12].try_into().unwrap()),
+                ),
+            );
         }
     }
 
@@ -550,7 +566,11 @@ impl PusReceiver {
                 None => warn!("not mode request recipient for target ID {target_id} found"),
                 Some(sender_to_recipient) => {
                     sender_to_recipient
-                        .send(RequestWithToken(Request::ModeRequest(mode_request), token))
+                        .send(RequestWithToken::new(
+                            target_id,
+                            Request::ModeRequest(mode_request),
+                            token,
+                        ))
                         .expect("sending mode request failed");
                 }
             };
@@ -582,22 +602,19 @@ impl PusReceiver {
                             .unwrap(),
                     )
                     .unwrap();
-                    forward_mode_request(
-                        target_id,
-                        ModeRequest::SetMode(ModeCommand::new(target_id, mode_submode)),
-                    );
+                    forward_mode_request(target_id, ModeRequest::SetMode(mode_submode));
                 }
                 Subservice::TcReadMode => {
                     let target_id = u32::from_be_bytes(app_data[0..4].try_into().unwrap());
-                    forward_mode_request(target_id, ModeRequest::ReadMode(target_id));
+                    forward_mode_request(target_id, ModeRequest::ReadMode);
                 }
                 Subservice::TcAnnounceMode => {
                     let target_id = u32::from_be_bytes(app_data[0..4].try_into().unwrap());
-                    forward_mode_request(target_id, ModeRequest::AnnounceMode(target_id));
+                    forward_mode_request(target_id, ModeRequest::AnnounceMode);
                 }
                 Subservice::TcAnnounceModeRecursive => {
                     let target_id = u32::from_be_bytes(app_data[0..4].try_into().unwrap());
-                    forward_mode_request(target_id, ModeRequest::AnnounceModeRecursive(target_id));
+                    forward_mode_request(target_id, ModeRequest::AnnounceModeRecursive);
                 }
                 _ => {
                     warn!("Can not process mode request with subservice {subservice:?}");
