@@ -44,3 +44,6 @@ pub mod seq_count;
 pub mod tmtc;
 
 pub use spacepackets;
+
+// Generic sender ID type.
+pub type SenderId = u32;

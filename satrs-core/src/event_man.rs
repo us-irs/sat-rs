@@ -66,6 +66,7 @@ use core::slice::Iter;
 #[cfg(feature = "alloc")]
 use hashbrown::HashMap;
 
+use crate::SenderId;
 #[cfg(feature = "std")]
 pub use stdmod::*;
 
@@ -83,8 +84,6 @@ pub type EventU16WithHeaplessAuxData = EventWithHeaplessAuxData<EventU16>;
 pub type EventWithAuxData<Event> = (Event, Option<Params>);
 pub type EventU32WithAuxData = EventWithAuxData<EventU32>;
 pub type EventU16WithAuxData = EventWithAuxData<EventU16>;
-
-pub type SenderId = u32;
 
 pub trait SendEventProvider<Provider: GenericEvent, AuxDataProvider = Params> {
     type Error;

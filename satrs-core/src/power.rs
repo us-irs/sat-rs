@@ -51,19 +51,17 @@ pub trait PowerSwitchInfo {
     fn switch_delay_ms(&self) -> u32;
 }
 
-pub trait PowerSwitchProvider: PowerSwitcherCommandSender + PowerSwitchInfo {
-    type Error;
-}
-
 #[cfg(test)]
 mod tests {
+    #![allow(dead_code)]
     use super::*;
-    use crate::power::PowerSwitcherCommandSender;
     use std::boxed::Box;
 
     struct Pcdu {
         switch_rx: std::sync::mpsc::Receiver<(SwitchId, u16)>,
     }
+
+    #[derive(Eq, PartialEq)]
     enum DeviceState {
         OFF,
         SwitchingPower,
@@ -73,6 +71,7 @@ mod tests {
     }
     struct MyComplexDevice {
         power_switcher: Box<dyn PowerSwitcherCommandSender<Error = ()>>,
+        power_info: Box<dyn PowerSwitchInfo<Error = ()>>,
         switch_id: SwitchId,
         some_state: u16,
         dev_state: DeviceState,
@@ -92,7 +91,7 @@ mod tests {
                     self.dev_state = DeviceState::SwitchingPower;
                 }
                 if self.dev_state == DeviceState::SwitchingPower {
-                    if self.power_switcher.get_is_switch_on() {
+                    if self.power_info.get_is_switch_on(0).unwrap() {
                         self.dev_state = DeviceState::ON;
                         self.mode = 1;
                     }
