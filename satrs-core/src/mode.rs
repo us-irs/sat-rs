@@ -71,8 +71,15 @@ impl ModeCommand {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ModeRequest {
-    SetMode(ModeCommand),
-    ReadMode(TargetId),
-    AnnounceMode(TargetId),
-    AnnounceModeRecursive(TargetId),
+    SetMode(ModeAndSubmode),
+    ReadMode(ModeRequest),
+    AnnounceMode(ModeRequest),
+    AnnounceModeRecursive(ModeRequest),
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct TargetedModeRequest {
+    target_id: TargetId,
+    mode_request: ModeRequest
 }
