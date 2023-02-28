@@ -39,8 +39,8 @@ impl ModeAndSubmode {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ModeCommand {
-    address: TargetId,
-    mode_submode: ModeAndSubmode,
+    pub address: TargetId,
+    pub mode_submode: ModeAndSubmode,
 }
 
 impl ModeCommand {
