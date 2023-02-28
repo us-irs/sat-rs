@@ -36,9 +36,13 @@ impl ModeAndSubmode {
         })
     }
 
-    pub fn mode(&self) -> u32 {self.mode}
+    pub fn mode(&self) -> u32 {
+        self.mode
+    }
 
-    pub fn submode(&self) -> u16 {self.submode}
+    pub fn submode(&self) -> u16 {
+        self.submode
+    }
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

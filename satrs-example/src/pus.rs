@@ -5,7 +5,7 @@ use satrs_core::events::EventU32;
 use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
 use satrs_core::mode::{ModeAndSubmode, ModeRequest};
 use satrs_core::params::Params;
-use satrs_core::pool::StoreAddr;
+use satrs_core::pool::{PoolProvider, StoreAddr};
 use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
 use satrs_core::pus::hk;
 use satrs_core::pus::mode;
@@ -18,6 +18,7 @@ use satrs_core::pus::verification::{
 use satrs_core::pus::{event, GenericTcCheckError};
 use satrs_core::res_code::ResultU16;
 use satrs_core::spacepackets::ecss::{scheduling, PusServiceId};
+use satrs_core::spacepackets::time::CcsdsTimeProvider;
 use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use satrs_core::tmtc::{AddressableId, PusServiceProvider, TargetId};
 use satrs_core::{
@@ -29,7 +30,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::rc::Rc;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
 
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
@@ -50,6 +51,43 @@ pub struct PusTmArgs {
 impl PusTmArgs {
     fn vr(&mut self) -> &mut StdVerifReporterWithSender {
         &mut self.verif_reporter
+    }
+}
+
+pub struct PusTcHandlerBase {
+    pub tc_store: Box<dyn PoolProvider>,
+    pub receiver: Receiver<(StoreAddr, VerificationToken<TcStateAccepted>)>,
+    pub verif_reporter: StdVerifReporterWithSender,
+    pub time_provider: Box<dyn CcsdsTimeProvider>,
+}
+
+pub trait TestHandlerNoPing {
+    fn handle_no_ping_tc(&mut self, tc: PusTc);
+}
+
+pub struct PusTestTcHandler {
+    pub base: PusTcHandlerBase,
+    handler: Option<Box<dyn TestHandlerNoPing>>,
+}
+
+pub struct PusScheduleTcHandler {
+    pub base: PusTestTcHandler,
+}
+
+impl PusTestTcHandler {
+    pub fn operation(&mut self) {
+        let (addr, token) = self.base.receiver.recv().unwrap();
+        let data = self.base.tc_store.read(&addr).unwrap();
+        let (pus_tc, _len) = PusTc::from_bytes(data).unwrap();
+        let stamp: [u8; 7] = [0; 7];
+        if pus_tc.subservice() == 1 {
+            self.base
+                .verif_reporter
+                .completion_success(token, Some(&stamp))
+                .unwrap();
+        } else if let Some(handler) = &mut self.handler {
+            handler.handle_no_ping_tc(pus_tc);
+        }
     }
 }
 
