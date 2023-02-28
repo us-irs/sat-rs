@@ -24,24 +24,6 @@ pub enum CustomTmSenderError {
     PusError(PusError),
 }
 
-// #[derive(Clone)]
-// struct EventTmSender {
-//     sender: std::sync::mpsc::Sender<Vec<u8>>,
-// }
-//
-// impl EcssTmSenderCore for EventTmSender {
-//     type Error = CustomTmSenderError;
-//     fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
-//         let mut vec = Vec::new();
-//         tm.append_to_vec(&mut vec)
-//             .map_err(|e| CustomTmSenderError::PusError(e))?;
-//         self.sender
-//             .send(vec)
-//             .map_err(CustomTmSenderError::SendError)?;
-//         Ok(())
-//     }
-// }
-
 #[test]
 fn test_threaded_usage() {
     let (event_sender, event_man_receiver) = channel();
