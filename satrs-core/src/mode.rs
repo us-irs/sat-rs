@@ -35,12 +35,16 @@ impl ModeAndSubmode {
             submode: u16::from_be_bytes(buf[4..6].try_into().unwrap()),
         })
     }
+
+    pub fn mode(&self) -> u32 {self.mode}
+
+    pub fn submode(&self) -> u16 {self.submode}
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ModeCommand {
-    address: TargetId,
-    mode_submode: ModeAndSubmode,
+    pub address: TargetId,
+    pub mode_submode: ModeAndSubmode,
 }
 
 impl ModeCommand {
