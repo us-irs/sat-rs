@@ -199,12 +199,17 @@ pub struct VerificationToken<STATE> {
     req_id: RequestId,
 }
 
+pub trait WasAtLeastAccepted {}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct TcStateNone;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct TcStateAccepted;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct TcStateStarted;
+
+impl WasAtLeastAccepted for TcStateAccepted {}
+impl WasAtLeastAccepted for TcStateStarted {}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum TcStateToken {
@@ -381,7 +386,9 @@ impl<'src_data> VerificationSendable<'src_data, TcStateAccepted, VerifSuccess> {
     }
 }
 
-impl<'src_data> VerificationSendable<'src_data, TcStateStarted, VerifSuccess> {
+impl<'src_data, TcState: WasAtLeastAccepted + Copy>
+    VerificationSendable<'src_data, TcState, VerifSuccess>
+{
     pub fn send_success_step_or_completion_success(
         self,
         seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
@@ -704,15 +711,15 @@ impl VerificationReporterCore {
     ///
     /// Requires a token previously acquired by calling [Self::start_success]. It consumes the
     /// token because verification handling is done.
-    pub fn completion_success<'src_data>(
+    pub fn completion_success<'src_data, TcState: WasAtLeastAccepted + Copy>(
         &mut self,
         src_data_buf: &'src_data mut [u8],
-        token: VerificationToken<TcStateStarted>,
+        token: VerificationToken<TcState>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: Option<&'src_data [u8]>,
     ) -> Result<
-        VerificationSendable<'src_data, TcStateStarted, VerifSuccess>,
-        VerificationErrorWithToken<TcStateStarted>,
+        VerificationSendable<'src_data, TcState, VerifSuccess>,
+        VerificationErrorWithToken<TcState>,
     > {
         self.sendable_success_no_step(
             src_data_buf,
@@ -727,15 +734,15 @@ impl VerificationReporterCore {
     ///
     /// Requires a token previously acquired by calling [Self::start_success]. It consumes the
     /// token because verification handling is done.
-    pub fn completion_failure<'src_data>(
+    pub fn completion_failure<'src_data, TcState: WasAtLeastAccepted + Copy>(
         &mut self,
         src_data_buf: &'src_data mut [u8],
-        token: VerificationToken<TcStateStarted>,
+        token: VerificationToken<TcState>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         params: FailParams<'src_data, '_>,
     ) -> Result<
-        VerificationSendable<'src_data, TcStateStarted, VerifFailure>,
-        VerificationErrorWithToken<TcStateStarted>,
+        VerificationSendable<'src_data, TcState, VerifFailure>,
+        VerificationErrorWithToken<TcState>,
     > {
         self.sendable_failure_no_step(
             src_data_buf,
@@ -747,12 +754,12 @@ impl VerificationReporterCore {
         )
     }
 
-    pub fn send_step_or_completion_success<E>(
+    pub fn send_step_or_completion_success<E, TcState: WasAtLeastAccepted + Copy>(
         &self,
-        mut sendable: VerificationSendable<'_, TcStateStarted, VerifSuccess>,
+        mut sendable: VerificationSendable<'_, TcState, VerifSuccess>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-    ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
+    ) -> Result<(), VerificationOrSendErrorWithToken<E, TcState>> {
         sender
             .send_tm(sendable.pus_tm.take().unwrap())
             .map_err(|e| {
@@ -765,12 +772,12 @@ impl VerificationReporterCore {
         Ok(())
     }
 
-    pub fn send_step_or_completion_failure<E>(
+    pub fn send_step_or_completion_failure<E, TcState: WasAtLeastAccepted + Copy>(
         &self,
-        mut sendable: VerificationSendable<'_, TcStateStarted, VerifFailure>,
+        mut sendable: VerificationSendable<'_, TcState, VerifFailure>,
         seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
-    ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
+    ) -> Result<(), VerificationOrSendErrorWithToken<E, TcState>> {
         sender
             .send_tm(sendable.pus_tm.take().unwrap())
             .map_err(|e| {
@@ -1087,12 +1094,12 @@ mod alloc_mod {
         ///
         /// Requires a token previously acquired by calling [Self::start_success]. It consumes the
         /// token because verification handling is done.
-        pub fn completion_success<E>(
+        pub fn completion_success<E, TcState: WasAtLeastAccepted + Copy>(
             &mut self,
-            token: VerificationToken<TcStateStarted>,
+            token: VerificationToken<TcState>,
             sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
             time_stamp: Option<&[u8]>,
-        ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
+        ) -> Result<(), VerificationOrSendErrorWithToken<E, TcState>> {
             let sendable = self.reporter.completion_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
@@ -1110,12 +1117,12 @@ mod alloc_mod {
         ///
         /// Requires a token previously acquired by calling [Self::start_success]. It consumes the
         /// token because verification handling is done.
-        pub fn completion_failure<E>(
+        pub fn completion_failure<E, TcState: WasAtLeastAccepted + Copy>(
             &mut self,
-            token: VerificationToken<TcStateStarted>,
+            token: VerificationToken<TcState>,
             sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
             params: FailParams,
-        ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
+        ) -> Result<(), VerificationOrSendErrorWithToken<E, TcState>> {
             let sendable = self.reporter.completion_failure(
                 self.source_data_buf.as_mut_slice(),
                 token,
@@ -1226,20 +1233,20 @@ mod alloc_mod {
                 .step_failure(token, self.sender.as_mut(), params)
         }
 
-        pub fn completion_success(
+        pub fn completion_success<TcState: WasAtLeastAccepted + Copy>(
             &mut self,
-            token: VerificationToken<TcStateStarted>,
+            token: VerificationToken<TcState>,
             time_stamp: Option<&[u8]>,
-        ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
+        ) -> Result<(), VerificationOrSendErrorWithToken<E, TcState>> {
             self.reporter
                 .completion_success(token, self.sender.as_mut(), time_stamp)
         }
 
-        pub fn completion_failure(
+        pub fn completion_failure<TcState: WasAtLeastAccepted + Copy>(
             &mut self,
-            token: VerificationToken<TcStateStarted>,
+            token: VerificationToken<TcState>,
             params: FailParams,
-        ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
+        ) -> Result<(), VerificationOrSendErrorWithToken<E, TcState>> {
             self.reporter
                 .completion_failure(token, self.sender.as_mut(), params)
         }
