@@ -79,6 +79,8 @@ fn main() {
         PUS_APID,
         #[allow(clippy::box_default)]
         Box::new(SeqCountProviderSimple::default()),
+        #[allow(clippy::box_default)]
+        Box::new(SeqCountProviderSimple::default()),
         1,
         2,
         8,
