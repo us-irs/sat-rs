@@ -256,7 +256,7 @@ mod tests {
     fn test_basic() {
         let mut event_man = create_basic_man();
         let (event_tx, event_rx) = channel();
-        let mut sender = MpscTmAsVecSender::new(event_tx);
+        let mut sender = MpscTmAsVecSender::new(0, "test_sender", event_tx);
         let event_sent = event_man
             .generate_pus_event_tm(&mut sender, &EMPTY_STAMP, INFO_EVENT, None)
             .expect("Sending info event failed");
@@ -270,7 +270,7 @@ mod tests {
     fn test_disable_event() {
         let mut event_man = create_basic_man();
         let (event_tx, event_rx) = channel();
-        let mut sender = MpscTmAsVecSender::new(event_tx);
+        let mut sender = MpscTmAsVecSender::new(0, "test", event_tx);
         let res = event_man.disable_tm_for_event(&LOW_SEV_EVENT);
         assert!(res.is_ok());
         assert!(res.unwrap());
@@ -293,7 +293,7 @@ mod tests {
     fn test_reenable_event() {
         let mut event_man = create_basic_man();
         let (event_tx, event_rx) = channel();
-        let mut sender = MpscTmAsVecSender::new(event_tx);
+        let mut sender = MpscTmAsVecSender::new(0, "test", event_tx);
         let mut res = event_man.disable_tm_for_event_with_sev(&INFO_EVENT);
         assert!(res.is_ok());
         assert!(res.unwrap());

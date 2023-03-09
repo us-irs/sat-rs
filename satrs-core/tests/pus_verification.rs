@@ -48,7 +48,8 @@ pub mod crossbeam_test {
         let shared_tc_pool_0 = Arc::new(RwLock::new(LocalPool::new(pool_cfg)));
         let shared_tc_pool_1 = shared_tc_pool_0.clone();
         let (tx, rx) = crossbeam_channel::bounded(5);
-        let sender = CrossbeamVerifSender::new(shared_tm_pool.clone(), tx.clone());
+        let sender =
+            CrossbeamVerifSender::new(0, "verif_sender", shared_tm_pool.clone(), tx.clone());
         let mut reporter_with_sender_0 =
             VerificationReporterWithSender::new(&cfg, Box::new(sender));
         let mut reporter_with_sender_1 = reporter_with_sender_0.clone();

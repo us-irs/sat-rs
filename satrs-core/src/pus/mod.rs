@@ -19,6 +19,7 @@ pub mod verification;
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
 
+use crate::SenderId;
 #[cfg(feature = "std")]
 pub use std_mod::*;
 
@@ -64,7 +65,12 @@ impl From<ByteConversionError> for EcssTmError {
 pub trait EcssTmSenderCore: Send {
     type Error;
 
+    /// Each sender can have an ID associated with it
+    fn id(&self) -> SenderId;
     fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error>;
+    fn name(&self) -> &'static str {
+        "unset"
+    }
 }
 
 #[cfg(feature = "alloc")]
@@ -96,6 +102,7 @@ mod alloc_mod {
 pub mod std_mod {
     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr, StoreError};
     use crate::pus::EcssTmSenderCore;
+    use crate::SenderId;
     use alloc::vec::Vec;
     use spacepackets::ecss::PusError;
     use spacepackets::tm::PusTm;
@@ -129,6 +136,8 @@ pub mod std_mod {
 
     #[derive(Clone)]
     pub struct MpscTmInStoreSender {
+        id: SenderId,
+        name: &'static str,
         store_helper: SharedPool,
         sender: mpsc::Sender<StoreAddr>,
         pub ignore_poison_errors: bool,
@@ -136,6 +145,10 @@ pub mod std_mod {
 
     impl EcssTmSenderCore for MpscTmInStoreSender {
         type Error = MpscPusInStoreSendError;
+
+        fn id(&self) -> SenderId {
+            self.id
+        }
 
         fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
             let operation = |mut store: RwLockWriteGuard<ShareablePoolProvider>| {
@@ -155,11 +168,22 @@ pub mod std_mod {
                 }
             }
         }
+
+        fn name(&self) -> &'static str {
+            self.name
+        }
     }
 
     impl MpscTmInStoreSender {
-        pub fn new(store_helper: SharedPool, sender: mpsc::Sender<StoreAddr>) -> Self {
+        pub fn new(
+            id: SenderId,
+            name: &'static str,
+            store_helper: SharedPool,
+            sender: mpsc::Sender<StoreAddr>,
+        ) -> Self {
             Self {
+                id,
+                name,
                 store_helper,
                 sender,
                 ignore_poison_errors: false,
@@ -175,16 +199,22 @@ pub mod std_mod {
 
     #[derive(Debug, Clone)]
     pub struct MpscTmAsVecSender {
+        id: SenderId,
         sender: mpsc::Sender<Vec<u8>>,
+        name: &'static str,
     }
 
     impl MpscTmAsVecSender {
-        pub fn new(sender: mpsc::Sender<Vec<u8>>) -> Self {
-            Self { sender }
+        pub fn new(id: u32, name: &'static str, sender: mpsc::Sender<Vec<u8>>) -> Self {
+            Self { id, sender, name }
         }
     }
     impl EcssTmSenderCore for MpscTmAsVecSender {
         type Error = MpscAsVecSenderError;
+        fn id(&self) -> SenderId {
+            self.id
+        }
+
         fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
             let mut vec = Vec::new();
             tm.append_to_vec(&mut vec)
@@ -193,6 +223,10 @@ pub mod std_mod {
                 .send(vec)
                 .map_err(MpscAsVecSenderError::SendError)?;
             Ok(())
+        }
+
+        fn name(&self) -> &'static str {
+            self.name
         }
     }
 }

@@ -1332,6 +1332,7 @@ mod stdmod {
     use super::*;
     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr};
     use crate::pus::MpscPusInStoreSendError;
+    use crate::SenderId;
     use delegate::delegate;
     use spacepackets::tm::PusTm;
     use std::sync::{mpsc, Arc, Mutex, RwLockWriteGuard};
@@ -1345,17 +1346,21 @@ mod stdmod {
 
     #[derive(Clone)]
     struct StdSenderBase<S> {
-        pub ignore_poison_error: bool,
+        id: SenderId,
+        name: &'static str,
         tm_store: SharedPool,
         tx: S,
+        pub ignore_poison_error: bool,
     }
 
     impl<S: SendBackend> StdSenderBase<S> {
-        pub fn new(tm_store: SharedPool, tx: S) -> Self {
+        pub fn new(id: SenderId, name: &'static str, tm_store: SharedPool, tx: S) -> Self {
             Self {
-                ignore_poison_error: false,
+                id,
+                name,
                 tm_store,
                 tx,
+                ignore_poison_error: false,
             }
         }
     }
@@ -1377,9 +1382,14 @@ mod stdmod {
     /// Verification sender with a [mpsc::Sender] backend.
     /// It implements the [EcssTmSenderCore] trait to be used as PUS Verification TM sender.
     impl MpscVerifSender {
-        pub fn new(tm_store: SharedPool, tx: mpsc::Sender<StoreAddr>) -> Self {
+        pub fn new(
+            id: SenderId,
+            name: &'static str,
+            tm_store: SharedPool,
+            tx: mpsc::Sender<StoreAddr>,
+        ) -> Self {
             Self {
-                base: StdSenderBase::new(tm_store, tx),
+                base: StdSenderBase::new(id, name, tm_store, tx),
             }
         }
     }
@@ -1390,6 +1400,8 @@ mod stdmod {
 
         delegate!(
             to self.base {
+                fn id(&self) -> SenderId;
+                fn name(&self) -> &'static str;
                 fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error>;
             }
         );
@@ -1411,9 +1423,14 @@ mod stdmod {
 
     #[cfg(feature = "crossbeam")]
     impl CrossbeamVerifSender {
-        pub fn new(tm_store: SharedPool, tx: crossbeam_channel::Sender<StoreAddr>) -> Self {
+        pub fn new(
+            id: SenderId,
+            name: &'static str,
+            tm_store: SharedPool,
+            tx: crossbeam_channel::Sender<StoreAddr>,
+        ) -> Self {
             Self {
-                base: StdSenderBase::new(tm_store, tx),
+                base: StdSenderBase::new(id, name, tm_store, tx),
             }
         }
     }
@@ -1425,6 +1442,8 @@ mod stdmod {
 
         delegate!(
             to self.base {
+                fn id(&self) -> SenderId;
+                fn name(&self) -> &'static str;
                 fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error>;
             }
         );
@@ -1432,6 +1451,11 @@ mod stdmod {
 
     impl<S: SendBackend + Clone + 'static> EcssTmSenderCore for StdSenderBase<S> {
         type Error = MpscPusInStoreSendError;
+
+        fn id(&self) -> SenderId {
+            self.id
+        }
+
         fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
             let operation = |mut mg: RwLockWriteGuard<ShareablePoolProvider>| {
                 let (addr, buf) = mg.free_element(tm.len_packed())?;
@@ -1453,6 +1477,10 @@ mod stdmod {
                     }
                 }
             }
+        }
+
+        fn name(&self) -> &'static str {
+            self.name
         }
     }
 }
@@ -1483,6 +1511,7 @@ mod tests {
     };
     use crate::pus::EcssTmErrorWithSend;
     use crate::seq_count::SeqCountProviderSimple;
+    use crate::SenderId;
     use alloc::boxed::Box;
     use alloc::format;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration, PusPacket};
@@ -1516,6 +1545,11 @@ mod tests {
 
     impl EcssTmSenderCore for TestSender {
         type Error = ();
+
+        fn id(&self) -> SenderId {
+            0
+        }
+
         fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
             assert_eq!(PusPacket::service(&tm), 1);
             assert!(tm.source_data().is_some());
@@ -1537,6 +1571,10 @@ mod tests {
             });
             Ok(())
         }
+
+        fn name(&self) -> &'static str {
+            "test_sender"
+        }
     }
 
     #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -1546,6 +1584,9 @@ mod tests {
 
     impl EcssTmSenderCore for FallibleSender {
         type Error = DummyError;
+        fn id(&self) -> SenderId {
+            0
+        }
         fn send_tm(&mut self, _: PusTm) -> Result<(), Self::Error> {
             Err(DummyError {})
         }
@@ -1641,7 +1682,7 @@ mod tests {
         let pool = LocalPool::new(PoolCfg::new(vec![(8, 8)]));
         let shared_pool: SharedPool = Arc::new(RwLock::new(Box::new(pool)));
         let (tx, _) = mpsc::channel();
-        let mpsc_verif_sender = MpscVerifSender::new(shared_pool, tx);
+        let mpsc_verif_sender = MpscVerifSender::new(0, "verif_sender", shared_pool, tx);
         is_send(&mpsc_verif_sender);
     }
 

@@ -243,6 +243,7 @@ mod tests {
     use super::*;
     use crate::events::{EventU32, Severity};
     use crate::pus::tests::CommonTmInfo;
+    use crate::SenderId;
     use spacepackets::ByteConversionError;
     use std::collections::VecDeque;
     use std::vec::Vec;
@@ -268,6 +269,9 @@ mod tests {
     impl EcssTmSenderCore for TestSender {
         type Error = ();
 
+        fn id(&self) -> SenderId {
+            0
+        }
         fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
             assert!(tm.source_data().is_some());
             let src_data = tm.source_data().unwrap();

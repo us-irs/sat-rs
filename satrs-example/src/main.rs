@@ -74,7 +74,12 @@ fn main() {
     let (tc_source_tx, tc_source_rx) = channel();
     let (tm_funnel_tx, tm_funnel_rx) = channel();
     let (tm_server_tx, tm_server_rx) = channel();
-    let verif_sender = MpscVerifSender::new(tm_store.pool.clone(), tm_funnel_tx.clone());
+    let verif_sender = MpscVerifSender::new(
+        0,
+        "verif_sender",
+        tm_store.pool.clone(),
+        tm_funnel_tx.clone(),
+    );
     let verif_cfg = VerificationReporterCfg::new(
         PUS_APID,
         #[allow(clippy::box_default)]
@@ -176,7 +181,8 @@ fn main() {
         .name("Event".to_string())
         .spawn(move || {
             let mut timestamp: [u8; 7] = [0; 7];
-            let mut sender = MpscTmInStoreSender::new(tm_store.pool, tm_funnel_tx);
+            let mut sender =
+                MpscTmInStoreSender::new(1, "event_sender", tm_store.pool, tm_funnel_tx);
             let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
             let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
                 reporter_event_handler
