@@ -35,6 +35,7 @@ pub mod crossbeam_test {
         let cfg = VerificationReporterCfg::new(
             TEST_APID,
             Box::new(SeqCountProviderSyncClonable::default()),
+            Box::new(SeqCountProviderSyncClonable::default()),
             1,
             2,
             8,
