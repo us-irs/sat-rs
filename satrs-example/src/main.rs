@@ -28,7 +28,7 @@ use satrs_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
 };
 use satrs_core::pus::MpscTmInStoreSender;
-use satrs_core::seq_count::SeqCountProviderSimple;
+use satrs_core::seq_count::{SeqCountProviderSimple, SeqCountProviderSyncClonable};
 use satrs_core::spacepackets::{
     time::cds::TimeProvider,
     time::TimeWriter,
@@ -70,6 +70,9 @@ fn main() {
         pool: Arc::new(RwLock::new(Box::new(tc_pool))),
     };
 
+    let seq_count_provider = SeqCountProviderSyncClonable::default();
+    let seq_count_provider_verif = seq_count_provider.clone();
+    let seq_count_provider_tmtc = seq_count_provider.clone();
     let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
     let (tc_source_tx, tc_source_rx) = channel();
     let (tm_funnel_tx, tm_funnel_rx) = channel();
@@ -82,8 +85,7 @@ fn main() {
     );
     let verif_cfg = VerificationReporterCfg::new(
         PUS_APID,
-        #[allow(clippy::box_default)]
-        Box::new(SeqCountProviderSimple::default()),
+        Box::new(seq_count_provider_verif),
         #[allow(clippy::box_default)]
         Box::new(SeqCountProviderSimple::default()),
         1,
@@ -135,6 +137,7 @@ fn main() {
         event_sender,
         event_request_tx,
         request_map,
+        seq_count_provider: seq_count_provider_tmtc,
     };
     let tc_args = TcArgs {
         tc_source,

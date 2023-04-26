@@ -19,6 +19,7 @@ use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::event_man::EventRequestWithToken;
 use satrs_core::pus::scheduling::{PusScheduler, TcInfo};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
+use satrs_core::seq_count::SeqCountProviderSyncClonable;
 use satrs_core::spacepackets::{ecss::PusPacket, tc::PusTc, tm::PusTm, SpHeader};
 use satrs_core::tmtc::{
     CcsdsDistributor, CcsdsError, PusServiceProvider, ReceivesCcsdsTc, ReceivesEcssPusTc,
@@ -32,6 +33,7 @@ pub struct OtherArgs {
     pub event_sender: Sender<(EventU32, Option<Params>)>,
     pub event_request_tx: Sender<EventRequestWithToken>,
     pub request_map: HashMap<u32, Sender<RequestWithToken>>,
+    pub seq_count_provider: SeqCountProviderSyncClonable,
 }
 
 pub struct TmArgs {
@@ -173,6 +175,7 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
         tm_tx: tm_args.tm_sink_sender,
         tm_store: tm_args.tm_store.clone(),
         verif_reporter: args.verif_reporter,
+        seq_count_provider: args.seq_count_provider.clone(),
     };
     let pus_tc_args = PusTcArgs {
         event_request_tx: args.event_request_tx,
