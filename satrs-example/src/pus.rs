@@ -31,6 +31,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
+use satrs_core::seq_count::{SeqCountProviderSyncClonable, SequenceCountProvider, SequenceCountProviderCore};
 
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
@@ -46,6 +47,8 @@ pub struct PusTmArgs {
     pub tm_store: TmStore,
     /// All verification reporting is done with this reporter.
     pub verif_reporter: StdVerifReporterWithSender,
+    /// Sequence count provider for TMs sent from within pus demultiplexer
+    pub seq_count_provider: SeqCountProviderSyncClonable,
 }
 
 impl PusTmArgs {
@@ -213,12 +216,13 @@ impl PusReceiver {
                     .verif_reporter
                     .start_success(token, Some(self.stamp_helper.stamp()))
                     .expect("Error sending start success");
-                let ping_reply = self.tm_helper.create_pus_tm_timestamp_now(17, 2, None);
+                let ping_reply = self.tm_helper.create_pus_tm_timestamp_now(17, 2, None, self.tm_args.seq_count_provider.get());
                 let addr = self.tm_args.tm_store.add_pus_tm(&ping_reply);
                 self.tm_args
                     .tm_tx
                     .send(addr)
                     .expect("Sending TM to TM funnel failed");
+                self.tm_args.seq_count_provider.increment();
                 self.tm_args
                     .verif_reporter
                     .completion_success(start_token, Some(self.stamp_helper.stamp()))
