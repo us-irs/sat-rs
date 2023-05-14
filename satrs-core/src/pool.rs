@@ -263,7 +263,7 @@ pub trait PoolProvider {
         if !self.has_element_at(addr)? {
             return Err(StoreError::DataDoesNotExist(*addr));
         }
-        return Ok(self.read(addr)?.len());
+        Ok(self.read(addr)?.len())
     }
 }
 
