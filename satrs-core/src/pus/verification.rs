@@ -479,7 +479,7 @@ impl VerificationReporterCore {
         ))
     }
 
-    // Not public, too many arguments is acceptable for this case.
+    // Internal helper function, too many arguments is acceptable for this case.
     #[allow(clippy::too_many_arguments)]
     fn sendable_failure_no_step<'src_data, State: Copy>(
         &mut self,
