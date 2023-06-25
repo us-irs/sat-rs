@@ -479,6 +479,8 @@ impl VerificationReporterCore {
         ))
     }
 
+    // Internal helper function, too many arguments is acceptable for this case.
+    #[allow(clippy::too_many_arguments)]
     fn sendable_failure_no_step<'src_data, State: Copy>(
         &mut self,
         src_data_buf: &'src_data mut [u8],
@@ -824,6 +826,8 @@ impl VerificationReporterCore {
         Ok(())
     }
 
+    // Internal helper function, too many arguments is acceptable for this case.
+    #[allow(clippy::too_many_arguments)]
     fn create_pus_verif_success_tm<'src_data>(
         &mut self,
         src_data_buf: &'src_data mut [u8],
@@ -858,6 +862,8 @@ impl VerificationReporterCore {
         ))
     }
 
+    // Internal helper function, too many arguments is acceptable for this case.
+    #[allow(clippy::too_many_arguments)]
     fn create_pus_verif_fail_tm<'src_data>(
         &mut self,
         src_data_buf: &'src_data mut [u8],
