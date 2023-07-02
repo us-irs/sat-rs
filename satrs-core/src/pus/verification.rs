@@ -73,7 +73,7 @@
 //! for the verification module contains examples how this module could be used in a more complex
 //! context involving multiple threads
 use crate::pus::{
-    source_buffer_large_enough, EcssTmError, EcssTmErrorWithSend, EcssTmSenderCore,
+    source_buffer_large_enough, EcssTmSenderCore, EcssTmtcError, EcssTmtcErrorWithSend,
     GenericTcCheckError,
 };
 use core::fmt::{Debug, Display, Formatter};
@@ -179,12 +179,12 @@ impl RequestId {
 /// re-trying the operation at a later point.
 #[derive(Debug, Clone)]
 pub struct VerificationOrSendErrorWithToken<E, T>(
-    pub EcssTmErrorWithSend<E>,
+    pub EcssTmtcErrorWithSend<E>,
     pub VerificationToken<T>,
 );
 
 #[derive(Debug, Clone)]
-pub struct VerificationErrorWithToken<T>(pub EcssTmError, pub VerificationToken<T>);
+pub struct VerificationErrorWithToken<T>(pub EcssTmtcError, pub VerificationToken<T>);
 
 impl<E, T> From<VerificationErrorWithToken<T>> for VerificationOrSendErrorWithToken<E, T> {
     fn from(value: VerificationErrorWithToken<T>) -> Self {
@@ -543,7 +543,7 @@ impl VerificationReporterCore {
             .send_tm(sendable.pus_tm.take().unwrap())
             .map_err(|e| {
                 VerificationOrSendErrorWithToken(
-                    EcssTmErrorWithSend::SendError(e),
+                    EcssTmtcErrorWithSend::SendError(e),
                     sendable.token.unwrap(),
                 )
             })?;
@@ -561,7 +561,7 @@ impl VerificationReporterCore {
             .send_tm(sendable.pus_tm.take().unwrap())
             .map_err(|e| {
                 VerificationOrSendErrorWithToken(
-                    EcssTmErrorWithSend::SendError(e),
+                    EcssTmtcErrorWithSend::SendError(e),
                     sendable.token.unwrap(),
                 )
             })?;
@@ -630,7 +630,7 @@ impl VerificationReporterCore {
             .send_tm(sendable.pus_tm.take().unwrap())
             .map_err(|e| {
                 VerificationOrSendErrorWithToken(
-                    EcssTmErrorWithSend::SendError(e),
+                    EcssTmtcErrorWithSend::SendError(e),
                     sendable.token.unwrap(),
                 )
             })?;
@@ -674,7 +674,7 @@ impl VerificationReporterCore {
             .send_tm(sendable.pus_tm.take().unwrap())
             .map_err(|e| {
                 VerificationOrSendErrorWithToken(
-                    EcssTmErrorWithSend::SendError(e),
+                    EcssTmtcErrorWithSend::SendError(e),
                     sendable.token.unwrap(),
                 )
             })?;
@@ -693,7 +693,7 @@ impl VerificationReporterCore {
         msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         time_stamp: Option<&'src_data [u8]>,
         step: impl EcssEnumeration,
-    ) -> Result<VerificationSendable<'src_data, TcStateStarted, VerifSuccess>, EcssTmError> {
+    ) -> Result<VerificationSendable<'src_data, TcStateStarted, VerifSuccess>, EcssTmtcError> {
         Ok(VerificationSendable::new_no_token(
             self.create_pus_verif_success_tm(
                 src_data_buf,
@@ -799,7 +799,7 @@ impl VerificationReporterCore {
             .send_tm(sendable.pus_tm.take().unwrap())
             .map_err(|e| {
                 VerificationOrSendErrorWithToken(
-                    EcssTmErrorWithSend::SendError(e),
+                    EcssTmtcErrorWithSend::SendError(e),
                     sendable.token.unwrap(),
                 )
             })?;
@@ -818,7 +818,7 @@ impl VerificationReporterCore {
             .send_tm(sendable.pus_tm.take().unwrap())
             .map_err(|e| {
                 VerificationOrSendErrorWithToken(
-                    EcssTmErrorWithSend::SendError(e),
+                    EcssTmtcErrorWithSend::SendError(e),
                     sendable.token.unwrap(),
                 )
             })?;
@@ -837,10 +837,10 @@ impl VerificationReporterCore {
         req_id: &RequestId,
         time_stamp: Option<&'src_data [u8]>,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
-    ) -> Result<PusTm<'src_data>, EcssTmError> {
+    ) -> Result<PusTm<'src_data>, EcssTmtcError> {
         let mut source_data_len = size_of::<u32>();
         if let Some(step) = step {
-            source_data_len += step.byte_width();
+            source_data_len += step.len();
         }
         source_buffer_large_enough(src_data_buf.len(), source_data_len)?;
         let mut idx = 0;
@@ -848,7 +848,7 @@ impl VerificationReporterCore {
         idx += RequestId::SIZE_AS_BYTES;
         if let Some(step) = step {
             // Size check was done beforehand
-            step.write_to_be_bytes(&mut src_data_buf[idx..idx + step.byte_width()])
+            step.write_to_be_bytes(&mut src_data_buf[idx..idx + step.len()])
                 .unwrap();
         }
         let mut sp_header = SpHeader::tm_unseg(self.apid(), seq_count, 0).unwrap();
@@ -873,11 +873,11 @@ impl VerificationReporterCore {
         req_id: &RequestId,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
         params: &FailParams<'src_data, '_>,
-    ) -> Result<PusTm<'src_data>, EcssTmError> {
+    ) -> Result<PusTm<'src_data>, EcssTmtcError> {
         let mut idx = 0;
-        let mut source_data_len = RequestId::SIZE_AS_BYTES + params.failure_code.byte_width();
+        let mut source_data_len = RequestId::SIZE_AS_BYTES + params.failure_code.len();
         if let Some(step) = step {
-            source_data_len += step.byte_width();
+            source_data_len += step.len();
         }
         if let Some(failure_data) = params.failure_data {
             source_data_len += failure_data.len();
@@ -887,14 +887,14 @@ impl VerificationReporterCore {
         idx += RequestId::SIZE_AS_BYTES;
         if let Some(step) = step {
             // Size check done beforehand
-            step.write_to_be_bytes(&mut src_data_buf[idx..idx + step.byte_width()])
+            step.write_to_be_bytes(&mut src_data_buf[idx..idx + step.len()])
                 .unwrap();
-            idx += step.byte_width();
+            idx += step.len();
         }
         params
             .failure_code
-            .write_to_be_bytes(&mut src_data_buf[idx..idx + params.failure_code.byte_width()])?;
-        idx += params.failure_code.byte_width();
+            .write_to_be_bytes(&mut src_data_buf[idx..idx + params.failure_code.len()])?;
+        idx += params.failure_code.len();
         if let Some(failure_data) = params.failure_data {
             src_data_buf[idx..idx + failure_data.len()].copy_from_slice(failure_data);
         }
@@ -1121,7 +1121,7 @@ mod alloc_mod {
             sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
             time_stamp: Option<&[u8]>,
             step: impl EcssEnumeration,
-        ) -> Result<(), EcssTmErrorWithSend<E>> {
+        ) -> Result<(), EcssTmtcErrorWithSend<E>> {
             let sendable = self.reporter.step_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
@@ -1298,7 +1298,7 @@ mod alloc_mod {
             token: &VerificationToken<TcStateStarted>,
             time_stamp: Option<&[u8]>,
             step: impl EcssEnumeration,
-        ) -> Result<(), EcssTmErrorWithSend<E>> {
+        ) -> Result<(), EcssTmtcErrorWithSend<E>> {
             self.reporter
                 .step_success(token, self.sender.as_mut(), time_stamp, step)
         }
@@ -1337,9 +1337,10 @@ mod stdmod {
     use super::alloc_mod::VerificationReporterWithSender;
     use super::*;
     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr};
-    use crate::pus::MpscPusInStoreSendError;
+    use crate::pus::{EcssSender, MpscPusInStoreSendError};
     use crate::SenderId;
     use delegate::delegate;
+    use spacepackets::ecss::SerializablePusPacket;
     use spacepackets::tm::PusTm;
     use std::sync::{mpsc, Arc, Mutex, RwLockWriteGuard};
 
@@ -1401,13 +1402,21 @@ mod stdmod {
     }
 
     //noinspection RsTraitImplementation
+    impl EcssSender for MpscVerifSender {
+        delegate!(
+            to self.base {
+                fn id(&self) -> SenderId;
+                fn name(&self) -> &'static str;
+            }
+        );
+    }
+
+    //noinspection RsTraitImplementation
     impl EcssTmSenderCore for MpscVerifSender {
         type Error = MpscPusInStoreSendError;
 
         delegate!(
             to self.base {
-                fn id(&self) -> SenderId;
-                fn name(&self) -> &'static str;
                 fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error>;
             }
         );
@@ -1443,24 +1452,37 @@ mod stdmod {
 
     //noinspection RsTraitImplementation
     #[cfg(feature = "crossbeam")]
+    impl EcssSender for CrossbeamVerifSender {
+        delegate!(
+            to self.base {
+                fn id(&self) -> SenderId;
+                fn name(&self) -> &'static str;
+            }
+        );
+    }
+
+    //noinspection RsTraitImplementation
+    #[cfg(feature = "crossbeam")]
     impl EcssTmSenderCore for CrossbeamVerifSender {
         type Error = MpscPusInStoreSendError;
 
         delegate!(
             to self.base {
-                fn id(&self) -> SenderId;
-                fn name(&self) -> &'static str;
                 fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error>;
             }
         );
     }
 
-    impl<S: SendBackend + Clone + 'static> EcssTmSenderCore for StdSenderBase<S> {
-        type Error = MpscPusInStoreSendError;
-
+    impl<S: SendBackend + Clone + 'static> EcssSender for StdSenderBase<S> {
         fn id(&self) -> SenderId {
             self.id
         }
+        fn name(&self) -> &'static str {
+            self.name
+        }
+    }
+    impl<S: SendBackend + Clone + 'static> EcssTmSenderCore for StdSenderBase<S> {
+        type Error = MpscPusInStoreSendError;
 
         fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
             let operation = |mut mg: RwLockWriteGuard<ShareablePoolProvider>| {
@@ -1483,10 +1505,6 @@ mod stdmod {
                     }
                 }
             }
-        }
-
-        fn name(&self) -> &'static str {
-            self.name
         }
     }
 }
@@ -1799,7 +1817,7 @@ mod tests {
         let err_with_token = res.unwrap_err();
         assert_eq!(err_with_token.1, tok);
         match err_with_token.0 {
-            EcssTmErrorWithSend::EcssTmError(EcssTmError::ByteConversionError(e)) => match e {
+            EcssTmErrorWithSend::EcssTmError(EcssTmtcError::ByteConversionError(e)) => match e {
                 ByteConversionError::ToSliceTooSmall(missmatch) => {
                     assert_eq!(
                         missmatch.expected,

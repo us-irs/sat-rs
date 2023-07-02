@@ -11,9 +11,9 @@ use hashbrown::HashSet;
 #[cfg(feature = "alloc")]
 pub use crate::pus::event::EventReporter;
 use crate::pus::verification::{TcStateStarted, VerificationToken};
-use crate::pus::EcssTmErrorWithSend;
 #[cfg(feature = "alloc")]
 use crate::pus::EcssTmSenderCore;
+use crate::pus::EcssTmtcErrorWithSend;
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub use alloc_mod::*;
@@ -96,13 +96,13 @@ pub struct EventRequestWithToken<Event: GenericEvent = EventU32> {
 
 #[derive(Debug)]
 pub enum EventManError<SenderE> {
-    EcssTmError(EcssTmErrorWithSend<SenderE>),
+    EcssTmtcError(EcssTmtcErrorWithSend<SenderE>),
     SeverityMissmatch(Severity, Severity),
 }
 
-impl<SenderE> From<EcssTmErrorWithSend<SenderE>> for EventManError<SenderE> {
-    fn from(v: EcssTmErrorWithSend<SenderE>) -> Self {
-        Self::EcssTmError(v)
+impl<SenderE> From<EcssTmtcErrorWithSend<SenderE>> for EventManError<SenderE> {
+    fn from(v: EcssTmtcErrorWithSend<SenderE>) -> Self {
+        Self::EcssTmtcError(v)
     }
 }
 

@@ -52,13 +52,14 @@ use alloc::vec::Vec;
 use core::fmt::Debug;
 use core::mem::size_of;
 use paste::paste;
-use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU64, EcssEnumU8, EcssEnumeration};
+use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU64, EcssEnumU8};
+use spacepackets::util::UnsignedEnum;
 use spacepackets::ByteConversionError;
 use spacepackets::SizeMissmatch;
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
-pub use spacepackets::ecss::ToBeBytes;
+pub use spacepackets::util::ToBeBytes;
 
 /// Generic trait which is used for objects which can be converted into a raw network (big) endian
 /// byte format.
@@ -170,6 +171,11 @@ macro_rules! scalar_byte_conversions_impl {
             paste! {
                 impl ToBeBytes for [<$ty:upper>] {
                     type ByteArray = [u8; size_of::<$ty>()];
+
+                    fn written_len(&self) -> usize {
+                        size_of::<Self::ByteArray>()
+                    }
+
                     fn to_be_bytes(&self) -> Self::ByteArray {
                         self.0.to_be_bytes()
                     }
@@ -199,6 +205,11 @@ macro_rules! pair_byte_conversions_impl {
             paste! {
                 impl ToBeBytes for [<$ty:upper Pair>] {
                     type ByteArray = [u8; size_of::<$ty>() * 2];
+
+                    fn written_len(&self) -> usize {
+                        size_of::<Self::ByteArray>()
+                    }
+
                     fn to_be_bytes(&self) -> Self::ByteArray {
                         let mut array = [0; size_of::<$ty>() * 2];
                         array[0..size_of::<$ty>()].copy_from_slice(&self.0.to_be_bytes());
@@ -236,6 +247,11 @@ macro_rules! triplet_to_be_bytes_impl {
             paste! {
                 impl ToBeBytes for [<$ty:upper Triplet>] {
                     type ByteArray = [u8; size_of::<$ty>() * 3];
+
+                    fn written_len(&self) -> usize {
+                        size_of::<Self::ByteArray>()
+                    }
+
                     fn to_be_bytes(&self) -> Self::ByteArray {
                         let mut array = [0; size_of::<$ty>() * 3];
                         array[0..size_of::<$ty>()].copy_from_slice(&self.0.to_be_bytes());
@@ -275,6 +291,10 @@ scalar_byte_conversions_impl!(u8, u16, u32, u64, i8, i16, i32, i64, f32, f64,);
 impl ToBeBytes for U8Pair {
     type ByteArray = [u8; 2];
 
+    fn written_len(&self) -> usize {
+        size_of::<Self::ByteArray>()
+    }
+
     fn to_be_bytes(&self) -> Self::ByteArray {
         let mut array = [0; 2];
         array[0] = self.0;
@@ -285,6 +305,10 @@ impl ToBeBytes for U8Pair {
 
 impl ToBeBytes for I8Pair {
     type ByteArray = [u8; 2];
+
+    fn written_len(&self) -> usize {
+        size_of::<Self::ByteArray>()
+    }
 
     fn to_be_bytes(&self) -> Self::ByteArray {
         let mut array = [0; 2];
@@ -297,6 +321,10 @@ impl ToBeBytes for I8Pair {
 impl ToBeBytes for U8Triplet {
     type ByteArray = [u8; 3];
 
+    fn written_len(&self) -> usize {
+        size_of::<Self::ByteArray>()
+    }
+
     fn to_be_bytes(&self) -> Self::ByteArray {
         let mut array = [0; 3];
         array[0] = self.0;
@@ -308,6 +336,10 @@ impl ToBeBytes for U8Triplet {
 
 impl ToBeBytes for I8Triplet {
     type ByteArray = [u8; 3];
+
+    fn written_len(&self) -> usize {
+        size_of::<Self::ByteArray>()
+    }
 
     fn to_be_bytes(&self) -> Self::ByteArray {
         let mut array = [0; 3];
@@ -443,11 +475,11 @@ macro_rules! writable_as_be_bytes_ecss_enum_impl {
     ($EnumIdent: ident) => {
         impl WritableToBeBytes for $EnumIdent {
             fn raw_len(&self) -> usize {
-                self.byte_width()
+                self.len()
             }
 
             fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
-                EcssEnumeration::write_to_be_bytes(self, buf).map(|_| self.byte_width())
+                <Self as UnsignedEnum>::write_to_be_bytes(self, buf).map(|_| self.raw_len())
             }
         }
     };
@@ -461,10 +493,10 @@ writable_as_be_bytes_ecss_enum_impl!(EcssEnumU64);
 impl WritableToBeBytes for EcssEnumParams {
     fn raw_len(&self) -> usize {
         match self {
-            EcssEnumParams::U8(e) => e.byte_width(),
-            EcssEnumParams::U16(e) => e.byte_width(),
-            EcssEnumParams::U32(e) => e.byte_width(),
-            EcssEnumParams::U64(e) => e.byte_width(),
+            EcssEnumParams::U8(e) => e.raw_len(),
+            EcssEnumParams::U16(e) => e.raw_len(),
+            EcssEnumParams::U32(e) => e.raw_len(),
+            EcssEnumParams::U64(e) => e.raw_len(),
         }
     }
 

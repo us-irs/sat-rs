@@ -12,7 +12,7 @@ name = "tests"
 path = "tests/tests.rs"
 
 [dependencies]
-quote = "1.0"
+quote = "1"
 proc-macro2 = "1.0"
 
 [dependencies.satrs-core]
@@ -25,5 +25,5 @@ trybuild = { version = "1.0", features = ["diff"] }
 path = ".."
 
 [dependencies.syn]
-version = "1.0"
+version = "2"
 features = ["extra-traits"]

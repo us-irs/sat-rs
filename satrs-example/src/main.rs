@@ -27,7 +27,7 @@ use satrs_core::pus::hk::Subservice as HkSubservice;
 use satrs_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
 };
-use satrs_core::pus::MpscTmInStoreSender;
+use satrs_core::pus::MpscTmtcInStoreSender;
 use satrs_core::seq_count::{SeqCountProviderSimple, SeqCountProviderSyncClonable};
 use satrs_core::spacepackets::{
     time::cds::TimeProvider,
@@ -185,7 +185,7 @@ fn main() {
         .spawn(move || {
             let mut timestamp: [u8; 7] = [0; 7];
             let mut sender =
-                MpscTmInStoreSender::new(1, "event_sender", tm_store.pool, tm_funnel_tx);
+                MpscTmtcInStoreSender::new(1, "event_sender", tm_store.pool, tm_funnel_tx);
             let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
             let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
                 reporter_event_handler
