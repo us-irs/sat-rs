@@ -36,7 +36,7 @@ impl From<ResultU16> for EcssEnumU16 {
 }
 
 impl UnsignedEnum for ResultU16 {
-    fn len(&self) -> usize {
+    fn size(&self) -> usize {
         core::mem::size_of::<u16>()
     }
 
@@ -49,7 +49,7 @@ impl UnsignedEnum for ResultU16 {
         }
         buf[0] = self.group_id;
         buf[1] = self.unique_id;
-        Ok(self.len())
+        Ok(self.size())
     }
 }
 

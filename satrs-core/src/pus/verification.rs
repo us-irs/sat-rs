@@ -840,7 +840,7 @@ impl VerificationReporterCore {
     ) -> Result<PusTm<'src_data>, EcssTmtcError> {
         let mut source_data_len = size_of::<u32>();
         if let Some(step) = step {
-            source_data_len += step.len();
+            source_data_len += step.size();
         }
         source_buffer_large_enough(src_data_buf.len(), source_data_len)?;
         let mut idx = 0;
@@ -848,7 +848,7 @@ impl VerificationReporterCore {
         idx += RequestId::SIZE_AS_BYTES;
         if let Some(step) = step {
             // Size check was done beforehand
-            step.write_to_be_bytes(&mut src_data_buf[idx..idx + step.len()])
+            step.write_to_be_bytes(&mut src_data_buf[idx..idx + step.size()])
                 .unwrap();
         }
         let mut sp_header = SpHeader::tm_unseg(self.apid(), seq_count, 0).unwrap();
@@ -875,9 +875,9 @@ impl VerificationReporterCore {
         params: &FailParams<'src_data, '_>,
     ) -> Result<PusTm<'src_data>, EcssTmtcError> {
         let mut idx = 0;
-        let mut source_data_len = RequestId::SIZE_AS_BYTES + params.failure_code.len();
+        let mut source_data_len = RequestId::SIZE_AS_BYTES + params.failure_code.size();
         if let Some(step) = step {
-            source_data_len += step.len();
+            source_data_len += step.size();
         }
         if let Some(failure_data) = params.failure_data {
             source_data_len += failure_data.len();
@@ -887,14 +887,14 @@ impl VerificationReporterCore {
         idx += RequestId::SIZE_AS_BYTES;
         if let Some(step) = step {
             // Size check done beforehand
-            step.write_to_be_bytes(&mut src_data_buf[idx..idx + step.len()])
+            step.write_to_be_bytes(&mut src_data_buf[idx..idx + step.size()])
                 .unwrap();
-            idx += step.len();
+            idx += step.size();
         }
         params
             .failure_code
-            .write_to_be_bytes(&mut src_data_buf[idx..idx + params.failure_code.len()])?;
-        idx += params.failure_code.len();
+            .write_to_be_bytes(&mut src_data_buf[idx..idx + params.failure_code.size()])?;
+        idx += params.failure_code.size();
         if let Some(failure_data) = params.failure_data {
             src_data_buf[idx..idx + failure_data.len()].copy_from_slice(failure_data);
         }

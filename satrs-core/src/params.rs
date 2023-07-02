@@ -475,7 +475,7 @@ macro_rules! writable_as_be_bytes_ecss_enum_impl {
     ($EnumIdent: ident) => {
         impl WritableToBeBytes for $EnumIdent {
             fn raw_len(&self) -> usize {
-                self.len()
+                self.size()
             }
 
             fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {

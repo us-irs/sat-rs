@@ -124,7 +124,7 @@ impl EventReporterBase {
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
     ) -> Result<PusTm, EcssTmtcError> {
-        let mut src_data_len = event_id.len();
+        let mut src_data_len = event_id.size();
         if let Some(aux_data) = aux_data {
             src_data_len += aux_data.len();
         }
@@ -138,8 +138,8 @@ impl EventReporterBase {
             Some(time_stamp),
         );
         let mut current_idx = 0;
-        event_id.write_to_be_bytes(&mut buf[0..event_id.len()])?;
-        current_idx += event_id.len();
+        event_id.write_to_be_bytes(&mut buf[0..event_id.size()])?;
+        current_idx += event_id.size();
         if let Some(aux_data) = aux_data {
             buf[current_idx..current_idx + aux_data.len()].copy_from_slice(aux_data);
             current_idx += aux_data.len();
