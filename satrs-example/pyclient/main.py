@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Example client for the sat-rs example application"""
 import logging
-import struct
 import sys
 import time
 from typing import Optional
@@ -43,13 +42,12 @@ from tmtccmd.tc import (
 from tmtccmd.util import FileSeqCountProvider, PusFileSeqCountProvider
 from tmtccmd.util.obj_id import ObjectIdDictT
 
-from tmtccmd.util.tmtc_printer import FsfwTmTcPrinter
 
 import pus_tc
 import tc_definitions
-from common import EXAMPLE_PUS_APID, EventSeverity, EventU32
+from common import EXAMPLE_PUS_APID, EventU32
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger()
 
 
 class SatRsConfigHook(HookBase):
@@ -85,12 +83,12 @@ class SatRsConfigHook(HookBase):
 class PusHandler(SpecificApidHandlerBase):
     def __init__(
         self,
+        file_logger: logging.Logger,
         verif_wrapper: VerificationWrapper,
-        printer: FsfwTmTcPrinter,
         raw_logger: RawTmtcTimedLogWrapper,
     ):
         super().__init__(EXAMPLE_PUS_APID, None)
-        self.printer = printer
+        self.file_logger = file_logger
         self.raw_logger = raw_logger
         self.verif_wrapper = verif_wrapper
 
@@ -146,10 +144,10 @@ class PusHandler(SpecificApidHandlerBase):
             )
             dedicated_handler = True
             if tm_packet.subservice == 2:
-                self.printer.file_logger.info("Received Ping Reply TM[17,2]")
+                self.file_logger.info("Received Ping Reply TM[17,2]")
                 _LOGGER.info("Received Ping Reply TM[17,2]")
             else:
-                self.printer.file_logger.info(
+                self.file_logger.info(
                     f"Received Test Packet with unknown subservice {tm_packet.subservice}"
                 )
                 _LOGGER.info(
@@ -236,14 +234,12 @@ def main():
     )
     # Create console logger helper and file loggers
     tmtc_logger = RegularTmtcLogWrapper()
-    printer = FsfwTmTcPrinter(tmtc_logger.logger)
+    file_logger = tmtc_logger.logger
     raw_logger = RawTmtcTimedLogWrapper(when=TimedLogWhen.PER_HOUR, interval=1)
     verificator = PusVerificator()
-    verification_wrapper = VerificationWrapper(
-        verificator, _LOGGER, printer.file_logger
-    )
+    verification_wrapper = VerificationWrapper(verificator, _LOGGER, file_logger)
     # Create primary TM handler and add it to the CCSDS Packet Handler
-    tm_handler = PusHandler(verification_wrapper, printer, raw_logger)
+    tm_handler = PusHandler(file_logger, verification_wrapper, raw_logger)
     ccsds_handler = CcsdsTmHandler(generic_handler=None)
     ccsds_handler.add_apid_handler(tm_handler)
 
