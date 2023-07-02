@@ -72,7 +72,7 @@ fn main() {
 
     let seq_count_provider = SeqCountProviderSyncClonable::default();
     let seq_count_provider_verif = seq_count_provider.clone();
-    let seq_count_provider_tmtc = seq_count_provider.clone();
+    let seq_count_provider_tmtc = seq_count_provider;
     let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
     let (tc_source_tx, tc_source_rx) = channel();
     let (tm_funnel_tx, tm_funnel_rx) = channel();
