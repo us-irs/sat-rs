@@ -26,4 +26,4 @@ path = ".."
 
 [dependencies.syn]
 version = "2"
-features = ["full", "extra-traits"]
+features = ["full"]

@@ -7,7 +7,6 @@ use satrs_core::mode::{ModeAndSubmode, ModeRequest};
 use satrs_core::params::Params;
 use satrs_core::pool::{PoolProvider, StoreAddr};
 use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
-use satrs_core::pus::hk;
 use satrs_core::pus::mode;
 use satrs_core::pus::mode::Subservice;
 use satrs_core::pus::scheduling::PusScheduler;
@@ -16,6 +15,7 @@ use satrs_core::pus::verification::{
     VerificationToken,
 };
 use satrs_core::pus::{event, GenericTcCheckError};
+use satrs_core::pus::{hk, EcssTmSender, EcssTmSenderCore};
 use satrs_core::res_code::ResultU16;
 use satrs_core::seq_count::{SeqCountProviderSyncClonable, SequenceCountProviderCore};
 use satrs_core::spacepackets::ecss::{scheduling, PusServiceId};
