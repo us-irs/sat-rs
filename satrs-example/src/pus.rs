@@ -17,6 +17,7 @@ use satrs_core::pus::verification::{
 };
 use satrs_core::pus::{event, GenericTcCheckError};
 use satrs_core::res_code::ResultU16;
+use satrs_core::seq_count::{SeqCountProviderSyncClonable, SequenceCountProviderCore};
 use satrs_core::spacepackets::ecss::{scheduling, PusServiceId};
 use satrs_core::spacepackets::time::CcsdsTimeProvider;
 use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
@@ -31,7 +32,6 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
-use satrs_core::seq_count::{SeqCountProviderSyncClonable, SequenceCountProvider, SequenceCountProviderCore};
 
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
@@ -57,6 +57,7 @@ impl PusTmArgs {
     }
 }
 
+#[allow(dead_code)]
 pub struct PusTcHandlerBase {
     pub tc_store: Box<dyn PoolProvider>,
     pub receiver: Receiver<(StoreAddr, VerificationToken<TcStateAccepted>)>,
@@ -68,16 +69,19 @@ pub trait TestHandlerNoPing {
     fn handle_no_ping_tc(&mut self, tc: PusTc);
 }
 
+#[allow(dead_code)]
 pub struct PusTestTcHandler {
     pub base: PusTcHandlerBase,
     handler: Option<Box<dyn TestHandlerNoPing>>,
 }
 
+#[allow(dead_code)]
 pub struct PusScheduleTcHandler {
     pub base: PusTestTcHandler,
 }
 
 impl PusTestTcHandler {
+    #[allow(dead_code)]
     pub fn operation(&mut self) {
         let (addr, token) = self.base.receiver.recv().unwrap();
         let data = self.base.tc_store.read(&addr).unwrap();
@@ -216,7 +220,12 @@ impl PusReceiver {
                     .verif_reporter
                     .start_success(token, Some(self.stamp_helper.stamp()))
                     .expect("Error sending start success");
-                let ping_reply = self.tm_helper.create_pus_tm_timestamp_now(17, 2, None, self.tm_args.seq_count_provider.get());
+                let ping_reply = self.tm_helper.create_pus_tm_timestamp_now(
+                    17,
+                    2,
+                    None,
+                    self.tm_args.seq_count_provider.get(),
+                );
                 let addr = self.tm_args.tm_store.add_pus_tm(&ping_reply);
                 self.tm_args
                     .tm_tx
