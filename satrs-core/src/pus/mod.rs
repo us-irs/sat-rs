@@ -186,13 +186,14 @@ pub mod std_mod {
         }
     }
 
-    impl EcssTmSenderCore for MpscTmtcInStoreSender {
-        type Error = MpscPusInStoreSendError;
-
-        fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
+    impl MpscTmtcInStoreSender {
+        pub fn send_tmtc(
+            &mut self,
+            tmtc: impl SerializablePusPacket,
+        ) -> Result<(), MpscPusInStoreSendError> {
             let operation = |mut store: RwLockWriteGuard<ShareablePoolProvider>| {
-                let (addr, slice) = store.free_element(tm.len_packed())?;
-                tm.write_to_bytes(slice)?;
+                let (addr, slice) = store.free_element(tmtc.len_packed())?;
+                tmtc.write_to_bytes(slice)?;
                 self.sender.send(addr)?;
                 Ok(())
             };
@@ -209,26 +210,19 @@ pub mod std_mod {
         }
     }
 
+    impl EcssTmSenderCore for MpscTmtcInStoreSender {
+        type Error = MpscPusInStoreSendError;
+
+        fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
+            self.send_tmtc(tm)
+        }
+    }
+
     impl EcssTcSenderCore for MpscTmtcInStoreSender {
         type Error = MpscPusInStoreSendError;
 
         fn send_tc(&mut self, tc: PusTc) -> Result<(), Self::Error> {
-            let operation = |mut store: RwLockWriteGuard<ShareablePoolProvider>| {
-                let (addr, slice) = store.free_element(tc.len_packed())?;
-                tc.write_to_bytes(slice)?;
-                self.sender.send(addr)?;
-                Ok(())
-            };
-            match self.store_helper.write() {
-                Ok(pool) => operation(pool),
-                Err(e) => {
-                    if self.ignore_poison_errors {
-                        operation(e.into_inner())
-                    } else {
-                        Err(MpscPusInStoreSendError::LockError)
-                    }
-                }
-            }
+            self.send_tmtc(tc)
         }
     }
 

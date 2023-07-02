@@ -84,7 +84,7 @@ use core::mem::size_of;
 use delegate::delegate;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use spacepackets::ecss::{scheduling, EcssEnumeration, PusPacket};
+use spacepackets::ecss::{scheduling, EcssEnumeration, PusPacket, SerializablePusPacket};
 use spacepackets::tc::PusTc;
 use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
