@@ -1,6 +1,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::{EcssEnumU16, EcssEnumeration};
+use spacepackets::util::UnsignedEnum;
 use spacepackets::{ByteConversionError, SizeMissmatch};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -34,12 +35,12 @@ impl From<ResultU16> for EcssEnumU16 {
     }
 }
 
-impl EcssEnumeration for ResultU16 {
-    fn pfc(&self) -> u8 {
-        16
+impl UnsignedEnum for ResultU16 {
+    fn size(&self) -> usize {
+        core::mem::size_of::<u16>()
     }
 
-    fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError> {
+    fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
         if buf.len() < 2 {
             return Err(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
                 found: buf.len(),
@@ -48,6 +49,12 @@ impl EcssEnumeration for ResultU16 {
         }
         buf[0] = self.group_id;
         buf[1] = self.unique_id;
-        Ok(())
+        Ok(self.size())
+    }
+}
+
+impl EcssEnumeration for ResultU16 {
+    fn pfc(&self) -> u8 {
+        16
     }
 }

@@ -33,6 +33,9 @@ use std::convert::TryFrom;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 
+pub trait PusTcMultiplexer {
+    fn route_pus_tc(tc: &PusTc, apid: u16, service: u8, subservice: u8);
+}
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
     pub tm_args: PusTmArgs,

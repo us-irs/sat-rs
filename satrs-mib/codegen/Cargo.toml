@@ -12,18 +12,18 @@ name = "tests"
 path = "tests/tests.rs"
 
 [dependencies]
-quote = "1.0"
-proc-macro2 = "1.0"
+quote = "1"
+proc-macro2 = "1"
 
 [dependencies.satrs-core]
 path = "../../satrs-core"
 
 [dev-dependencies]
-trybuild = { version = "1.0", features = ["diff"] }
+trybuild = { version = "1", features = ["diff"] }
 
 [dev-dependencies.satrs-mib]
 path = ".."
 
 [dependencies.syn]
-version = "1.0"
-features = ["extra-traits"]
+version = "2"
+features = ["full", "extra-traits"]

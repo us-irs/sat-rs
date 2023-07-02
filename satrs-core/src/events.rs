@@ -31,7 +31,8 @@ use core::fmt::Debug;
 use core::hash::Hash;
 use core::marker::PhantomData;
 use delegate::delegate;
-use spacepackets::ecss::{EcssEnumeration, ToBeBytes};
+use spacepackets::ecss::EcssEnumeration;
+use spacepackets::util::{ToBeBytes, UnsignedEnum};
 use spacepackets::{ByteConversionError, SizeMissmatch};
 
 /// Using a type definition allows to change this to u64 in the future more easily
@@ -121,7 +122,7 @@ impl<RAW: ToBeBytes, GID, UID> EventBase<RAW, GID, UID> {
         raw: RAW,
         buf: &mut [u8],
         width: usize,
-    ) -> Result<(), ByteConversionError> {
+    ) -> Result<usize, ByteConversionError> {
         if buf.len() < width {
             return Err(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
                 found: buf.len(),
@@ -129,7 +130,7 @@ impl<RAW: ToBeBytes, GID, UID> EventBase<RAW, GID, UID> {
             }));
         }
         buf.copy_from_slice(raw.to_be_bytes().as_ref());
-        Ok(())
+        Ok(raw.written_len())
     }
 }
 
@@ -403,21 +404,34 @@ try_from_impls!(SeverityLow, Severity::LOW, u32, EventU32TypedSev);
 try_from_impls!(SeverityMedium, Severity::MEDIUM, u32, EventU32TypedSev);
 try_from_impls!(SeverityHigh, Severity::HIGH, u32, EventU32TypedSev);
 
-impl EcssEnumeration for EventU32 {
-    fn pfc(&self) -> u8 {
-        32
+impl UnsignedEnum for EventU32 {
+    fn size(&self) -> usize {
+        core::mem::size_of::<u32>()
     }
 
-    fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError> {
-        self.base.write_to_bytes(self.raw(), buf, self.byte_width())
+    fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
+        self.base.write_to_bytes(self.raw(), buf, self.size())
     }
+}
+
+impl EcssEnumeration for EventU32 {
+    fn pfc(&self) -> u8 {
+        u32::BITS as u8
+    }
+}
+
+//noinspection RsTraitImplementation
+impl<SEVERITY: HasSeverity> UnsignedEnum for EventU32TypedSev<SEVERITY> {
+    delegate!(to self.event {
+        fn size(&self) -> usize;
+        fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError>;
+    });
 }
 
 //noinspection RsTraitImplementation
 impl<SEVERITY: HasSeverity> EcssEnumeration for EventU32TypedSev<SEVERITY> {
     delegate!(to self.event {
         fn pfc(&self) -> u8;
-        fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError>;
     });
 }
 
@@ -538,22 +552,34 @@ impl<SEVERITY: HasSeverity> EventU16TypedSev<SEVERITY> {
 
 impl_event_provider!(EventU16, EventU16TypedSev, u16, u8, u8);
 
+impl UnsignedEnum for EventU16 {
+    fn size(&self) -> usize {
+        core::mem::size_of::<u16>()
+    }
+
+    fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
+        self.base.write_to_bytes(self.raw(), buf, self.size())
+    }
+}
 impl EcssEnumeration for EventU16 {
     #[inline]
     fn pfc(&self) -> u8 {
-        16
+        u16::BITS as u8
     }
+}
 
-    fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError> {
-        self.base.write_to_bytes(self.raw(), buf, self.byte_width())
-    }
+//noinspection RsTraitImplementation
+impl<SEVERITY: HasSeverity> UnsignedEnum for EventU16TypedSev<SEVERITY> {
+    delegate!(to self.event {
+        fn size(&self) -> usize;
+        fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError>;
+    });
 }
 
 //noinspection RsTraitImplementation
 impl<SEVERITY: HasSeverity> EcssEnumeration for EventU16TypedSev<SEVERITY> {
     delegate!(to self.event {
         fn pfc(&self) -> u8;
-        fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<(), ByteConversionError>;
     });
 }
 
