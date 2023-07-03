@@ -8,12 +8,13 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 use std::rc::Rc;
+use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
 use crate::ccsds::CcsdsReceiver;
-use crate::pus::{PusReceiver, PusTcArgs, PusTmArgs};
+use crate::pus::{PusReceiver, PusTcArgs, PusTcMpscRouter, PusTmArgs};
 use crate::requests::RequestWithToken;
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::event_man::EventRequestWithToken;
@@ -178,12 +179,21 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
         verif_reporter: args.verif_reporter,
         seq_count_provider: args.seq_count_provider.clone(),
     };
+    let (pus_test_tx, pus_tedt_rx) = mpsc::channel();
+    let (pus_event_tx, pus_event_rx) = mpsc::channel();
+    let (pus_sched_tx, pus_sched_rx) = mpsc::channel();
+    let (pus_hk_tx, pus_hk_rx) = mpsc::channel();
+    let (pus_action_tx, pus_action_rx) = mpsc::channel();
+    let pus_router = PusTcMpscRouter {
+        test_service_receiver: pus_test_tx,
+        event_service_receiver: pus_event_tx,
+        sched_service_receiver: pus_sched_tx,
+        hk_service_receiver: pus_hk_tx,
+        action_service_receiver: pus_action_tx,
+    };
     let pus_tc_args = PusTcArgs {
-        event_request_tx: args.event_request_tx,
-        request_map: args.request_map,
-        tc_source: tc_args.tc_source.clone(),
+        pus_router,
         event_sender: args.event_sender,
-        scheduler: sched_clone,
     };
     let mut pus_receiver = PusReceiver::new(PUS_APID, pus_tm_args, pus_tc_args);
 
@@ -266,7 +276,7 @@ fn core_tmtc_loop(
             match PusTc::from_bytes(tc_buf) {
                 Ok((pus_tc, _)) => {
                     pus_receiver
-                        .handle_pus_tc_packet(pus_tc.service(), pus_tc.sp_header(), &pus_tc)
+                        .handle_tc_packet(addr, pus_tc.service(), &pus_tc)
                         .ok();
                 }
                 Err(e) => {

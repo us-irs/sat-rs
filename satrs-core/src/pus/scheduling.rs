@@ -620,6 +620,7 @@ impl PusScheduler {
 mod tests {
     use super::*;
     use crate::pool::{LocalPool, PoolCfg, PoolProvider, StoreAddr, StoreError};
+    use spacepackets::ecss::SerializablePusPacket;
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::time::{cds, TimeWriter, UnixTimestamp};
     use spacepackets::SpHeader;

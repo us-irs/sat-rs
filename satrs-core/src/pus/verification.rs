@@ -207,15 +207,19 @@ pub struct TcStateNone;
 pub struct TcStateAccepted;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct TcStateStarted;
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct TcStateCompleted;
 
 impl WasAtLeastAccepted for TcStateAccepted {}
 impl WasAtLeastAccepted for TcStateStarted {}
+impl WasAtLeastAccepted for TcStateCompleted {}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum TcStateToken {
     None(VerificationToken<TcStateNone>),
     Accepted(VerificationToken<TcStateAccepted>),
     Started(VerificationToken<TcStateStarted>),
+    Completed(VerificationToken<TcStateCompleted>),
 }
 
 impl From<VerificationToken<TcStateNone>> for TcStateToken {
@@ -233,6 +237,12 @@ impl From<VerificationToken<TcStateAccepted>> for TcStateToken {
 impl From<VerificationToken<TcStateStarted>> for TcStateToken {
     fn from(t: VerificationToken<TcStateStarted>) -> Self {
         TcStateToken::Started(t)
+    }
+}
+
+impl From<VerificationToken<TcStateCompleted>> for TcStateToken {
+    fn from(t: VerificationToken<TcStateCompleted>) -> Self {
+        TcStateToken::Completed(t)
     }
 }
 
@@ -1529,11 +1539,11 @@ mod tests {
     use crate::pool::{LocalPool, PoolCfg, SharedPool};
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
-        EcssTmError, EcssTmSenderCore, FailParams, FailParamsWithStep, MpscVerifSender, RequestId,
-        TcStateNone, VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
-        VerificationToken,
+        EcssTmSenderCore, EcssTmtcError, FailParams, FailParamsWithStep, MpscVerifSender,
+        RequestId, TcStateNone, VerificationReporter, VerificationReporterCfg,
+        VerificationReporterWithSender, VerificationToken,
     };
-    use crate::pus::EcssTmErrorWithSend;
+    use crate::pus::{EcssSender, EcssTmtcErrorWithSend};
     use crate::seq_count::SeqCountProviderSimple;
     use crate::SenderId;
     use alloc::boxed::Box;
@@ -1541,6 +1551,7 @@ mod tests {
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration, PusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::tm::PusTm;
+    use spacepackets::util::UnsignedEnum;
     use spacepackets::{ByteConversionError, CcsdsPacket, SpHeader};
     use std::collections::VecDeque;
     use std::sync::{mpsc, Arc, RwLock};
@@ -1567,12 +1578,17 @@ mod tests {
         pub service_queue: VecDeque<TmInfo>,
     }
 
-    impl EcssTmSenderCore for TestSender {
-        type Error = ();
-
+    impl EcssSender for TestSender {
         fn id(&self) -> SenderId {
             0
         }
+        fn name(&self) -> &'static str {
+            "test_sender"
+        }
+    }
+
+    impl EcssTmSenderCore for TestSender {
+        type Error = ();
 
         fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
             assert_eq!(PusPacket::service(&tm), 1);
@@ -1595,10 +1611,6 @@ mod tests {
             });
             Ok(())
         }
-
-        fn name(&self) -> &'static str {
-            "test_sender"
-        }
     }
 
     #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -1606,11 +1618,13 @@ mod tests {
     #[derive(Default, Clone)]
     struct FallibleSender {}
 
-    impl EcssTmSenderCore for FallibleSender {
-        type Error = DummyError;
+    impl EcssSender for FallibleSender {
         fn id(&self) -> SenderId {
             0
         }
+    }
+    impl EcssTmSenderCore for FallibleSender {
+        type Error = DummyError;
         fn send_tm(&mut self, _: PusTm) -> Result<(), Self::Error> {
             Err(DummyError {})
         }
@@ -1747,7 +1761,7 @@ mod tests {
         let err = res.unwrap_err();
         assert_eq!(err.1, tok);
         match err.0 {
-            EcssTmErrorWithSend::SendError(e) => {
+            EcssTmtcErrorWithSend::SendError(e) => {
                 assert_eq!(e, DummyError {})
             }
             _ => panic!("{}", format!("Unexpected error {:?}", err.0)),
@@ -1817,18 +1831,20 @@ mod tests {
         let err_with_token = res.unwrap_err();
         assert_eq!(err_with_token.1, tok);
         match err_with_token.0 {
-            EcssTmErrorWithSend::EcssTmError(EcssTmtcError::ByteConversionError(e)) => match e {
-                ByteConversionError::ToSliceTooSmall(missmatch) => {
-                    assert_eq!(
-                        missmatch.expected,
-                        fail_data.len() + RequestId::SIZE_AS_BYTES + fail_code.byte_width()
-                    );
-                    assert_eq!(missmatch.found, b.rep().allowed_source_data_len());
+            EcssTmtcErrorWithSend::EcssTmtcError(EcssTmtcError::ByteConversionError(e)) => {
+                match e {
+                    ByteConversionError::ToSliceTooSmall(missmatch) => {
+                        assert_eq!(
+                            missmatch.expected,
+                            fail_data.len() + RequestId::SIZE_AS_BYTES + fail_code.size()
+                        );
+                        assert_eq!(missmatch.found, b.rep().allowed_source_data_len());
+                    }
+                    _ => {
+                        panic!("{}", format!("Unexpected error {:?}", e))
+                    }
                 }
-                _ => {
-                    panic!("{}", format!("Unexpected error {:?}", e))
-                }
-            },
+            }
             _ => {
                 panic!("{}", format!("Unexpected error {:?}", err_with_token.0))
             }
@@ -2386,7 +2402,8 @@ mod tests {
         let shared_tm_pool: SharedPool =
             Arc::new(RwLock::new(Box::new(LocalPool::new(pool_cfg.clone()))));
         let (verif_tx, verif_rx) = mpsc::channel();
-        let sender = MpscVerifSender::new(shared_tm_pool.clone(), verif_tx);
+        let sender =
+            MpscVerifSender::new(0, "Verification Sender", shared_tm_pool.clone(), verif_tx);
         let cfg = VerificationReporterCfg::new(
             TEST_APID,
             Box::new(SeqCountProviderSimple::default()),

@@ -20,6 +20,7 @@ pub mod verification;
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
 
+use crate::pus::verification::TcStateToken;
 use crate::SenderId;
 #[cfg(feature = "std")]
 pub use std_mod::*;

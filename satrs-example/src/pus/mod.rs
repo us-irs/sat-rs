@@ -1,5 +1,5 @@
 use crate::requests::{Request, RequestWithToken};
-use crate::tmtc::{PusTcSource, TmStore, PUS_APID};
+use crate::tmtc::{MpscStoreAndSendError, PusTcSource, TmStore, PUS_APID};
 use log::{info, warn};
 use satrs_core::events::EventU32;
 use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
@@ -34,6 +34,8 @@ use std::convert::TryFrom;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 
+pub mod test;
+
 // pub trait PusTcRouter {
 //     type Error;
 //     fn route_pus_tc(
@@ -45,14 +47,19 @@ use std::sync::mpsc::{Receiver, Sender};
 //     );
 // }
 
+pub enum PusTcWrapper<'tc> {
+    PusTc(&'tc PusTc<'tc>),
+    StoreAddr(StoreAddr),
+}
+
 pub type AcceptedTc = (StoreAddr, VerificationToken<TcStateAccepted>);
 
 pub struct PusTcMpscRouter {
-    test_service_receiver: MpscTmtcInStoreSender,
-    event_service_receiver: Sender<AcceptedTc>,
-    sched_service_receiver: Sender<AcceptedTc>,
-    hk_service_receiver: Sender<AcceptedTc>,
-    action_service_receiver: Sender<AcceptedTc>,
+    pub test_service_receiver: Sender<AcceptedTc>,
+    pub event_service_receiver: Sender<AcceptedTc>,
+    pub sched_service_receiver: Sender<AcceptedTc>,
+    pub hk_service_receiver: Sender<AcceptedTc>,
+    pub action_service_receiver: Sender<AcceptedTc>,
 }
 
 // impl PusTcRouter for PusTcMpscRouter {
@@ -146,7 +153,7 @@ impl PusTmArgs {
 // }
 
 pub struct PusTcArgs {
-    pub event_request_tx: Sender<EventRequestWithToken>,
+    //pub event_request_tx: Sender<EventRequestWithToken>,
     /// This routes all telecommands to their respective recipients
     pub pus_router: PusTcMpscRouter,
     /// Request routing helper. Maps targeted requests to their recipient.
@@ -196,15 +203,13 @@ impl PusReceiver {
     }
 }
 
-impl PusServiceProvider for PusReceiver {
-    type Error = ();
-
-    fn handle_pus_tc_packet(
+impl PusReceiver {
+    pub fn handle_tc_packet(
         &mut self,
+        store_addr: StoreAddr,
         service: u8,
-        _header: &SpHeader,
         pus_tc: &PusTc,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), MpscStoreAndSendError> {
         let init_token = self.tm_args.verif_reporter.add_tc(pus_tc);
         self.stamp_helper.update_from_now();
         let accepted_token = self
@@ -219,20 +224,26 @@ impl PusServiceProvider for PusReceiver {
                     .tc_args
                     .pus_router
                     .test_service_receiver
-                    .send_tc(*pus_tc),
-                PusServiceId::Housekeeping => {
-                    self.tc_args.pus_router.hk_service_receiver.send_tc(*pus_tc)
-                } //self.handle_hk_request(pus_tc, accepted_token),
+                    .send((store_addr, accepted_token))
+                    .unwrap(),
+                PusServiceId::Housekeeping => self
+                    .tc_args
+                    .pus_router
+                    .hk_service_receiver
+                    .send((store_addr, accepted_token))
+                    .unwrap(),
                 PusServiceId::Event => self
                     .tc_args
                     .pus_router
                     .event_service_receiver
-                    .send_tc(*pus_tc), //self.handle_event_request(pus_tc, accepted_token),
+                    .send((store_addr, accepted_token))
+                    .unwrap(),
                 PusServiceId::Scheduling => self
                     .tc_args
                     .pus_router
                     .sched_service_receiver
-                    .send_tc(*pus_tc), //self.handle_scheduled_tc(pus_tc, accepted_token),
+                    .send((store_addr, accepted_token))
+                    .unwrap(),
                 _ => self
                     .tm_args
                     .verif_reporter
@@ -250,7 +261,7 @@ impl PusServiceProvider for PusReceiver {
                 if let Ok(custom_service) = CustomPusServiceId::try_from(e.number) {
                     match custom_service {
                         CustomPusServiceId::Mode => {
-                            self.handle_mode_service(pus_tc, accepted_token)
+                            //self.handle_mode_service(pus_tc, accepted_token)
                         }
                         CustomPusServiceId::Health => {}
                     }
@@ -272,6 +283,82 @@ impl PusServiceProvider for PusReceiver {
         Ok(())
     }
 }
+// impl PusServiceProvider for PusReceiver {
+//     type Error = ();
+//
+//     fn handle_pus_tc_packet(
+//         &mut self,
+//         service: u8,
+//         _header: &SpHeader,
+//         pus_tc: &PusTc,
+//     ) -> Result<(), Self::Error> {
+//         let init_token = self.tm_args.verif_reporter.add_tc(pus_tc);
+//         self.stamp_helper.update_from_now();
+//         let accepted_token = self
+//             .tm_args
+//             .vr()
+//             .acceptance_success(init_token, Some(self.stamp_helper.stamp()))
+//             .expect("Acceptance success failure");
+//         let service = PusServiceId::try_from(service);
+//         match service {
+//             Ok(standard_service) => match standard_service {
+//                 PusServiceId::Test => self
+//                     .tc_args
+//                     .pus_router
+//                     .test_service_receiver
+//                     .send_tc(*pus_tc),
+//                 PusServiceId::Housekeeping => {
+//                     self.tc_args.pus_router.hk_service_receiver.send_tc(*pus_tc)
+//                 } //self.handle_hk_request(pus_tc, accepted_token),
+//                 PusServiceId::Event => self
+//                     .tc_args
+//                     .pus_router
+//                     .event_service_receiver
+//                     .send_tc(*pus_tc), //self.handle_event_request(pus_tc, accepted_token),
+//                 PusServiceId::Scheduling => self
+//                     .tc_args
+//                     .pus_router
+//                     .sched_service_receiver
+//                     .send_tc(*pus_tc), //self.handle_scheduled_tc(pus_tc, accepted_token),
+//                 _ => self
+//                     .tm_args
+//                     .verif_reporter
+//                     .start_failure(
+//                         accepted_token,
+//                         FailParams::new(
+//                             Some(self.stamp_helper.stamp()),
+//                             &tmtc_err::PUS_SERVICE_NOT_IMPLEMENTED,
+//                             Some(&[standard_service as u8]),
+//                         ),
+//                     )
+//                     .expect("Start failure verification failed"),
+//             },
+//             Err(e) => {
+//                 if let Ok(custom_service) = CustomPusServiceId::try_from(e.number) {
+//                     match custom_service {
+//                         CustomPusServiceId::Mode => {
+//                             self.handle_mode_service(pus_tc, accepted_token)
+//                         }
+//                         CustomPusServiceId::Health => {}
+//                     }
+//                 } else {
+//                     self.tm_args
+//                         .verif_reporter
+//                         .start_failure(
+//                             accepted_token,
+//                             FailParams::new(
+//                                 Some(self.stamp_helper.stamp()),
+//                                 &tmtc_err::INVALID_PUS_SUBSERVICE,
+//                                 Some(&[e.number]),
+//                             ),
+//                         )
+//                         .expect("Start failure verification failed")
+//                 }
+//             }
+//         }
+//         Ok(())
+//     }
+// }
 
 // impl PusReceiver {
 //     fn handle_test_service(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {

@@ -243,6 +243,7 @@ mod tests {
     use super::*;
     use crate::events::{EventU32, Severity};
     use crate::pus::tests::CommonTmInfo;
+    use crate::pus::EcssSender;
     use crate::SenderId;
     use spacepackets::ByteConversionError;
     use std::collections::VecDeque;
@@ -266,12 +267,15 @@ mod tests {
         pub service_queue: VecDeque<TmInfo>,
     }
 
-    impl EcssTmSenderCore for TestSender {
-        type Error = ();
-
+    impl EcssSender for TestSender {
         fn id(&self) -> SenderId {
             0
         }
+    }
+
+    impl EcssTmSenderCore for TestSender {
+        type Error = ();
+
         fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
             assert!(tm.source_data().is_some());
             let src_data = tm.source_data().unwrap();
@@ -413,7 +417,7 @@ mod tests {
         let err = reporter.event_info(sender, &time_stamp_empty, event, None);
         assert!(err.is_err());
         let err = err.unwrap_err();
-        if let EcssTmErrorWithSend::EcssTmError(EcssTmtcError::ByteConversionError(
+        if let EcssTmtcErrorWithSend::EcssTmtcError(EcssTmtcError::ByteConversionError(
             ByteConversionError::ToSliceTooSmall(missmatch),
         )) = err
         {

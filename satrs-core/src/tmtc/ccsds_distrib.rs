@@ -224,6 +224,7 @@ impl<E: 'static> CcsdsDistributor<E> {
 pub(crate) mod tests {
     use super::*;
     use crate::tmtc::ccsds_distrib::{CcsdsDistributor, CcsdsPacketHandler};
+    use spacepackets::ecss::SerializablePusPacket;
     use spacepackets::tc::PusTc;
     use spacepackets::CcsdsPacket;
     use std::collections::VecDeque;

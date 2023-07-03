@@ -141,6 +141,7 @@ impl<E: 'static> UdpTcServer<E> {
 mod tests {
     use crate::hal::host::udp_server::{ReceiveResult, UdpTcServer};
     use crate::tmtc::ReceivesTcCore;
+    use spacepackets::ecss::SerializablePusPacket;
     use spacepackets::tc::PusTc;
     use spacepackets::SpHeader;
     use std::boxed::Box;

@@ -8,7 +8,7 @@ pub mod crossbeam_test {
         VerificationReporterWithSender,
     };
     use satrs_core::seq_count::SeqCountProviderSyncClonable;
-    use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket};
+    use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket, SerializablePusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::tm::PusTm;
     use spacepackets::SpHeader;
