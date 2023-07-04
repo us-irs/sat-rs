@@ -1,10 +1,11 @@
+use crate::pus::test::PusService17TestHandler;
 use crate::tmtc::MpscStoreAndSendError;
 use satrs_core::events::EventU32;
 use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
 use satrs_core::mode::{ModeAndSubmode, ModeRequest};
 use satrs_core::objects::ObjectId;
 use satrs_core::params::Params;
-use satrs_core::pool::{PoolProvider, StoreAddr};
+use satrs_core::pool::{PoolProvider, SharedPool, StoreAddr};
 use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
 use satrs_core::pus::hk;
 use satrs_core::pus::mode::Subservice;
@@ -30,9 +31,45 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::rc::Rc;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, SendError, Sender};
 
+pub mod scheduler;
 pub mod test;
+
+pub struct PusServiceBase {
+    tc_rx: Receiver<AcceptedTc>,
+    tc_store: SharedPool,
+    tm_helper: PusTmWithCdsShortHelper,
+    tm_tx: Sender<StoreAddr>,
+    tm_store: SharedTmStore,
+    verification_handler: StdVerifReporterWithSender,
+    stamp_buf: [u8; 7],
+    pus_buf: [u8; 2048],
+    handled_tcs: u32,
+}
+
+impl PusServiceBase {
+    pub fn new(
+        receiver: Receiver<AcceptedTc>,
+        tc_pool: SharedPool,
+        tm_helper: PusTmWithCdsShortHelper,
+        tm_tx: Sender<StoreAddr>,
+        tm_store: SharedTmStore,
+        verification_handler: StdVerifReporterWithSender,
+    ) -> Self {
+        Self {
+            tc_rx: receiver,
+            tc_store: tc_pool,
+            tm_helper,
+            tm_tx,
+            tm_store,
+            verification_handler,
+            stamp_buf: [0; 7],
+            pus_buf: [0; 2048],
+            handled_tcs: 0,
+        }
+    }
+}
 
 // pub trait PusTcRouter {
 //     type Error;
@@ -218,12 +255,19 @@ impl PusReceiver {
         let service = PusServiceId::try_from(service);
         match service {
             Ok(standard_service) => match standard_service {
-                PusServiceId::Test => self
-                    .tc_args
-                    .pus_router
-                    .test_service_receiver
-                    .send((store_addr, accepted_token))
-                    .unwrap(),
+                PusServiceId::Test => {
+                    let res = self
+                        .tc_args
+                        .pus_router
+                        .test_service_receiver
+                        .send((store_addr, accepted_token));
+                    match res {
+                        Ok(_) => {}
+                        Err(e) => {
+                            println!("Error {e}")
+                        }
+                    }
+                }
                 PusServiceId::Housekeeping => self
                     .tc_args
                     .pus_router

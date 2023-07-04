@@ -152,7 +152,12 @@ impl ReceivesCcsdsTc for PusTcSource {
     }
 }
 
-pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
+pub fn core_tmtc_task(
+    args: OtherArgs,
+    mut tc_args: TcArgs,
+    tm_args: TmArgs,
+    pus_router: PusTcMpscRouter,
+) {
     let scheduler = Rc::new(RefCell::new(
         PusScheduler::new_with_current_init_time(Duration::from_secs(5)).unwrap(),
     ));
@@ -163,18 +168,6 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
         tm_store: tm_args.tm_store.clone(),
         verif_reporter: args.verif_reporter,
         seq_count_provider: args.seq_count_provider.clone(),
-    };
-    let (pus_test_tx, pus_tedt_rx) = mpsc::channel();
-    let (pus_event_tx, pus_event_rx) = mpsc::channel();
-    let (pus_sched_tx, pus_sched_rx) = mpsc::channel();
-    let (pus_hk_tx, pus_hk_rx) = mpsc::channel();
-    let (pus_action_tx, pus_action_rx) = mpsc::channel();
-    let pus_router = PusTcMpscRouter {
-        test_service_receiver: pus_test_tx,
-        event_service_receiver: pus_event_tx,
-        sched_service_receiver: pus_sched_tx,
-        hk_service_receiver: pus_hk_tx,
-        action_service_receiver: pus_action_tx,
     };
     let pus_tc_args = PusTcArgs {
         pus_router,

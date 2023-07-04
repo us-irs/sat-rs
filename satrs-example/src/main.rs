@@ -9,6 +9,8 @@ use log::{info, warn};
 
 use crate::hk::AcsHkIds;
 use crate::logging::setup_logger;
+use crate::pus::test::PusService17TestHandler;
+use crate::pus::PusTcMpscRouter;
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{
     core_tmtc_task, OtherArgs, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, PUS_APID,
@@ -35,16 +37,15 @@ use satrs_core::spacepackets::{
     tm::{PusTm, PusTmSecondaryHeader},
     SequenceFlags, SpHeader,
 };
-use satrs_core::tmtc::tm_helper::SharedTmStore;
+use satrs_core::tmtc::tm_helper::{PusTmWithCdsShortHelper, SharedTmStore};
 use satrs_core::tmtc::AddressableId;
 use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};
-use std::sync::{Arc, RwLock};
+use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-use crate::pus::test::PusService17Handler;
 
 fn main() {
     setup_logger().expect("setting up logging with fern failed");
@@ -126,14 +127,14 @@ fn main() {
     request_map.insert(RequestTargetId::AcsSubsystem as u32, acs_thread_tx);
 
     let tc_source = PusTcSource {
-        tc_store,
+        tc_store: tc_store.clone(),
         tc_source: tc_source_tx,
     };
 
     // Create clones here to allow moving the values
     let core_args = OtherArgs {
         sock_addr,
-        verif_reporter,
+        verif_reporter: verif_reporter.clone(),
         event_sender,
         event_request_tx,
         request_map,
@@ -152,13 +153,32 @@ fn main() {
     let aocs_to_funnel = tm_funnel_tx.clone();
     let mut aocs_tm_store = tm_store.clone();
 
-    let pus17_handler = PusService17Handler::new()
+    let (pus_test_tx, pus_test_rx) = channel();
+    let (pus_event_tx, pus_event_rx) = channel();
+    let (pus_sched_tx, pus_sched_rx) = channel();
+    let (pus_hk_tx, pus_hk_rx) = channel();
+    let (pus_action_tx, pus_action_rx) = channel();
+    let pus_router = PusTcMpscRouter {
+        test_service_receiver: pus_test_tx,
+        event_service_receiver: pus_event_tx,
+        sched_service_receiver: pus_sched_tx,
+        hk_service_receiver: pus_hk_tx,
+        action_service_receiver: pus_action_tx,
+    };
+    let mut pus17_handler = PusService17TestHandler::new(
+        pus_test_rx,
+        tc_store.pool.clone(),
+        PusTmWithCdsShortHelper::new(PUS_APID),
+        tm_funnel_tx.clone(),
+        tm_store.clone(),
+        verif_reporter.clone(),
+    );
 
     info!("Starting TMTC task");
     let jh0 = thread::Builder::new()
         .name("TMTC".to_string())
         .spawn(move || {
-            core_tmtc_task(core_args, tc_args, tm_args);
+            core_tmtc_task(core_args, tc_args, tm_args, pus_router);
         })
         .unwrap();
 
@@ -315,10 +335,16 @@ fn main() {
 
     info!("Starting PUS handler thread");
     let jh4 = thread::Builder::new()
-        .name("AOCS".to_string())
+        .name("PUS".to_string())
         .spawn(move || {
-
-        });
+            loop {
+                // TODO: Better error handling
+                let res = pus17_handler.periodic_operation();
+                res.expect("some PUS17 error");
+                thread::sleep(Duration::from_millis(400));
+            }
+        })
+        .unwrap();
     jh0.join().expect("Joining UDP TMTC server thread failed");
     jh1.join().expect("Joining TM Funnel thread failed");
     jh2.join().expect("Joining Event Manager thread failed");
