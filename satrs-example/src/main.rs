@@ -11,7 +11,7 @@ use crate::hk::AcsHkIds;
 use crate::logging::setup_logger;
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{
-    core_tmtc_task, OtherArgs, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, TmStore, PUS_APID,
+    core_tmtc_task, OtherArgs, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, PUS_APID,
 };
 use satrs_core::event_man::{
     EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
@@ -35,6 +35,7 @@ use satrs_core::spacepackets::{
     tm::{PusTm, PusTmSecondaryHeader},
     SequenceFlags, SpHeader,
 };
+use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::AddressableId;
 use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
 use std::collections::HashMap;
@@ -43,6 +44,7 @@ use std::sync::mpsc::{channel, TryRecvError};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
+use crate::pus::test::PusService17Handler;
 
 fn main() {
     setup_logger().expect("setting up logging with fern failed");
@@ -55,9 +57,7 @@ fn main() {
         (15, 1024),
         (15, 2048),
     ]));
-    let tm_store = TmStore {
-        pool: Arc::new(RwLock::new(Box::new(tm_pool))),
-    };
+    let tm_store = SharedTmStore::new(Arc::new(RwLock::new(Box::new(tm_pool))));
     let tc_pool = LocalPool::new(PoolCfg::new(vec![
         (30, 32),
         (15, 64),
@@ -80,7 +80,7 @@ fn main() {
     let verif_sender = MpscVerifSender::new(
         0,
         "verif_sender",
-        tm_store.pool.clone(),
+        tm_store.backing_pool(),
         tm_funnel_tx.clone(),
     );
     let verif_cfg = VerificationReporterCfg::new(
@@ -152,6 +152,8 @@ fn main() {
     let aocs_to_funnel = tm_funnel_tx.clone();
     let mut aocs_tm_store = tm_store.clone();
 
+    let pus17_handler = PusService17Handler::new()
+
     info!("Starting TMTC task");
     let jh0 = thread::Builder::new()
         .name("TMTC".to_string())
@@ -184,8 +186,12 @@ fn main() {
         .name("Event".to_string())
         .spawn(move || {
             let mut timestamp: [u8; 7] = [0; 7];
-            let mut sender =
-                MpscTmtcInStoreSender::new(1, "event_sender", tm_store.pool, tm_funnel_tx);
+            let mut sender = MpscTmtcInStoreSender::new(
+                1,
+                "event_sender",
+                tm_store.backing_pool(),
+                tm_funnel_tx,
+            );
             let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
             let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
                 reporter_event_handler
@@ -307,10 +313,17 @@ fn main() {
         })
         .unwrap();
 
+    info!("Starting PUS handler thread");
+    let jh4 = thread::Builder::new()
+        .name("AOCS".to_string())
+        .spawn(move || {
+
+        });
     jh0.join().expect("Joining UDP TMTC server thread failed");
     jh1.join().expect("Joining TM Funnel thread failed");
     jh2.join().expect("Joining Event Manager thread failed");
     jh3.join().expect("Joining AOCS thread failed");
+    jh4.join().expect("Joining PUS handler thread failed");
 }
 
 pub fn update_time(time_provider: &mut TimeProvider, timestamp: &mut [u8]) {

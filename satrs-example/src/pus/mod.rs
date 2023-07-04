@@ -1,6 +1,4 @@
-use crate::requests::{Request, RequestWithToken};
-use crate::tmtc::{MpscStoreAndSendError, PusTcSource, TmStore, PUS_APID};
-use log::{info, warn};
+use crate::tmtc::MpscStoreAndSendError;
 use satrs_core::events::EventU32;
 use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
 use satrs_core::mode::{ModeAndSubmode, ModeRequest};
@@ -21,7 +19,7 @@ use satrs_core::res_code::ResultU16;
 use satrs_core::seq_count::{SeqCountProviderSyncClonable, SequenceCountProviderCore};
 use satrs_core::spacepackets::ecss::{scheduling, PusServiceId};
 use satrs_core::spacepackets::time::CcsdsTimeProvider;
-use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
+use satrs_core::tmtc::tm_helper::{PusTmWithCdsShortHelper, SharedTmStore};
 use satrs_core::tmtc::{AddressableId, PusServiceProvider, TargetId};
 use satrs_core::{
     spacepackets::ecss::PusPacket, spacepackets::tc::PusTc, spacepackets::time::cds::TimeProvider,
@@ -98,7 +96,7 @@ pub struct PusTmArgs {
     /// All telemetry is sent with this sender handle.
     pub tm_tx: Sender<StoreAddr>,
     /// All TM to be sent is stored here
-    pub tm_store: TmStore,
+    pub tm_store: SharedTmStore,
     /// All verification reporting is done with this reporter.
     pub verif_reporter: StdVerifReporterWithSender,
     /// Sequence count provider for TMs sent from within pus demultiplexer

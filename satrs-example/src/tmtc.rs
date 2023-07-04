@@ -23,6 +23,7 @@ use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::seq_count::SeqCountProviderSyncClonable;
 use satrs_core::spacepackets::ecss::SerializablePusPacket;
 use satrs_core::spacepackets::{ecss::PusPacket, tc::PusTc, tm::PusTm, SpHeader};
+use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::{
     CcsdsDistributor, CcsdsError, PusServiceProvider, ReceivesCcsdsTc, ReceivesEcssPusTc,
 };
@@ -39,7 +40,7 @@ pub struct OtherArgs {
 }
 
 pub struct TmArgs {
-    pub tm_store: TmStore,
+    pub tm_store: SharedTmStore,
     pub tm_sink_sender: Sender<StoreAddr>,
     pub tm_server_rx: Receiver<StoreAddr>,
 }
@@ -97,24 +98,8 @@ impl From<SendError<StoreAddr>> for MpscStoreAndSendError {
 }
 
 #[derive(Clone)]
-pub struct TmStore {
-    pub pool: SharedPool,
-}
-
-#[derive(Clone)]
 pub struct TcStore {
     pub pool: SharedPool,
-}
-
-impl TmStore {
-    pub fn add_pus_tm(&mut self, pus_tm: &PusTm) -> StoreAddr {
-        let mut pg = self.pool.write().expect("error locking TM store");
-        let (addr, buf) = pg.free_element(pus_tm.len_packed()).expect("Store error");
-        pus_tm
-            .write_to_bytes(buf)
-            .expect("writing PUS TM to store failed");
-        addr
-    }
 }
 
 impl TcStore {
@@ -209,7 +194,7 @@ pub fn core_tmtc_task(args: OtherArgs, mut tc_args: TcArgs, tm_args: TmArgs) {
     let mut udp_tmtc_server = UdpTmtcServer {
         udp_tc_server,
         tm_rx: tm_args.tm_server_rx,
-        tm_store: tm_args.tm_store.pool.clone(),
+        tm_store: tm_args.tm_store.backing_pool(),
     };
 
     let mut tc_buf: [u8; 4096] = [0; 4096];
