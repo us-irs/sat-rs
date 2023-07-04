@@ -5,7 +5,7 @@ use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
 use satrs_core::mode::{ModeAndSubmode, ModeRequest};
 use satrs_core::objects::ObjectId;
 use satrs_core::params::Params;
-use satrs_core::pool::{PoolProvider, SharedPool, StoreAddr};
+use satrs_core::pool::{PoolProvider, SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
 use satrs_core::pus::hk;
 use satrs_core::pus::mode::Subservice;
@@ -18,8 +18,8 @@ use satrs_core::pus::{event, EcssTcSenderCore, GenericTcCheckError, MpscTmtcInSt
 use satrs_core::pus::{mode, EcssTcSender};
 use satrs_core::res_code::ResultU16;
 use satrs_core::seq_count::{SeqCountProviderSyncClonable, SequenceCountProviderCore};
-use satrs_core::spacepackets::ecss::{scheduling, PusServiceId};
-use satrs_core::spacepackets::time::CcsdsTimeProvider;
+use satrs_core::spacepackets::ecss::{scheduling, PusError, PusServiceId};
+use satrs_core::spacepackets::time::{CcsdsTimeProvider, StdTimestampError};
 use satrs_core::tmtc::tm_helper::{PusTmWithCdsShortHelper, SharedTmStore};
 use satrs_core::tmtc::{AddressableId, PusServiceProvider, TargetId};
 use satrs_core::{
@@ -36,6 +36,36 @@ use std::sync::mpsc::{Receiver, SendError, Sender};
 pub mod scheduler;
 pub mod test;
 
+#[derive(Debug, Clone)]
+pub enum PusPacketHandlingError {
+    PusError(PusError),
+    WrongService(u8),
+    StoreError(StoreError),
+    RwGuardError(String),
+    TimeError(StdTimestampError),
+    TmSendError(String),
+    QueueDisconnected,
+    OtherError(String),
+}
+
+impl From<PusError> for PusPacketHandlingError {
+    fn from(value: PusError) -> Self {
+        Self::PusError(value)
+    }
+}
+
+impl From<StdTimestampError> for PusPacketHandlingError {
+    fn from(value: StdTimestampError) -> Self {
+        Self::TimeError(value)
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PusPacketHandlerResult {
+    RequestHandled,
+    CustomSubservice(VerificationToken<TcStateAccepted>),
+    Empty,
+}
 pub struct PusServiceBase {
     tc_rx: Receiver<AcceptedTc>,
     tc_store: SharedPool,

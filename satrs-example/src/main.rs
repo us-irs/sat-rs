@@ -9,7 +9,7 @@ use log::{info, warn};
 
 use crate::hk::AcsHkIds;
 use crate::logging::setup_logger;
-use crate::pus::test::{PacketHandlerResult, PusService17TestHandler};
+use crate::pus::test::{PusService17TestHandler, Service17CustomWrapper};
 use crate::pus::PusTcMpscRouter;
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{
@@ -109,6 +109,7 @@ fn main() {
     // The event manager will receive the RX handle to receive all the events.
     let (event_sender, event_man_rx) = channel();
     let event_recv = MpscEventReceiver::<EventU32>::new(event_man_rx);
+    let test_srv_event_sender = event_sender.clone();
     let mut event_man = EventManagerWithMpscQueue::new(Box::new(event_recv));
 
     // All events sent to the manager are routed to the PUS event manager, which generates PUS event
@@ -174,6 +175,10 @@ fn main() {
         tm_store.clone(),
         verif_reporter.clone(),
     );
+    let mut srv_17_wrapper = Service17CustomWrapper {
+        pus17_handler,
+        test_srv_event_sender,
+    };
 
     info!("Starting TMTC task");
     let jh0 = thread::Builder::new()
@@ -337,38 +342,10 @@ fn main() {
     info!("Starting PUS handler thread");
     let jh4 = thread::Builder::new()
         .name("PUS".to_string())
-        .spawn(move || {
-            loop {
-                let mut handled_pings = 0;
-                // TODO: Better error handling
-                let res = pus17_handler.handle_next_packet().unwrap();
-                match res {
-                    PacketHandlerResult::PingRequestHandled => {
-                        handled_pings += 1;
-                    }
-                    PacketHandlerResult::CustomSubservice => {
-                        let (buf, _) = pus17_handler.pus_tc_buf();
-                        let (tc, size) = PusTc::from_bytes(&buf).unwrap();
-                        if tc.subservice() == 128 {
-                            info!("Generating test event");
-                            event_sender
-                                .send((TEST_EVENT.into(), None))
-                                .expect("Sending test event failed");
-                            let start_token = pus17_handler
-                                .verification_handler()
-                                .start_success(token, Some(&stamp_buf))
-                                .expect("Error sending start success");
-                            pus17_handler
-                                .verification_handler()
-                                .completion_success(start_token, Some(&stamp_buf))
-                                .expect("Error sending completion success");
-                        }
-                    }
-                    PacketHandlerResult::Empty => {
-                        thread::sleep(Duration::from_millis(400));
-                    }
-                }
-                res.expect("some PUS17 error");
+        .spawn(move || loop {
+            let queue_empty = srv_17_wrapper.perform_operation();
+            if queue_empty {
+                thread::sleep(Duration::from_millis(400));
             }
         })
         .unwrap();

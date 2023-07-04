@@ -1,4 +1,4 @@
-use crate::pus::{AcceptedTc, PusServiceBase};
+use crate::pus::{AcceptedTc, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase};
 use delegate::delegate;
 use satrs_core::pool::{SharedPool, StoreAddr};
 use satrs_core::pus::scheduling::PusScheduler;
@@ -12,7 +12,7 @@ use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::spacepackets::time::cds::TimeProvider;
 use satrs_core::tmtc::tm_helper::{PusTmWithCdsShortHelper, SharedTmStore};
 use satrs_example::tmtc_err;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 
 pub struct PusService11SchedHandler {
     psb: PusServiceBase,
@@ -41,12 +41,27 @@ impl PusService11SchedHandler {
             scheduler,
         }
     }
-    // TODO: Return errors which occured
-    pub fn periodic_operation(&mut self) -> Result<u32, ()> {
-        Ok(self.psb.handled_tcs)
+
+    pub fn handle_next_packet(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        return match self.psb.tc_rx.try_recv() {
+            Ok((addr, token)) => {
+                if self.handle_one_tc(addr, token)? {
+                    return Ok(PusPacketHandlerResult::RequestHandled);
+                }
+                Ok(PusPacketHandlerResult::CustomSubservice(token))
+            }
+            Err(e) => match e {
+                TryRecvError::Empty => Ok(PusPacketHandlerResult::Empty),
+                TryRecvError::Disconnected => Err(PusPacketHandlingError::QueueDisconnected),
+            },
+        };
     }
 
-    pub fn handle_one_tc(&mut self, addr: StoreAddr, token: VerificationToken<TcStateAccepted>) {
+    pub fn handle_one_tc(
+        &mut self,
+        addr: StoreAddr,
+        token: VerificationToken<TcStateAccepted>,
+    ) -> Result<bool, PusPacketHandlingError> {
         let time_provider = TimeProvider::from_now_with_u16_days().unwrap();
         // TODO: Better error handling
         {
