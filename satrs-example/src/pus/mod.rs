@@ -45,7 +45,7 @@ pub struct PusServiceBase {
     verification_handler: StdVerifReporterWithSender,
     stamp_buf: [u8; 7],
     pus_buf: [u8; 2048],
-    handled_tcs: u32,
+    pus_size: usize,
 }
 
 impl PusServiceBase {
@@ -66,7 +66,7 @@ impl PusServiceBase {
             verification_handler,
             stamp_buf: [0; 7],
             pus_buf: [0; 2048],
-            handled_tcs: 0,
+            pus_size: 0,
         }
     }
 }

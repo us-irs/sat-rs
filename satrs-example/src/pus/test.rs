@@ -25,6 +25,12 @@ pub struct PusService17TestHandler {
     psb: PusServiceBase,
 }
 
+pub enum PacketHandlerResult {
+    PingRequestHandled,
+    CustomSubservice(VerificationToken<TcStateAccepted>),
+    Empty,
+}
+
 impl PusService17TestHandler {
     pub fn new(
         receiver: Receiver<AcceptedTc>,
@@ -44,6 +50,14 @@ impl PusService17TestHandler {
                 verification_handler,
             ),
         }
+    }
+
+    pub fn verification_handler(&mut self) -> &mut StdVerifReporterWithSender {
+        &mut self.psb.verification_handler
+    }
+
+    pub fn pus_tc_buf(&self) -> (&[u8], usize) {
+        (&self.psb.pus_buf, self.psb.pus_size)
     }
 
     // TODO: Return errors which occured
@@ -66,7 +80,33 @@ impl PusService17TestHandler {
             }
         }
     }
-    pub fn handle_one_tc(&mut self, addr: StoreAddr, token: VerificationToken<TcStateAccepted>) {
+
+    pub fn handle_next_packet(&mut self) -> Result<PacketHandlerResult, ()> {
+        match self.psb.tc_rx.try_recv() {
+            Ok((addr, token)) => {
+                if self.handle_one_tc(addr, token) {
+                    return Ok(PacketHandlerResult::PingRequestHandled);
+                } else {
+                    return Ok(PacketHandlerResult::CustomSubservice);
+                }
+            }
+            Err(e) => {
+                match e {
+                    TryRecvError::Empty => return Ok(PacketHandlerResult::Empty),
+                    TryRecvError::Disconnected => {
+                        // TODO: Replace panic by something cleaner
+                        panic!("PusService17Handler: Sender disconnected");
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn handle_one_tc(
+        &mut self,
+        addr: StoreAddr,
+        token: VerificationToken<TcStateAccepted>,
+    ) -> bool {
         let time_provider = TimeProvider::from_now_with_u16_days().unwrap();
         // TODO: Better error handling
         {
@@ -104,7 +144,9 @@ impl PusService17TestHandler {
                 .completion_success(start_token, Some(&self.psb.stamp_buf))
                 .expect("Error sending completion success");
             self.psb.handled_tcs += 1;
+            true
         }
+        false
         // TODO: How to handle invalid subservice?
         // TODO: How do we handle custom code like this? Custom subservice handler via trait?
         // if tc.subservice() == 128 {

@@ -9,7 +9,7 @@ use log::{info, warn};
 
 use crate::hk::AcsHkIds;
 use crate::logging::setup_logger;
-use crate::pus::test::PusService17TestHandler;
+use crate::pus::test::{PacketHandlerResult, PusService17TestHandler};
 use crate::pus::PusTcMpscRouter;
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{
@@ -31,6 +31,7 @@ use satrs_core::pus::verification::{
 };
 use satrs_core::pus::MpscTmtcInStoreSender;
 use satrs_core::seq_count::{SeqCountProviderSimple, SeqCountProviderSyncClonable};
+use satrs_core::spacepackets::tc::{GenericPusTcSecondaryHeader, PusTc};
 use satrs_core::spacepackets::{
     time::cds::TimeProvider,
     time::TimeWriter,
@@ -39,7 +40,7 @@ use satrs_core::spacepackets::{
 };
 use satrs_core::tmtc::tm_helper::{PusTmWithCdsShortHelper, SharedTmStore};
 use satrs_core::tmtc::AddressableId;
-use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
+use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT, TEST_EVENT};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};
@@ -338,10 +339,36 @@ fn main() {
         .name("PUS".to_string())
         .spawn(move || {
             loop {
+                let mut handled_pings = 0;
                 // TODO: Better error handling
-                let res = pus17_handler.periodic_operation();
+                let res = pus17_handler.handle_next_packet().unwrap();
+                match res {
+                    PacketHandlerResult::PingRequestHandled => {
+                        handled_pings += 1;
+                    }
+                    PacketHandlerResult::CustomSubservice => {
+                        let (buf, _) = pus17_handler.pus_tc_buf();
+                        let (tc, size) = PusTc::from_bytes(&buf).unwrap();
+                        if tc.subservice() == 128 {
+                            info!("Generating test event");
+                            event_sender
+                                .send((TEST_EVENT.into(), None))
+                                .expect("Sending test event failed");
+                            let start_token = pus17_handler
+                                .verification_handler()
+                                .start_success(token, Some(&stamp_buf))
+                                .expect("Error sending start success");
+                            pus17_handler
+                                .verification_handler()
+                                .completion_success(start_token, Some(&stamp_buf))
+                                .expect("Error sending completion success");
+                        }
+                    }
+                    PacketHandlerResult::Empty => {
+                        thread::sleep(Duration::from_millis(400));
+                    }
+                }
                 res.expect("some PUS17 error");
-                thread::sleep(Duration::from_millis(400));
             }
         })
         .unwrap();
