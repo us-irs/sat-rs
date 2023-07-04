@@ -1,4 +1,7 @@
-use crate::pus::{AcceptedTc, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase};
+use crate::pus::{
+    AcceptedTc, PartialPusHandlingError, PusPacketHandlerResult, PusPacketHandlingError,
+    PusServiceBase,
+};
 use delegate::delegate;
 use log::{error, info, warn};
 use satrs_core::events::EventU32;
@@ -13,7 +16,8 @@ use satrs_core::spacepackets::ecss::{PusError, PusPacket};
 use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::spacepackets::time::cds::TimeProvider;
 use satrs_core::spacepackets::time::{StdTimestampError, TimeWriter};
-use satrs_core::spacepackets::tm::PusTm;
+use satrs_core::spacepackets::tm::{PusTm, PusTmSecondaryHeader};
+use satrs_core::spacepackets::SpHeader;
 use satrs_core::tmtc::tm_helper::{PusTmWithCdsShortHelper, SharedTmStore};
 use satrs_example::{tmtc_err, TEST_EVENT};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
@@ -37,6 +41,13 @@ impl Service17CustomWrapper {
             PusPacketHandlerResult::RequestHandled => {
                 info!("Received PUS ping command TC[17,1]");
                 info!("Sent ping reply PUS TM[17,2]");
+                handled_pings += 1;
+            }
+            PusPacketHandlerResult::RequestHandledPartialSuccess(partial_err) => {
+                warn!(
+                    "Handled PUS ping command with partial success: {:?}",
+                    partial_err
+                );
                 handled_pings += 1;
             }
             PusPacketHandlerResult::CustomSubservice(token) => {
@@ -90,18 +101,18 @@ impl PusService17TestHandler {
     pub fn new(
         receiver: Receiver<AcceptedTc>,
         tc_pool: SharedPool,
-        tm_helper: PusTmWithCdsShortHelper,
         tm_tx: Sender<StoreAddr>,
         tm_store: SharedTmStore,
+        tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
     ) -> Self {
         Self {
             psb: PusServiceBase::new(
                 receiver,
                 tc_pool,
-                tm_helper,
                 tm_tx,
                 tm_store,
+                tm_apid,
                 verification_handler,
             ),
         }
@@ -117,12 +128,7 @@ impl PusService17TestHandler {
 
     pub fn handle_next_packet(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         return match self.psb.tc_rx.try_recv() {
-            Ok((addr, token)) => {
-                if self.handle_one_tc(addr, token)? {
-                    return Ok(PusPacketHandlerResult::RequestHandled);
-                }
-                Ok(PusPacketHandlerResult::CustomSubservice(token))
-            }
+            Ok((addr, token)) => self.handle_one_tc(addr, token),
             Err(e) => match e {
                 TryRecvError::Empty => Ok(PusPacketHandlerResult::Empty),
                 TryRecvError::Disconnected => Err(PusPacketHandlingError::QueueDisconnected),
@@ -134,7 +140,8 @@ impl PusService17TestHandler {
         &mut self,
         addr: StoreAddr,
         token: VerificationToken<TcStateAccepted>,
-    ) -> Result<bool, PusPacketHandlingError> {
+    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        let mut partial_result = None;
         {
             // Keep locked section as short as possible.
             let mut tc_pool = self
@@ -143,39 +150,40 @@ impl PusService17TestHandler {
                 .write()
                 .map_err(|e| PusPacketHandlingError::RwGuardError(format!("{e}")))?;
             let tc_guard = tc_pool.read_with_guard(addr);
-            let tc_raw = tc_guard.read().expect("Reading pool guard failed");
+            let tc_raw = tc_guard.read()?;
             self.psb.pus_buf[0..tc_raw.len()].copy_from_slice(tc_raw);
         }
+        let mut partial_error = None;
         let (tc, tc_size) = PusTc::from_bytes(&self.psb.pus_buf)?;
         if tc.service() != 17 {
             return Err(PusPacketHandlingError::WrongService(tc.service()));
         }
         if tc.subservice() == 1 {
-            let time_provider = TimeProvider::from_now_with_u16_days()?;
-            // Can not fail, buffer is large enough.
-            time_provider
-                .write_to_bytes(&mut self.psb.stamp_buf)
-                .unwrap();
+            partial_result = self.psb.update_stamp().err();
             let result = self
                 .psb
                 .verification_handler
-                .start_success(token, Some(&self.psb.stamp_buf));
+                .start_success(token, Some(&self.psb.stamp_buf))
+                .map_err(|e| PartialPusHandlingError::VerificationError);
             let start_token = if result.is_err() {
-                error!("Could not send start success verification");
+                partial_error = Some(result.unwrap_err());
                 None
             } else {
                 Some(result.unwrap())
             };
             // Sequence count will be handled centrally in TM funnel.
-            let ping_reply =
-                self.psb
-                    .tm_helper
-                    .create_pus_tm_with_stamp(17, 2, None, &time_provider, 0);
+            let mut reply_header = SpHeader::tm_unseg(self.psb.tm_apid, 0, 0).unwrap();
+            let tc_header = PusTmSecondaryHeader::new_simple(17, 2, &self.psb.stamp_buf);
+            let ping_reply = PusTm::new(&mut reply_header, tc_header, None, true);
             let addr = self.psb.tm_store.add_pus_tm(&ping_reply);
-            self.psb
+            if let Err(e) = self
+                .psb
                 .tm_tx
                 .send(addr)
-                .map_err(|e| PusPacketHandlingError::TmSendError(format!("{e}")))?;
+                .map_err(|e| PartialPusHandlingError::TmSendError(format!("{e}")))
+            {
+                partial_error = Some(e);
+            }
             if let Some(start_token) = start_token {
                 if self
                     .psb
@@ -183,11 +191,16 @@ impl PusService17TestHandler {
                     .completion_success(start_token, Some(&self.psb.stamp_buf))
                     .is_err()
                 {
-                    error!("Could not send completion success verification");
+                    partial_error = Some(PartialPusHandlingError::VerificationError)
                 }
             }
-            return Ok(true);
+            if partial_error.is_some() {
+                return Ok(PusPacketHandlerResult::RequestHandledPartialSuccess(
+                    partial_error.unwrap(),
+                ));
+            }
+            return Ok(PusPacketHandlerResult::RequestHandled);
         }
-        Ok(false)
+        Ok(PusPacketHandlerResult::CustomSubservice(token))
     }
 }

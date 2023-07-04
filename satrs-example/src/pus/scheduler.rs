@@ -1,4 +1,7 @@
-use crate::pus::{AcceptedTc, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase};
+use crate::pus::{
+    AcceptedTc, PartialPusHandlingError, PusPacketHandlerResult, PusPacketHandlingError,
+    PusServiceBase,
+};
 use delegate::delegate;
 use satrs_core::pool::{SharedPool, StoreAddr};
 use satrs_core::pus::scheduling::PusScheduler;
@@ -7,9 +10,10 @@ use satrs_core::pus::verification::{
     VerificationToken,
 };
 use satrs_core::pus::GenericTcCheckError;
-use satrs_core::spacepackets::ecss::scheduling;
+use satrs_core::spacepackets::ecss::{scheduling, PusPacket};
 use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::spacepackets::time::cds::TimeProvider;
+use satrs_core::spacepackets::time::TimeWriter;
 use satrs_core::tmtc::tm_helper::{PusTmWithCdsShortHelper, SharedTmStore};
 use satrs_example::tmtc_err;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
@@ -23,9 +27,9 @@ impl PusService11SchedHandler {
     pub fn new(
         receiver: Receiver<AcceptedTc>,
         tc_pool: SharedPool,
-        tm_helper: PusTmWithCdsShortHelper,
         tm_tx: Sender<StoreAddr>,
         tm_store: SharedTmStore,
+        tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
         scheduler: PusScheduler,
     ) -> Self {
@@ -33,9 +37,9 @@ impl PusService11SchedHandler {
             psb: PusServiceBase::new(
                 receiver,
                 tc_pool,
-                tm_helper,
                 tm_tx,
                 tm_store,
+                tm_apid,
                 verification_handler,
             ),
             scheduler,
@@ -44,68 +48,36 @@ impl PusService11SchedHandler {
 
     pub fn handle_next_packet(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         return match self.psb.tc_rx.try_recv() {
-            Ok((addr, token)) => {
-                if self.handle_one_tc(addr, token)? {
-                    return Ok(PusPacketHandlerResult::RequestHandled);
-                }
-                Ok(PusPacketHandlerResult::CustomSubservice(token))
-            }
+            Ok((addr, token)) => self.handle_one_tc(addr, token),
             Err(e) => match e {
                 TryRecvError::Empty => Ok(PusPacketHandlerResult::Empty),
                 TryRecvError::Disconnected => Err(PusPacketHandlingError::QueueDisconnected),
             },
         };
     }
-
     pub fn handle_one_tc(
         &mut self,
         addr: StoreAddr,
         token: VerificationToken<TcStateAccepted>,
-    ) -> Result<bool, PusPacketHandlingError> {
-        let time_provider = TimeProvider::from_now_with_u16_days().unwrap();
-        // TODO: Better error handling
+    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        let mut partial_result = self.psb.update_stamp().err();
         {
             // Keep locked section as short as possible.
-            let mut tc_pool = self.psb.tc_store.write().unwrap();
+            let mut tc_pool = self
+                .psb
+                .tc_store
+                .write()
+                .map_err(|e| PusPacketHandlingError::RwGuardError(format!("{e}")))?;
             let tc_guard = tc_pool.read_with_guard(addr);
             let tc_raw = tc_guard.read().unwrap();
             self.psb.pus_buf[0..tc_raw.len()].copy_from_slice(tc_raw);
         }
         let (tc, tc_size) = PusTc::from_bytes(&self.psb.pus_buf).unwrap();
-        let subservice = match pus_11_generic_tc_check(&tc) {
-            Ok(subservice) => subservice,
-            Err(e) => match e {
-                GenericTcCheckError::NotEnoughAppData => {
-                    self.psb
-                        .verification_handler
-                        .start_failure(
-                            token,
-                            FailParams::new(
-                                Some(&self.psb.stamp_buf),
-                                &tmtc_err::NOT_ENOUGH_APP_DATA,
-                                None,
-                            ),
-                        )
-                        .expect("could not sent verification error");
-                    return;
-                }
-                GenericTcCheckError::InvalidSubservice => {
-                    self.psb
-                        .verification_handler
-                        .start_failure(
-                            token,
-                            FailParams::new(
-                                Some(&self.psb.stamp_buf),
-                                &tmtc_err::INVALID_PUS_SUBSERVICE,
-                                None,
-                            ),
-                        )
-                        .expect("could not sent verification error");
-                    return;
-                }
-            },
-        };
-        match subservice {
+        let std_service = scheduling::Subservice::try_from(tc.subservice());
+        if std_service.is_err() {
+            return Ok(PusPacketHandlerResult::CustomSubservice(token));
+        }
+        match std_service.unwrap() {
             scheduling::Subservice::TcEnableScheduling => {
                 let start_token = self
                     .psb
@@ -175,7 +147,10 @@ impl PusService11SchedHandler {
                     .completion_success(start_token, Some(&self.psb.stamp_buf))
                     .expect("sending completion success failed");
             }
-            _ => {}
+            _ => {
+                return Ok(PusPacketHandlerResult::CustomSubservice(token));
+            }
         }
+        Ok(PusPacketHandlerResult::CustomSubservice(token))
     }
 }

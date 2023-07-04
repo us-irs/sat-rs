@@ -170,9 +170,9 @@ fn main() {
     let mut pus17_handler = PusService17TestHandler::new(
         pus_test_rx,
         tc_store.pool.clone(),
-        PusTmWithCdsShortHelper::new(PUS_APID),
         tm_funnel_tx.clone(),
         tm_store.clone(),
+        PUS_APID,
         verif_reporter.clone(),
     );
     let mut srv_17_wrapper = Service17CustomWrapper {
@@ -345,7 +345,7 @@ fn main() {
         .spawn(move || loop {
             let queue_empty = srv_17_wrapper.perform_operation();
             if queue_empty {
-                thread::sleep(Duration::from_millis(400));
+                thread::sleep(Duration::from_millis(200));
             }
         })
         .unwrap();

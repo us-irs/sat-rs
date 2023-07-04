@@ -11,7 +11,7 @@ use satrs_core::pus::hk;
 use satrs_core::pus::mode::Subservice;
 use satrs_core::pus::scheduling::PusScheduler;
 use satrs_core::pus::verification::{
-    pus_11_generic_tc_check, FailParams, StdVerifReporterWithSender, TcStateAccepted,
+    pus_11_generic_tc_check, FailParams, StdVerifReporterWithSender, TcStateAccepted, TcStateToken,
     VerificationToken,
 };
 use satrs_core::pus::{event, EcssTcSenderCore, GenericTcCheckError, MpscTmtcInStoreSender};
@@ -19,7 +19,7 @@ use satrs_core::pus::{mode, EcssTcSender};
 use satrs_core::res_code::ResultU16;
 use satrs_core::seq_count::{SeqCountProviderSyncClonable, SequenceCountProviderCore};
 use satrs_core::spacepackets::ecss::{scheduling, PusError, PusServiceId};
-use satrs_core::spacepackets::time::{CcsdsTimeProvider, StdTimestampError};
+use satrs_core::spacepackets::time::{CcsdsTimeProvider, StdTimestampError, TimestampError};
 use satrs_core::tmtc::tm_helper::{PusTmWithCdsShortHelper, SharedTmStore};
 use satrs_core::tmtc::{AddressableId, PusServiceProvider, TargetId};
 use satrs_core::{
@@ -31,7 +31,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::rc::Rc;
-use std::sync::mpsc::{Receiver, SendError, Sender};
+use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
 
 pub mod scheduler;
 pub mod test;
@@ -40,10 +40,9 @@ pub mod test;
 pub enum PusPacketHandlingError {
     PusError(PusError),
     WrongService(u8),
+    NotEnoughAppData(String),
     StoreError(StoreError),
     RwGuardError(String),
-    TimeError(StdTimestampError),
-    TmSendError(String),
     QueueDisconnected,
     OtherError(String),
 }
@@ -54,24 +53,44 @@ impl From<PusError> for PusPacketHandlingError {
     }
 }
 
-impl From<StdTimestampError> for PusPacketHandlingError {
+impl From<StoreError> for PusPacketHandlingError {
+    fn from(value: StoreError) -> Self {
+        Self::StoreError(value)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum PartialPusHandlingError {
+    TimeError(StdTimestampError),
+    TmSendError(String),
+    VerificationError,
+}
+impl From<StdTimestampError> for PartialPusHandlingError {
     fn from(value: StdTimestampError) -> Self {
         Self::TimeError(value)
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+impl From<TimestampError> for PartialPusHandlingError {
+    fn from(value: TimestampError) -> Self {
+        Self::TimeError(StdTimestampError::TimestampError(value))
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum PusPacketHandlerResult {
     RequestHandled,
+    RequestHandledPartialSuccess(PartialPusHandlingError),
     CustomSubservice(VerificationToken<TcStateAccepted>),
     Empty,
 }
+
 pub struct PusServiceBase {
     tc_rx: Receiver<AcceptedTc>,
     tc_store: SharedPool,
-    tm_helper: PusTmWithCdsShortHelper,
     tm_tx: Sender<StoreAddr>,
     tm_store: SharedTmStore,
+    tm_apid: u16,
     verification_handler: StdVerifReporterWithSender,
     stamp_buf: [u8; 7],
     pus_buf: [u8; 2048],
@@ -82,15 +101,15 @@ impl PusServiceBase {
     pub fn new(
         receiver: Receiver<AcceptedTc>,
         tc_pool: SharedPool,
-        tm_helper: PusTmWithCdsShortHelper,
         tm_tx: Sender<StoreAddr>,
         tm_store: SharedTmStore,
+        tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
     ) -> Self {
         Self {
             tc_rx: receiver,
             tc_store: tc_pool,
-            tm_helper,
+            tm_apid,
             tm_tx,
             tm_store,
             verification_handler,
@@ -98,6 +117,40 @@ impl PusServiceBase {
             pus_buf: [0; 2048],
             pus_size: 0,
         }
+    }
+
+    pub fn handle_next_packet<
+        T: FnOnce(
+            StoreAddr,
+            VerificationToken<TcStateAccepted>,
+        ) -> Result<PusPacketHandlerResult, PusPacketHandlingError>,
+    >(
+        &mut self,
+        handle_one_packet: T,
+    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        return match self.tc_rx.try_recv() {
+            Ok((addr, token)) => handle_one_packet(addr, token),
+            Err(e) => match e {
+                TryRecvError::Empty => Ok(PusPacketHandlerResult::Empty),
+                TryRecvError::Disconnected => Err(PusPacketHandlingError::QueueDisconnected),
+            },
+        };
+    }
+
+    pub fn update_stamp(&mut self) -> Result<(), PartialPusHandlingError> {
+        let time_provider = TimeProvider::from_now_with_u16_days()
+            .map_err(|e| PartialPusHandlingError::TimeError(e));
+        return if time_provider.is_ok() {
+            // Can not fail, buffer is large enough.
+            time_provider
+                .unwrap()
+                .write_to_bytes(&mut self.stamp_buf)
+                .unwrap();
+            Ok(())
+        } else {
+            self.stamp_buf = [0; 7];
+            Err(time_provider.unwrap_err())
+        };
     }
 }
 
