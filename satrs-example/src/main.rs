@@ -221,7 +221,9 @@ fn main() {
             loop {
                 if let Ok(addr) = tm_funnel.tm_funnel_rx.recv() {
                     // Read the TM, set sequence counter and message counter, and finally write
-                    // it back with the updated CRC
+                    // it back with the updated CRC.
+                    // We could theoretically manipulate the counters and the CRC directly
+                    // in place as an optimization, but I don't think this is necessary..
                     let shared_pool = tm_store.backing_pool();
                     let mut pool_guard = shared_pool.write().expect("Locking TM pool failed");
                     let tm_raw = pool_guard
