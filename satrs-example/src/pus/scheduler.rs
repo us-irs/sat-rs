@@ -1,3 +1,4 @@
+use crate::pus::test::PusServiceHandler;
 use crate::pus::{
     AcceptedTc, PartialPusHandlingError, PusPacketHandlerResult, PusPacketHandlingError,
     PusServiceBase,
@@ -55,7 +56,14 @@ impl PusService11SchedHandler {
             },
         };
     }
-    pub fn handle_one_tc(
+}
+
+impl PusServiceHandler for PusService11SchedHandler {
+    fn psb(&mut self) -> &mut PusServiceBase {
+        &mut self.psb
+    }
+
+    fn handle_one_tc(
         &mut self,
         addr: StoreAddr,
         token: VerificationToken<TcStateAccepted>,

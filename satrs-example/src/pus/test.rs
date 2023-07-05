@@ -109,7 +109,6 @@ pub trait PusServiceHandler {
             },
         };
     }
-
 }
 pub struct PusService17TestHandler {
     psb: PusServiceBase,
