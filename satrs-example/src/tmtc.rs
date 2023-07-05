@@ -1,7 +1,5 @@
 use log::info;
-use satrs_core::events::EventU32;
 use satrs_core::hal::host::udp_server::{ReceiveResult, UdpTcServer};
-use satrs_core::params::Params;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
@@ -10,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::ccsds::CcsdsReceiver;
-use crate::pus::{PusReceiver, PusTcArgs, PusTcMpscRouter, PusTmArgs};
+use crate::pus::{PusReceiver, PusTcMpscRouter};
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::spacepackets::ecss::{PusPacket, SerializablePusPacket};
@@ -20,12 +18,6 @@ use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc, ReceivesEcssPusTc};
 
 pub const PUS_APID: u16 = 0x02;
-
-pub struct OtherArgs {
-    pub sock_addr: SocketAddr,
-    pub verif_reporter: StdVerifReporterWithSender,
-    pub event_sender: Sender<(EventU32, Option<Params>)>,
-}
 
 pub struct TmArgs {
     pub tm_store: SharedTmStore,
@@ -141,19 +133,13 @@ impl ReceivesCcsdsTc for PusTcSource {
 }
 
 pub fn core_tmtc_task(
-    args: OtherArgs,
+    socket_addr: SocketAddr,
     mut tc_args: TcArgs,
     tm_args: TmArgs,
+    verif_reporter: StdVerifReporterWithSender,
     pus_router: PusTcMpscRouter,
 ) {
-    let pus_tm_args = PusTmArgs {
-        verif_reporter: args.verif_reporter,
-    };
-    let pus_tc_args = PusTcArgs {
-        pus_router,
-        event_sender: args.event_sender,
-    };
-    let mut pus_receiver = PusReceiver::new(PUS_APID, pus_tm_args, pus_tc_args);
+    let mut pus_receiver = PusReceiver::new(verif_reporter, pus_router);
 
     let ccsds_receiver = CcsdsReceiver {
         tc_source: tc_args.tc_source.clone(),
@@ -161,7 +147,7 @@ pub fn core_tmtc_task(
 
     let ccsds_distributor = CcsdsDistributor::new(Box::new(ccsds_receiver));
 
-    let udp_tc_server = UdpTcServer::new(args.sock_addr, 2048, Box::new(ccsds_distributor))
+    let udp_tc_server = UdpTcServer::new(socket_addr, 2048, Box::new(ccsds_distributor))
         .expect("Creating UDP TMTC server failed");
 
     let mut udp_tmtc_server = UdpTmtcServer {

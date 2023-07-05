@@ -72,6 +72,7 @@ impl PusServiceHandler for PusService11SchedHandler {
                 let start_token = self
                     .psb
                     .verification_handler
+                    .get_mut()
                     .start_success(token, Some(&time_stamp))
                     .expect("Error sending start success");
 
@@ -79,6 +80,7 @@ impl PusServiceHandler for PusService11SchedHandler {
                 if self.scheduler.is_enabled() {
                     self.psb
                         .verification_handler
+                        .get_mut()
                         .completion_success(start_token, Some(&time_stamp))
                         .expect("Error sending completion success");
                 } else {
@@ -89,6 +91,7 @@ impl PusServiceHandler for PusService11SchedHandler {
                 let start_token = self
                     .psb
                     .verification_handler
+                    .get_mut()
                     .start_success(token, Some(&time_stamp))
                     .expect("Error sending start success");
 
@@ -96,6 +99,7 @@ impl PusServiceHandler for PusService11SchedHandler {
                 if !self.scheduler.is_enabled() {
                     self.psb
                         .verification_handler
+                        .get_mut()
                         .completion_success(start_token, Some(&time_stamp))
                         .expect("Error sending completion success");
                 } else {
@@ -106,6 +110,7 @@ impl PusServiceHandler for PusService11SchedHandler {
                 let start_token = self
                     .psb
                     .verification_handler
+                    .get_mut()
                     .start_success(token, Some(&time_stamp))
                     .expect("Error sending start success");
 
@@ -117,6 +122,7 @@ impl PusServiceHandler for PusService11SchedHandler {
 
                 self.psb
                     .verification_handler
+                    .get_mut()
                     .completion_success(start_token, Some(&time_stamp))
                     .expect("Error sending completion success");
             }
@@ -124,6 +130,7 @@ impl PusServiceHandler for PusService11SchedHandler {
                 let start_token = self
                     .psb
                     .verification_handler
+                    .get_mut()
                     .start_success(token, Some(&time_stamp))
                     .expect("error sending start success");
 
@@ -134,6 +141,7 @@ impl PusServiceHandler for PusService11SchedHandler {
 
                 self.psb
                     .verification_handler
+                    .get_mut()
                     .completion_success(start_token, Some(&time_stamp))
                     .expect("sending completion success failed");
             }

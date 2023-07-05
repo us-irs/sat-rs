@@ -11,13 +11,12 @@ use crate::hk::AcsHkIds;
 use crate::logging::setup_logger;
 use crate::pus::action::{Pus8Wrapper, PusService8ActionHandler};
 use crate::pus::event::Pus5Wrapper;
+use crate::pus::hk::{Pus3Wrapper, PusService3HkHandler};
 use crate::pus::scheduler::Pus11Wrapper;
 use crate::pus::test::Service17CustomWrapper;
 use crate::pus::PusTcMpscRouter;
 use crate::requests::{Request, RequestWithToken};
-use crate::tmtc::{
-    core_tmtc_task, OtherArgs, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, PUS_APID,
-};
+use crate::tmtc::{core_tmtc_task, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, PUS_APID};
 use satrs_core::event_man::{
     EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
 };
@@ -107,7 +106,7 @@ fn main() {
     // The event manager will receive the RX handle to receive all the events.
     let (event_sender, event_man_rx) = channel();
     let event_recv = MpscEventReceiver::<EventU32>::new(event_man_rx);
-    let test_srv_event_sender = event_sender.clone();
+    let test_srv_event_sender = event_sender;
     let mut event_man = EventManagerWithMpscQueue::new(Box::new(event_recv));
 
     // All events sent to the manager are routed to the PUS event manager, which generates PUS event
@@ -132,11 +131,6 @@ fn main() {
     };
 
     // Create clones here to allow moving the values
-    let core_args = OtherArgs {
-        sock_addr,
-        verif_reporter: verif_reporter.clone(),
-        event_sender,
-    };
     let tc_args = TcArgs {
         tc_source: tc_source_wrapper.clone(),
         tc_receiver: tc_source_rx,
@@ -147,13 +141,13 @@ fn main() {
         tm_server_rx,
     };
 
-    let aocs_to_funnel = tm_funnel_tx.clone();
+    let aocs_tm_funnel = tm_funnel_tx.clone();
     let mut aocs_tm_store = tm_store.clone();
 
     let (pus_test_tx, pus_test_rx) = channel();
     let (pus_event_tx, pus_event_rx) = channel();
     let (pus_sched_tx, pus_sched_rx) = channel();
-    let (pus_hk_tx, _pus_hk_rx) = channel();
+    let (pus_hk_tx, pus_hk_rx) = channel();
     let (pus_action_tx, pus_action_rx) = channel();
     let pus_router = PusTcMpscRouter {
         test_service_receiver: pus_test_tx,
@@ -206,16 +200,27 @@ fn main() {
         tm_funnel_tx.clone(),
         tm_store.clone(),
         PUS_APID,
-        verif_reporter,
+        verif_reporter.clone(),
         request_map.clone(),
     );
     let mut pus_8_wrapper = Pus8Wrapper { pus_8_handler };
+
+    let pus_3_handler = PusService3HkHandler::new(
+        pus_hk_rx,
+        tc_store.pool.clone(),
+        tm_funnel_tx.clone(),
+        tm_store.clone(),
+        PUS_APID,
+        verif_reporter.clone(),
+        request_map,
+    );
+    let mut pus_3_wrapper = Pus3Wrapper { pus_3_handler };
 
     info!("Starting TMTC task");
     let jh0 = thread::Builder::new()
         .name("TMTC".to_string())
         .spawn(move || {
-            core_tmtc_task(core_args, tc_args, tm_args, pus_router);
+            core_tmtc_task(sock_addr, tc_args, tm_args, verif_reporter, pus_router);
         })
         .unwrap();
 
@@ -363,7 +368,7 @@ fn main() {
                                             true,
                                         );
                                         let addr = aocs_tm_store.add_pus_tm(&pus_tm);
-                                        aocs_to_funnel.send(addr).expect("Sending HK TM failed");
+                                        aocs_tm_funnel.send(addr).expect("Sending HK TM failed");
                                     }
                                 }
                                 HkRequest::Enable(_) => {}
@@ -412,6 +417,7 @@ fn main() {
                 is_srv_finished(pus_11_wrapper.handle_next_packet());
                 is_srv_finished(pus_5_wrapper.handle_next_packet());
                 is_srv_finished(pus_8_wrapper.handle_next_packet());
+                is_srv_finished(pus_3_wrapper.handle_next_packet());
                 if all_queues_empty {
                     break;
                 }

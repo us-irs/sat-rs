@@ -44,6 +44,64 @@ impl PusService8ActionHandler {
     }
 }
 
+impl PusService8ActionHandler {
+    fn handle_action_request_with_id(
+        &self,
+        token: VerificationToken<TcStateAccepted>,
+        tc: &PusTc,
+        time_stamp: &[u8],
+    ) -> Result<(), PusPacketHandlingError> {
+        let user_data = tc.user_data();
+        if user_data.is_none() || user_data.unwrap().len() < 8 {
+            self.psb()
+                .verification_handler
+                .borrow_mut()
+                .start_failure(
+                    token,
+                    FailParams::new(Some(time_stamp), &tmtc_err::NOT_ENOUGH_APP_DATA, None),
+                )
+                .expect("Sending start failure failed");
+            return Err(PusPacketHandlingError::NotEnoughAppData(
+                "Expected at least 4 bytes".into(),
+            ));
+        }
+        let user_data = user_data.unwrap();
+        let target_id = u32::from_be_bytes(user_data[0..4].try_into().unwrap());
+        let action_id = u32::from_be_bytes(user_data[4..8].try_into().unwrap());
+        if let Some(sender) = self.request_handlers.get(&target_id) {
+            sender
+                .send(RequestWithToken::new(
+                    target_id,
+                    Request::Action(ActionRequest::CmdWithU32Id((
+                        action_id,
+                        Vec::from(&user_data[8..]),
+                    ))),
+                    token,
+                ))
+                .expect("Forwarding action request failed");
+        } else {
+            let mut fail_data: [u8; 4] = [0; 4];
+            fail_data.copy_from_slice(&target_id.to_be_bytes());
+            self.psb()
+                .verification_handler
+                .borrow_mut()
+                .start_failure(
+                    token,
+                    FailParams::new(
+                        Some(time_stamp),
+                        &tmtc_err::UNKNOWN_TARGET_ID,
+                        Some(&fail_data),
+                    ),
+                )
+                .expect("Sending start failure failed");
+            return Err(PusPacketHandlingError::OtherError(format!(
+                "Unknown target ID {target_id}"
+            )));
+        }
+        Ok(())
+    }
+}
+
 impl PusServiceHandler for PusService8ActionHandler {
     fn psb_mut(&mut self) -> &mut PusServiceBase {
         &mut self.psb
@@ -64,60 +122,13 @@ impl PusServiceHandler for PusService8ActionHandler {
         let time_stamp = self.psb().get_current_timestamp(&mut partial_error);
         match subservice {
             128 => {
-                let user_data = tc.user_data();
-                if user_data.is_none() || user_data.unwrap().len() < 8 {
-                    self.psb_mut()
-                        .verification_handler
-                        .start_failure(
-                            token,
-                            FailParams::new(
-                                Some(&time_stamp),
-                                &tmtc_err::NOT_ENOUGH_APP_DATA,
-                                None,
-                            ),
-                        )
-                        .expect("Sending start failure failed");
-                    return Err(PusPacketHandlingError::NotEnoughAppData(
-                        "Expected at least 4 bytes".into(),
-                    ));
-                }
-                let user_data = user_data.unwrap();
-                let target_id = u32::from_be_bytes(user_data[0..4].try_into().unwrap());
-                let action_id = u32::from_be_bytes(user_data[4..8].try_into().unwrap());
-                if let Some(sender) = self.request_handlers.get(&target_id) {
-                    sender
-                        .send(RequestWithToken::new(
-                            target_id,
-                            Request::Action(ActionRequest::CmdWithU32Id((
-                                action_id,
-                                Vec::from(&user_data[8..]),
-                            ))),
-                            token,
-                        ))
-                        .expect("Forwarding action request failed");
-                } else {
-                    let mut fail_data: [u8; 4] = [0; 4];
-                    fail_data.copy_from_slice(&target_id.to_be_bytes());
-                    self.psb_mut()
-                        .verification_handler
-                        .start_failure(
-                            token,
-                            FailParams::new(
-                                Some(&time_stamp),
-                                &tmtc_err::UNKNOWN_TARGET_ID,
-                                Some(&fail_data),
-                            ),
-                        )
-                        .expect("Sending start failure failed");
-                    return Err(PusPacketHandlingError::OtherError(format!(
-                        "Unknown target ID {target_id}"
-                    )));
-                }
+                self.handle_action_request_with_id(token, &tc, &time_stamp)?;
             }
             _ => {
                 let fail_data = [subservice];
                 self.psb_mut()
                     .verification_handler
+                    .get_mut()
                     .start_failure(
                         token,
                         FailParams::new(

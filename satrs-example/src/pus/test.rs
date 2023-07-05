@@ -51,10 +51,12 @@ impl Service17CustomWrapper {
                         .expect("Sending test event failed");
                     let start_token = psb_mut
                         .verification_handler
+                        .get_mut()
                         .start_success(token, Some(&stamp_buf))
                         .expect("Error sending start success");
                     psb_mut
                         .verification_handler
+                        .get_mut()
                         .completion_success(start_token, Some(&stamp_buf))
                         .expect("Error sending completion success");
                 } else {
@@ -62,6 +64,7 @@ impl Service17CustomWrapper {
                     self.pus17_handler
                         .psb_mut()
                         .verification_handler
+                        .get_mut()
                         .start_failure(
                             token,
                             FailParams::new(

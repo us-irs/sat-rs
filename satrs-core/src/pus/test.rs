@@ -62,6 +62,7 @@ impl PusServiceHandler for PusService17TestHandler {
             let result = self
                 .psb
                 .verification_handler
+                .get_mut()
                 .start_success(token, Some(&time_stamp))
                 .map_err(|_| PartialPusHandlingError::VerificationError);
             let start_token = if let Ok(result) = result {
@@ -87,6 +88,7 @@ impl PusServiceHandler for PusService17TestHandler {
                 if self
                     .psb
                     .verification_handler
+                    .get_mut()
                     .completion_success(start_token, Some(&time_stamp))
                     .is_err()
                 {

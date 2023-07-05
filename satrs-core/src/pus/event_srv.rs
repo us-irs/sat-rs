@@ -66,9 +66,7 @@ impl PusServiceHandler for PusService5EventHandler {
                 token,
             ));
         }
-        let mut partial_error = None;
-        let time_stamp = self.psb().get_current_timestamp(&mut partial_error);
-        let mut handle_enable_disable_request = |enable: bool, stamp: [u8; 7]| {
+        let handle_enable_disable_request = |enable: bool, stamp: [u8; 7]| {
             if tc.user_data().is_none() || tc.user_data().unwrap().len() < 4 {
                 return Err(PusPacketHandlingError::NotEnoughAppData(
                     "At least 4 bytes event ID expected".into(),
@@ -79,6 +77,7 @@ impl PusServiceHandler for PusService5EventHandler {
             let start_token = self
                 .psb
                 .verification_handler
+                .borrow_mut()
                 .start_success(token, Some(&stamp))
                 .map_err(|_| PartialPusHandlingError::VerificationError);
             let partial_error = start_token.clone().err();
@@ -109,6 +108,8 @@ impl PusServiceHandler for PusService5EventHandler {
             }
             Ok(PusPacketHandlerResult::RequestHandled)
         };
+        let mut partial_error = None;
+        let time_stamp = self.psb().get_current_timestamp(&mut partial_error);
         match srv.unwrap() {
             Subservice::TmInfoReport
             | Subservice::TmLowSeverityReport

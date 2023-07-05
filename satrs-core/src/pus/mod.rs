@@ -148,6 +148,7 @@ pub mod std_mod {
     use spacepackets::time::cds::TimeProvider;
     use spacepackets::time::{StdTimestampError, TimeWriter};
     use spacepackets::tm::PusTm;
+    use std::cell::RefCell;
     use std::format;
     use std::string::String;
     use std::sync::{mpsc, RwLockWriteGuard};
@@ -340,7 +341,9 @@ pub mod std_mod {
         pub tm_tx: mpsc::Sender<StoreAddr>,
         pub tm_store: SharedTmStore,
         pub tm_apid: u16,
-        pub verification_handler: StdVerifReporterWithSender,
+        /// The verification handler is wrapped in a [RefCell] to allow the interior mutability
+        /// pattern. This makes writing methods which are not mutable a lot easier.
+        pub verification_handler: RefCell<StdVerifReporterWithSender>,
         pub pus_buf: [u8; 2048],
         pub pus_size: usize,
     }
@@ -360,7 +363,7 @@ pub mod std_mod {
                 tm_apid,
                 tm_tx,
                 tm_store,
-                verification_handler,
+                verification_handler: RefCell::new(verification_handler),
                 pus_buf: [0; 2048],
                 pus_size: 0,
             }
