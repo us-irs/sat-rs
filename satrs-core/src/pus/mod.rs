@@ -137,17 +137,18 @@ mod alloc_mod {
 pub mod std_mod {
     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr, StoreError};
     use crate::pus::verification::{
-        FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
+        StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
     };
     use crate::pus::{EcssSender, EcssTcSenderCore, EcssTmSenderCore};
     use crate::tmtc::tm_helper::SharedTmStore;
     use crate::SenderId;
     use alloc::vec::Vec;
-    use spacepackets::ecss::{EcssEnumeration, PusError, SerializablePusPacket};
+    use spacepackets::ecss::{PusError, SerializablePusPacket};
     use spacepackets::tc::PusTc;
     use spacepackets::time::cds::TimeProvider;
     use spacepackets::time::{StdTimestampError, TimeWriter};
     use spacepackets::tm::PusTm;
+    use std::format;
     use std::string::String;
     use std::sync::{mpsc, RwLockWriteGuard};
     use thiserror::Error;
@@ -334,15 +335,14 @@ pub mod std_mod {
     pub type AcceptedTc = (StoreAddr, VerificationToken<TcStateAccepted>);
 
     pub struct PusServiceBase {
-        pub(crate) tc_rx: mpsc::Receiver<AcceptedTc>,
-        pub(crate) tc_store: SharedPool,
-        pub(crate) tm_tx: mpsc::Sender<StoreAddr>,
-        pub(crate) tm_store: SharedTmStore,
-        pub(crate) tm_apid: u16,
-        pub(crate) verification_handler: StdVerifReporterWithSender,
-        pub(crate) stamp_buf: [u8; 7],
-        pub(crate) pus_buf: [u8; 2048],
-        pus_size: usize,
+        pub tc_rx: mpsc::Receiver<AcceptedTc>,
+        pub tc_store: SharedPool,
+        pub tm_tx: mpsc::Sender<StoreAddr>,
+        pub tm_store: SharedTmStore,
+        pub tm_apid: u16,
+        pub verification_handler: StdVerifReporterWithSender,
+        pub pus_buf: [u8; 2048],
+        pub pus_size: usize,
     }
 
     impl PusServiceBase {
@@ -361,56 +361,53 @@ pub mod std_mod {
                 tm_tx,
                 tm_store,
                 verification_handler,
-                stamp_buf: [0; 7],
                 pus_buf: [0; 2048],
                 pus_size: 0,
             }
         }
 
-        pub fn update_stamp(&mut self) -> Result<(), PartialPusHandlingError> {
+        pub fn get_current_timestamp(
+            &self,
+            partial_error: &mut Option<PartialPusHandlingError>,
+        ) -> [u8; 7] {
+            let mut time_stamp: [u8; 7] = [0; 7];
             let time_provider =
                 TimeProvider::from_now_with_u16_days().map_err(PartialPusHandlingError::TimeError);
             if let Ok(time_provider) = time_provider {
-                time_provider.write_to_bytes(&mut self.stamp_buf).unwrap();
-                Ok(())
+                time_provider.write_to_bytes(&mut time_stamp).unwrap();
             } else {
-                self.stamp_buf = [0; 7];
-                Err(time_provider.unwrap_err())
+                *partial_error = Some(time_provider.unwrap_err());
             }
+            time_stamp
         }
-
-        pub fn report_start_failure(
-            &mut self,
-            token: VerificationToken<TcStateAccepted>,
-            failure_code: &impl EcssEnumeration,
-            failure_data: Option<&[u8]>,
-        ) -> Result<(), VerificationToken<TcStateAccepted>> {
-            self.verification_handler
-                .start_failure(
-                    token,
-                    FailParams::new(Some(&self.stamp_buf), failure_code, failure_data),
-                )
-                .map_err(|e| e.1)
+        pub fn get_current_timestamp_ignore_error(&self) -> [u8; 7] {
+            let mut dummy = None;
+            self.get_current_timestamp(&mut dummy)
         }
     }
 
     pub trait PusServiceHandler {
         fn psb_mut(&mut self) -> &mut PusServiceBase;
         fn psb(&self) -> &PusServiceBase;
-        fn verification_reporter(&mut self) -> &mut StdVerifReporterWithSender {
-            &mut self.psb_mut().verification_handler
-        }
-        fn tc_store(&mut self) -> &mut SharedPool {
-            &mut self.psb_mut().tc_store
-        }
-        fn pus_tc_buf(&self) -> (&[u8], usize) {
-            (&self.psb().pus_buf, self.psb().pus_size)
-        }
         fn handle_one_tc(
             &mut self,
             addr: StoreAddr,
             token: VerificationToken<TcStateAccepted>,
         ) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
+
+        fn copy_tc_to_buf(&mut self, addr: StoreAddr) -> Result<(), PusPacketHandlingError> {
+            // Keep locked section as short as possible.
+            let psb_mut = self.psb_mut();
+            let mut tc_pool = psb_mut
+                .tc_store
+                .write()
+                .map_err(|e| PusPacketHandlingError::RwGuardError(format!("{e}")))?;
+            let tc_guard = tc_pool.read_with_guard(addr);
+            let tc_raw = tc_guard.read().unwrap();
+            psb_mut.pus_buf[0..tc_raw.len()].copy_from_slice(tc_raw);
+            Ok(())
+        }
+
         fn handle_next_packet(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
             return match self.psb().tc_rx.try_recv() {
                 Ok((addr, token)) => self.handle_one_tc(addr, token),

@@ -467,7 +467,7 @@ impl VerificationReporterCore {
     // Internal helper function, too many arguments is acceptable for this case.
     #[allow(clippy::too_many_arguments)]
     fn sendable_failure_no_step<'src_data, State: Copy>(
-        &mut self,
+        &self,
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
         token: VerificationToken<State>,
@@ -621,7 +621,7 @@ impl VerificationReporterCore {
     /// Requires a token previously acquired by calling [Self::acceptance_success]. It consumes
     /// the token because verification handling is done.
     pub fn start_failure<'src_data>(
-        &mut self,
+        &self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcStateAccepted>,
         seq_count: u16,
@@ -838,7 +838,7 @@ impl VerificationReporterCore {
     // Internal helper function, too many arguments is acceptable for this case.
     #[allow(clippy::too_many_arguments)]
     fn create_pus_verif_fail_tm<'src_data>(
-        &mut self,
+        &self,
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
         seq_count: u16,
@@ -883,7 +883,7 @@ impl VerificationReporterCore {
     }
 
     fn create_pus_verif_tm_base<'src_data>(
-        &mut self,
+        &self,
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
         msg_counter: u16,

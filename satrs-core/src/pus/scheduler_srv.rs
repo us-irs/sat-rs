@@ -2,15 +2,12 @@ use crate::pool::{SharedPool, StoreAddr};
 use crate::pus::scheduler::PusScheduler;
 use crate::pus::verification::{StdVerifReporterWithSender, TcStateAccepted, VerificationToken};
 use crate::pus::{
-    AcceptedTc, PartialPusHandlingError, PusPacketHandlerResult, PusPacketHandlingError,
-    PusServiceBase, PusServiceHandler,
+    AcceptedTc, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHandler,
 };
 use crate::tmtc::tm_helper::SharedTmStore;
 use spacepackets::ecss::{scheduling, PusPacket};
 use spacepackets::tc::PusTc;
 use spacepackets::time::cds::TimeProvider;
-use spacepackets::time::TimeWriter;
-use std::format;
 use std::sync::mpsc::{Receiver, Sender};
 
 pub struct PusService11SchedHandler {
@@ -59,17 +56,7 @@ impl PusServiceHandler for PusService11SchedHandler {
         addr: StoreAddr,
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        {
-            // Keep locked section as short as possible.
-            let mut tc_pool = self
-                .psb
-                .tc_store
-                .write()
-                .map_err(|e| PusPacketHandlingError::RwGuardError(format!("{e}")))?;
-            let tc_guard = tc_pool.read_with_guard(addr);
-            let tc_raw = tc_guard.read().unwrap();
-            self.psb.pus_buf[0..tc_raw.len()].copy_from_slice(tc_raw);
-        }
+        self.copy_tc_to_buf(addr)?;
         let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf).unwrap();
         let std_service = scheduling::Subservice::try_from(tc.subservice());
         if std_service.is_err() {
@@ -78,32 +65,21 @@ impl PusServiceHandler for PusService11SchedHandler {
                 token,
             ));
         }
-        //let partial_error = self.psb.update_stamp().err();
-        let time_provider =
-            TimeProvider::from_now_with_u16_days().map_err(PartialPusHandlingError::TimeError);
-        let partial_error = if let Ok(time_provider) = time_provider {
-            time_provider
-                .write_to_bytes(&mut self.psb.stamp_buf)
-                .unwrap();
-            Ok(())
-        } else {
-            self.psb.stamp_buf = [0; 7];
-            Err(time_provider.unwrap_err())
-        };
-        let partial_error = partial_error.err();
+        let mut partial_error = None;
+        let time_stamp = self.psb().get_current_timestamp(&mut partial_error);
         match std_service.unwrap() {
             scheduling::Subservice::TcEnableScheduling => {
                 let start_token = self
                     .psb
                     .verification_handler
-                    .start_success(token, Some(&self.psb.stamp_buf))
+                    .start_success(token, Some(&time_stamp))
                     .expect("Error sending start success");
 
                 self.scheduler.enable();
                 if self.scheduler.is_enabled() {
                     self.psb
                         .verification_handler
-                        .completion_success(start_token, Some(&self.psb.stamp_buf))
+                        .completion_success(start_token, Some(&time_stamp))
                         .expect("Error sending completion success");
                 } else {
                     panic!("Failed to enable scheduler");
@@ -113,14 +89,14 @@ impl PusServiceHandler for PusService11SchedHandler {
                 let start_token = self
                     .psb
                     .verification_handler
-                    .start_success(token, Some(&self.psb.stamp_buf))
+                    .start_success(token, Some(&time_stamp))
                     .expect("Error sending start success");
 
                 self.scheduler.disable();
                 if !self.scheduler.is_enabled() {
                     self.psb
                         .verification_handler
-                        .completion_success(start_token, Some(&self.psb.stamp_buf))
+                        .completion_success(start_token, Some(&time_stamp))
                         .expect("Error sending completion success");
                 } else {
                     panic!("Failed to disable scheduler");
@@ -130,7 +106,7 @@ impl PusServiceHandler for PusService11SchedHandler {
                 let start_token = self
                     .psb
                     .verification_handler
-                    .start_success(token, Some(&self.psb.stamp_buf))
+                    .start_success(token, Some(&time_stamp))
                     .expect("Error sending start success");
 
                 let mut pool = self.psb.tc_store.write().expect("Locking pool failed");
@@ -141,14 +117,14 @@ impl PusServiceHandler for PusService11SchedHandler {
 
                 self.psb
                     .verification_handler
-                    .completion_success(start_token, Some(&self.psb.stamp_buf))
+                    .completion_success(start_token, Some(&time_stamp))
                     .expect("Error sending completion success");
             }
             scheduling::Subservice::TcInsertActivity => {
                 let start_token = self
                     .psb
                     .verification_handler
-                    .start_success(token, Some(&self.psb.stamp_buf))
+                    .start_success(token, Some(&time_stamp))
                     .expect("error sending start success");
 
                 let mut pool = self.psb.tc_store.write().expect("locking pool failed");
@@ -158,7 +134,7 @@ impl PusServiceHandler for PusService11SchedHandler {
 
                 self.psb
                     .verification_handler
-                    .completion_success(start_token, Some(&self.psb.stamp_buf))
+                    .completion_success(start_token, Some(&time_stamp))
                     .expect("sending completion success failed");
             }
             _ => {

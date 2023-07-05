@@ -9,6 +9,7 @@ use log::{info, warn};
 
 use crate::hk::AcsHkIds;
 use crate::logging::setup_logger;
+use crate::pus::action::{Pus8Wrapper, PusService8ActionHandler};
 use crate::pus::event::Pus5Wrapper;
 use crate::pus::scheduler::Pus11Wrapper;
 use crate::pus::test::Service17CustomWrapper;
@@ -45,7 +46,7 @@ use satrs_core::spacepackets::{
     SequenceFlags, SpHeader,
 };
 use satrs_core::tmtc::tm_helper::SharedTmStore;
-use satrs_core::tmtc::AddressableId;
+use satrs_core::tmtc::{AddressableId, TargetId};
 use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -123,7 +124,7 @@ fn main() {
     // Some request are targetable. This map is used to retrieve sender handles based on a target ID.
     let mut request_map = HashMap::new();
     let (acs_thread_tx, acs_thread_rx) = channel::<RequestWithToken>();
-    request_map.insert(RequestTargetId::AcsSubsystem as u32, acs_thread_tx);
+    request_map.insert(RequestTargetId::AcsSubsystem as TargetId, acs_thread_tx);
 
     let tc_source_wrapper = PusTcSource {
         tc_store: tc_store.clone(),
@@ -135,7 +136,6 @@ fn main() {
         sock_addr,
         verif_reporter: verif_reporter.clone(),
         event_sender,
-        request_map,
     };
     let tc_args = TcArgs {
         tc_source: tc_source_wrapper.clone(),
@@ -153,7 +153,7 @@ fn main() {
     let (pus_test_tx, pus_test_rx) = channel();
     let (pus_event_tx, pus_event_rx) = channel();
     let (pus_sched_tx, pus_sched_rx) = channel();
-    let (pus_hk_tx, pus_hk_rx) = channel();
+    let (pus_hk_tx, _pus_hk_rx) = channel();
     let (pus_action_tx, pus_action_rx) = channel();
     let pus_router = PusTcMpscRouter {
         test_service_receiver: pus_test_tx,
@@ -195,10 +195,21 @@ fn main() {
         tm_funnel_tx.clone(),
         tm_store.clone(),
         PUS_APID,
-        verif_reporter,
+        verif_reporter.clone(),
         event_request_tx,
     );
     let mut pus_5_wrapper = Pus5Wrapper { pus_5_handler };
+
+    let pus_8_handler = PusService8ActionHandler::new(
+        pus_action_rx,
+        tc_store.pool.clone(),
+        tm_funnel_tx.clone(),
+        tm_store.clone(),
+        PUS_APID,
+        verif_reporter,
+        request_map.clone(),
+    );
+    let mut pus_8_wrapper = Pus8Wrapper { pus_8_handler };
 
     info!("Starting TMTC task");
     let jh0 = thread::Builder::new()
@@ -320,7 +331,7 @@ fn main() {
                         );
                         update_time(&mut time_provider, &mut timestamp);
                         match request.targeted_request.request {
-                            Request::HkRequest(hk_req) => match hk_req {
+                            Request::Hk(hk_req) => match hk_req {
                                 HkRequest::OneShot(unique_id) => {
                                     let target = request.targeted_request.target_id;
                                     assert_eq!(target, RequestTargetId::AcsSubsystem as u32);
@@ -359,8 +370,11 @@ fn main() {
                                 HkRequest::Disable(_) => {}
                                 HkRequest::ModifyCollectionInterval(_, _) => {}
                             },
-                            Request::ModeRequest(_mode_req) => {
+                            Request::Mode(_mode_req) => {
                                 warn!("mode request handling not implemented yet")
+                            }
+                            Request::Action(_action_req) => {
+                                warn!("action request handling not implemented yet")
                             }
                         }
                         let started_token = reporter_aocs
@@ -397,6 +411,7 @@ fn main() {
                 is_srv_finished(pus_17_wrapper.handle_next_packet());
                 is_srv_finished(pus_11_wrapper.handle_next_packet());
                 is_srv_finished(pus_5_wrapper.handle_next_packet());
+                is_srv_finished(pus_8_wrapper.handle_next_packet());
                 if all_queues_empty {
                     break;
                 }

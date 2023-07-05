@@ -12,7 +12,6 @@ use crate::tmtc::tm_helper::SharedTmStore;
 use spacepackets::ecss::event::Subservice;
 use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
-use std::format;
 use std::sync::mpsc::{Receiver, Sender};
 
 pub struct PusService5EventHandler {
@@ -57,26 +56,19 @@ impl PusServiceHandler for PusService5EventHandler {
         addr: StoreAddr,
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        {
-            // Keep locked section as short as possible.
-            let mut tc_pool = self
-                .psb
-                .tc_store
-                .write()
-                .map_err(|e| PusPacketHandlingError::RwGuardError(format!("{e}")))?;
-            let tc_guard = tc_pool.read_with_guard(addr);
-            let tc_raw = tc_guard.read().unwrap();
-            self.psb.pus_buf[0..tc_raw.len()].copy_from_slice(tc_raw);
-        }
+        self.copy_tc_to_buf(addr)?;
         let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf).unwrap();
-        let srv = Subservice::try_from(tc.subservice());
+        let subservice = tc.subservice();
+        let srv = Subservice::try_from(subservice);
         if srv.is_err() {
             return Ok(PusPacketHandlerResult::CustomSubservice(
                 tc.subservice(),
                 token,
             ));
         }
-        let mut handle_enable_disable_request = |enable: bool| {
+        let mut partial_error = None;
+        let time_stamp = self.psb().get_current_timestamp(&mut partial_error);
+        let mut handle_enable_disable_request = |enable: bool, stamp: [u8; 7]| {
             if tc.user_data().is_none() || tc.user_data().unwrap().len() < 4 {
                 return Err(PusPacketHandlingError::NotEnoughAppData(
                     "At least 4 bytes event ID expected".into(),
@@ -84,11 +76,10 @@ impl PusServiceHandler for PusService5EventHandler {
             }
             let user_data = tc.user_data().unwrap();
             let event_u32 = EventU32::from(u32::from_be_bytes(user_data[0..4].try_into().unwrap()));
-
             let start_token = self
                 .psb
                 .verification_handler
-                .start_success(token, Some(&self.psb.stamp_buf))
+                .start_success(token, Some(&stamp))
                 .map_err(|_| PartialPusHandlingError::VerificationError);
             let partial_error = start_token.clone().err();
             let mut token: TcStateToken = token.into();
@@ -126,15 +117,14 @@ impl PusServiceHandler for PusService5EventHandler {
                 return Err(PusPacketHandlingError::InvalidSubservice(tc.subservice()))
             }
             Subservice::TcEnableEventGeneration => {
-                handle_enable_disable_request(true)?;
+                handle_enable_disable_request(true, time_stamp)?;
             }
             Subservice::TcDisableEventGeneration => {
-                handle_enable_disable_request(false)?;
+                handle_enable_disable_request(false, time_stamp)?;
             }
             Subservice::TcReportDisabledList | Subservice::TmDisabledEventsReport => {
                 return Ok(PusPacketHandlerResult::SubserviceNotImplemented(
-                    tc.subservice(),
-                    token,
+                    subservice, token,
                 ));
             }
         }

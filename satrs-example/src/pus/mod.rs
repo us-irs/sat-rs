@@ -12,6 +12,7 @@ use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use satrs_example::{tmtc_err, CustomPusServiceId};
 use std::sync::mpsc::Sender;
 
+pub mod action;
 pub mod event;
 pub mod scheduler;
 pub mod test;

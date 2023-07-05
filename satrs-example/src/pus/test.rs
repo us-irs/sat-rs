@@ -2,6 +2,7 @@ use log::{info, warn};
 use satrs_core::events::EventU32;
 use satrs_core::params::Params;
 use satrs_core::pus::test::PusService17TestHandler;
+use satrs_core::pus::verification::FailParams;
 use satrs_core::pus::{PusPacketHandlerResult, PusServiceHandler};
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::spacepackets::tc::PusTc;
@@ -37,8 +38,9 @@ impl Service17CustomWrapper {
                 warn!("PUS17: Subservice {subservice} not implemented")
             }
             PusPacketHandlerResult::CustomSubservice(subservice, token) => {
-                let (buf, _) = self.pus17_handler.pus_tc_buf();
-                let (tc, _) = PusTc::from_bytes(buf).unwrap();
+                let psb_mut = self.pus17_handler.psb_mut();
+                let buf = psb_mut.pus_buf;
+                let (tc, _) = PusTc::from_bytes(&buf).unwrap();
                 let time_stamper = TimeProvider::from_now_with_u16_days().unwrap();
                 let mut stamp_buf: [u8; 7] = [0; 7];
                 time_stamper.write_to_bytes(&mut stamp_buf).unwrap();
@@ -47,23 +49,26 @@ impl Service17CustomWrapper {
                     self.test_srv_event_sender
                         .send((TEST_EVENT.into(), None))
                         .expect("Sending test event failed");
-                    let start_token = self
-                        .pus17_handler
-                        .verification_reporter()
+                    let start_token = psb_mut
+                        .verification_handler
                         .start_success(token, Some(&stamp_buf))
                         .expect("Error sending start success");
-                    self.pus17_handler
-                        .verification_reporter()
+                    psb_mut
+                        .verification_handler
                         .completion_success(start_token, Some(&stamp_buf))
                         .expect("Error sending completion success");
                 } else {
                     let fail_data = [tc.subservice()];
                     self.pus17_handler
                         .psb_mut()
-                        .report_start_failure(
+                        .verification_handler
+                        .start_failure(
                             token,
-                            &tmtc_err::INVALID_PUS_SUBSERVICE,
-                            Some(&fail_data),
+                            FailParams::new(
+                                Some(&stamp_buf),
+                                &tmtc_err::INVALID_PUS_SUBSERVICE,
+                                Some(&fail_data),
+                            ),
                         )
                         .expect("Sending start failure verification failed");
                 }

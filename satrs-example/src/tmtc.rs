@@ -2,7 +2,6 @@ use log::info;
 use satrs_core::events::EventU32;
 use satrs_core::hal::host::udp_server::{ReceiveResult, UdpTcServer};
 use satrs_core::params::Params;
-use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
@@ -12,7 +11,6 @@ use std::time::Duration;
 
 use crate::ccsds::CcsdsReceiver;
 use crate::pus::{PusReceiver, PusTcArgs, PusTcMpscRouter, PusTmArgs};
-use crate::requests::RequestWithToken;
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::spacepackets::ecss::{PusPacket, SerializablePusPacket};
@@ -27,7 +25,6 @@ pub struct OtherArgs {
     pub sock_addr: SocketAddr,
     pub verif_reporter: StdVerifReporterWithSender,
     pub event_sender: Sender<(EventU32, Option<Params>)>,
-    pub request_map: HashMap<u32, Sender<RequestWithToken>>,
 }
 
 pub struct TmArgs {

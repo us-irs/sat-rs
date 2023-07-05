@@ -51,27 +51,18 @@ impl PusServiceHandler for PusService17TestHandler {
         addr: StoreAddr,
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        {
-            // Keep locked section as short as possible.
-            let mut tc_pool = self
-                .psb
-                .tc_store
-                .write()
-                .map_err(|e| PusPacketHandlingError::RwGuardError(format!("{e}")))?;
-            let tc_guard = tc_pool.read_with_guard(addr);
-            let tc_raw = tc_guard.read()?;
-            self.psb.pus_buf[0..tc_raw.len()].copy_from_slice(tc_raw);
-        }
+        self.copy_tc_to_buf(addr)?;
         let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf)?;
         if tc.service() != 17 {
             return Err(PusPacketHandlingError::WrongService(tc.service()));
         }
         if tc.subservice() == 1 {
-            let mut partial_error = self.psb.update_stamp().err();
+            let mut partial_error = None;
+            let time_stamp = self.psb().get_current_timestamp(&mut partial_error);
             let result = self
                 .psb
                 .verification_handler
-                .start_success(token, Some(&self.psb.stamp_buf))
+                .start_success(token, Some(&time_stamp))
                 .map_err(|_| PartialPusHandlingError::VerificationError);
             let start_token = if let Ok(result) = result {
                 Some(result)
@@ -81,7 +72,7 @@ impl PusServiceHandler for PusService17TestHandler {
             };
             // Sequence count will be handled centrally in TM funnel.
             let mut reply_header = SpHeader::tm_unseg(self.psb.tm_apid, 0, 0).unwrap();
-            let tc_header = PusTmSecondaryHeader::new_simple(17, 2, &self.psb.stamp_buf);
+            let tc_header = PusTmSecondaryHeader::new_simple(17, 2, &time_stamp);
             let ping_reply = PusTm::new(&mut reply_header, tc_header, None, true);
             let addr = self.psb.tm_store.add_pus_tm(&ping_reply);
             if let Err(e) = self
@@ -96,7 +87,7 @@ impl PusServiceHandler for PusService17TestHandler {
                 if self
                     .psb
                     .verification_handler
-                    .completion_success(start_token, Some(&self.psb.stamp_buf))
+                    .completion_success(start_token, Some(&time_stamp))
                     .is_err()
                 {
                     partial_error = Some(PartialPusHandlingError::VerificationError)

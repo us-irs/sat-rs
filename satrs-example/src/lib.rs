@@ -1,5 +1,6 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use satrs_core::events::{EventU32TypedSev, SeverityInfo};
+use satrs_core::objects::ObjectId;
 use std::net::Ipv4Addr;
 
 use satrs_mib::res_code::{ResultU16, ResultU16Info};
@@ -16,6 +17,11 @@ pub enum CustomPusServiceId {
 pub enum RequestTargetId {
     AcsSubsystem = 1,
 }
+
+pub const ACS_OBJECT_ID: ObjectId = ObjectId {
+    id: RequestTargetId::AcsSubsystem as u32,
+    name: "ACS_SUBSYSTEM",
+};
 
 #[derive(Debug)]
 pub enum GroupId {
@@ -38,6 +44,8 @@ pub mod tmtc_err {
     pub const INVALID_PUS_SUBSERVICE: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 1);
     #[resultcode]
     pub const PUS_SERVICE_NOT_IMPLEMENTED: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 2);
+    #[resultcode]
+    pub const UNKNOWN_TARGET_ID: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 3);
 
     #[resultcode(
         info = "Not enough data inside the TC application data field. Optionally includes: \

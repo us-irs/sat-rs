@@ -51,6 +51,7 @@
 //!  assert_eq!(example_obj.id, obj_id);
 //!  assert_eq!(example_obj.dummy, 42);
 //! ```
+use crate::tmtc::TargetId;
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
@@ -64,7 +65,7 @@ use std::error::Error;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub struct ObjectId {
-    pub id: u32,
+    pub id: TargetId,
     pub name: &'static str,
 }
 
