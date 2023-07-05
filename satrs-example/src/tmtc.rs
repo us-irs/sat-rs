@@ -20,6 +20,7 @@ use satrs_core::pus::event_man::EventRequestWithToken;
 use satrs_core::pus::scheduling::{PusScheduler, TcInfo};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::seq_count::SeqCountProviderSyncClonable;
+use satrs_core::spacepackets::ecss::SerializablePusPacket;
 use satrs_core::spacepackets::{ecss::PusPacket, tc::PusTc, tm::PusTm, SpHeader};
 use satrs_core::tmtc::{
     CcsdsDistributor, CcsdsError, PusServiceProvider, ReceivesCcsdsTc, ReceivesEcssPusTc,

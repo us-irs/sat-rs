@@ -10,10 +10,10 @@ fern = "0.6"
 chrono = "0.4"
 log = "0.4"
 crossbeam-channel = "0.5"
-delegate = "0.9"
+delegate = "0.10"
 zerocopy = "0.6"
 csv = "1"
-num_enum = "0.5"
+num_enum = "0.6"
 
 [dependencies.satrs-core]
 path = "../satrs-core"

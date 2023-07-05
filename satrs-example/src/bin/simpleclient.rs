@@ -1,6 +1,8 @@
 use satrs_core::pus::verification::RequestId;
 use satrs_core::{
-    spacepackets::ecss::PusPacket, spacepackets::tc::PusTc, spacepackets::tm::PusTm,
+    spacepackets::ecss::{PusPacket, SerializablePusPacket},
+    spacepackets::tc::PusTc,
+    spacepackets::tm::PusTm,
     spacepackets::SpHeader,
 };
 use satrs_example::{OBSW_SERVER_ADDR, SERVER_PORT};
