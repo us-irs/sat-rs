@@ -1,6 +1,5 @@
 use crate::tmtc::PusTcSource;
 use log::{error, info, warn};
-use satrs_core::pool::{SharedPool, StoreAddr};
 use satrs_core::pus::scheduler::TcInfo;
 use satrs_core::pus::scheduler_srv::PusService11SchedHandler;
 use satrs_core::pus::{PusPacketHandlerResult, PusServiceHandler};

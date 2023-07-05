@@ -233,7 +233,7 @@ impl TryFrom<TcStateToken> for VerificationToken<TcStateAccepted> {
         if let TcStateToken::Accepted(token) = value {
             Ok(token)
         } else {
-            return Err(());
+            Err(())
         }
     }
 }
