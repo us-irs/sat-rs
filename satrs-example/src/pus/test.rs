@@ -93,6 +93,24 @@ impl Service17CustomWrapper {
     }
 }
 
+pub trait PusServiceHandler {
+    fn psb(&mut self) -> &mut PusServiceBase;
+    fn handle_one_tc(
+        &mut self,
+        addr: StoreAddr,
+        token: VerificationToken<TcStateAccepted>,
+    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
+    fn handle_next_packet(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        return match self.psb().tc_rx.try_recv() {
+            Ok((addr, token)) => self.handle_one_tc(addr, token),
+            Err(e) => match e {
+                TryRecvError::Empty => Ok(PusPacketHandlerResult::Empty),
+                TryRecvError::Disconnected => Err(PusPacketHandlingError::QueueDisconnected),
+            },
+        };
+    }
+
+}
 pub struct PusService17TestHandler {
     psb: PusServiceBase,
 }
@@ -125,18 +143,14 @@ impl PusService17TestHandler {
     pub fn pus_tc_buf(&self) -> (&[u8], usize) {
         (&self.psb.pus_buf, self.psb.pus_size)
     }
+}
 
-    pub fn handle_next_packet(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        return match self.psb.tc_rx.try_recv() {
-            Ok((addr, token)) => self.handle_one_tc(addr, token),
-            Err(e) => match e {
-                TryRecvError::Empty => Ok(PusPacketHandlerResult::Empty),
-                TryRecvError::Disconnected => Err(PusPacketHandlingError::QueueDisconnected),
-            },
-        };
+impl PusServiceHandler for PusService17TestHandler {
+    fn psb(&mut self) -> &mut PusServiceBase {
+        &mut self.psb
     }
 
-    pub fn handle_one_tc(
+    fn handle_one_tc(
         &mut self,
         addr: StoreAddr,
         token: VerificationToken<TcStateAccepted>,
