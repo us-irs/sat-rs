@@ -9,11 +9,11 @@ use satrs_core::spacepackets::ecss::PusServiceId;
 use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::spacepackets::time::cds::TimeProvider;
 use satrs_core::spacepackets::time::TimeWriter;
-use satrs_core::tmtc::tm_helper::{PusTmWithCdsShortHelper, SharedTmStore};
+use satrs_core::tmtc::tm_helper::PusTmWithCdsShortHelper;
 use satrs_example::{tmtc_err, CustomPusServiceId};
 use std::sync::mpsc::Sender;
 
-pub mod events;
+pub mod event;
 pub mod scheduler;
 pub mod test;
 
@@ -25,31 +25,6 @@ pub struct PusTcMpscRouter {
     pub action_service_receiver: Sender<AcceptedTc>,
 }
 
-// impl PusTcRouter for PusTcMpscRouter {
-//     type Error = ();
-//
-//     fn route_pus_tc(&mut self, apid: u16, service: u8, subservice: u8, tc: &PusTc) {
-//         if apid == PUS_APID {
-//             if service == PusServiceId::Event as u8 {
-//                 self.event_service_receiver.send_tc(*tc).unwrap();
-//             }
-//             if service == PusServiceId::Action as u8 {
-//                 // TODO: Look up object ID and then route the action request to that object.
-//                 self.action_service_receiver.send_tc(*tc).unwrap();
-//             }
-//             if service == PusServiceId::Housekeeping as u8 {
-//                 // TODO: Look up object ID and then route the HK request to that object.
-//             }
-//             if service == PusServiceId::Scheduling as u8 {
-//                 self.sched_service_receiver.send_tc(*tc).unwrap();
-//             }
-//             if service == PusServiceId::Test as u8 {
-//                 self.test_service_receiver.send_tc(*tc).unwrap();
-//             }
-//         }
-//         todo!()
-//     }
-// }
 pub struct PusReceiver {
     pub tm_helper: PusTmWithCdsShortHelper,
     pub tm_args: PusTmArgs,
@@ -58,10 +33,6 @@ pub struct PusReceiver {
 }
 
 pub struct PusTmArgs {
-    /// All telemetry is sent with this sender handle.
-    pub tm_tx: Sender<StoreAddr>,
-    /// All TM to be sent is stored here
-    pub tm_store: SharedTmStore,
     /// All verification reporting is done with this reporter.
     pub verif_reporter: StdVerifReporterWithSender,
     /// Sequence count provider for TMs sent from within pus demultiplexer
@@ -74,55 +45,9 @@ impl PusTmArgs {
     }
 }
 
-// #[allow(dead_code)]
-// pub struct PusTcHandlerBase {
-//     pub tc_store: Box<dyn PoolProvider>,
-//     pub receiver: Receiver<(StoreAddr, VerificationToken<TcStateAccepted>)>,
-//     pub verif_reporter: StdVerifReporterWithSender,
-//     pub time_provider: Box<dyn CcsdsTimeProvider>,
-// }
-//
-// pub trait TestHandlerNoPing {
-//     fn handle_no_ping_tc(&mut self, tc: PusTc);
-// }
-//
-// #[allow(dead_code)]
-// pub struct PusTestTcHandler {
-//     pub base: PusTcHandlerBase,
-//     handler: Option<Box<dyn TestHandlerNoPing>>,
-// }
-//
-// #[allow(dead_code)]
-// pub struct PusScheduleTcHandler {
-//     pub base: PusTestTcHandler,
-// }
-//
-// impl PusTestTcHandler {
-//     #[allow(dead_code)]
-//     pub fn operation(&mut self) {
-//         let (addr, token) = self.base.receiver.recv().unwrap();
-//         let data = self.base.tc_store.read(&addr).unwrap();
-//         let (pus_tc, _len) = PusTc::from_bytes(data).unwrap();
-//         let stamp: [u8; 7] = [0; 7];
-//         if pus_tc.subservice() == 1 {
-//             self.base
-//                 .verif_reporter
-//                 .completion_success(token, Some(&stamp))
-//                 .unwrap();
-//         } else if let Some(handler) = &mut self.handler {
-//             handler.handle_no_ping_tc(pus_tc);
-//         }
-//     }
-// }
-
 pub struct PusTcArgs {
-    //pub event_request_tx: Sender<EventRequestWithToken>,
     /// This routes all telecommands to their respective recipients
     pub pus_router: PusTcMpscRouter,
-    /// Request routing helper. Maps targeted requests to their recipient.
-    //pub request_map: HashMap<TargetId, Sender<RequestWithToken>>,
-    /// Required for scheduling of telecommands.
-    //pub tc_source: PusTcSource,
     /// Used to send events from within the TC router
     pub event_sender: Sender<(EventU32, Option<Params>)>,
 }
@@ -330,64 +255,6 @@ impl PusReceiver {
 // }
 
 // impl PusReceiver {
-//     fn handle_test_service(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
-//         match PusPacket::subservice(pus_tc) {
-//             1 => {
-//                 info!("Received PUS ping command TC[17,1]");
-//                 info!("Sending ping reply PUS TM[17,2]");
-//                 let start_token = self
-//                     .tm_args
-//                     .verif_reporter
-//                     .start_success(token, Some(self.stamp_helper.stamp()))
-//                     .expect("Error sending start success");
-//                 let ping_reply = self.tm_helper.create_pus_tm_timestamp_now(
-//                     17,
-//                     2,
-//                     None,
-//                     self.tm_args.seq_count_provider.get(),
-//                 );
-//                 let addr = self.tm_args.tm_store.add_pus_tm(&ping_reply);
-//                 self.tm_args
-//                     .tm_tx
-//                     .send(addr)
-//                     .expect("Sending TM to TM funnel failed");
-//                 self.tm_args.seq_count_provider.increment();
-//                 self.tm_args
-//                     .verif_reporter
-//                     .completion_success(start_token, Some(self.stamp_helper.stamp()))
-//                     .expect("Error sending completion success");
-//             }
-//             128 => {
-//                 info!("Generating test event");
-//                 self.tc_args
-//                     .event_sender
-//                     .send((TEST_EVENT.into(), None))
-//                     .expect("Sending test event failed");
-//                 let start_token = self
-//                     .tm_args
-//                     .verif_reporter
-//                     .start_success(token, Some(self.stamp_helper.stamp()))
-//                     .expect("Error sending start success");
-//                 self.tm_args
-//                     .verif_reporter
-//                     .completion_success(start_token, Some(self.stamp_helper.stamp()))
-//                     .expect("Error sending completion success");
-//             }
-//             _ => {
-//                 self.tm_args
-//                     .verif_reporter
-//                     .start_failure(
-//                         token,
-//                         FailParams::new(
-//                             Some(self.stamp_helper.stamp()),
-//                             &tmtc_err::INVALID_PUS_SUBSERVICE,
-//                             None,
-//                         ),
-//                     )
-//                     .expect("Sending start failure TM failed");
-//             }
-//         }
-//     }
 //
 //     fn handle_hk_request(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
 //         if pus_tc.user_data().is_none() {
@@ -495,204 +362,6 @@ impl PusReceiver {
 //         }
 //     }
 //
-//     fn handle_event_request(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
-//         let send_start_failure = |vr: &mut StdVerifReporterWithSender,
-//                                   timestamp: &[u8],
-//                                   failure_code: &ResultU16,
-//                                   failure_data: Option<&[u8]>| {
-//             vr.start_failure(
-//                 token,
-//                 FailParams::new(Some(timestamp), failure_code, failure_data),
-//             )
-//             .expect("Sending start failure TM failed");
-//         };
-//         let send_start_acceptance = |vr: &mut StdVerifReporterWithSender, timestamp: &[u8]| {
-//             vr.start_success(token, Some(timestamp))
-//                 .expect("Sending start success TM failed")
-//         };
-//         if pus_tc.user_data().is_none() {
-//             send_start_failure(
-//                 &mut self.tm_args.verif_reporter,
-//                 self.stamp_helper.stamp(),
-//                 &tmtc_err::NOT_ENOUGH_APP_DATA,
-//                 None,
-//             );
-//             return;
-//         }
-//         let app_data = pus_tc.user_data().unwrap();
-//         if app_data.len() < 4 {
-//             send_start_failure(
-//                 &mut self.tm_args.verif_reporter,
-//                 self.stamp_helper.stamp(),
-//                 &tmtc_err::NOT_ENOUGH_APP_DATA,
-//                 None,
-//             );
-//             return;
-//         }
-//         let event_id = EventU32::from(u32::from_be_bytes(app_data.try_into().unwrap()));
-//         match PusPacket::subservice(pus_tc).try_into() {
-//             Ok(event::Subservice::TcEnableEventGeneration) => {
-//                 let start_token = send_start_acceptance(
-//                     &mut self.tm_args.verif_reporter,
-//                     self.stamp_helper.stamp(),
-//                 );
-//                 self.tc_args
-//                     .event_request_tx
-//                     .send(EventRequestWithToken {
-//                         request: EventRequest::Enable(event_id),
-//                         token: start_token,
-//                     })
-//                     .expect("Sending event request failed");
-//             }
-//             Ok(event::Subservice::TcDisableEventGeneration) => {
-//                 let start_token = send_start_acceptance(
-//                     &mut self.tm_args.verif_reporter,
-//                     self.stamp_helper.stamp(),
-//                 );
-//                 self.tc_args
-//                     .event_request_tx
-//                     .send(EventRequestWithToken {
-//                         request: EventRequest::Disable(event_id),
-//                         token: start_token,
-//                     })
-//                     .expect("Sending event request failed");
-//             }
-//             _ => {
-//                 send_start_failure(
-//                     &mut self.tm_args.verif_reporter,
-//                     self.stamp_helper.stamp(),
-//                     &tmtc_err::INVALID_PUS_SUBSERVICE,
-//                     None,
-//                 );
-//             }
-//         }
-//     }
-//
-//     fn handle_scheduled_tc(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
-//         let subservice = match pus_11_generic_tc_check(pus_tc) {
-//             Ok(subservice) => subservice,
-//             Err(e) => match e {
-//                 GenericTcCheckError::NotEnoughAppData => {
-//                     self.tm_args
-//                         .verif_reporter
-//                         .start_failure(
-//                             token,
-//                             FailParams::new(
-//                                 Some(self.stamp_helper.stamp()),
-//                                 &tmtc_err::NOT_ENOUGH_APP_DATA,
-//                                 None,
-//                             ),
-//                         )
-//                         .expect("could not sent verification error");
-//                     return;
-//                 }
-//                 GenericTcCheckError::InvalidSubservice => {
-//                     self.tm_args
-//                         .verif_reporter
-//                         .start_failure(
-//                             token,
-//                             FailParams::new(
-//                                 Some(self.stamp_helper.stamp()),
-//                                 &tmtc_err::INVALID_PUS_SUBSERVICE,
-//                                 None,
-//                             ),
-//                         )
-//                         .expect("could not sent verification error");
-//                     return;
-//                 }
-//             },
-//         };
-//         match subservice {
-//             scheduling::Subservice::TcEnableScheduling => {
-//                 let start_token = self
-//                     .tm_args
-//                     .verif_reporter
-//                     .start_success(token, Some(self.stamp_helper.stamp()))
-//                     .expect("Error sending start success");
-//
-//                 let mut scheduler = self.tc_args.scheduler.borrow_mut();
-//                 scheduler.enable();
-//                 if scheduler.is_enabled() {
-//                     self.tm_args
-//                         .verif_reporter
-//                         .completion_success(start_token, Some(self.stamp_helper.stamp()))
-//                         .expect("Error sending completion success");
-//                 } else {
-//                     panic!("Failed to enable scheduler");
-//                 }
-//             }
-//             scheduling::Subservice::TcDisableScheduling => {
-//                 let start_token = self
-//                     .tm_args
-//                     .verif_reporter
-//                     .start_success(token, Some(self.stamp_helper.stamp()))
-//                     .expect("Error sending start success");
-//
-//                 let mut scheduler = self.tc_args.scheduler.borrow_mut();
-//                 scheduler.disable();
-//                 if !scheduler.is_enabled() {
-//                     self.tm_args
-//                         .verif_reporter
-//                         .completion_success(start_token, Some(self.stamp_helper.stamp()))
-//                         .expect("Error sending completion success");
-//                 } else {
-//                     panic!("Failed to disable scheduler");
-//                 }
-//             }
-//             scheduling::Subservice::TcResetScheduling => {
-//                 let start_token = self
-//                     .tm_args
-//                     .verif_reporter
-//                     .start_success(token, Some(self.stamp_helper.stamp()))
-//                     .expect("Error sending start success");
-//
-//                 let mut pool = self
-//                     .tc_args
-//                     .tc_source
-//                     .tc_store
-//                     .pool
-//                     .write()
-//                     .expect("Locking pool failed");
-//
-//                 let mut scheduler = self.tc_args.scheduler.borrow_mut();
-//                 scheduler
-//                     .reset(pool.as_mut())
-//                     .expect("Error resetting TC Pool");
-//                 drop(scheduler);
-//
-//                 self.tm_args
-//                     .verif_reporter
-//                     .completion_success(start_token, Some(self.stamp_helper.stamp()))
-//                     .expect("Error sending completion success");
-//             }
-//             scheduling::Subservice::TcInsertActivity => {
-//                 let start_token = self
-//                     .tm_args
-//                     .verif_reporter
-//                     .start_success(token, Some(self.stamp_helper.stamp()))
-//                     .expect("error sending start success");
-//
-//                 let mut pool = self
-//                     .tc_args
-//                     .tc_source
-//                     .tc_store
-//                     .pool
-//                     .write()
-//                     .expect("locking pool failed");
-//                 let mut scheduler = self.tc_args.scheduler.borrow_mut();
-//                 scheduler
-//                     .insert_wrapped_tc::<TimeProvider>(pus_tc, pool.as_mut())
-//                     .expect("insertion of activity into pool failed");
-//                 drop(scheduler);
-//
-//                 self.tm_args
-//                     .verif_reporter
-//                     .completion_success(start_token, Some(self.stamp_helper.stamp()))
-//                     .expect("sending completion success failed");
-//             }
-//             _ => {}
-//         }
-//     }
 //
 //     fn handle_mode_service(&mut self, pus_tc: &PusTc, token: VerificationToken<TcStateAccepted>) {
 //         let mut app_data_len = 0;

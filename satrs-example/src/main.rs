@@ -9,6 +9,7 @@ use log::{info, warn};
 
 use crate::hk::AcsHkIds;
 use crate::logging::setup_logger;
+use crate::pus::event::Pus5Wrapper;
 use crate::pus::scheduler::Pus11Wrapper;
 use crate::pus::test::Service17CustomWrapper;
 use crate::pus::PusTcMpscRouter;
@@ -26,6 +27,7 @@ use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, EventRequest, EventRequestWithToken,
     PusEventDispatcher,
 };
+use satrs_core::pus::event_srv::PusService5EventHandler;
 use satrs_core::pus::hk::Subservice as HkSubservice;
 use satrs_core::pus::scheduler::PusScheduler;
 use satrs_core::pus::scheduler_srv::PusService11SchedHandler;
@@ -141,7 +143,7 @@ fn main() {
         sock_addr,
         verif_reporter: verif_reporter.clone(),
         event_sender,
-        event_request_tx,
+        // event_request_tx,
         request_map,
         seq_count_provider: seq_count_provider_tmtc,
     };
@@ -184,16 +186,26 @@ fn main() {
     };
     let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
         .expect("Creating PUS Scheduler failed");
-    let pus11_handler = PusService11SchedHandler::new(
+    let pus_11_handler = PusService11SchedHandler::new(
         pus_sched_rx,
         tc_store.pool.clone(),
         tm_funnel_tx.clone(),
         tm_store.clone(),
         PUS_APID,
-        verif_reporter,
+        verif_reporter.clone(),
         scheduler,
     );
-    let mut pus_11_wrapper = Pus11Wrapper { pus11_handler };
+    let mut pus_11_wrapper = Pus11Wrapper { pus_11_handler };
+    let pus_5_handler = PusService5EventHandler::new(
+        pus_event_rx,
+        tc_store.pool.clone(),
+        tm_funnel_tx.clone(),
+        tm_store.clone(),
+        PUS_APID,
+        verif_reporter,
+        event_request_tx,
+    );
+    let mut pus_5_wrapper = Pus5Wrapper { pus_5_handler };
 
     info!("Starting TMTC task");
     let jh0 = thread::Builder::new()
@@ -236,7 +248,7 @@ fn main() {
             let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
             let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
                 reporter_event_handler
-                    .completion_success(event_req.token, Some(timestamp))
+                    .completion_success(event_req.token.try_into().unwrap(), Some(timestamp))
                     .expect("Sending completion success failed");
             };
             loop {
@@ -366,6 +378,7 @@ fn main() {
             };
             is_srv_finished(pus_17_wrapper.perform_operation());
             is_srv_finished(pus_11_wrapper.perform_operation());
+            is_srv_finished(pus_5_wrapper.perform_operation());
             if all_queues_empty {
                 thread::sleep(Duration::from_millis(200));
             }

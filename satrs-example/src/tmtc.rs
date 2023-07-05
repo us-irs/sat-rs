@@ -16,7 +16,6 @@ use crate::ccsds::CcsdsReceiver;
 use crate::pus::{PusReceiver, PusTcArgs, PusTcMpscRouter, PusTmArgs};
 use crate::requests::RequestWithToken;
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
-use satrs_core::pus::event_man::EventRequestWithToken;
 use satrs_core::pus::scheduler::{PusScheduler, TcInfo};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::seq_count::SeqCountProviderSyncClonable;
@@ -32,7 +31,6 @@ pub struct OtherArgs {
     pub sock_addr: SocketAddr,
     pub verif_reporter: StdVerifReporterWithSender,
     pub event_sender: Sender<(EventU32, Option<Params>)>,
-    pub event_request_tx: Sender<EventRequestWithToken>,
     pub request_map: HashMap<u32, Sender<RequestWithToken>>,
     pub seq_count_provider: SeqCountProviderSyncClonable,
 }
@@ -161,8 +159,6 @@ pub fn core_tmtc_task(
     ));
 
     let pus_tm_args = PusTmArgs {
-        tm_tx: tm_args.tm_sink_sender,
-        tm_store: tm_args.tm_store.clone(),
         verif_reporter: args.verif_reporter,
         seq_count_provider: args.seq_count_provider.clone(),
     };

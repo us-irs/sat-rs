@@ -227,6 +227,17 @@ impl From<VerificationToken<TcStateNone>> for TcStateToken {
     }
 }
 
+impl TryFrom<TcStateToken> for VerificationToken<TcStateAccepted> {
+    type Error = ();
+
+    fn try_from(value: TcStateToken) -> Result<Self, Self::Error> {
+        if let TcStateToken::Accepted(token) = value {
+            Ok(token)
+        } else {
+            return Err(());
+        }
+    }
+}
 impl From<VerificationToken<TcStateAccepted>> for TcStateToken {
     fn from(t: VerificationToken<TcStateAccepted>) -> Self {
         TcStateToken::Accepted(t)

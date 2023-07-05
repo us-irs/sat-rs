@@ -33,6 +33,9 @@ impl Service17CustomWrapper {
                     partial_err
                 );
             }
+            PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
+                warn!("PUS17: Subservice {subservice} not implemented")
+            }
             PusPacketHandlerResult::CustomSubservice(subservice, token) => {
                 let (buf, _) = self.pus17_handler.pus_tc_buf();
                 let (tc, _) = PusTc::from_bytes(buf).unwrap();

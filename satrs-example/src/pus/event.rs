@@ -1,24 +1,24 @@
 use log::{error, warn};
-use satrs_core::pus::scheduler_srv::PusService11SchedHandler;
+use satrs_core::pus::event_srv::PusService5EventHandler;
 use satrs_core::pus::{PusPacketHandlerResult, PusServiceHandler};
 
-pub struct Pus11Wrapper {
-    pub pus_11_handler: PusService11SchedHandler,
+pub struct Pus5Wrapper {
+    pub pus_5_handler: PusService5EventHandler,
 }
 
-impl Pus11Wrapper {
+impl Pus5Wrapper {
     pub fn perform_operation(&mut self) -> bool {
-        match self.pus_11_handler.handle_next_packet() {
+        match self.pus_5_handler.handle_next_packet() {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {
-                    warn!("PUS11 partial packet handling success: {e:?}")
+                    warn!("PUS 5 partial packet handling success: {e:?}")
                 }
                 PusPacketHandlerResult::CustomSubservice(invalid, _) => {
-                    warn!("PUS11 invalid subservice {invalid}");
+                    warn!("PUS 5 invalid subservice {invalid}");
                 }
                 PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
-                    warn!("PUS11: Subservice {subservice} not implemented");
+                    warn!("PUS 5 subservice {subservice} not implemented");
                 }
                 PusPacketHandlerResult::Empty => {
                     return true;

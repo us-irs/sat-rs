@@ -11,6 +11,7 @@ use spacepackets::{ByteConversionError, SizeMissmatch};
 
 pub mod event;
 pub mod event_man;
+pub mod event_srv;
 pub mod hk;
 pub mod mode;
 pub mod scheduler;
@@ -289,13 +290,17 @@ pub mod std_mod {
         PusError(#[from] PusError),
         #[error("Wrong service number {0} for packet handler")]
         WrongService(u8),
+        #[error("Invalid subservice {0}")]
+        InvalidSubservice(u8),
         #[error("Not enough application data available: {0}")]
         NotEnoughAppData(String),
         #[error("Generic store error: {0}")]
         StoreError(#[from] StoreError),
-        #[error("Error with the pool RwGuard")]
+        #[error("Error with the pool RwGuard: {0}")]
         RwGuardError(String),
-        #[error("MQ backend disconnect error")]
+        #[error("MQ send error: {0}")]
+        SendError(String),
+        #[error("TX message queue side has disconnected")]
         QueueDisconnected,
         #[error("Other error {0}")]
         OtherError(String),
@@ -315,6 +320,7 @@ pub mod std_mod {
     pub enum PusPacketHandlerResult {
         RequestHandled,
         RequestHandledPartialSuccess(PartialPusHandlingError),
+        SubserviceNotImplemented(u8, VerificationToken<TcStateAccepted>),
         CustomSubservice(u8, VerificationToken<TcStateAccepted>),
         Empty,
     }
