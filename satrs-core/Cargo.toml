@@ -18,7 +18,7 @@ paste = "1"
 embed-doc-image = "0.1"
 
 [dependencies.num_enum]
-version = "0.5"
+version = "0.6"
 default-features = false
 
 [dependencies.dyn-clone]

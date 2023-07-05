@@ -237,7 +237,11 @@ fn main() {
                         .set_seq_count(seq_count_provider.get_and_increment());
                     let entry = msg_counter_map.entry(tm.service()).or_insert(0);
                     tm.sec_header.msg_counter = *entry;
-                    *entry += 1;
+                    if *entry == u16::MAX {
+                        *entry = 0;
+                    } else {
+                        *entry += 1;
+                    }
                     tm.calc_crc_on_serialization = true;
                     tm.write_to_bytes(tm_raw)
                         .expect("Writing PUS TM back failed");

@@ -630,7 +630,6 @@ impl<Severity: HasSeverity> PartialEq<EventU16TypedSev<Severity>> for EventU16 {
 mod tests {
     use super::EventU32TypedSev;
     use super::*;
-    use spacepackets::ecss::EcssEnumeration;
     use spacepackets::ByteConversionError;
     use std::mem::size_of;
 

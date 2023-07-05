@@ -1446,11 +1446,10 @@ mod tests {
         VerificationReporterWithSender, VerificationToken,
     };
     use crate::pus::{EcssSender, EcssTmtcErrorWithSend};
-    use crate::seq_count::SeqCountProviderSimple;
     use crate::SenderId;
     use alloc::boxed::Box;
     use alloc::format;
-    use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration, PusPacket};
+    use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, PusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::tm::PusTm;
     use spacepackets::util::UnsignedEnum;
@@ -1556,15 +1555,7 @@ mod tests {
     }
 
     fn base_reporter() -> VerificationReporter {
-        let cfg = VerificationReporterCfg::new(
-            TEST_APID,
-            Box::new(SeqCountProviderSimple::default()),
-            Box::new(SeqCountProviderSimple::default()),
-            1,
-            2,
-            8,
-        )
-        .unwrap();
+        let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
         VerificationReporter::new(&cfg)
     }
 
@@ -2306,15 +2297,7 @@ mod tests {
         let (verif_tx, verif_rx) = mpsc::channel();
         let sender =
             MpscVerifSender::new(0, "Verification Sender", shared_tm_pool.clone(), verif_tx);
-        let cfg = VerificationReporterCfg::new(
-            TEST_APID,
-            Box::new(SeqCountProviderSimple::default()),
-            Box::new(SeqCountProviderSimple::default()),
-            1,
-            2,
-            8,
-        )
-        .unwrap();
+        let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
         let mut reporter = VerificationReporterWithSender::new(&cfg, Box::new(sender));
 
         let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();

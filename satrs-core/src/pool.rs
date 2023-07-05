@@ -402,7 +402,8 @@ impl PoolProvider for LocalPool {
     fn modify(&mut self, addr: &StoreAddr) -> Result<&mut [u8], StoreError> {
         let curr_size = self.addr_check(addr)?;
         let raw_pos = self.raw_pos(addr).unwrap();
-        let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..curr_size];
+        let block =
+            &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + curr_size];
         Ok(block)
     }
 
@@ -778,5 +779,26 @@ mod tests {
         let _ = rw_guard.modify().expect("modify failed");
         drop(rw_guard);
         assert!(!local_pool.has_element_at(&addr).expect("Invalid address"));
+    }
+
+    #[test]
+    fn modify_pool_index_above_0() {
+        let mut local_pool = basic_small_pool();
+        let test_buf_0: [u8; 4] = [1; 4];
+        let test_buf_1: [u8; 4] = [2; 4];
+        let test_buf_2: [u8; 4] = [3; 4];
+        let test_buf_3: [u8; 4] = [4; 4];
+        let addr0 = local_pool.add(&test_buf_0).expect("Adding data failed");
+        let addr1 = local_pool.add(&test_buf_1).expect("Adding data failed");
+        let addr2 = local_pool.add(&test_buf_2).expect("Adding data failed");
+        let addr3 = local_pool.add(&test_buf_3).expect("Adding data failed");
+        let tm0_raw = local_pool.modify(&addr0).expect("Modifying data failed");
+        assert_eq!(tm0_raw, test_buf_0);
+        let tm1_raw = local_pool.modify(&addr1).expect("Modifying data failed");
+        assert_eq!(tm1_raw, test_buf_1);
+        let tm2_raw = local_pool.modify(&addr2).expect("Modifying data failed");
+        assert_eq!(tm2_raw, test_buf_2);
+        let tm3_raw = local_pool.modify(&addr3).expect("Modifying data failed");
+        assert_eq!(tm3_raw, test_buf_3);
     }
 }
