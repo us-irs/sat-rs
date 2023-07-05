@@ -51,7 +51,7 @@ doc = ::embed_doc_image::embed_image!("event_man_arch", "images/event_man_arch.p
 //!
 //! # Examples
 //!
-//! You can check [integration test](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-core/tests/pus_events.rs)
+//! You can check [integration test](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-core/tests/pus_events.rs)
 //! for a concrete example using multi-threading where events are routed to
 //! different threads.
 use crate::events::{EventU16, EventU32, GenericEvent, LargestEventRaw, LargestGroupIdRaw};
