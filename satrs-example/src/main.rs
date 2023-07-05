@@ -6,6 +6,7 @@ mod requests;
 mod tmtc;
 
 use log::{info, warn};
+use std::collections::hash_map::Entry;
 
 use crate::hk::AcsHkIds;
 use crate::logging::setup_logger;
@@ -36,7 +37,8 @@ use satrs_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
 };
 use satrs_core::pus::MpscTmtcInStoreSender;
-use satrs_core::seq_count::{SeqCountProviderSimple, SeqCountProviderSyncClonable};
+use satrs_core::seq_count::{SeqCountProviderSimple, SequenceCountProviderCore};
+use satrs_core::spacepackets::ecss::{PusPacket, SerializablePusPacket};
 use satrs_core::spacepackets::{
     time::cds::TimeProvider,
     time::TimeWriter,
@@ -65,6 +67,7 @@ fn main() {
         (15, 2048),
     ]));
     let tm_store = SharedTmStore::new(Arc::new(RwLock::new(Box::new(tm_pool))));
+    let tm_store_event = tm_store.clone();
     let tc_pool = LocalPool::new(PoolCfg::new(vec![
         (30, 32),
         (15, 64),
@@ -77,9 +80,8 @@ fn main() {
         pool: Arc::new(RwLock::new(Box::new(tc_pool))),
     };
 
-    let seq_count_provider = SeqCountProviderSyncClonable::default();
-    let seq_count_provider_verif = seq_count_provider.clone();
-    let seq_count_provider_tmtc = seq_count_provider;
+    let seq_count_provider = SeqCountProviderSimple::new();
+    let mut msg_counter_map: HashMap<u8, u16> = HashMap::new();
     let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
     let (tc_source_tx, tc_source_rx) = channel();
     let (tm_funnel_tx, tm_funnel_rx) = channel();
@@ -90,16 +92,7 @@ fn main() {
         tm_store.backing_pool(),
         tm_funnel_tx.clone(),
     );
-    let verif_cfg = VerificationReporterCfg::new(
-        PUS_APID,
-        Box::new(seq_count_provider_verif),
-        #[allow(clippy::box_default)]
-        Box::new(SeqCountProviderSimple::default()),
-        1,
-        2,
-        8,
-    )
-    .unwrap();
+    let verif_cfg = VerificationReporterCfg::new(PUS_APID, 1, 2, 8).unwrap();
     // Every software component which needs to generate verification telemetry, gets a cloned
     // verification reporter.
     let verif_reporter = VerificationReporterWithSender::new(&verif_cfg, Box::new(verif_sender));
@@ -143,9 +136,7 @@ fn main() {
         sock_addr,
         verif_reporter: verif_reporter.clone(),
         event_sender,
-        // event_request_tx,
         request_map,
-        seq_count_provider: seq_count_provider_tmtc,
     };
     let tc_args = TcArgs {
         tc_source: tc_source_wrapper.clone(),
@@ -222,12 +213,32 @@ fn main() {
     let jh1 = thread::Builder::new()
         .name("TM Funnel".to_string())
         .spawn(move || {
+            let mut tm_buf: [u8; 2048] = [0; 2048];
             let tm_funnel = TmFunnel {
                 tm_server_tx,
                 tm_funnel_rx,
             };
             loop {
                 if let Ok(addr) = tm_funnel.tm_funnel_rx.recv() {
+                    // Read the TM, set sequence counter and message counter, and finally write
+                    // it back with the updated CRC
+                    let shared_pool = tm_store.backing_pool();
+                    let mut pool_guard = shared_pool.write().expect("Locking TM pool failed");
+                    let tm_raw = pool_guard
+                        .modify(&addr)
+                        .expect("Reading TM from pool failed");
+                    tm_buf[0..tm_raw.len()].copy_from_slice(&tm_raw);
+                    let (mut tm, size) =
+                        PusTm::from_bytes(&tm_buf, 7).expect("Creating TM from raw slice failed");
+                    tm.sp_header.set_apid(PUS_APID);
+                    tm.sp_header
+                        .set_seq_count(seq_count_provider.get_and_increment());
+                    let entry = msg_counter_map.entry(tm.service()).or_insert(0);
+                    tm.sec_header.msg_counter = *entry;
+                    *entry += 1;
+                    tm.calc_crc_on_serialization = true;
+                    tm.write_to_bytes(tm_raw)
+                        .expect("Writing PUS TM back failed");
                     tm_funnel
                         .tm_server_tx
                         .send(addr)
@@ -245,7 +256,7 @@ fn main() {
             let mut sender = MpscTmtcInStoreSender::new(
                 1,
                 "event_sender",
-                tm_store.backing_pool(),
+                tm_store_event.backing_pool(),
                 tm_funnel_tx,
             );
             let mut time_provider = TimeProvider::new_with_u16_days(0, 0);

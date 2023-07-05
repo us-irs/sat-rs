@@ -4,7 +4,6 @@ use satrs_core::params::Params;
 use satrs_core::pool::StoreAddr;
 use satrs_core::pus::verification::{FailParams, StdVerifReporterWithSender};
 use satrs_core::pus::AcceptedTc;
-use satrs_core::seq_count::SeqCountProviderSyncClonable;
 use satrs_core::spacepackets::ecss::PusServiceId;
 use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::spacepackets::time::cds::TimeProvider;
@@ -35,8 +34,6 @@ pub struct PusReceiver {
 pub struct PusTmArgs {
     /// All verification reporting is done with this reporter.
     pub verif_reporter: StdVerifReporterWithSender,
-    /// Sequence count provider for TMs sent from within pus demultiplexer
-    pub seq_count_provider: SeqCountProviderSyncClonable,
 }
 
 impl PusTmArgs {

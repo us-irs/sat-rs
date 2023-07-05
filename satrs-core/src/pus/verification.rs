@@ -97,7 +97,6 @@ pub use alloc_mod::{
     VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
 };
 
-use crate::seq_count::SequenceCountProviderCore;
 #[cfg(all(feature = "crossbeam", feature = "std"))]
 pub use stdmod::CrossbeamVerifSender;
 #[cfg(feature = "std")]
@@ -316,14 +315,6 @@ pub struct VerificationReporterCore {
     apid: u16,
 }
 
-pub(crate) fn increment_seq_counter(
-    seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
-) {
-    if let Some(seq_counter) = seq_counter {
-        seq_counter.increment();
-    }
-}
-
 pub enum VerifSuccess {}
 pub enum VerifFailure {}
 
@@ -366,14 +357,7 @@ impl<'src_data, State, SuccessOrFailure> VerificationSendable<'src_data, State, 
 }
 
 impl<'src_data, State> VerificationSendable<'src_data, State, VerifFailure> {
-    pub fn send_success_verif_failure(
-        self,
-        seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
-        msg_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
-    ) {
-        increment_seq_counter(seq_counter);
-        increment_seq_counter(msg_counter);
-    }
+    pub fn send_success_verif_failure(self) {}
 }
 
 impl<'src_data, State> VerificationSendable<'src_data, State, VerifFailure> {
@@ -383,13 +367,7 @@ impl<'src_data, State> VerificationSendable<'src_data, State, VerifFailure> {
 }
 
 impl<'src_data> VerificationSendable<'src_data, TcStateNone, VerifSuccess> {
-    pub fn send_success_acceptance_success(
-        self,
-        seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
-        msg_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
-    ) -> VerificationToken<TcStateAccepted> {
-        increment_seq_counter(seq_counter);
-        increment_seq_counter(msg_counter);
+    pub fn send_success_acceptance_success(self) -> VerificationToken<TcStateAccepted> {
         VerificationToken {
             state: PhantomData,
             req_id: self.token.unwrap().req_id(),
@@ -398,13 +376,7 @@ impl<'src_data> VerificationSendable<'src_data, TcStateNone, VerifSuccess> {
 }
 
 impl<'src_data> VerificationSendable<'src_data, TcStateAccepted, VerifSuccess> {
-    pub fn send_success_start_success(
-        self,
-        seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
-        msg_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
-    ) -> VerificationToken<TcStateStarted> {
-        increment_seq_counter(seq_counter);
-        increment_seq_counter(msg_counter);
+    pub fn send_success_start_success(self) -> VerificationToken<TcStateStarted> {
         VerificationToken {
             state: PhantomData,
             req_id: self.token.unwrap().req_id(),
@@ -415,14 +387,7 @@ impl<'src_data> VerificationSendable<'src_data, TcStateAccepted, VerifSuccess> {
 impl<'src_data, TcState: WasAtLeastAccepted + Copy>
     VerificationSendable<'src_data, TcState, VerifSuccess>
 {
-    pub fn send_success_step_or_completion_success(
-        self,
-        seq_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
-        msg_counter: Option<&(impl SequenceCountProviderCore<u16> + ?Sized)>,
-    ) {
-        increment_seq_counter(seq_counter);
-        increment_seq_counter(msg_counter);
-    }
+    pub fn send_success_step_or_completion_success(self) {}
 }
 
 /// Primary verification handler. It provides an API to send PUS 1 verification telemetry packets
@@ -477,8 +442,8 @@ impl VerificationReporterCore {
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
         token: VerificationToken<State>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_count: u16,
+        msg_count: u16,
         time_stamp: Option<&'src_data [u8]>,
     ) -> Result<
         VerificationSendable<'src_data, State, VerifSuccess>,
@@ -488,8 +453,8 @@ impl VerificationReporterCore {
             self.create_pus_verif_success_tm(
                 src_data_buf,
                 subservice,
-                seq_counter.get(),
-                msg_counter.get(),
+                seq_count,
+                msg_count,
                 &token.req_id,
                 time_stamp,
                 None::<&dyn EcssEnumeration>,
@@ -506,8 +471,8 @@ impl VerificationReporterCore {
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
         token: VerificationToken<State>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_count: u16,
+        msg_count: u16,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
         params: &FailParams<'src_data, '_>,
     ) -> Result<
@@ -518,8 +483,8 @@ impl VerificationReporterCore {
             self.create_pus_verif_fail_tm(
                 src_data_buf,
                 subservice,
-                seq_counter.get(),
-                msg_counter.get(),
+                seq_count,
+                msg_count,
                 &token.req_id,
                 step,
                 params,
@@ -534,8 +499,8 @@ impl VerificationReporterCore {
         &mut self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcStateNone>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_count: u16,
+        msg_count: u16,
         time_stamp: Option<&'src_data [u8]>,
     ) -> Result<
         VerificationSendable<'src_data, TcStateNone, VerifSuccess>,
@@ -545,8 +510,8 @@ impl VerificationReporterCore {
             src_data_buf,
             Subservice::TmAcceptanceSuccess.into(),
             token,
-            seq_counter,
-            msg_counter,
+            seq_count,
+            msg_count,
             time_stamp,
         )
     }
@@ -554,8 +519,6 @@ impl VerificationReporterCore {
     pub fn send_acceptance_success<E>(
         &self,
         mut sendable: VerificationSendable<'_, TcStateNone, VerifSuccess>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<VerificationToken<TcStateAccepted>, VerificationOrSendErrorWithToken<E, TcStateNone>>
     {
@@ -567,14 +530,12 @@ impl VerificationReporterCore {
                     sendable.token.unwrap(),
                 )
             })?;
-        Ok(sendable.send_success_acceptance_success(Some(seq_counter), Some(msg_counter)))
+        Ok(sendable.send_success_acceptance_success())
     }
 
     pub fn send_acceptance_failure<E>(
         &self,
         mut sendable: VerificationSendable<'_, TcStateNone, VerifFailure>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateNone>> {
         sender
@@ -585,7 +546,7 @@ impl VerificationReporterCore {
                     sendable.token.unwrap(),
                 )
             })?;
-        sendable.send_success_verif_failure(Some(seq_counter), Some(msg_counter));
+        sendable.send_success_verif_failure();
         Ok(())
     }
 
@@ -594,8 +555,8 @@ impl VerificationReporterCore {
         &mut self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcStateNone>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_count: u16,
+        msg_count: u16,
         params: FailParams<'src_data, '_>,
     ) -> Result<
         VerificationSendable<'src_data, TcStateNone, VerifFailure>,
@@ -605,8 +566,8 @@ impl VerificationReporterCore {
             src_data_buf,
             Subservice::TmAcceptanceFailure.into(),
             token,
-            seq_counter,
-            msg_counter,
+            seq_count,
+            msg_count,
             None::<&dyn EcssEnumeration>,
             &params,
         )
@@ -619,8 +580,8 @@ impl VerificationReporterCore {
         &mut self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcStateAccepted>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_count: u16,
+        msg_count: u16,
         time_stamp: Option<&'src_data [u8]>,
     ) -> Result<
         VerificationSendable<'src_data, TcStateAccepted, VerifSuccess>,
@@ -630,8 +591,8 @@ impl VerificationReporterCore {
             src_data_buf,
             Subservice::TmStartSuccess.into(),
             token,
-            seq_counter,
-            msg_counter,
+            seq_count,
+            msg_count,
             time_stamp,
         )
     }
@@ -639,8 +600,6 @@ impl VerificationReporterCore {
     pub fn send_start_success<E>(
         &self,
         mut sendable: VerificationSendable<'_, TcStateAccepted, VerifSuccess>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<
         VerificationToken<TcStateStarted>,
@@ -654,7 +613,7 @@ impl VerificationReporterCore {
                     sendable.token.unwrap(),
                 )
             })?;
-        Ok(sendable.send_success_start_success(Some(seq_counter), Some(msg_counter)))
+        Ok(sendable.send_success_start_success())
     }
 
     /// Package and send a PUS TM\[1, 4\] packet, see 8.1.2.4 of the PUS standard.
@@ -665,8 +624,8 @@ impl VerificationReporterCore {
         &mut self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcStateAccepted>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_count: u16,
+        msg_count: u16,
         params: FailParams<'src_data, '_>,
     ) -> Result<
         VerificationSendable<'src_data, TcStateAccepted, VerifFailure>,
@@ -676,8 +635,8 @@ impl VerificationReporterCore {
             src_data_buf,
             Subservice::TmStartFailure.into(),
             token,
-            seq_counter,
-            msg_counter,
+            seq_count,
+            msg_count,
             None::<&dyn EcssEnumeration>,
             &params,
         )
@@ -686,8 +645,6 @@ impl VerificationReporterCore {
     pub fn send_start_failure<E>(
         &self,
         mut sendable: VerificationSendable<'_, TcStateAccepted, VerifFailure>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateAccepted>> {
         sender
@@ -698,7 +655,7 @@ impl VerificationReporterCore {
                     sendable.token.unwrap(),
                 )
             })?;
-        sendable.send_success_verif_failure(Some(seq_counter), Some(msg_counter));
+        sendable.send_success_verif_failure();
         Ok(())
     }
 
@@ -709,8 +666,8 @@ impl VerificationReporterCore {
         &mut self,
         src_data_buf: &'src_data mut [u8],
         token: &VerificationToken<TcStateStarted>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_count: u16,
+        msg_count: u16,
         time_stamp: Option<&'src_data [u8]>,
         step: impl EcssEnumeration,
     ) -> Result<VerificationSendable<'src_data, TcStateStarted, VerifSuccess>, EcssTmtcError> {
@@ -718,8 +675,8 @@ impl VerificationReporterCore {
             self.create_pus_verif_success_tm(
                 src_data_buf,
                 Subservice::TmStepSuccess.into(),
-                seq_counter.get(),
-                msg_counter.get(),
+                seq_count,
+                msg_count,
                 &token.req_id,
                 time_stamp,
                 Some(&step),
@@ -735,8 +692,8 @@ impl VerificationReporterCore {
         &mut self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcStateStarted>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_count: u16,
+        msg_count: u16,
         params: FailParamsWithStep<'src_data, '_>,
     ) -> Result<
         VerificationSendable<'src_data, TcStateStarted, VerifFailure>,
@@ -746,8 +703,8 @@ impl VerificationReporterCore {
             self.create_pus_verif_fail_tm(
                 src_data_buf,
                 Subservice::TmStepFailure.into(),
-                seq_counter.get(),
-                msg_counter.get(),
+                seq_count,
+                msg_count,
                 &token.req_id,
                 Some(params.step),
                 &params.bp,
@@ -765,8 +722,8 @@ impl VerificationReporterCore {
         &mut self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcState>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_counter: u16,
+        msg_counter: u16,
         time_stamp: Option<&'src_data [u8]>,
     ) -> Result<
         VerificationSendable<'src_data, TcState, VerifSuccess>,
@@ -790,8 +747,8 @@ impl VerificationReporterCore {
         &mut self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcState>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
+        seq_count: u16,
+        msg_count: u16,
         params: FailParams<'src_data, '_>,
     ) -> Result<
         VerificationSendable<'src_data, TcState, VerifFailure>,
@@ -801,8 +758,8 @@ impl VerificationReporterCore {
             src_data_buf,
             Subservice::TmCompletionFailure.into(),
             token,
-            seq_counter,
-            msg_counter,
+            seq_count,
+            msg_count,
             None::<&dyn EcssEnumeration>,
             &params,
         )
@@ -811,8 +768,6 @@ impl VerificationReporterCore {
     pub fn send_step_or_completion_success<E, TcState: WasAtLeastAccepted + Copy>(
         &self,
         mut sendable: VerificationSendable<'_, TcState, VerifSuccess>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcState>> {
         sender
@@ -823,15 +778,13 @@ impl VerificationReporterCore {
                     sendable.token.unwrap(),
                 )
             })?;
-        sendable.send_success_step_or_completion_success(Some(seq_counter), Some(msg_counter));
+        sendable.send_success_step_or_completion_success();
         Ok(())
     }
 
     pub fn send_step_or_completion_failure<E, TcState: WasAtLeastAccepted + Copy>(
         &self,
         mut sendable: VerificationSendable<'_, TcState, VerifFailure>,
-        seq_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
-        msg_counter: &(impl SequenceCountProviderCore<u16> + ?Sized),
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcState>> {
         sender
@@ -842,7 +795,7 @@ impl VerificationReporterCore {
                     sendable.token.unwrap(),
                 )
             })?;
-        sendable.send_success_verif_failure(Some(seq_counter), Some(msg_counter));
+        sendable.send_success_verif_failure();
         Ok(())
     }
 
@@ -953,7 +906,6 @@ impl VerificationReporterCore {
 mod alloc_mod {
     use super::*;
     use crate::pus::alloc_mod::EcssTmSender;
-    use crate::seq_count::SequenceCountProvider;
     use alloc::boxed::Box;
     use alloc::vec;
     use alloc::vec::Vec;
@@ -961,8 +913,6 @@ mod alloc_mod {
     #[derive(Clone)]
     pub struct VerificationReporterCfg {
         apid: u16,
-        seq_counter: Box<dyn SequenceCountProvider<u16> + Send>,
-        msg_counter: Box<dyn SequenceCountProvider<u16> + Send>,
         pub step_field_width: usize,
         pub fail_code_field_width: usize,
         pub max_fail_data_len: usize,
@@ -971,8 +921,6 @@ mod alloc_mod {
     impl VerificationReporterCfg {
         pub fn new(
             apid: u16,
-            seq_counter: Box<dyn SequenceCountProvider<u16> + Send>,
-            msg_counter: Box<dyn SequenceCountProvider<u16> + Send>,
             step_field_width: usize,
             fail_code_field_width: usize,
             max_fail_data_len: usize,
@@ -982,8 +930,6 @@ mod alloc_mod {
             }
             Some(Self {
                 apid,
-                seq_counter,
-                msg_counter,
                 step_field_width,
                 fail_code_field_width,
                 max_fail_data_len,
@@ -993,11 +939,11 @@ mod alloc_mod {
 
     /// Primary verification handler. It provides an API to send PUS 1 verification telemetry packets
     /// and verify the various steps of telecommand handling as specified in the PUS standard.
+    /// It is assumed that the sequence counter and message counters are written in a central
+    /// TM funnel. This helper will always set those fields to 0.
     #[derive(Clone)]
     pub struct VerificationReporter {
         source_data_buf: Vec<u8>,
-        seq_counter: Box<dyn SequenceCountProvider<u16> + Send + 'static>,
-        msg_counter: Box<dyn SequenceCountProvider<u16> + Send + 'static>,
         pub reporter: VerificationReporterCore,
     }
 
@@ -1012,8 +958,6 @@ mod alloc_mod {
                         + cfg.fail_code_field_width
                         + cfg.max_fail_data_len
                 ],
-                seq_counter: cfg.seq_counter.clone(),
-                msg_counter: cfg.msg_counter.clone(),
                 reporter,
             }
         }
@@ -1046,16 +990,11 @@ mod alloc_mod {
             let sendable = self.reporter.acceptance_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                self.seq_counter.as_ref(),
-                self.msg_counter.as_ref(),
+                0,
+                0,
                 time_stamp,
             )?;
-            self.reporter.send_acceptance_success(
-                sendable,
-                self.seq_counter.as_ref(),
-                self.msg_counter.as_ref(),
-                sender,
-            )
+            self.reporter.send_acceptance_success(sendable, sender)
         }
 
         /// Package and send a PUS TM\[1, 2\] packet, see 8.1.2.2 of the PUS standard
@@ -1068,16 +1007,11 @@ mod alloc_mod {
             let sendable = self.reporter.acceptance_failure(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                self.seq_counter.as_ref(),
-                self.msg_counter.as_ref(),
+                0,
+                0,
                 params,
             )?;
-            self.reporter.send_acceptance_failure(
-                sendable,
-                self.seq_counter.as_ref(),
-                self.msg_counter.as_ref(),
-                sender,
-            )
+            self.reporter.send_acceptance_failure(sendable, sender)
         }
 
         /// Package and send a PUS TM\[1, 3\] packet, see 8.1.2.3 of the PUS standard.
@@ -1095,16 +1029,11 @@ mod alloc_mod {
             let sendable = self.reporter.start_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                self.seq_counter.as_mut(),
-                self.msg_counter.as_mut(),
+                0,
+                0,
                 time_stamp,
             )?;
-            self.reporter.send_start_success(
-                sendable,
-                self.seq_counter.as_ref(),
-                self.msg_counter.as_ref(),
-                sender,
-            )
+            self.reporter.send_start_success(sendable, sender)
         }
 
         /// Package and send a PUS TM\[1, 4\] packet, see 8.1.2.4 of the PUS standard.
@@ -1120,16 +1049,11 @@ mod alloc_mod {
             let sendable = self.reporter.start_failure(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                self.seq_counter.as_mut(),
-                self.msg_counter.as_mut(),
+                0,
+                0,
                 params,
             )?;
-            self.reporter.send_start_failure(
-                sendable,
-                self.seq_counter.as_ref(),
-                self.msg_counter.as_ref(),
-                sender,
-            )
+            self.reporter.send_start_failure(sendable, sender)
         }
 
         /// Package and send a PUS TM\[1, 5\] packet, see 8.1.2.5 of the PUS standard.
@@ -1145,18 +1069,13 @@ mod alloc_mod {
             let sendable = self.reporter.step_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                self.seq_counter.as_mut(),
-                self.msg_counter.as_mut(),
+                0,
+                0,
                 time_stamp,
                 step,
             )?;
             self.reporter
-                .send_step_or_completion_success(
-                    sendable,
-                    self.seq_counter.as_ref(),
-                    self.msg_counter.as_ref(),
-                    sender,
-                )
+                .send_step_or_completion_success(sendable, sender)
                 .map_err(|e| e.0)
         }
 
@@ -1173,16 +1092,12 @@ mod alloc_mod {
             let sendable = self.reporter.step_failure(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                self.seq_counter.as_mut(),
-                self.msg_counter.as_mut(),
+                0,
+                0,
                 params,
             )?;
-            self.reporter.send_step_or_completion_failure(
-                sendable,
-                self.seq_counter.as_ref(),
-                self.msg_counter.as_ref(),
-                sender,
-            )
+            self.reporter
+                .send_step_or_completion_failure(sendable, sender)
         }
 
         /// Package and send a PUS TM\[1, 7\] packet, see 8.1.2.7 of the PUS standard.
@@ -1198,16 +1113,12 @@ mod alloc_mod {
             let sendable = self.reporter.completion_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                self.seq_counter.as_mut(),
-                self.msg_counter.as_mut(),
+                0,
+                0,
                 time_stamp,
             )?;
-            self.reporter.send_step_or_completion_success(
-                sendable,
-                self.seq_counter.as_ref(),
-                self.msg_counter.as_ref(),
-                sender,
-            )
+            self.reporter
+                .send_step_or_completion_success(sendable, sender)
         }
 
         /// Package and send a PUS TM\[1, 8\] packet, see 8.1.2.8 of the PUS standard.
@@ -1223,16 +1134,12 @@ mod alloc_mod {
             let sendable = self.reporter.completion_failure(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                self.seq_counter.as_mut(),
-                self.msg_counter.as_mut(),
+                0,
+                0,
                 params,
             )?;
-            self.reporter.send_step_or_completion_failure(
-                sendable,
-                self.seq_counter.as_ref(),
-                self.msg_counter.as_ref(),
-                sender,
-            )
+            self.reporter
+                .send_step_or_completion_failure(sendable, sender)
         }
     }
 

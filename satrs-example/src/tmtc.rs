@@ -15,7 +15,6 @@ use crate::pus::{PusReceiver, PusTcArgs, PusTcMpscRouter, PusTmArgs};
 use crate::requests::RequestWithToken;
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
-use satrs_core::seq_count::SeqCountProviderSyncClonable;
 use satrs_core::spacepackets::ecss::{PusPacket, SerializablePusPacket};
 use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::spacepackets::SpHeader;
@@ -29,7 +28,6 @@ pub struct OtherArgs {
     pub verif_reporter: StdVerifReporterWithSender,
     pub event_sender: Sender<(EventU32, Option<Params>)>,
     pub request_map: HashMap<u32, Sender<RequestWithToken>>,
-    pub seq_count_provider: SeqCountProviderSyncClonable,
 }
 
 pub struct TmArgs {
@@ -153,7 +151,6 @@ pub fn core_tmtc_task(
 ) {
     let pus_tm_args = PusTmArgs {
         verif_reporter: args.verif_reporter,
-        seq_count_provider: args.seq_count_provider.clone(),
     };
     let pus_tc_args = PusTcArgs {
         pus_router,

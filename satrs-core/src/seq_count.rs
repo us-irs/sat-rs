@@ -46,6 +46,14 @@ pub struct SeqCountProviderSimple {
     seq_count: Cell<u16>,
 }
 
+impl SeqCountProviderSimple {
+    pub fn new() -> Self {
+        Self {
+            seq_count: Cell::new(0),
+        }
+    }
+}
+
 impl SequenceCountProviderCore<u16> for SeqCountProviderSimple {
     fn get(&self) -> u16 {
         self.seq_count.get()
