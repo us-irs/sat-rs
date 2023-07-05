@@ -109,6 +109,9 @@ impl PusServiceHandler for PusService17TestHandler {
             };
             return Ok(PusPacketHandlerResult::RequestHandled);
         }
-        Ok(PusPacketHandlerResult::CustomSubservice(token))
+        Ok(PusPacketHandlerResult::CustomSubservice(
+            tc.subservice(),
+            token,
+        ))
     }
 }

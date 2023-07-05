@@ -69,7 +69,10 @@ impl PusServiceHandler for PusService11SchedHandler {
         let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf).unwrap();
         let std_service = scheduling::Subservice::try_from(tc.subservice());
         if std_service.is_err() {
-            return Ok(PusPacketHandlerResult::CustomSubservice(token));
+            return Ok(PusPacketHandlerResult::CustomSubservice(
+                tc.subservice(),
+                token,
+            ));
         }
         //let partial_error = self.psb.update_stamp().err();
         let time_provider =
@@ -155,7 +158,10 @@ impl PusServiceHandler for PusService11SchedHandler {
                     .expect("sending completion success failed");
             }
             _ => {
-                return Ok(PusPacketHandlerResult::CustomSubservice(token));
+                return Ok(PusPacketHandlerResult::CustomSubservice(
+                    tc.subservice(),
+                    token,
+                ));
             }
         }
         if let Some(partial_error) = partial_error {
@@ -163,6 +169,9 @@ impl PusServiceHandler for PusService11SchedHandler {
                 partial_error,
             ));
         }
-        Ok(PusPacketHandlerResult::CustomSubservice(token))
+        Ok(PusPacketHandlerResult::CustomSubservice(
+            tc.subservice(),
+            token,
+        ))
     }
 }

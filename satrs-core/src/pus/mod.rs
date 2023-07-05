@@ -136,13 +136,13 @@ mod alloc_mod {
 pub mod std_mod {
     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr, StoreError};
     use crate::pus::verification::{
-        StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
+        FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
     };
     use crate::pus::{EcssSender, EcssTcSenderCore, EcssTmSenderCore};
     use crate::tmtc::tm_helper::SharedTmStore;
     use crate::SenderId;
     use alloc::vec::Vec;
-    use spacepackets::ecss::{PusError, SerializablePusPacket};
+    use spacepackets::ecss::{EcssEnumeration, PusError, SerializablePusPacket};
     use spacepackets::tc::PusTc;
     use spacepackets::time::cds::TimeProvider;
     use spacepackets::time::{StdTimestampError, TimeWriter};
@@ -315,7 +315,7 @@ pub mod std_mod {
     pub enum PusPacketHandlerResult {
         RequestHandled,
         RequestHandledPartialSuccess(PartialPusHandlingError),
-        CustomSubservice(VerificationToken<TcStateAccepted>),
+        CustomSubservice(u8, VerificationToken<TcStateAccepted>),
         Empty,
     }
 
@@ -371,6 +371,20 @@ pub mod std_mod {
                 self.stamp_buf = [0; 7];
                 Err(time_provider.unwrap_err())
             }
+        }
+
+        pub fn report_start_failure(
+            &mut self,
+            token: VerificationToken<TcStateAccepted>,
+            failure_code: &impl EcssEnumeration,
+            failure_data: Option<&[u8]>,
+        ) -> Result<(), VerificationToken<TcStateAccepted>> {
+            self.verification_handler
+                .start_failure(
+                    token,
+                    FailParams::new(Some(&self.stamp_buf), failure_code, failure_data),
+                )
+                .map_err(|e| e.1)
         }
     }
 

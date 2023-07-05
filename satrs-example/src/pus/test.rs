@@ -2,7 +2,6 @@ use log::{info, warn};
 use satrs_core::events::EventU32;
 use satrs_core::params::Params;
 use satrs_core::pus::test::PusService17TestHandler;
-use satrs_core::pus::verification::FailParams;
 use satrs_core::pus::{PusPacketHandlerResult, PusServiceHandler};
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::spacepackets::tc::PusTc;
@@ -34,13 +33,13 @@ impl Service17CustomWrapper {
                     partial_err
                 );
             }
-            PusPacketHandlerResult::CustomSubservice(token) => {
+            PusPacketHandlerResult::CustomSubservice(subservice, token) => {
                 let (buf, _) = self.pus17_handler.pus_tc_buf();
                 let (tc, _) = PusTc::from_bytes(buf).unwrap();
                 let time_stamper = TimeProvider::from_now_with_u16_days().unwrap();
                 let mut stamp_buf: [u8; 7] = [0; 7];
                 time_stamper.write_to_bytes(&mut stamp_buf).unwrap();
-                if tc.subservice() == 128 {
+                if subservice == 128 {
                     info!("Generating test event");
                     self.test_srv_event_sender
                         .send((TEST_EVENT.into(), None))
@@ -57,14 +56,11 @@ impl Service17CustomWrapper {
                 } else {
                     let fail_data = [tc.subservice()];
                     self.pus17_handler
-                        .verification_reporter()
-                        .start_failure(
+                        .psb_mut()
+                        .report_start_failure(
                             token,
-                            FailParams::new(
-                                Some(&stamp_buf),
-                                &tmtc_err::INVALID_PUS_SUBSERVICE,
-                                Some(&fail_data),
-                            ),
+                            &tmtc_err::INVALID_PUS_SUBSERVICE,
+                            Some(&fail_data),
                         )
                         .expect("Sending start failure verification failed");
                 }

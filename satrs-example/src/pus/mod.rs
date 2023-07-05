@@ -13,13 +13,9 @@ use satrs_core::tmtc::tm_helper::{PusTmWithCdsShortHelper, SharedTmStore};
 use satrs_example::{tmtc_err, CustomPusServiceId};
 use std::sync::mpsc::Sender;
 
+pub mod events;
 pub mod scheduler;
 pub mod test;
-
-pub enum PusTcWrapper<'tc> {
-    PusTc(&'tc PusTc<'tc>),
-    StoreAddr(StoreAddr),
-}
 
 pub struct PusTcMpscRouter {
     pub test_service_receiver: Sender<AcceptedTc>,

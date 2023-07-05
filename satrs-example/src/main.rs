@@ -9,6 +9,7 @@ use log::{info, warn};
 
 use crate::hk::AcsHkIds;
 use crate::logging::setup_logger;
+use crate::pus::scheduler::Pus11Wrapper;
 use crate::pus::test::Service17CustomWrapper;
 use crate::pus::PusTcMpscRouter;
 use crate::requests::{Request, RequestWithToken};
@@ -26,6 +27,8 @@ use satrs_core::pus::event_man::{
     PusEventDispatcher,
 };
 use satrs_core::pus::hk::Subservice as HkSubservice;
+use satrs_core::pus::scheduler::PusScheduler;
+use satrs_core::pus::scheduler_srv::PusService11SchedHandler;
 use satrs_core::pus::test::PusService17TestHandler;
 use satrs_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
@@ -173,12 +176,24 @@ fn main() {
         tm_funnel_tx.clone(),
         tm_store.clone(),
         PUS_APID,
-        verif_reporter,
+        verif_reporter.clone(),
     );
-    let mut srv_17_wrapper = Service17CustomWrapper {
+    let mut pus_17_wrapper = Service17CustomWrapper {
         pus17_handler,
         test_srv_event_sender,
     };
+    let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
+        .expect("Creating PUS Scheduler failed");
+    let pus11_handler = PusService11SchedHandler::new(
+        pus_sched_rx,
+        tc_store.pool.clone(),
+        tm_funnel_tx.clone(),
+        tm_store.clone(),
+        PUS_APID,
+        verif_reporter,
+        scheduler,
+    );
+    let mut pus_11_wrapper = Pus11Wrapper { pus11_handler };
 
     info!("Starting TMTC task");
     let jh0 = thread::Builder::new()
@@ -343,8 +358,15 @@ fn main() {
     let jh4 = thread::Builder::new()
         .name("PUS".to_string())
         .spawn(move || loop {
-            let queue_empty = srv_17_wrapper.perform_operation();
-            if queue_empty {
+            let mut all_queues_empty = true;
+            let mut is_srv_finished = |srv_handler_finished: bool| {
+                if !srv_handler_finished {
+                    all_queues_empty = false;
+                }
+            };
+            is_srv_finished(pus_17_wrapper.perform_operation());
+            is_srv_finished(pus_11_wrapper.perform_operation());
+            if all_queues_empty {
                 thread::sleep(Duration::from_millis(200));
             }
         })
