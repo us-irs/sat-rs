@@ -7,7 +7,6 @@ pub mod crossbeam_test {
         CrossbeamVerifSender, FailParams, RequestId, VerificationReporterCfg,
         VerificationReporterWithSender,
     };
-    use satrs_core::seq_count::SeqCountProviderSyncClonable;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket, SerializablePusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::tm::PusTm;
@@ -32,15 +31,7 @@ pub mod crossbeam_test {
         // We use a synced sequence count provider here because both verification reporters have the
         // the same APID. If they had distinct APIDs, the more correct approach would be to have
         // each reporter have an own sequence count provider.
-        let cfg = VerificationReporterCfg::new(
-            TEST_APID,
-            Box::new(SeqCountProviderSyncClonable::default()),
-            Box::new(SeqCountProviderSyncClonable::default()),
-            1,
-            2,
-            8,
-        )
-        .unwrap();
+        let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
         // Shared pool object to store the verification PUS telemetry
         let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
         let shared_tm_pool: SharedPool =

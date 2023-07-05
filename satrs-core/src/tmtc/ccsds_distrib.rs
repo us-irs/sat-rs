@@ -21,6 +21,7 @@
 //! use satrs_core::tmtc::ccsds_distrib::{CcsdsPacketHandler, CcsdsDistributor};
 //! use satrs_core::tmtc::{ReceivesTc, ReceivesTcCore};
 //! use spacepackets::{CcsdsPacket, SpHeader};
+//! use spacepackets::ecss::SerializablePusPacket;
 //! use spacepackets::tc::PusTc;
 //!
 //! #[derive (Default)]

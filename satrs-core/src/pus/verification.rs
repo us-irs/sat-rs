@@ -29,8 +29,8 @@
 //! let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
 //! let shared_tm_pool: SharedPool = Arc::new(RwLock::new(Box::new(LocalPool::new(pool_cfg.clone()))));
 //! let (verif_tx, verif_rx) = mpsc::channel();
-//! let sender = MpscVerifSender::new(shared_tm_pool.clone(), verif_tx);
-//! let cfg = VerificationReporterCfg::new(TEST_APID, Box::new(SeqCountProviderSimple::default()), Box::new(SeqCountProviderSimple::default()), 1, 2, 8).unwrap();
+//! let sender = MpscVerifSender::new(0, "Test Sender", shared_tm_pool.clone(), verif_tx);
+//! let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
 //! let mut  reporter = VerificationReporterWithSender::new(&cfg , Box::new(sender));
 //!
 //! let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
@@ -939,7 +939,7 @@ mod alloc_mod {
 
     /// Primary verification handler. It provides an API to send PUS 1 verification telemetry packets
     /// and verify the various steps of telecommand handling as specified in the PUS standard.
-    /// It is assumed that the sequence counter and message counters are written in a central
+    /// It is assumed that the sequence counter and message counters are updated in a central
     /// TM funnel. This helper will always set those fields to 0.
     #[derive(Clone)]
     pub struct VerificationReporter {
@@ -1795,7 +1795,7 @@ mod tests {
             common: CommonTmInfo {
                 subservice: 4,
                 apid: TEST_APID,
-                msg_counter: 1,
+                msg_counter: 0,
                 dest_id: 0,
                 time_stamp: EMPTY_STAMP,
             },
@@ -1874,7 +1874,7 @@ mod tests {
             common: CommonTmInfo {
                 subservice: 3,
                 apid: TEST_APID,
-                msg_counter: 1,
+                msg_counter: 0,
                 dest_id: 0,
                 time_stamp: [0, 1, 0, 1, 0, 1, 0],
             },
@@ -1887,7 +1887,7 @@ mod tests {
             common: CommonTmInfo {
                 subservice: 5,
                 apid: TEST_APID,
-                msg_counter: 2,
+                msg_counter: 0,
                 dest_id: 0,
                 time_stamp: EMPTY_STAMP,
             },
@@ -1900,7 +1900,7 @@ mod tests {
             common: CommonTmInfo {
                 subservice: 5,
                 apid: TEST_APID,
-                msg_counter: 3,
+                msg_counter: 0,
                 dest_id: 0,
                 time_stamp: EMPTY_STAMP,
             },
@@ -1992,7 +1992,7 @@ mod tests {
             common: CommonTmInfo {
                 subservice: 3,
                 apid: TEST_APID,
-                msg_counter: 1,
+                msg_counter: 0,
                 dest_id: 0,
                 time_stamp: [0, 1, 0, 1, 0, 1, 0],
             },
@@ -2006,7 +2006,7 @@ mod tests {
             common: CommonTmInfo {
                 subservice: 5,
                 apid: TEST_APID,
-                msg_counter: 2,
+                msg_counter: 0,
                 dest_id: 0,
                 time_stamp: EMPTY_STAMP,
             },
@@ -2020,7 +2020,7 @@ mod tests {
             common: CommonTmInfo {
                 subservice: 6,
                 apid: TEST_APID,
-                msg_counter: 3,
+                msg_counter: 0,
                 dest_id: 0,
                 time_stamp: EMPTY_STAMP,
             },
@@ -2137,7 +2137,7 @@ mod tests {
             common: CommonTmInfo {
                 subservice: 3,
                 apid: TEST_APID,
-                msg_counter: 1,
+                msg_counter: 0,
                 dest_id: 0,
                 time_stamp: [0, 1, 0, 1, 0, 1, 0],
             },
@@ -2151,7 +2151,7 @@ mod tests {
             common: CommonTmInfo {
                 subservice: 8,
                 apid: TEST_APID,
-                msg_counter: 2,
+                msg_counter: 0,
                 dest_id: 0,
                 time_stamp: EMPTY_STAMP,
             },
@@ -2227,7 +2227,7 @@ mod tests {
             common: CommonTmInfo {
                 subservice: 3,
                 apid: TEST_APID,
-                msg_counter: 1,
+                msg_counter: 0,
                 dest_id: 0,
                 time_stamp: [0, 1, 0, 1, 0, 1, 0],
             },
@@ -2240,7 +2240,7 @@ mod tests {
             common: CommonTmInfo {
                 subservice: 7,
                 apid: TEST_APID,
-                msg_counter: 2,
+                msg_counter: 0,
                 dest_id: 0,
                 time_stamp: EMPTY_STAMP,
             },
@@ -2336,10 +2336,10 @@ mod tests {
                 assert_eq!(pus_tm.sp_header.seq_count(), 0);
             } else if packet_idx == 1 {
                 assert_eq!(pus_tm.subservice(), 3);
-                assert_eq!(pus_tm.sp_header.seq_count(), 1);
+                assert_eq!(pus_tm.sp_header.seq_count(), 0);
             } else if packet_idx == 2 {
                 assert_eq!(pus_tm.subservice(), 7);
-                assert_eq!(pus_tm.sp_header.seq_count(), 2);
+                assert_eq!(pus_tm.sp_header.seq_count(), 0);
             }
             packet_idx += 1;
         }
