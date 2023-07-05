@@ -2,12 +2,10 @@ use log::info;
 use satrs_core::events::EventU32;
 use satrs_core::hal::host::udp_server::{ReceiveResult, UdpTcServer};
 use satrs_core::params::Params;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
-use std::rc::Rc;
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
@@ -16,7 +14,6 @@ use crate::ccsds::CcsdsReceiver;
 use crate::pus::{PusReceiver, PusTcArgs, PusTcMpscRouter, PusTmArgs};
 use crate::requests::RequestWithToken;
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
-use satrs_core::pus::scheduler::{PusScheduler, TcInfo};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::seq_count::SeqCountProviderSyncClonable;
 use satrs_core::spacepackets::ecss::{PusPacket, SerializablePusPacket};
@@ -154,10 +151,6 @@ pub fn core_tmtc_task(
     tm_args: TmArgs,
     pus_router: PusTcMpscRouter,
 ) {
-    let scheduler = Rc::new(RefCell::new(
-        PusScheduler::new_with_current_init_time(Duration::from_secs(5)).unwrap(),
-    ));
-
     let pus_tm_args = PusTmArgs {
         verif_reporter: args.verif_reporter,
         seq_count_provider: args.seq_count_provider.clone(),
@@ -185,13 +178,11 @@ pub fn core_tmtc_task(
 
     let mut tc_buf: [u8; 4096] = [0; 4096];
     loop {
-        let tmtc_sched = scheduler.clone();
         core_tmtc_loop(
             &mut udp_tmtc_server,
             &mut tc_args,
             &mut tc_buf,
             &mut pus_receiver,
-            tmtc_sched,
         );
         thread::sleep(Duration::from_millis(400));
     }
@@ -202,36 +193,7 @@ fn core_tmtc_loop(
     tc_args: &mut TcArgs,
     tc_buf: &mut [u8],
     pus_receiver: &mut PusReceiver,
-    scheduler: Rc<RefCell<PusScheduler>>,
 ) {
-    let releaser = |enabled: bool, info: &TcInfo| -> bool {
-        if enabled {
-            tc_args
-                .tc_source
-                .tc_source
-                .send(info.addr())
-                .expect("sending TC to TC source failed");
-        }
-        true
-    };
-
-    let mut pool = tc_args
-        .tc_source
-        .tc_store
-        .pool
-        .write()
-        .expect("error locking pool");
-
-    let mut scheduler = scheduler.borrow_mut();
-    scheduler.update_time_from_now().unwrap();
-    if let Ok(released_tcs) = scheduler.release_telecommands(releaser, pool.as_mut()) {
-        if released_tcs > 0 {
-            info!("{released_tcs} TC(s) released from scheduler");
-        }
-    }
-    drop(pool);
-    drop(scheduler);
-
     while poll_tc_server(udp_tmtc_server) {}
     match tc_args.tc_receiver.try_recv() {
         Ok(addr) => {

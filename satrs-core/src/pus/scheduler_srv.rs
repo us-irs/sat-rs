@@ -40,6 +40,10 @@ impl PusService11SchedHandler {
             scheduler,
         }
     }
+
+    pub fn scheduler_mut(&mut self) -> &mut PusScheduler {
+        &mut self.scheduler
+    }
 }
 
 impl PusServiceHandler for PusService11SchedHandler {

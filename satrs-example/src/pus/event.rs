@@ -7,7 +7,7 @@ pub struct Pus5Wrapper {
 }
 
 impl Pus5Wrapper {
-    pub fn perform_operation(&mut self) -> bool {
+    pub fn handle_next_packet(&mut self) -> bool {
         match self.pus_5_handler.handle_next_packet() {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}

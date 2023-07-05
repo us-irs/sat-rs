@@ -16,7 +16,7 @@ pub struct Service17CustomWrapper {
 }
 
 impl Service17CustomWrapper {
-    pub fn perform_operation(&mut self) -> bool {
+    pub fn handle_next_packet(&mut self) -> bool {
         let res = self.pus17_handler.handle_next_packet();
         if res.is_err() {
             warn!("PUS17 handler failed with error {:?}", res.unwrap_err());

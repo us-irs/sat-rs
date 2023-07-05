@@ -133,7 +133,7 @@ fn main() {
     let (acs_thread_tx, acs_thread_rx) = channel::<RequestWithToken>();
     request_map.insert(RequestTargetId::AcsSubsystem as u32, acs_thread_tx);
 
-    let tc_source = PusTcSource {
+    let tc_source_wrapper = PusTcSource {
         tc_store: tc_store.clone(),
         tc_source: tc_source_tx,
     };
@@ -148,7 +148,7 @@ fn main() {
         seq_count_provider: seq_count_provider_tmtc,
     };
     let tc_args = TcArgs {
-        tc_source,
+        tc_source: tc_source_wrapper.clone(),
         tc_receiver: tc_source_rx,
     };
     let tm_args = TmArgs {
@@ -195,7 +195,10 @@ fn main() {
         verif_reporter.clone(),
         scheduler,
     );
-    let mut pus_11_wrapper = Pus11Wrapper { pus_11_handler };
+    let mut pus_11_wrapper = Pus11Wrapper {
+        pus_11_handler,
+        tc_source_wrapper,
+    };
     let pus_5_handler = PusService5EventHandler::new(
         pus_event_rx,
         tc_store.pool.clone(),
@@ -370,18 +373,23 @@ fn main() {
     let jh4 = thread::Builder::new()
         .name("PUS".to_string())
         .spawn(move || loop {
-            let mut all_queues_empty = true;
-            let mut is_srv_finished = |srv_handler_finished: bool| {
-                if !srv_handler_finished {
-                    all_queues_empty = false;
+            pus_11_wrapper.release_tcs();
+            loop {
+                let mut all_queues_empty = true;
+                let mut is_srv_finished = |srv_handler_finished: bool| {
+                    if !srv_handler_finished {
+                        all_queues_empty = false;
+                    }
+                };
+                is_srv_finished(pus_17_wrapper.handle_next_packet());
+                is_srv_finished(pus_11_wrapper.handle_next_packet());
+                is_srv_finished(pus_5_wrapper.handle_next_packet());
+                if all_queues_empty {
+                    break;
                 }
-            };
-            is_srv_finished(pus_17_wrapper.perform_operation());
-            is_srv_finished(pus_11_wrapper.perform_operation());
-            is_srv_finished(pus_5_wrapper.perform_operation());
-            if all_queues_empty {
-                thread::sleep(Duration::from_millis(200));
             }
+
+            thread::sleep(Duration::from_millis(200));
         })
         .unwrap();
     jh0.join().expect("Joining UDP TMTC server thread failed");
