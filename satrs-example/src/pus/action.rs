@@ -130,6 +130,11 @@ impl PusServiceHandler for PusService8ActionHandler {
                 return Err(PusPacketHandlingError::InvalidSubservice(subservice));
             }
         }
+        if let Some(partial_error) = partial_error {
+            return Ok(PusPacketHandlerResult::RequestHandledPartialSuccess(
+                partial_error,
+            ));
+        }
         Ok(PusPacketHandlerResult::RequestHandled)
     }
 }
