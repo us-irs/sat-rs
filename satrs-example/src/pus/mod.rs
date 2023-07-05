@@ -1,176 +1,25 @@
-use crate::pus::test::PusService17TestHandler;
 use crate::tmtc::MpscStoreAndSendError;
 use satrs_core::events::EventU32;
-use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
-use satrs_core::mode::{ModeAndSubmode, ModeRequest};
-use satrs_core::objects::ObjectId;
 use satrs_core::params::Params;
-use satrs_core::pool::{PoolProvider, SharedPool, StoreAddr, StoreError};
-use satrs_core::pus::event_man::{EventRequest, EventRequestWithToken};
-use satrs_core::pus::hk;
-use satrs_core::pus::mode::Subservice;
-use satrs_core::pus::scheduling::PusScheduler;
-use satrs_core::pus::verification::{
-    pus_11_generic_tc_check, FailParams, StdVerifReporterWithSender, TcStateAccepted, TcStateToken,
-    VerificationToken,
-};
-use satrs_core::pus::{event, EcssTcSenderCore, GenericTcCheckError, MpscTmtcInStoreSender};
-use satrs_core::pus::{mode, EcssTcSender};
-use satrs_core::res_code::ResultU16;
-use satrs_core::seq_count::{SeqCountProviderSyncClonable, SequenceCountProviderCore};
-use satrs_core::spacepackets::ecss::{scheduling, PusError, PusServiceId};
-use satrs_core::spacepackets::time::{CcsdsTimeProvider, StdTimestampError, TimestampError};
+use satrs_core::pool::StoreAddr;
+use satrs_core::pus::verification::{FailParams, StdVerifReporterWithSender};
+use satrs_core::pus::AcceptedTc;
+use satrs_core::seq_count::SeqCountProviderSyncClonable;
+use satrs_core::spacepackets::ecss::PusServiceId;
+use satrs_core::spacepackets::tc::PusTc;
+use satrs_core::spacepackets::time::cds::TimeProvider;
+use satrs_core::spacepackets::time::TimeWriter;
 use satrs_core::tmtc::tm_helper::{PusTmWithCdsShortHelper, SharedTmStore};
-use satrs_core::tmtc::{AddressableId, PusServiceProvider, TargetId};
-use satrs_core::{
-    spacepackets::ecss::PusPacket, spacepackets::tc::PusTc, spacepackets::time::cds::TimeProvider,
-    spacepackets::time::TimeWriter, spacepackets::SpHeader,
-};
-use satrs_example::{hk_err, tmtc_err, CustomPusServiceId, TEST_EVENT};
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::rc::Rc;
-use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
+use satrs_example::{tmtc_err, CustomPusServiceId};
+use std::sync::mpsc::Sender;
 
 pub mod scheduler;
 pub mod test;
-
-#[derive(Debug, Clone)]
-pub enum PusPacketHandlingError {
-    PusError(PusError),
-    WrongService(u8),
-    NotEnoughAppData(String),
-    StoreError(StoreError),
-    RwGuardError(String),
-    QueueDisconnected,
-    OtherError(String),
-}
-
-impl From<PusError> for PusPacketHandlingError {
-    fn from(value: PusError) -> Self {
-        Self::PusError(value)
-    }
-}
-
-impl From<StoreError> for PusPacketHandlingError {
-    fn from(value: StoreError) -> Self {
-        Self::StoreError(value)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum PartialPusHandlingError {
-    TimeError(StdTimestampError),
-    TmSendError(String),
-    VerificationError,
-}
-impl From<StdTimestampError> for PartialPusHandlingError {
-    fn from(value: StdTimestampError) -> Self {
-        Self::TimeError(value)
-    }
-}
-
-impl From<TimestampError> for PartialPusHandlingError {
-    fn from(value: TimestampError) -> Self {
-        Self::TimeError(StdTimestampError::TimestampError(value))
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum PusPacketHandlerResult {
-    RequestHandled,
-    RequestHandledPartialSuccess(PartialPusHandlingError),
-    CustomSubservice(VerificationToken<TcStateAccepted>),
-    Empty,
-}
-
-pub struct PusServiceBase {
-    tc_rx: Receiver<AcceptedTc>,
-    tc_store: SharedPool,
-    tm_tx: Sender<StoreAddr>,
-    tm_store: SharedTmStore,
-    tm_apid: u16,
-    verification_handler: StdVerifReporterWithSender,
-    stamp_buf: [u8; 7],
-    pus_buf: [u8; 2048],
-    pus_size: usize,
-}
-
-impl PusServiceBase {
-    pub fn new(
-        receiver: Receiver<AcceptedTc>,
-        tc_pool: SharedPool,
-        tm_tx: Sender<StoreAddr>,
-        tm_store: SharedTmStore,
-        tm_apid: u16,
-        verification_handler: StdVerifReporterWithSender,
-    ) -> Self {
-        Self {
-            tc_rx: receiver,
-            tc_store: tc_pool,
-            tm_apid,
-            tm_tx,
-            tm_store,
-            verification_handler,
-            stamp_buf: [0; 7],
-            pus_buf: [0; 2048],
-            pus_size: 0,
-        }
-    }
-
-    pub fn handle_next_packet<
-        T: FnOnce(
-            StoreAddr,
-            VerificationToken<TcStateAccepted>,
-        ) -> Result<PusPacketHandlerResult, PusPacketHandlingError>,
-    >(
-        &mut self,
-        handle_one_packet: T,
-    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        return match self.tc_rx.try_recv() {
-            Ok((addr, token)) => handle_one_packet(addr, token),
-            Err(e) => match e {
-                TryRecvError::Empty => Ok(PusPacketHandlerResult::Empty),
-                TryRecvError::Disconnected => Err(PusPacketHandlingError::QueueDisconnected),
-            },
-        };
-    }
-
-    pub fn update_stamp(&mut self) -> Result<(), PartialPusHandlingError> {
-        let time_provider = TimeProvider::from_now_with_u16_days()
-            .map_err(|e| PartialPusHandlingError::TimeError(e));
-        return if time_provider.is_ok() {
-            // Can not fail, buffer is large enough.
-            time_provider
-                .unwrap()
-                .write_to_bytes(&mut self.stamp_buf)
-                .unwrap();
-            Ok(())
-        } else {
-            self.stamp_buf = [0; 7];
-            Err(time_provider.unwrap_err())
-        };
-    }
-}
-
-// pub trait PusTcRouter {
-//     type Error;
-//     fn route_pus_tc(
-//         &mut self,
-//         apid: u16,
-//         service: u8,
-//         subservice: u8,
-//         tc: &PusTc,
-//     );
-// }
 
 pub enum PusTcWrapper<'tc> {
     PusTc(&'tc PusTc<'tc>),
     StoreAddr(StoreAddr),
 }
-
-pub type AcceptedTc = (StoreAddr, VerificationToken<TcStateAccepted>);
 
 pub struct PusTcMpscRouter {
     pub test_service_receiver: Sender<AcceptedTc>,
@@ -280,7 +129,6 @@ pub struct PusTcArgs {
     //pub tc_source: PusTcSource,
     /// Used to send events from within the TC router
     pub event_sender: Sender<(EventU32, Option<Params>)>,
-    //pub scheduler: Rc<RefCell<PusScheduler>>,
 }
 
 struct TimeStampHelper {

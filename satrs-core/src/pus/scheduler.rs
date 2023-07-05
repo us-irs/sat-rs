@@ -2,25 +2,24 @@
 //!
 //! The core data structure of this module is the [PusScheduler]. This structure can be used
 //! to perform the scheduling of telecommands like specified in the ECSS standard.
-use crate::pool::{PoolProvider, StoreAddr, StoreError};
-use alloc::collections::btree_map::{Entry, Range};
-use alloc::vec;
-use alloc::vec::Vec;
+use crate::pool::{StoreAddr, StoreError};
 use core::fmt::{Debug, Display, Formatter};
 use core::time::Duration;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::scheduling::TimeWindowType;
-use spacepackets::ecss::{PusError, PusPacket};
+use spacepackets::ecss::PusError;
 use spacepackets::tc::{GenericPusTcSecondaryHeader, PusTc};
-use spacepackets::time::cds::DaysLen24Bits;
-use spacepackets::time::{cds, CcsdsTimeProvider, TimeReader, TimestampError, UnixTimestamp};
+use spacepackets::time::{CcsdsTimeProvider, TimestampError, UnixTimestamp};
 use spacepackets::CcsdsPacket;
-use std::collections::BTreeMap;
 #[cfg(feature = "std")]
 use std::error::Error;
-#[cfg(feature = "std")]
-use std::time::SystemTimeError;
+
+//#[cfg(feature = "std")]
+//pub use std_mod::*;
+
+#[cfg(feature = "alloc")]
+pub use alloc_mod::*;
 
 /// This is the request ID as specified in ECSS-E-ST-70-41C 5.4.11.2 of the standard.
 ///
@@ -171,35 +170,6 @@ impl TcInfo {
     }
 }
 
-/// This is the core data structure for scheduling PUS telecommands with [alloc] support.
-///
-/// It is assumed that the actual telecommand data is stored in a separate TC pool offering
-/// a [crate::pool::PoolProvider] API. This data structure just tracks the store addresses and their
-/// release times and offers a convenient API to insert and release telecommands and perform
-/// other functionality specified by the ECSS standard in section 6.11. The time is tracked
-/// as a [spacepackets::time::UnixTimestamp] but the only requirement to the timekeeping of
-/// the user is that it is convertible to that timestamp.
-///
-/// The standard also specifies that the PUS scheduler can be enabled and disabled.
-/// A disabled scheduler should still delete commands where the execution time has been reached
-/// but should not release them to be executed.
-///
-/// The implementation uses an ordered map internally with the release timestamp being the key.
-/// This allows efficient time based insertions and extractions which should be the primary use-case
-/// for a time-based command scheduler.
-/// There is no way to avoid duplicate [RequestId]s during insertion, which can occur even if the
-/// user always correctly increment for sequence counter due to overflows. To avoid this issue,
-/// it can make sense to split up telecommand groups by the APID to avoid overflows.
-///
-/// Currently, sub-schedules and groups are not supported.
-#[derive(Debug)]
-pub struct PusScheduler {
-    tc_map: BTreeMap<UnixTimestamp, Vec<TcInfo>>,
-    current_time: UnixTimestamp,
-    time_margin: Duration,
-    enabled: bool,
-}
-
 enum DeletionResult {
     WithoutStoreDeletion(Option<StoreAddr>),
     WithStoreDeletion(Result<bool, StoreError>),
@@ -259,360 +229,410 @@ impl<TimeProvider: CcsdsTimeProvider + Clone> TimeWindow<TimeProvider> {
     }
 }
 
-impl PusScheduler {
-    /// Create a new PUS scheduler.
-    ///
-    /// # Arguments
-    ///
-    /// * `init_current_time` - The time to initialize the scheduler with.
-    /// * `time_margin` - This time margin is used when inserting new telecommands into the
-    ///      schedule. If the release time of a new telecommand is earlier than the time margin
-    ///      added to the current time, it will not be inserted into the schedule.
-    pub fn new(init_current_time: UnixTimestamp, time_margin: Duration) -> Self {
-        PusScheduler {
-            tc_map: Default::default(),
-            current_time: init_current_time,
-            time_margin,
-            enabled: true,
-        }
-    }
+#[cfg(feature = "alloc")]
+pub mod alloc_mod {
+    use crate::pool::{PoolProvider, StoreAddr, StoreError};
+    use crate::pus::scheduler::{DeletionResult, RequestId, ScheduleError, TcInfo, TimeWindow};
+    use alloc::collections::btree_map::{Entry, Range};
+    use alloc::collections::BTreeMap;
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use core::time::Duration;
+    use spacepackets::ecss::scheduling::TimeWindowType;
+    use spacepackets::ecss::PusPacket;
+    use spacepackets::tc::PusTc;
+    use spacepackets::time::cds::DaysLen24Bits;
+    use spacepackets::time::{cds, CcsdsTimeProvider, TimeReader, UnixTimestamp};
 
-    /// Like [Self::new], but sets the `init_current_time` parameter to the current system time.
     #[cfg(feature = "std")]
-    #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
-    pub fn new_with_current_init_time(time_margin: Duration) -> Result<Self, SystemTimeError> {
-        Ok(Self::new(UnixTimestamp::from_now()?, time_margin))
-    }
+    use std::time::SystemTimeError;
 
-    pub fn num_scheduled_telecommands(&self) -> u64 {
-        let mut num_entries = 0;
-        for entries in &self.tc_map {
-            num_entries += entries.1.len() as u64;
-        }
-        num_entries
-    }
-
-    pub fn is_enabled(&self) -> bool {
-        self.enabled
-    }
-
-    pub fn enable(&mut self) {
-        self.enabled = true;
-    }
-
+    /// This is the core data structure for scheduling PUS telecommands with [alloc] support.
+    ///
+    /// It is assumed that the actual telecommand data is stored in a separate TC pool offering
+    /// a [crate::pool::PoolProvider] API. This data structure just tracks the store addresses and their
+    /// release times and offers a convenient API to insert and release telecommands and perform
+    /// other functionality specified by the ECSS standard in section 6.11. The time is tracked
+    /// as a [spacepackets::time::UnixTimestamp] but the only requirement to the timekeeping of
+    /// the user is that it is convertible to that timestamp.
+    ///
+    /// The standard also specifies that the PUS scheduler can be enabled and disabled.
     /// A disabled scheduler should still delete commands where the execution time has been reached
     /// but should not release them to be executed.
-    pub fn disable(&mut self) {
-        self.enabled = false;
-    }
-
-    /// This will disable the scheduler and clear the schedule as specified in 6.11.4.4.
-    /// Be careful with this command as it will delete all the commands in the schedule.
     ///
-    /// The holding store for the telecommands needs to be passed so all the stored telecommands
-    /// can be deleted to avoid a memory leak. If at last one deletion operation fails, the error
-    /// will be returned but the method will still try to delete all the commands in the schedule.
-    pub fn reset(&mut self, store: &mut (impl PoolProvider + ?Sized)) -> Result<(), StoreError> {
-        self.enabled = false;
-        let mut deletion_ok = Ok(());
-        for tc_lists in &mut self.tc_map {
-            for tc in tc_lists.1 {
-                let res = store.delete(tc.addr);
-                if res.is_err() {
-                    deletion_ok = res;
-                }
-            }
-        }
-        self.tc_map.clear();
-        deletion_ok
-    }
-
-    pub fn update_time(&mut self, current_time: UnixTimestamp) {
-        self.current_time = current_time;
-    }
-
-    pub fn current_time(&self) -> &UnixTimestamp {
-        &self.current_time
-    }
-
-    /// Insert a telecommand which was already unwrapped from the outer Service 11 packet and stored
-    /// inside the telecommand packet pool.
-    pub fn insert_unwrapped_and_stored_tc(
-        &mut self,
-        time_stamp: UnixTimestamp,
-        info: TcInfo,
-    ) -> Result<(), ScheduleError> {
-        if time_stamp < self.current_time + self.time_margin {
-            return Err(ScheduleError::ReleaseTimeInTimeMargin(
-                self.current_time,
-                self.time_margin,
-                time_stamp,
-            ));
-        }
-        match self.tc_map.entry(time_stamp) {
-            Entry::Vacant(e) => {
-                e.insert(vec![info]);
-            }
-            Entry::Occupied(mut v) => {
-                v.get_mut().push(info);
-            }
-        }
-        Ok(())
-    }
-
-    /// Insert a telecommand which was already unwrapped from the outer Service 11 packet but still
-    /// needs to be stored inside the telecommand pool.
-    pub fn insert_unwrapped_tc(
-        &mut self,
-        time_stamp: UnixTimestamp,
-        tc: &[u8],
-        pool: &mut (impl PoolProvider + ?Sized),
-    ) -> Result<TcInfo, ScheduleError> {
-        let check_tc = PusTc::from_bytes(tc)?;
-        if PusPacket::service(&check_tc.0) == 11 && PusPacket::subservice(&check_tc.0) == 4 {
-            return Err(ScheduleError::NestedScheduledTc);
-        }
-        let req_id = RequestId::from_tc(&check_tc.0);
-
-        match pool.add(tc) {
-            Ok(addr) => {
-                let info = TcInfo::new(addr, req_id);
-                self.insert_unwrapped_and_stored_tc(time_stamp, info)?;
-                Ok(info)
-            }
-            Err(err) => Err(err.into()),
-        }
-    }
-
-    /// Insert a telecommand based on the fully wrapped time-tagged telecommand. The timestamp
-    /// provider needs to be supplied via a generic.
-    pub fn insert_wrapped_tc<TimeStamp: CcsdsTimeProvider + TimeReader>(
-        &mut self,
-        pus_tc: &PusTc,
-        pool: &mut (impl PoolProvider + ?Sized),
-    ) -> Result<TcInfo, ScheduleError> {
-        if PusPacket::service(pus_tc) != 11 {
-            return Err(ScheduleError::WrongService);
-        }
-        if PusPacket::subservice(pus_tc) != 4 {
-            return Err(ScheduleError::WrongSubservice);
-        }
-        return if let Some(user_data) = pus_tc.user_data() {
-            let stamp: TimeStamp = TimeReader::from_bytes(user_data)?;
-            let unix_stamp = stamp.unix_stamp();
-            let stamp_len = stamp.len_as_bytes();
-            self.insert_unwrapped_tc(unix_stamp, &user_data[stamp_len..], pool)
-        } else {
-            Err(ScheduleError::TcDataEmpty)
-        };
-    }
-
-    /// Insert a telecommand based on the fully wrapped time-tagged telecommand using a CDS
-    /// short timestamp with 16-bit length of days field.
-    pub fn insert_wrapped_tc_cds_short(
-        &mut self,
-        pus_tc: &PusTc,
-        pool: &mut (impl PoolProvider + ?Sized),
-    ) -> Result<TcInfo, ScheduleError> {
-        self.insert_wrapped_tc::<cds::TimeProvider>(pus_tc, pool)
-    }
-
-    /// Insert a telecommand based on the fully wrapped time-tagged telecommand using a CDS
-    /// long timestamp with a 24-bit length of days field.
-    pub fn insert_wrapped_tc_cds_long(
-        &mut self,
-        pus_tc: &PusTc,
-        pool: &mut (impl PoolProvider + ?Sized),
-    ) -> Result<TcInfo, ScheduleError> {
-        self.insert_wrapped_tc::<cds::TimeProvider<DaysLen24Bits>>(pus_tc, pool)
-    }
-
-    /// This function uses [Self::retrieve_by_time_filter] to extract all scheduled commands inside
-    /// the time range and then deletes them from the provided store.
+    /// The implementation uses an ordered map internally with the release timestamp being the key.
+    /// This allows efficient time based insertions and extractions which should be the primary use-case
+    /// for a time-based command scheduler.
+    /// There is no way to avoid duplicate [RequestId]s during insertion, which can occur even if the
+    /// user always correctly increment for sequence counter due to overflows. To avoid this issue,
+    /// it can make sense to split up telecommand groups by the APID to avoid overflows.
     ///
-    /// Like specified in the documentation of [Self::retrieve_by_time_filter], the range extraction
-    /// for deletion is always inclusive.
-    ///
-    /// This function returns the number of deleted commands on success. In case any deletion fails,
-    /// the last deletion will be supplied in addition to the number of deleted commands.
-    pub fn delete_by_time_filter<TimeProvider: CcsdsTimeProvider + Clone>(
-        &mut self,
-        time_window: TimeWindow<TimeProvider>,
-        pool: &mut (impl PoolProvider + ?Sized),
-    ) -> Result<u64, (u64, StoreError)> {
-        let range = self.retrieve_by_time_filter(time_window);
-        let mut del_packets = 0;
-        let mut res_if_fails = None;
-        let mut keys_to_delete = Vec::new();
-        for time_bucket in range {
-            for tc in time_bucket.1 {
-                match pool.delete(tc.addr) {
-                    Ok(_) => del_packets += 1,
-                    Err(e) => res_if_fails = Some(e),
-                }
-            }
-            keys_to_delete.push(*time_bucket.0);
-        }
-        for key in keys_to_delete {
-            self.tc_map.remove(&key);
-        }
-        if let Some(err) = res_if_fails {
-            return Err((del_packets, err));
-        }
-        Ok(del_packets)
+    /// Currently, sub-schedules and groups are not supported.
+    #[derive(Debug)]
+    pub struct PusScheduler {
+        tc_map: BTreeMap<UnixTimestamp, Vec<TcInfo>>,
+        pub(crate) current_time: UnixTimestamp,
+        time_margin: Duration,
+        enabled: bool,
     }
-
-    /// Deletes all the scheduled commands. This also deletes the packets from the passed TC pool.
-    ///
-    /// This function returns the number of deleted commands on success. In case any deletion fails,
-    /// the last deletion will be supplied in addition to the number of deleted commands.
-    pub fn delete_all(
-        &mut self,
-        pool: &mut (impl PoolProvider + ?Sized),
-    ) -> Result<u64, (u64, StoreError)> {
-        self.delete_by_time_filter(TimeWindow::<cds::TimeProvider>::new_select_all(), pool)
-    }
-
-    /// Retrieve a range over all scheduled commands.
-    pub fn retrieve_all(&mut self) -> Range<'_, UnixTimestamp, Vec<TcInfo>> {
-        self.tc_map.range(..)
-    }
-
-    /// This retrieves scheduled telecommands which are inside the provided time window.
-    ///
-    /// It should be noted that the ranged extraction is always inclusive. For example, a range
-    /// from 50 to 100 unix seconds would also include command scheduled at 100 unix seconds.
-    pub fn retrieve_by_time_filter<TimeProvider: CcsdsTimeProvider>(
-        &mut self,
-        time_window: TimeWindow<TimeProvider>,
-    ) -> Range<'_, UnixTimestamp, Vec<TcInfo>> {
-        match time_window.time_window_type() {
-            TimeWindowType::SelectAll => self.tc_map.range(..),
-            TimeWindowType::TimeTagToTimeTag => {
-                // This should be guaranteed to be valid by library API, so unwrap is okay
-                let start_time = time_window.start_time().unwrap().unix_stamp();
-                let end_time = time_window.end_time().unwrap().unix_stamp();
-                self.tc_map.range(start_time..=end_time)
-            }
-            TimeWindowType::FromTimeTag => {
-                // This should be guaranteed to be valid by library API, so unwrap is okay
-                let start_time = time_window.start_time().unwrap().unix_stamp();
-                self.tc_map.range(start_time..)
-            }
-            TimeWindowType::ToTimeTag => {
-                // This should be guaranteed to be valid by library API, so unwrap is okay
-                let end_time = time_window.end_time().unwrap().unix_stamp();
-                self.tc_map.range(..=end_time)
+    impl PusScheduler {
+        /// Create a new PUS scheduler.
+        ///
+        /// # Arguments
+        ///
+        /// * `init_current_time` - The time to initialize the scheduler with.
+        /// * `time_margin` - This time margin is used when inserting new telecommands into the
+        ///      schedule. If the release time of a new telecommand is earlier than the time margin
+        ///      added to the current time, it will not be inserted into the schedule.
+        pub fn new(init_current_time: UnixTimestamp, time_margin: Duration) -> Self {
+            PusScheduler {
+                tc_map: Default::default(),
+                current_time: init_current_time,
+                time_margin,
+                enabled: true,
             }
         }
-    }
 
-    /// Deletes a scheduled command with the given request  ID. Returns the store address if a
-    /// scheduled command was found in the map and deleted, and None otherwise.
-    ///
-    /// Please note that this function will stop on the first telecommand with a request ID match.
-    /// In case of duplicate IDs (which should generally not happen), this function needs to be
-    /// called repeatedly.
-    pub fn delete_by_request_id(&mut self, req_id: &RequestId) -> Option<StoreAddr> {
-        if let DeletionResult::WithoutStoreDeletion(v) =
-            self.delete_by_request_id_internal(req_id, None::<&mut dyn PoolProvider>)
-        {
-            return v;
+        /// Like [Self::new], but sets the `init_current_time` parameter to the current system time.
+        #[cfg(feature = "std")]
+        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
+        pub fn new_with_current_init_time(time_margin: Duration) -> Result<Self, SystemTimeError> {
+            Ok(Self::new(UnixTimestamp::from_now()?, time_margin))
         }
-        panic!("unexpected deletion result");
-    }
 
-    /// This behaves like [Self::delete_by_request_id] but deletes the packet from the pool as well.
-    pub fn delete_by_request_id_and_from_pool(
-        &mut self,
-        req_id: &RequestId,
-        pool: &mut (impl PoolProvider + ?Sized),
-    ) -> Result<bool, StoreError> {
-        if let DeletionResult::WithStoreDeletion(v) =
-            self.delete_by_request_id_internal(req_id, Some(pool))
-        {
-            return v;
-        }
-        panic!("unexpected deletion result");
-    }
-
-    fn delete_by_request_id_internal(
-        &mut self,
-        req_id: &RequestId,
-        pool: Option<&mut (impl PoolProvider + ?Sized)>,
-    ) -> DeletionResult {
-        let mut idx_found = None;
-        for time_bucket in &mut self.tc_map {
-            for (idx, tc_info) in time_bucket.1.iter().enumerate() {
-                if &tc_info.request_id == req_id {
-                    idx_found = Some(idx);
-                }
+        pub fn num_scheduled_telecommands(&self) -> u64 {
+            let mut num_entries = 0;
+            for entries in &self.tc_map {
+                num_entries += entries.1.len() as u64;
             }
-            if let Some(idx) = idx_found {
-                let addr = time_bucket.1.remove(idx).addr;
-                if let Some(pool) = pool {
-                    return match pool.delete(addr) {
-                        Ok(_) => DeletionResult::WithStoreDeletion(Ok(true)),
-                        Err(e) => DeletionResult::WithStoreDeletion(Err(e)),
-                    };
-                }
-                return DeletionResult::WithoutStoreDeletion(Some(addr));
-            }
+            num_entries
         }
-        if pool.is_none() {
-            DeletionResult::WithoutStoreDeletion(None)
-        } else {
-            DeletionResult::WithStoreDeletion(Ok(false))
+
+        pub fn is_enabled(&self) -> bool {
+            self.enabled
         }
-    }
-    /// Retrieve all telecommands which should be release based on the current time.
-    pub fn telecommands_to_release(&self) -> Range<'_, UnixTimestamp, Vec<TcInfo>> {
-        self.tc_map.range(..=self.current_time)
-    }
 
-    #[cfg(feature = "std")]
-    #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
-    pub fn update_time_from_now(&mut self) -> Result<(), SystemTimeError> {
-        self.current_time = UnixTimestamp::from_now()?;
-        Ok(())
-    }
+        pub fn enable(&mut self) {
+            self.enabled = true;
+        }
 
-    /// Utility method which calls [Self::telecommands_to_release] and then calls a releaser
-    /// closure for each telecommand which should be released. This function will also delete
-    /// the telecommands from the holding store after calling the release closure, if the scheduler
-    /// is disabled.
-    ///
-    /// # Arguments
-    ///
-    /// * `releaser` - Closure where the first argument is whether the scheduler is enabled and
-    ///     the second argument is the telecommand information also containing the store address.
-    ///     This closure should return whether the command should be deleted if the scheduler is
-    ///     disabled to prevent memory leaks.
-    /// * `store` - The holding store of the telecommands.
-    pub fn release_telecommands<R: FnMut(bool, &TcInfo) -> bool>(
-        &mut self,
-        mut releaser: R,
-        tc_store: &mut (impl PoolProvider + ?Sized),
-    ) -> Result<u64, (u64, StoreError)> {
-        let tcs_to_release = self.telecommands_to_release();
-        let mut released_tcs = 0;
-        let mut store_error = Ok(());
-        for tc in tcs_to_release {
-            for info in tc.1 {
-                let should_delete = releaser(self.enabled, info);
-                released_tcs += 1;
-                if should_delete && !self.is_enabled() {
-                    let res = tc_store.delete(info.addr);
+        /// A disabled scheduler should still delete commands where the execution time has been reached
+        /// but should not release them to be executed.
+        pub fn disable(&mut self) {
+            self.enabled = false;
+        }
+
+        /// This will disable the scheduler and clear the schedule as specified in 6.11.4.4.
+        /// Be careful with this command as it will delete all the commands in the schedule.
+        ///
+        /// The holding store for the telecommands needs to be passed so all the stored telecommands
+        /// can be deleted to avoid a memory leak. If at last one deletion operation fails, the error
+        /// will be returned but the method will still try to delete all the commands in the schedule.
+        pub fn reset(
+            &mut self,
+            store: &mut (impl PoolProvider + ?Sized),
+        ) -> Result<(), StoreError> {
+            self.enabled = false;
+            let mut deletion_ok = Ok(());
+            for tc_lists in &mut self.tc_map {
+                for tc in tc_lists.1 {
+                    let res = store.delete(tc.addr);
                     if res.is_err() {
-                        store_error = res;
+                        deletion_ok = res;
                     }
                 }
             }
+            self.tc_map.clear();
+            deletion_ok
         }
-        self.tc_map.retain(|k, _| k > &self.current_time);
-        store_error
-            .map(|_| released_tcs)
-            .map_err(|e| (released_tcs, e))
+
+        pub fn update_time(&mut self, current_time: UnixTimestamp) {
+            self.current_time = current_time;
+        }
+
+        pub fn current_time(&self) -> &UnixTimestamp {
+            &self.current_time
+        }
+
+        /// Insert a telecommand which was already unwrapped from the outer Service 11 packet and stored
+        /// inside the telecommand packet pool.
+        pub fn insert_unwrapped_and_stored_tc(
+            &mut self,
+            time_stamp: UnixTimestamp,
+            info: TcInfo,
+        ) -> Result<(), ScheduleError> {
+            if time_stamp < self.current_time + self.time_margin {
+                return Err(ScheduleError::ReleaseTimeInTimeMargin(
+                    self.current_time,
+                    self.time_margin,
+                    time_stamp,
+                ));
+            }
+            match self.tc_map.entry(time_stamp) {
+                Entry::Vacant(e) => {
+                    e.insert(vec![info]);
+                }
+                Entry::Occupied(mut v) => {
+                    v.get_mut().push(info);
+                }
+            }
+            Ok(())
+        }
+
+        /// Insert a telecommand which was already unwrapped from the outer Service 11 packet but still
+        /// needs to be stored inside the telecommand pool.
+        pub fn insert_unwrapped_tc(
+            &mut self,
+            time_stamp: UnixTimestamp,
+            tc: &[u8],
+            pool: &mut (impl PoolProvider + ?Sized),
+        ) -> Result<TcInfo, ScheduleError> {
+            let check_tc = PusTc::from_bytes(tc)?;
+            if PusPacket::service(&check_tc.0) == 11 && PusPacket::subservice(&check_tc.0) == 4 {
+                return Err(ScheduleError::NestedScheduledTc);
+            }
+            let req_id = RequestId::from_tc(&check_tc.0);
+
+            match pool.add(tc) {
+                Ok(addr) => {
+                    let info = TcInfo::new(addr, req_id);
+                    self.insert_unwrapped_and_stored_tc(time_stamp, info)?;
+                    Ok(info)
+                }
+                Err(err) => Err(err.into()),
+            }
+        }
+
+        /// Insert a telecommand based on the fully wrapped time-tagged telecommand. The timestamp
+        /// provider needs to be supplied via a generic.
+        pub fn insert_wrapped_tc<TimeStamp: CcsdsTimeProvider + TimeReader>(
+            &mut self,
+            pus_tc: &PusTc,
+            pool: &mut (impl PoolProvider + ?Sized),
+        ) -> Result<TcInfo, ScheduleError> {
+            if PusPacket::service(pus_tc) != 11 {
+                return Err(ScheduleError::WrongService);
+            }
+            if PusPacket::subservice(pus_tc) != 4 {
+                return Err(ScheduleError::WrongSubservice);
+            }
+            return if let Some(user_data) = pus_tc.user_data() {
+                let stamp: TimeStamp = TimeReader::from_bytes(user_data)?;
+                let unix_stamp = stamp.unix_stamp();
+                let stamp_len = stamp.len_as_bytes();
+                self.insert_unwrapped_tc(unix_stamp, &user_data[stamp_len..], pool)
+            } else {
+                Err(ScheduleError::TcDataEmpty)
+            };
+        }
+
+        /// Insert a telecommand based on the fully wrapped time-tagged telecommand using a CDS
+        /// short timestamp with 16-bit length of days field.
+        pub fn insert_wrapped_tc_cds_short(
+            &mut self,
+            pus_tc: &PusTc,
+            pool: &mut (impl PoolProvider + ?Sized),
+        ) -> Result<TcInfo, ScheduleError> {
+            self.insert_wrapped_tc::<cds::TimeProvider>(pus_tc, pool)
+        }
+
+        /// Insert a telecommand based on the fully wrapped time-tagged telecommand using a CDS
+        /// long timestamp with a 24-bit length of days field.
+        pub fn insert_wrapped_tc_cds_long(
+            &mut self,
+            pus_tc: &PusTc,
+            pool: &mut (impl PoolProvider + ?Sized),
+        ) -> Result<TcInfo, ScheduleError> {
+            self.insert_wrapped_tc::<cds::TimeProvider<DaysLen24Bits>>(pus_tc, pool)
+        }
+
+        /// This function uses [Self::retrieve_by_time_filter] to extract all scheduled commands inside
+        /// the time range and then deletes them from the provided store.
+        ///
+        /// Like specified in the documentation of [Self::retrieve_by_time_filter], the range extraction
+        /// for deletion is always inclusive.
+        ///
+        /// This function returns the number of deleted commands on success. In case any deletion fails,
+        /// the last deletion will be supplied in addition to the number of deleted commands.
+        pub fn delete_by_time_filter<TimeProvider: CcsdsTimeProvider + Clone>(
+            &mut self,
+            time_window: TimeWindow<TimeProvider>,
+            pool: &mut (impl PoolProvider + ?Sized),
+        ) -> Result<u64, (u64, StoreError)> {
+            let range = self.retrieve_by_time_filter(time_window);
+            let mut del_packets = 0;
+            let mut res_if_fails = None;
+            let mut keys_to_delete = Vec::new();
+            for time_bucket in range {
+                for tc in time_bucket.1 {
+                    match pool.delete(tc.addr) {
+                        Ok(_) => del_packets += 1,
+                        Err(e) => res_if_fails = Some(e),
+                    }
+                }
+                keys_to_delete.push(*time_bucket.0);
+            }
+            for key in keys_to_delete {
+                self.tc_map.remove(&key);
+            }
+            if let Some(err) = res_if_fails {
+                return Err((del_packets, err));
+            }
+            Ok(del_packets)
+        }
+
+        /// Deletes all the scheduled commands. This also deletes the packets from the passed TC pool.
+        ///
+        /// This function returns the number of deleted commands on success. In case any deletion fails,
+        /// the last deletion will be supplied in addition to the number of deleted commands.
+        pub fn delete_all(
+            &mut self,
+            pool: &mut (impl PoolProvider + ?Sized),
+        ) -> Result<u64, (u64, StoreError)> {
+            self.delete_by_time_filter(TimeWindow::<cds::TimeProvider>::new_select_all(), pool)
+        }
+
+        /// Retrieve a range over all scheduled commands.
+        pub fn retrieve_all(&mut self) -> Range<'_, UnixTimestamp, Vec<TcInfo>> {
+            self.tc_map.range(..)
+        }
+
+        /// This retrieves scheduled telecommands which are inside the provided time window.
+        ///
+        /// It should be noted that the ranged extraction is always inclusive. For example, a range
+        /// from 50 to 100 unix seconds would also include command scheduled at 100 unix seconds.
+        pub fn retrieve_by_time_filter<TimeProvider: CcsdsTimeProvider>(
+            &mut self,
+            time_window: TimeWindow<TimeProvider>,
+        ) -> Range<'_, UnixTimestamp, Vec<TcInfo>> {
+            match time_window.time_window_type() {
+                TimeWindowType::SelectAll => self.tc_map.range(..),
+                TimeWindowType::TimeTagToTimeTag => {
+                    // This should be guaranteed to be valid by library API, so unwrap is okay
+                    let start_time = time_window.start_time().unwrap().unix_stamp();
+                    let end_time = time_window.end_time().unwrap().unix_stamp();
+                    self.tc_map.range(start_time..=end_time)
+                }
+                TimeWindowType::FromTimeTag => {
+                    // This should be guaranteed to be valid by library API, so unwrap is okay
+                    let start_time = time_window.start_time().unwrap().unix_stamp();
+                    self.tc_map.range(start_time..)
+                }
+                TimeWindowType::ToTimeTag => {
+                    // This should be guaranteed to be valid by library API, so unwrap is okay
+                    let end_time = time_window.end_time().unwrap().unix_stamp();
+                    self.tc_map.range(..=end_time)
+                }
+            }
+        }
+
+        /// Deletes a scheduled command with the given request  ID. Returns the store address if a
+        /// scheduled command was found in the map and deleted, and None otherwise.
+        ///
+        /// Please note that this function will stop on the first telecommand with a request ID match.
+        /// In case of duplicate IDs (which should generally not happen), this function needs to be
+        /// called repeatedly.
+        pub fn delete_by_request_id(&mut self, req_id: &RequestId) -> Option<StoreAddr> {
+            if let DeletionResult::WithoutStoreDeletion(v) =
+                self.delete_by_request_id_internal(req_id, None::<&mut dyn PoolProvider>)
+            {
+                return v;
+            }
+            panic!("unexpected deletion result");
+        }
+
+        /// This behaves like [Self::delete_by_request_id] but deletes the packet from the pool as well.
+        pub fn delete_by_request_id_and_from_pool(
+            &mut self,
+            req_id: &RequestId,
+            pool: &mut (impl PoolProvider + ?Sized),
+        ) -> Result<bool, StoreError> {
+            if let DeletionResult::WithStoreDeletion(v) =
+                self.delete_by_request_id_internal(req_id, Some(pool))
+            {
+                return v;
+            }
+            panic!("unexpected deletion result");
+        }
+
+        fn delete_by_request_id_internal(
+            &mut self,
+            req_id: &RequestId,
+            pool: Option<&mut (impl PoolProvider + ?Sized)>,
+        ) -> DeletionResult {
+            let mut idx_found = None;
+            for time_bucket in &mut self.tc_map {
+                for (idx, tc_info) in time_bucket.1.iter().enumerate() {
+                    if &tc_info.request_id == req_id {
+                        idx_found = Some(idx);
+                    }
+                }
+                if let Some(idx) = idx_found {
+                    let addr = time_bucket.1.remove(idx).addr;
+                    if let Some(pool) = pool {
+                        return match pool.delete(addr) {
+                            Ok(_) => DeletionResult::WithStoreDeletion(Ok(true)),
+                            Err(e) => DeletionResult::WithStoreDeletion(Err(e)),
+                        };
+                    }
+                    return DeletionResult::WithoutStoreDeletion(Some(addr));
+                }
+            }
+            if pool.is_none() {
+                DeletionResult::WithoutStoreDeletion(None)
+            } else {
+                DeletionResult::WithStoreDeletion(Ok(false))
+            }
+        }
+        /// Retrieve all telecommands which should be release based on the current time.
+        pub fn telecommands_to_release(&self) -> Range<'_, UnixTimestamp, Vec<TcInfo>> {
+            self.tc_map.range(..=self.current_time)
+        }
+
+        #[cfg(feature = "std")]
+        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
+        pub fn update_time_from_now(&mut self) -> Result<(), SystemTimeError> {
+            self.current_time = UnixTimestamp::from_now()?;
+            Ok(())
+        }
+
+        /// Utility method which calls [Self::telecommands_to_release] and then calls a releaser
+        /// closure for each telecommand which should be released. This function will also delete
+        /// the telecommands from the holding store after calling the release closure, if the scheduler
+        /// is disabled.
+        ///
+        /// # Arguments
+        ///
+        /// * `releaser` - Closure where the first argument is whether the scheduler is enabled and
+        ///     the second argument is the telecommand information also containing the store address.
+        ///     This closure should return whether the command should be deleted if the scheduler is
+        ///     disabled to prevent memory leaks.
+        /// * `store` - The holding store of the telecommands.
+        pub fn release_telecommands<R: FnMut(bool, &TcInfo) -> bool>(
+            &mut self,
+            mut releaser: R,
+            tc_store: &mut (impl PoolProvider + ?Sized),
+        ) -> Result<u64, (u64, StoreError)> {
+            let tcs_to_release = self.telecommands_to_release();
+            let mut released_tcs = 0;
+            let mut store_error = Ok(());
+            for tc in tcs_to_release {
+                for info in tc.1 {
+                    let should_delete = releaser(self.enabled, info);
+                    released_tcs += 1;
+                    if should_delete && !self.is_enabled() {
+                        let res = tc_store.delete(info.addr);
+                        if res.is_err() {
+                            store_error = res;
+                        }
+                    }
+                }
+            }
+            self.tc_map.retain(|k, _| k > &self.current_time);
+            store_error
+                .map(|_| released_tcs)
+                .map_err(|e| (released_tcs, e))
+        }
     }
 }
 
@@ -620,6 +640,7 @@ impl PusScheduler {
 mod tests {
     use super::*;
     use crate::pool::{LocalPool, PoolCfg, PoolProvider, StoreAddr, StoreError};
+    use alloc::collections::btree_map::Range;
     use spacepackets::ecss::SerializablePusPacket;
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::time::{cds, TimeWriter, UnixTimestamp};

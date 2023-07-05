@@ -1,4 +1,3 @@
-use spacepackets::ecss::SerializablePusPacket;
 use spacepackets::time::cds::TimeProvider;
 use spacepackets::time::TimeWriter;
 use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
@@ -73,17 +72,6 @@ impl PusTmWithCdsShortHelper {
         seq_count: u16,
     ) -> PusTm {
         stamper.write_to_bytes(&mut self.cds_short_buf).unwrap();
-        self.create_pus_tm_common(service, subservice, source_data, seq_count)
-    }
-
-    pub fn create_pus_tm_with_stamp<'a>(
-        &'a mut self,
-        service: u8,
-        subservice: u8,
-        source_data: Option<&'a [u8]>,
-        timestamp: &'a [u8],
-        seq_count: u16,
-    ) -> PusTm {
         self.create_pus_tm_common(service, subservice, source_data, seq_count)
     }
 

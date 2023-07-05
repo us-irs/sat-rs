@@ -13,8 +13,10 @@ pub mod event;
 pub mod event_man;
 pub mod hk;
 pub mod mode;
+pub mod scheduler;
+pub mod scheduler_srv;
 #[cfg(feature = "std")]
-pub mod scheduling;
+pub mod test;
 pub mod verification;
 
 #[cfg(feature = "alloc")]
@@ -133,38 +135,34 @@ mod alloc_mod {
 #[cfg(feature = "std")]
 pub mod std_mod {
     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr, StoreError};
+    use crate::pus::verification::{
+        StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
+    };
     use crate::pus::{EcssSender, EcssTcSenderCore, EcssTmSenderCore};
+    use crate::tmtc::tm_helper::SharedTmStore;
     use crate::SenderId;
     use alloc::vec::Vec;
     use spacepackets::ecss::{PusError, SerializablePusPacket};
     use spacepackets::tc::PusTc;
+    use spacepackets::time::cds::TimeProvider;
+    use spacepackets::time::{StdTimestampError, TimeWriter};
     use spacepackets::tm::PusTm;
-    use std::sync::mpsc::SendError;
+    use std::string::String;
     use std::sync::{mpsc, RwLockWriteGuard};
+    use thiserror::Error;
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Error)]
     pub enum MpscPusInStoreSendError {
+        #[error("RwGuard lock error")]
         LockError,
-        PusError(PusError),
-        StoreError(StoreError),
-        SendError(SendError<StoreAddr>),
+        #[error("Generic PUS error: {0}")]
+        PusError(#[from] PusError),
+        #[error("Generic store error: {0}")]
+        StoreError(#[from] StoreError),
+        #[error("Generic send error: {0}")]
+        SendError(#[from] mpsc::SendError<StoreAddr>),
+        #[error("RX handle has disconnected")]
         RxDisconnected(StoreAddr),
-    }
-
-    impl From<PusError> for MpscPusInStoreSendError {
-        fn from(value: PusError) -> Self {
-            MpscPusInStoreSendError::PusError(value)
-        }
-    }
-    impl From<SendError<StoreAddr>> for MpscPusInStoreSendError {
-        fn from(value: SendError<StoreAddr>) -> Self {
-            MpscPusInStoreSendError::SendError(value)
-        }
-    }
-    impl From<StoreError> for MpscPusInStoreSendError {
-        fn from(value: StoreError) -> Self {
-            MpscPusInStoreSendError::StoreError(value)
-        }
     }
 
     #[derive(Clone)]
@@ -246,7 +244,7 @@ pub mod std_mod {
     #[derive(Debug, Clone)]
     pub enum MpscAsVecSenderError {
         PusError(PusError),
-        SendError(SendError<Vec<u8>>),
+        SendError(mpsc::SendError<Vec<u8>>),
     }
 
     #[derive(Debug, Clone)]
@@ -284,12 +282,127 @@ pub mod std_mod {
             Ok(())
         }
     }
-}
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum GenericTcCheckError {
-    NotEnoughAppData,
-    InvalidSubservice,
+    #[derive(Debug, Clone, Error)]
+    pub enum PusPacketHandlingError {
+        #[error("Generic PUS error: {0}")]
+        PusError(#[from] PusError),
+        #[error("Wrong service number {0} for packet handler")]
+        WrongService(u8),
+        #[error("Not enough application data available: {0}")]
+        NotEnoughAppData(String),
+        #[error("Generic store error: {0}")]
+        StoreError(#[from] StoreError),
+        #[error("Error with the pool RwGuard")]
+        RwGuardError(String),
+        #[error("MQ backend disconnect error")]
+        QueueDisconnected,
+        #[error("Other error {0}")]
+        OtherError(String),
+    }
+
+    #[derive(Debug, Clone, Error)]
+    pub enum PartialPusHandlingError {
+        #[error("Generic timestamp generation error")]
+        TimeError(StdTimestampError),
+        #[error("Error sending telemetry: {0}")]
+        TmSendError(String),
+        #[error("Error sending verification message")]
+        VerificationError,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum PusPacketHandlerResult {
+        RequestHandled,
+        RequestHandledPartialSuccess(PartialPusHandlingError),
+        CustomSubservice(VerificationToken<TcStateAccepted>),
+        Empty,
+    }
+
+    impl From<PartialPusHandlingError> for PusPacketHandlerResult {
+        fn from(value: PartialPusHandlingError) -> Self {
+            Self::RequestHandledPartialSuccess(value)
+        }
+    }
+
+    pub type AcceptedTc = (StoreAddr, VerificationToken<TcStateAccepted>);
+
+    pub struct PusServiceBase {
+        pub(crate) tc_rx: mpsc::Receiver<AcceptedTc>,
+        pub(crate) tc_store: SharedPool,
+        pub(crate) tm_tx: mpsc::Sender<StoreAddr>,
+        pub(crate) tm_store: SharedTmStore,
+        pub(crate) tm_apid: u16,
+        pub(crate) verification_handler: StdVerifReporterWithSender,
+        pub(crate) stamp_buf: [u8; 7],
+        pub(crate) pus_buf: [u8; 2048],
+        pus_size: usize,
+    }
+
+    impl PusServiceBase {
+        pub fn new(
+            receiver: mpsc::Receiver<AcceptedTc>,
+            tc_pool: SharedPool,
+            tm_tx: mpsc::Sender<StoreAddr>,
+            tm_store: SharedTmStore,
+            tm_apid: u16,
+            verification_handler: StdVerifReporterWithSender,
+        ) -> Self {
+            Self {
+                tc_rx: receiver,
+                tc_store: tc_pool,
+                tm_apid,
+                tm_tx,
+                tm_store,
+                verification_handler,
+                stamp_buf: [0; 7],
+                pus_buf: [0; 2048],
+                pus_size: 0,
+            }
+        }
+
+        pub fn update_stamp(&mut self) -> Result<(), PartialPusHandlingError> {
+            let time_provider =
+                TimeProvider::from_now_with_u16_days().map_err(PartialPusHandlingError::TimeError);
+            if let Ok(time_provider) = time_provider {
+                time_provider.write_to_bytes(&mut self.stamp_buf).unwrap();
+                Ok(())
+            } else {
+                self.stamp_buf = [0; 7];
+                Err(time_provider.unwrap_err())
+            }
+        }
+    }
+
+    pub trait PusServiceHandler {
+        fn psb_mut(&mut self) -> &mut PusServiceBase;
+        fn psb(&self) -> &PusServiceBase;
+        fn verification_reporter(&mut self) -> &mut StdVerifReporterWithSender {
+            &mut self.psb_mut().verification_handler
+        }
+        fn tc_store(&mut self) -> &mut SharedPool {
+            &mut self.psb_mut().tc_store
+        }
+        fn pus_tc_buf(&self) -> (&[u8], usize) {
+            (&self.psb().pus_buf, self.psb().pus_size)
+        }
+        fn handle_one_tc(
+            &mut self,
+            addr: StoreAddr,
+            token: VerificationToken<TcStateAccepted>,
+        ) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
+        fn handle_next_packet(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+            return match self.psb().tc_rx.try_recv() {
+                Ok((addr, token)) => self.handle_one_tc(addr, token),
+                Err(e) => match e {
+                    mpsc::TryRecvError::Empty => Ok(PusPacketHandlerResult::Empty),
+                    mpsc::TryRecvError::Disconnected => {
+                        Err(PusPacketHandlingError::QueueDisconnected)
+                    }
+                },
+            };
+        }
+    }
 }
 
 pub(crate) fn source_buffer_large_enough(cap: usize, len: usize) -> Result<(), EcssTmtcError> {

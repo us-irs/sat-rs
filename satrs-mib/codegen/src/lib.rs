@@ -20,7 +20,7 @@ pub fn resultcode(
     let item = parse_macro_input!(item as ItemConst);
 
     // Generate additional generated info struct used for introspection.
-    let result_code_name = item.ident.clone();
+    let result_code_name = &item.ident;
     let name_as_str = result_code_name.to_string();
     let gen_struct_name = format_ident!("{}_EXT", result_code_name);
     let info_str = info_str.map_or(String::from(""), |v| v.value());

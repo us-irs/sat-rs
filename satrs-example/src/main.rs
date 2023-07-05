@@ -9,7 +9,7 @@ use log::{info, warn};
 
 use crate::hk::AcsHkIds;
 use crate::logging::setup_logger;
-use crate::pus::test::{PusService17TestHandler, Service17CustomWrapper};
+use crate::pus::test::Service17CustomWrapper;
 use crate::pus::PusTcMpscRouter;
 use crate::requests::{Request, RequestWithToken};
 use crate::tmtc::{
@@ -26,25 +26,25 @@ use satrs_core::pus::event_man::{
     PusEventDispatcher,
 };
 use satrs_core::pus::hk::Subservice as HkSubservice;
+use satrs_core::pus::test::PusService17TestHandler;
 use satrs_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
 };
 use satrs_core::pus::MpscTmtcInStoreSender;
 use satrs_core::seq_count::{SeqCountProviderSimple, SeqCountProviderSyncClonable};
-use satrs_core::spacepackets::tc::{GenericPusTcSecondaryHeader, PusTc};
 use satrs_core::spacepackets::{
     time::cds::TimeProvider,
     time::TimeWriter,
     tm::{PusTm, PusTmSecondaryHeader},
     SequenceFlags, SpHeader,
 };
-use satrs_core::tmtc::tm_helper::{PusTmWithCdsShortHelper, SharedTmStore};
+use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::AddressableId;
-use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT, TEST_EVENT};
+use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};
-use std::sync::{mpsc, Arc, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -167,13 +167,13 @@ fn main() {
         hk_service_receiver: pus_hk_tx,
         action_service_receiver: pus_action_tx,
     };
-    let mut pus17_handler = PusService17TestHandler::new(
+    let pus17_handler = PusService17TestHandler::new(
         pus_test_rx,
         tc_store.pool.clone(),
         tm_funnel_tx.clone(),
         tm_store.clone(),
         PUS_APID,
-        verif_reporter.clone(),
+        verif_reporter,
     );
     let mut srv_17_wrapper = Service17CustomWrapper {
         pus17_handler,

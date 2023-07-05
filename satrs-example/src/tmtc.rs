@@ -8,7 +8,6 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 use std::rc::Rc;
-use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
@@ -18,15 +17,14 @@ use crate::pus::{PusReceiver, PusTcArgs, PusTcMpscRouter, PusTmArgs};
 use crate::requests::RequestWithToken;
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::event_man::EventRequestWithToken;
-use satrs_core::pus::scheduling::{PusScheduler, TcInfo};
+use satrs_core::pus::scheduler::{PusScheduler, TcInfo};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::seq_count::SeqCountProviderSyncClonable;
-use satrs_core::spacepackets::ecss::SerializablePusPacket;
-use satrs_core::spacepackets::{ecss::PusPacket, tc::PusTc, tm::PusTm, SpHeader};
+use satrs_core::spacepackets::ecss::{PusPacket, SerializablePusPacket};
+use satrs_core::spacepackets::tc::PusTc;
+use satrs_core::spacepackets::SpHeader;
 use satrs_core::tmtc::tm_helper::SharedTmStore;
-use satrs_core::tmtc::{
-    CcsdsDistributor, CcsdsError, PusServiceProvider, ReceivesCcsdsTc, ReceivesEcssPusTc,
-};
+use satrs_core::tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc, ReceivesEcssPusTc};
 
 pub const PUS_APID: u16 = 0x02;
 
@@ -162,7 +160,6 @@ pub fn core_tmtc_task(
         PusScheduler::new_with_current_init_time(Duration::from_secs(5)).unwrap(),
     ));
 
-    let sched_clone = scheduler.clone();
     let pus_tm_args = PusTmArgs {
         tm_tx: tm_args.tm_sink_sender,
         tm_store: tm_args.tm_store.clone(),
