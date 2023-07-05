@@ -12,6 +12,8 @@ use spacepackets::SpHeader;
 use std::format;
 use std::sync::mpsc::{Receiver, Sender};
 
+/// This is a helper class for [std] environments to handle generic PUS 17 (test service) packets.
+/// This handler only processes ping requests and generates a ping reply for them accordingly.
 pub struct PusService17TestHandler {
     psb: PusServiceBase,
 }

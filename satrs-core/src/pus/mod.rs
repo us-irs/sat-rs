@@ -1,4 +1,7 @@
 //! # PUS support modules
+//!
+//! This module contains structures to make working with the PUS C standard easier.
+//! The satrs-example application contains various usage examples of these components.
 #[cfg(feature = "alloc")]
 use downcast_rs::{impl_downcast, Downcast};
 #[cfg(feature = "alloc")]
@@ -296,6 +299,8 @@ pub mod std_mod {
         InvalidSubservice(u8),
         #[error("Not enough application data available: {0}")]
         NotEnoughAppData(String),
+        #[error("Invalid application data")]
+        InvalidAppData(String),
         #[error("Generic store error: {0}")]
         StoreError(#[from] StoreError),
         #[error("Error with the pool RwGuard: {0}")]
@@ -318,6 +323,7 @@ pub mod std_mod {
         VerificationError,
     }
 
+    /// Generic result type for handlers which can process PUS packets.
     #[derive(Debug, Clone)]
     pub enum PusPacketHandlerResult {
         RequestHandled,
@@ -333,8 +339,13 @@ pub mod std_mod {
         }
     }
 
+    /// Generic abstraction for a telecommand being sent around after is has been accepted.
+    /// The actual telecommand is stored inside a pre-allocated pool structure.
     pub type AcceptedTc = (StoreAddr, VerificationToken<TcStateAccepted>);
 
+    /// Base class for handlers which can handle PUS TC packets. Right now, the message queue
+    /// backend is constrained to [mpsc::channel]s and the verification reporter
+    /// is constrained to the [StdVerifReporterWithSender].
     pub struct PusServiceBase {
         pub tc_rx: mpsc::Receiver<AcceptedTc>,
         pub tc_store: SharedPool,
@@ -383,6 +394,7 @@ pub mod std_mod {
             }
             time_stamp
         }
+
         pub fn get_current_timestamp_ignore_error(&self) -> [u8; 7] {
             let mut dummy = None;
             self.get_current_timestamp(&mut dummy)

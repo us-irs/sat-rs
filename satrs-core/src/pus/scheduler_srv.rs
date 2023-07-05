@@ -10,6 +10,14 @@ use spacepackets::tc::PusTc;
 use spacepackets::time::cds::TimeProvider;
 use std::sync::mpsc::{Receiver, Sender};
 
+/// This is a helper class for [std] environments to handle generic PUS 11 (scheduling service)
+/// packets. This handler is constrained to using the [PusScheduler], but is able to process
+/// the most important PUS requests for a scheduling service.
+///
+/// Please note that this class does not do the regular periodic handling like releasing any
+/// telecommands inside the scheduler. The user can retrieve the wrapped scheduler via the
+/// [Self::scheduler] and [Self::scheduler_mut] function and then use the scheduler API to release
+/// telecommands when applicable.
 pub struct PusService11SchedHandler {
     psb: PusServiceBase,
     scheduler: PusScheduler,
@@ -40,6 +48,10 @@ impl PusService11SchedHandler {
 
     pub fn scheduler_mut(&mut self) -> &mut PusScheduler {
         &mut self.scheduler
+    }
+
+    pub fn scheduler(&self) -> &PusScheduler {
+        &self.scheduler
     }
 }
 
