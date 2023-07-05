@@ -388,7 +388,6 @@ fn main() {
                     break;
                 }
             }
-
             thread::sleep(Duration::from_millis(200));
         })
         .unwrap();

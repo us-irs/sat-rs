@@ -69,9 +69,9 @@ impl Service17CustomWrapper {
                 }
             }
             PusPacketHandlerResult::Empty => {
-                return false;
+                return true;
             }
         }
-        true
+        false
     }
 }
