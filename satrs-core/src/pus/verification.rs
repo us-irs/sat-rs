@@ -944,6 +944,8 @@ mod alloc_mod {
     #[derive(Clone)]
     pub struct VerificationReporter {
         source_data_buf: Vec<u8>,
+        //pub seq_count_provider: Option<Box<dyn >>
+        //pub msg_count_provider: Option<Box<dyn SequenceCountProvider<u16>>>,
         pub reporter: VerificationReporterCore,
     }
 

@@ -36,7 +36,7 @@ use satrs_core::pus::verification::{
     MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
 };
 use satrs_core::pus::MpscTmtcInStoreSender;
-use satrs_core::seq_count::{SeqCountProviderSimple, SequenceCountProviderCore};
+use satrs_core::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore};
 use satrs_core::spacepackets::tm::PusTmZeroCopyWriter;
 use satrs_core::spacepackets::{
     time::cds::TimeProvider,
@@ -79,7 +79,7 @@ fn main() {
         pool: Arc::new(RwLock::new(Box::new(tc_pool))),
     };
 
-    let seq_count_provider = SeqCountProviderSimple::new();
+    let seq_count_provider = CcsdsSimpleSeqCountProvider::new();
     let mut msg_counter_map: HashMap<u8, u16> = HashMap::new();
     let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
     let (tc_source_tx, tc_source_rx) = channel();
