@@ -116,12 +116,13 @@ mod tests {
     use crate::pool::{LocalPool, PoolCfg, SharedPool};
     use crate::pus::test::PusService17TestHandler;
     use crate::pus::verification::{
-        MpscVerifSender, StdVerifReporterWithSender, VerificationReporterCfg,
+        MpscVerifSender, RequestId, StdVerifReporterWithSender, VerificationReporterCfg,
     };
     use crate::pus::PusServiceHandler;
     use crate::tmtc::tm_helper::SharedTmStore;
-    use spacepackets::ecss::SerializablePusPacket;
+    use spacepackets::ecss::{PusPacket, SerializablePusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
+    use spacepackets::tm::PusTm;
     use spacepackets::{SequenceFlags, SpHeader};
     use std::boxed::Box;
     use std::sync::{mpsc, RwLock};
@@ -130,14 +131,14 @@ mod tests {
     const TEST_APID: u16 = 0x101;
 
     #[test]
-    fn test_basic() {
+    fn test_basic_ping_processing() {
         let mut pus_buf: [u8; 64] = [0; 64];
         let pool_cfg = PoolCfg::new(vec![(16, 16), (8, 32), (4, 64)]);
         let tc_pool = LocalPool::new(pool_cfg.clone());
         let tm_pool = LocalPool::new(pool_cfg);
         let tc_pool_shared = SharedPool::new(RwLock::new(Box::new(tc_pool)));
         let tm_pool_shared = SharedPool::new(RwLock::new(Box::new(tm_pool)));
-        let shared_tm_store = SharedTmStore::new(tm_pool_shared);
+        let shared_tm_store = SharedTmStore::new(tm_pool_shared.clone());
         let (test_srv_tx, test_srv_rx) = mpsc::channel();
         let (tm_tx, tm_rx) = mpsc::channel();
         let verif_sender = MpscVerifSender::new(
@@ -175,5 +176,50 @@ mod tests {
         assert!(result.is_ok());
         // We should see 4 replies in the TM queue now: Acceptance TM, Start TM, ping reply and
         // Completion TM
+        let mut next_msg = tm_rx.try_recv();
+        assert!(next_msg.is_ok());
+        let mut tm_addr = next_msg.unwrap();
+        let tm_pool = tm_pool_shared.read().unwrap();
+        let tm_raw = tm_pool.read(&tm_addr).unwrap();
+        let (tm, _) = PusTm::from_bytes(&tm_raw, 0).unwrap();
+        assert_eq!(tm.service(), 1);
+        assert_eq!(tm.subservice(), 1);
+        let req_id = RequestId::from_bytes(tm.user_data().unwrap()).unwrap();
+        assert_eq!(req_id, token.req_id());
+
+        // Acceptance TM
+        next_msg = tm_rx.try_recv();
+        assert!(next_msg.is_ok());
+        tm_addr = next_msg.unwrap();
+        let tm_raw = tm_pool.read(&tm_addr).unwrap();
+        // Is generated with CDS short timestamp.
+        let (tm, _) = PusTm::from_bytes(&tm_raw, 7).unwrap();
+        assert_eq!(tm.service(), 1);
+        assert_eq!(tm.subservice(), 3);
+        let req_id = RequestId::from_bytes(tm.user_data().unwrap()).unwrap();
+        assert_eq!(req_id, token.req_id());
+
+        // Ping reply
+        next_msg = tm_rx.try_recv();
+        assert!(next_msg.is_ok());
+        tm_addr = next_msg.unwrap();
+        let tm_raw = tm_pool.read(&tm_addr).unwrap();
+        // Is generated with CDS short timestamp.
+        let (tm, _) = PusTm::from_bytes(&tm_raw, 7).unwrap();
+        assert_eq!(tm.service(), 17);
+        assert_eq!(tm.subservice(), 2);
+        assert!(tm.user_data().is_none());
+
+        // TM completion
+        next_msg = tm_rx.try_recv();
+        assert!(next_msg.is_ok());
+        tm_addr = next_msg.unwrap();
+        let tm_raw = tm_pool.read(&tm_addr).unwrap();
+        // Is generated with CDS short timestamp.
+        let (tm, _) = PusTm::from_bytes(&tm_raw, 7).unwrap();
+        assert_eq!(tm.service(), 1);
+        assert_eq!(tm.subservice(), 7);
+        let req_id = RequestId::from_bytes(tm.user_data().unwrap()).unwrap();
+        assert_eq!(req_id, token.req_id());
     }
 }
