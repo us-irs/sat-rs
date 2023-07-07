@@ -122,6 +122,10 @@ pub mod stdmod {
     macro_rules! sync_clonable_seq_counter_impl {
          ($($ty: ident,)+) => {
              $(paste! {
+                 /// These sequence counters can be shared between threads and can also be
+                 /// configured to wrap around at specified maximum values. Please note that
+                 /// that the API provided by this class will not panic und [Mutex] lock errors,
+                 /// but it will yield 0 for the getter functions.
                  #[derive(Clone, Default)]
                  pub struct [<SeqCountProviderSync $ty:upper>] {
                      seq_count: Arc<Mutex<$ty>>,
@@ -142,7 +146,10 @@ pub mod stdmod {
                  }
                  impl SequenceCountProviderCore<$ty> for [<SeqCountProviderSync $ty:upper>] {
                     fn get(&self) -> $ty {
-                        *self.seq_count.lock().unwrap()
+                        match self.seq_count.lock() {
+                            Ok(counter) => *counter,
+                            Err(_) => 0
+                        }
                     }
 
                     fn increment(&self) {
@@ -150,14 +157,18 @@ pub mod stdmod {
                     }
 
                     fn get_and_increment(&self) -> $ty {
-                        let mut counter = self.seq_count.lock().unwrap();
-                        let current_val = *counter;
-                        if *counter == self.max_val {
-                            *counter = 0;
-                        } else {
-                            *counter += 1;
+                        match self.seq_count.lock() {
+                            Ok(mut counter) => {
+                                let val = *counter;
+                                if val == self.max_val {
+                                    *counter = 0;
+                                } else {
+                                    *counter += 1;
+                                }
+                                val
+                            }
+                            Err(_) => 0,
                         }
-                        current_val
                     }
                  }
              })+
