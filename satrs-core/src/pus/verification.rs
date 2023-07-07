@@ -906,6 +906,7 @@ impl VerificationReporterCore {
 mod alloc_mod {
     use super::*;
     use crate::pus::alloc_mod::EcssTmSender;
+    use crate::seq_count::SequenceCountProvider;
     use alloc::boxed::Box;
     use alloc::vec;
     use alloc::vec::Vec;
@@ -944,8 +945,8 @@ mod alloc_mod {
     #[derive(Clone)]
     pub struct VerificationReporter {
         source_data_buf: Vec<u8>,
-        //pub seq_count_provider: Option<Box<dyn >>
-        //pub msg_count_provider: Option<Box<dyn SequenceCountProvider<u16>>>,
+        pub seq_count_provider: Option<Box<dyn SequenceCountProvider<u16> + Send>>,
+        pub msg_count_provider: Option<Box<dyn SequenceCountProvider<u16> + Send>>,
         pub reporter: VerificationReporterCore,
     }
 
@@ -960,6 +961,8 @@ mod alloc_mod {
                         + cfg.fail_code_field_width
                         + cfg.max_fail_data_len
                 ],
+                seq_count_provider: None,
+                msg_count_provider: None,
                 reporter,
             }
         }
@@ -989,11 +992,19 @@ mod alloc_mod {
             VerificationToken<TcStateAccepted>,
             VerificationOrSendErrorWithToken<E, TcStateNone>,
         > {
+            let seq_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
+            let msg_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
             let sendable = self.reporter.acceptance_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                0,
-                0,
+                seq_count,
+                msg_count,
                 time_stamp,
             )?;
             self.reporter.send_acceptance_success(sendable, sender)
@@ -1006,11 +1017,19 @@ mod alloc_mod {
             sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
             params: FailParams,
         ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateNone>> {
+            let seq_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
+            let msg_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
             let sendable = self.reporter.acceptance_failure(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                0,
-                0,
+                seq_count,
+                msg_count,
                 params,
             )?;
             self.reporter.send_acceptance_failure(sendable, sender)
@@ -1028,11 +1047,19 @@ mod alloc_mod {
             VerificationToken<TcStateStarted>,
             VerificationOrSendErrorWithToken<E, TcStateAccepted>,
         > {
+            let seq_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
+            let msg_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
             let sendable = self.reporter.start_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                0,
-                0,
+                seq_count,
+                msg_count,
                 time_stamp,
             )?;
             self.reporter.send_start_success(sendable, sender)
@@ -1048,11 +1075,19 @@ mod alloc_mod {
             sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
             params: FailParams,
         ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateAccepted>> {
+            let seq_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
+            let msg_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
             let sendable = self.reporter.start_failure(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                0,
-                0,
+                seq_count,
+                msg_count,
                 params,
             )?;
             self.reporter.send_start_failure(sendable, sender)
@@ -1068,11 +1103,19 @@ mod alloc_mod {
             time_stamp: Option<&[u8]>,
             step: impl EcssEnumeration,
         ) -> Result<(), EcssTmtcErrorWithSend<E>> {
+            let seq_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
+            let msg_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
             let sendable = self.reporter.step_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                0,
-                0,
+                seq_count,
+                msg_count,
                 time_stamp,
                 step,
             )?;
@@ -1091,11 +1134,19 @@ mod alloc_mod {
             sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
             params: FailParamsWithStep,
         ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateStarted>> {
+            let seq_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
+            let msg_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
             let sendable = self.reporter.step_failure(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                0,
-                0,
+                seq_count,
+                msg_count,
                 params,
             )?;
             self.reporter
@@ -1112,11 +1163,19 @@ mod alloc_mod {
             sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
             time_stamp: Option<&[u8]>,
         ) -> Result<(), VerificationOrSendErrorWithToken<E, TcState>> {
+            let seq_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
+            let msg_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
             let sendable = self.reporter.completion_success(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                0,
-                0,
+                seq_count,
+                msg_count,
                 time_stamp,
             )?;
             self.reporter
@@ -1133,11 +1192,19 @@ mod alloc_mod {
             sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
             params: FailParams,
         ) -> Result<(), VerificationOrSendErrorWithToken<E, TcState>> {
+            let seq_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
+            let msg_count = self
+                .seq_count_provider
+                .as_ref()
+                .map_or(0, |v| v.get_and_increment());
             let sendable = self.reporter.completion_failure(
                 self.source_data_buf.as_mut_slice(),
                 token,
-                0,
-                0,
+                seq_count,
+                msg_count,
                 params,
             )?;
             self.reporter
