@@ -110,3 +110,70 @@ impl PusServiceHandler for PusService17TestHandler {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::pool::{LocalPool, PoolCfg, SharedPool};
+    use crate::pus::test::PusService17TestHandler;
+    use crate::pus::verification::{
+        MpscVerifSender, StdVerifReporterWithSender, VerificationReporterCfg,
+    };
+    use crate::pus::PusServiceHandler;
+    use crate::tmtc::tm_helper::SharedTmStore;
+    use spacepackets::ecss::SerializablePusPacket;
+    use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
+    use spacepackets::{SequenceFlags, SpHeader};
+    use std::boxed::Box;
+    use std::sync::{mpsc, RwLock};
+    use std::vec;
+
+    const TEST_APID: u16 = 0x101;
+
+    #[test]
+    fn test_basic() {
+        let mut pus_buf: [u8; 64] = [0; 64];
+        let pool_cfg = PoolCfg::new(vec![(16, 16), (8, 32), (4, 64)]);
+        let tc_pool = LocalPool::new(pool_cfg.clone());
+        let tm_pool = LocalPool::new(pool_cfg);
+        let tc_pool_shared = SharedPool::new(RwLock::new(Box::new(tc_pool)));
+        let tm_pool_shared = SharedPool::new(RwLock::new(Box::new(tm_pool)));
+        let shared_tm_store = SharedTmStore::new(tm_pool_shared);
+        let (test_srv_tx, test_srv_rx) = mpsc::channel();
+        let (tm_tx, tm_rx) = mpsc::channel();
+        let verif_sender = MpscVerifSender::new(
+            0,
+            "verif_sender",
+            shared_tm_store.backing_pool(),
+            tm_tx.clone(),
+        );
+        let verif_cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
+        let mut verification_handler =
+            StdVerifReporterWithSender::new(&verif_cfg, Box::new(verif_sender));
+        let mut pus_17_handler = PusService17TestHandler::new(
+            test_srv_rx,
+            tc_pool_shared.clone(),
+            tm_tx,
+            shared_tm_store,
+            TEST_APID,
+            verification_handler.clone(),
+        );
+        // Create a ping TC, verify acceptance.
+        let mut sp_header = SpHeader::tc(TEST_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
+        let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let ping_tc = PusTc::new(&mut sp_header, sec_header, None, true);
+        let token = verification_handler.add_tc(&ping_tc);
+        let token = verification_handler
+            .acceptance_success(token, None)
+            .unwrap();
+        let tc_size = ping_tc.write_to_bytes(&mut pus_buf).unwrap();
+        let mut tc_pool = tc_pool_shared.write().unwrap();
+        let addr = tc_pool.add(&pus_buf[..tc_size]).unwrap();
+        drop(tc_pool);
+        // Send accepted TC to test service handler.
+        test_srv_tx.send((addr, token)).unwrap();
+        let result = pus_17_handler.handle_next_packet();
+        assert!(result.is_ok());
+        // We should see 4 replies in the TM queue now: Acceptance TM, Start TM, ping reply and
+        // Completion TM
+    }
+}
