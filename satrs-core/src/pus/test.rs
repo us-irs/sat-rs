@@ -116,9 +116,9 @@ mod tests {
     use crate::pool::{LocalPool, PoolCfg, SharedPool};
     use crate::pus::test::PusService17TestHandler;
     use crate::pus::verification::{
-        MpscVerifSender, RequestId, StdVerifReporterWithSender, VerificationReporterCfg,
+        RequestId, StdVerifReporterWithSender, VerificationReporterCfg,
     };
-    use crate::pus::PusServiceHandler;
+    use crate::pus::{MpscTmInStoreSender, PusServiceHandler};
     use crate::tmtc::tm_helper::SharedTmStore;
     use spacepackets::ecss::{PusPacket, SerializablePusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
@@ -141,7 +141,7 @@ mod tests {
         let shared_tm_store = SharedTmStore::new(tm_pool_shared.clone());
         let (test_srv_tx, test_srv_rx) = mpsc::channel();
         let (tm_tx, tm_rx) = mpsc::channel();
-        let verif_sender = MpscVerifSender::new(
+        let verif_sender = MpscTmInStoreSender::new(
             0,
             "verif_sender",
             shared_tm_store.backing_pool(),

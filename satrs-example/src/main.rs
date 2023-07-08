@@ -32,10 +32,8 @@ use satrs_core::pus::hk::Subservice as HkSubservice;
 use satrs_core::pus::scheduler::PusScheduler;
 use satrs_core::pus::scheduler_srv::PusService11SchedHandler;
 use satrs_core::pus::test::PusService17TestHandler;
-use satrs_core::pus::verification::{
-    MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
-};
-use satrs_core::pus::MpscTmtcInStoreSender;
+use satrs_core::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
+use satrs_core::pus::MpscTmInStoreSender;
 use satrs_core::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore};
 use satrs_core::spacepackets::tm::PusTmZeroCopyWriter;
 use satrs_core::spacepackets::{
@@ -85,7 +83,7 @@ fn main() {
     let (tc_source_tx, tc_source_rx) = channel();
     let (tm_funnel_tx, tm_funnel_rx) = channel();
     let (tm_server_tx, tm_server_rx) = channel();
-    let verif_sender = MpscVerifSender::new(
+    let verif_sender = MpscTmInStoreSender::new(
         0,
         "verif_sender",
         tm_store.backing_pool(),
@@ -271,7 +269,7 @@ fn main() {
         .name("Event".to_string())
         .spawn(move || {
             let mut timestamp: [u8; 7] = [0; 7];
-            let mut sender = MpscTmtcInStoreSender::new(
+            let mut sender = MpscTmInStoreSender::new(
                 1,
                 "event_sender",
                 tm_store_event.backing_pool(),

@@ -16,8 +16,9 @@
 //! use std::sync::{Arc, mpsc, RwLock};
 //! use std::time::Duration;
 //! use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
-//! use satrs_core::pus::verification::{MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender};
+//! use satrs_core::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
 //! use satrs_core::seq_count::SeqCountProviderSimple;
+//! use satrs_core::pus::MpscTmInStoreSender;
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
 //! use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
@@ -29,7 +30,7 @@
 //! let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
 //! let shared_tm_pool: SharedPool = Arc::new(RwLock::new(Box::new(LocalPool::new(pool_cfg.clone()))));
 //! let (verif_tx, verif_rx) = mpsc::channel();
-//! let sender = MpscVerifSender::new(0, "Test Sender", shared_tm_pool.clone(), verif_tx);
+//! let sender = MpscTmInStoreSender::new(0, "Test Sender", shared_tm_pool.clone(), verif_tx);
 //! let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
 //! let mut  reporter = VerificationReporterWithSender::new(&cfg , Box::new(sender));
 //!
@@ -96,11 +97,8 @@ pub use spacepackets::ecss::verification::*;
 pub use alloc_mod::{
     VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
 };
-
-#[cfg(all(feature = "crossbeam", feature = "std"))]
-pub use stdmod::CrossbeamVerifSender;
 #[cfg(feature = "std")]
-pub use stdmod::{MpscVerifSender, SharedStdVerifReporterWithSender, StdVerifReporterWithSender};
+pub use std_mod::*;
 
 /// This is a request identifier as specified in 5.4.11.2 c. of the PUS standard.
 ///
@@ -523,7 +521,7 @@ impl VerificationReporterCore {
     ) -> Result<VerificationToken<TcStateAccepted>, VerificationOrSendErrorWithToken<E, TcStateNone>>
     {
         sender
-            .send_tm(sendable.pus_tm.take().unwrap())
+            .send_tm(sendable.pus_tm.take().unwrap().into())
             .map_err(|e| {
                 VerificationOrSendErrorWithToken(
                     EcssTmtcErrorWithSend::SendError(e),
@@ -539,7 +537,7 @@ impl VerificationReporterCore {
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateNone>> {
         sender
-            .send_tm(sendable.pus_tm.take().unwrap())
+            .send_tm(sendable.pus_tm.take().unwrap().into())
             .map_err(|e| {
                 VerificationOrSendErrorWithToken(
                     EcssTmtcErrorWithSend::SendError(e),
@@ -606,7 +604,7 @@ impl VerificationReporterCore {
         VerificationOrSendErrorWithToken<E, TcStateAccepted>,
     > {
         sender
-            .send_tm(sendable.pus_tm.take().unwrap())
+            .send_tm(sendable.pus_tm.take().unwrap().into())
             .map_err(|e| {
                 VerificationOrSendErrorWithToken(
                     EcssTmtcErrorWithSend::SendError(e),
@@ -648,7 +646,7 @@ impl VerificationReporterCore {
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcStateAccepted>> {
         sender
-            .send_tm(sendable.pus_tm.take().unwrap())
+            .send_tm(sendable.pus_tm.take().unwrap().into())
             .map_err(|e| {
                 VerificationOrSendErrorWithToken(
                     EcssTmtcErrorWithSend::SendError(e),
@@ -771,7 +769,7 @@ impl VerificationReporterCore {
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcState>> {
         sender
-            .send_tm(sendable.pus_tm.take().unwrap())
+            .send_tm(sendable.pus_tm.take().unwrap().into())
             .map_err(|e| {
                 VerificationOrSendErrorWithToken(
                     EcssTmtcErrorWithSend::SendError(e),
@@ -788,7 +786,7 @@ impl VerificationReporterCore {
         sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
     ) -> Result<(), VerificationOrSendErrorWithToken<E, TcState>> {
         sender
-            .send_tm(sendable.pus_tm.take().unwrap())
+            .send_tm(sendable.pus_tm.take().unwrap().into())
             .map_err(|e| {
                 VerificationOrSendErrorWithToken(
                     EcssTmtcErrorWithSend::SendError(e),
@@ -1329,180 +1327,197 @@ mod alloc_mod {
 }
 
 #[cfg(feature = "std")]
-mod stdmod {
-    use super::alloc_mod::VerificationReporterWithSender;
-    use super::*;
-    use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr};
-    use crate::pus::{EcssSender, MpscPusInStoreSendError};
-    use crate::SenderId;
-    use delegate::delegate;
-    use spacepackets::ecss::SerializablePusPacket;
-    use spacepackets::tm::PusTm;
-    use std::sync::{mpsc, Arc, Mutex, RwLockWriteGuard};
+mod std_mod {
+    use crate::pus::verification::VerificationReporterWithSender;
+    use crate::pus::MpscTmInStoreSenderError;
+    use std::sync::{Arc, Mutex};
 
-    pub type StdVerifReporterWithSender = VerificationReporterWithSender<MpscPusInStoreSendError>;
+    //     use super::alloc_mod::VerificationReporterWithSender;
+    //     use super::*;
+    //     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr};
+    //     use crate::pus::{EcssSender, MpscPusInStoreSendError, PusTmWrapper};
+    //     use crate::SenderId;
+    //     use delegate::delegate;
+    //     use spacepackets::ecss::SerializablePusPacket;
+    //     use std::sync::{mpsc, Arc, Mutex, RwLockWriteGuard};
+    //
+    pub type StdVerifReporterWithSender = VerificationReporterWithSender<MpscTmInStoreSenderError>;
     pub type SharedStdVerifReporterWithSender = Arc<Mutex<StdVerifReporterWithSender>>;
-
-    trait SendBackend: Send {
-        fn send(&self, addr: StoreAddr) -> Result<(), StoreAddr>;
-    }
-
-    #[derive(Clone)]
-    struct StdSenderBase<S> {
-        id: SenderId,
-        name: &'static str,
-        tm_store: SharedPool,
-        tx: S,
-        pub ignore_poison_error: bool,
-    }
-
-    impl<S: SendBackend> StdSenderBase<S> {
-        pub fn new(id: SenderId, name: &'static str, tm_store: SharedPool, tx: S) -> Self {
-            Self {
-                id,
-                name,
-                tm_store,
-                tx,
-                ignore_poison_error: false,
-            }
-        }
-    }
-
-    unsafe impl<S: Sync> Sync for StdSenderBase<S> {}
-    unsafe impl<S: Send> Send for StdSenderBase<S> {}
-
-    impl SendBackend for mpsc::Sender<StoreAddr> {
-        fn send(&self, addr: StoreAddr) -> Result<(), StoreAddr> {
-            self.send(addr).map_err(|_| addr)
-        }
-    }
-
-    #[derive(Clone)]
-    pub struct MpscVerifSender {
-        base: StdSenderBase<mpsc::Sender<StoreAddr>>,
-    }
-
-    /// Verification sender with a [mpsc::Sender] backend.
-    /// It implements the [EcssTmSenderCore] trait to be used as PUS Verification TM sender.
-    impl MpscVerifSender {
-        pub fn new(
-            id: SenderId,
-            name: &'static str,
-            tm_store: SharedPool,
-            tx: mpsc::Sender<StoreAddr>,
-        ) -> Self {
-            Self {
-                base: StdSenderBase::new(id, name, tm_store, tx),
-            }
-        }
-    }
-
-    //noinspection RsTraitImplementation
-    impl EcssSender for MpscVerifSender {
-        delegate!(
-            to self.base {
-                fn id(&self) -> SenderId;
-                fn name(&self) -> &'static str;
-            }
-        );
-    }
-
-    //noinspection RsTraitImplementation
-    impl EcssTmSenderCore for MpscVerifSender {
-        type Error = MpscPusInStoreSendError;
-
-        delegate!(
-            to self.base {
-                fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error>;
-            }
-        );
-    }
-
-    impl SendBackend for crossbeam_channel::Sender<StoreAddr> {
-        fn send(&self, addr: StoreAddr) -> Result<(), StoreAddr> {
-            self.send(addr).map_err(|_| addr)
-        }
-    }
-
-    /// Verification sender with a [crossbeam_channel::Sender] backend.
-    /// It implements the [EcssTmSenderCore] trait to be used as PUS Verification TM sender
-    #[cfg(feature = "crossbeam")]
-    #[derive(Clone)]
-    pub struct CrossbeamVerifSender {
-        base: StdSenderBase<crossbeam_channel::Sender<StoreAddr>>,
-    }
-
-    #[cfg(feature = "crossbeam")]
-    impl CrossbeamVerifSender {
-        pub fn new(
-            id: SenderId,
-            name: &'static str,
-            tm_store: SharedPool,
-            tx: crossbeam_channel::Sender<StoreAddr>,
-        ) -> Self {
-            Self {
-                base: StdSenderBase::new(id, name, tm_store, tx),
-            }
-        }
-    }
-
-    //noinspection RsTraitImplementation
-    #[cfg(feature = "crossbeam")]
-    impl EcssSender for CrossbeamVerifSender {
-        delegate!(
-            to self.base {
-                fn id(&self) -> SenderId;
-                fn name(&self) -> &'static str;
-            }
-        );
-    }
-
-    //noinspection RsTraitImplementation
-    #[cfg(feature = "crossbeam")]
-    impl EcssTmSenderCore for CrossbeamVerifSender {
-        type Error = MpscPusInStoreSendError;
-
-        delegate!(
-            to self.base {
-                fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error>;
-            }
-        );
-    }
-
-    impl<S: SendBackend + Clone + 'static> EcssSender for StdSenderBase<S> {
-        fn id(&self) -> SenderId {
-            self.id
-        }
-        fn name(&self) -> &'static str {
-            self.name
-        }
-    }
-    impl<S: SendBackend + Clone + 'static> EcssTmSenderCore for StdSenderBase<S> {
-        type Error = MpscPusInStoreSendError;
-
-        fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
-            let operation = |mut mg: RwLockWriteGuard<ShareablePoolProvider>| {
-                let (addr, buf) = mg.free_element(tm.len_packed())?;
-                tm.write_to_bytes(buf)
-                    .map_err(MpscPusInStoreSendError::PusError)?;
-                drop(mg);
-                self.tx
-                    .send(addr)
-                    .map_err(|_| MpscPusInStoreSendError::RxDisconnected(addr))?;
-                Ok(())
-            };
-            match self.tm_store.write() {
-                Ok(lock) => operation(lock),
-                Err(poison_error) => {
-                    if self.ignore_poison_error {
-                        operation(poison_error.into_inner())
-                    } else {
-                        Err(MpscPusInStoreSendError::LockError)
-                    }
-                }
-            }
-        }
-    }
+    //
+    //     trait SendBackend: Send {
+    //         type SendError: Debug;
+    //
+    //         fn send(&self, addr: StoreAddr) -> Result<(), Self::SendError>;
+    //     }
+    //
+    //     #[derive(Clone)]
+    //     struct StdSenderBase<S> {
+    //         id: SenderId,
+    //         name: &'static str,
+    //         tm_store: SharedPool,
+    //         tx: S,
+    //         pub ignore_poison_error: bool,
+    //     }
+    //
+    //     impl<S: SendBackend> StdSenderBase<S> {
+    //         pub fn new(id: SenderId, name: &'static str, tm_store: SharedPool, tx: S) -> Self {
+    //             Self {
+    //                 id,
+    //                 name,
+    //                 tm_store,
+    //                 tx,
+    //                 ignore_poison_error: false,
+    //             }
+    //         }
+    //     }
+    //
+    //     unsafe impl<S: Sync> Sync for StdSenderBase<S> {}
+    //     unsafe impl<S: Send> Send for StdSenderBase<S> {}
+    //
+    //     impl SendBackend for mpsc::Sender<StoreAddr> {
+    //         type SendError = mpsc::SendError<StoreAddr>;
+    //
+    //         fn send(&self, addr: StoreAddr) -> Result<(), Self::SendError> {
+    //             self.send(addr)
+    //         }
+    //     }
+    //
+    //     #[derive(Clone)]
+    //     pub struct MpscVerifSender {
+    //         base: StdSenderBase<mpsc::Sender<StoreAddr>>,
+    //     }
+    //
+    //     /// Verification sender with a [mpsc::Sender] backend.
+    //     /// It implements the [EcssTmSenderCore] trait to be used as PUS Verification TM sender.
+    //     impl MpscVerifSender {
+    //         pub fn new(
+    //             id: SenderId,
+    //             name: &'static str,
+    //             tm_store: SharedPool,
+    //             tx: mpsc::Sender<StoreAddr>,
+    //         ) -> Self {
+    //             Self {
+    //                 base: StdSenderBase::new(id, name, tm_store, tx),
+    //             }
+    //         }
+    //     }
+    //
+    //     //noinspection RsTraitImplementation
+    //     impl EcssSender for MpscVerifSender {
+    //         delegate!(
+    //             to self.base {
+    //                 fn id(&self) -> SenderId;
+    //                 fn name(&self) -> &'static str;
+    //             }
+    //         );
+    //     }
+    //
+    //     //noinspection RsTraitImplementation
+    //     impl EcssTmSenderCore for MpscVerifSender {
+    //         type Error = MpscPusInStoreSendError;
+    //
+    //         delegate!(
+    //             to self.base {
+    //                 fn send_tm(&self, tm: PusTmWrapper) -> Result<(), Self::Error>;
+    //             }
+    //         );
+    //     }
+    //
+    //     impl SendBackend for crossbeam_channel::Sender<StoreAddr> {
+    //         type SendError = crossbeam_channel::SendError<StoreAddr>;
+    //
+    //         fn send(&self, addr: StoreAddr) -> Result<(), Self::SendError> {
+    //             self.send(addr)
+    //         }
+    //     }
+    //
+    //     /// Verification sender with a [crossbeam_channel::Sender] backend.
+    //     /// It implements the [EcssTmSenderCore] trait to be used as PUS Verification TM sender
+    //     #[cfg(feature = "crossbeam")]
+    //     #[derive(Clone)]
+    //     pub struct CrossbeamVerifSender {
+    //         base: StdSenderBase<crossbeam_channel::Sender<StoreAddr>>,
+    //     }
+    //
+    //     #[cfg(feature = "crossbeam")]
+    //     impl CrossbeamVerifSender {
+    //         pub fn new(
+    //             id: SenderId,
+    //             name: &'static str,
+    //             tm_store: SharedPool,
+    //             tx: crossbeam_channel::Sender<StoreAddr>,
+    //         ) -> Self {
+    //             Self {
+    //                 base: StdSenderBase::new(id, name, tm_store, tx),
+    //             }
+    //         }
+    //     }
+    //
+    //     //noinspection RsTraitImplementation
+    //     #[cfg(feature = "crossbeam")]
+    //     impl EcssSender for CrossbeamVerifSender {
+    //         delegate!(
+    //             to self.base {
+    //                 fn id(&self) -> SenderId;
+    //                 fn name(&self) -> &'static str;
+    //             }
+    //         );
+    //     }
+    //
+    //     //noinspection RsTraitImplementation
+    //     #[cfg(feature = "crossbeam")]
+    //     impl EcssTmSenderCore for CrossbeamVerifSender {
+    //         type Error = MpscPusInStoreSendError;
+    //
+    //         delegate!(
+    //             to self.base {
+    //                 fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error>;
+    //             }
+    //         );
+    //     }
+    //
+    //     impl<S: SendBackend + Clone + 'static> EcssSender for StdSenderBase<S> {
+    //         fn id(&self) -> SenderId {
+    //             self.id
+    //         }
+    //         fn name(&self) -> &'static str {
+    //             self.name
+    //         }
+    //     }
+    //     impl<S: SendBackend + Clone + 'static> EcssTmSenderCore for StdSenderBase<S> {
+    //         type Error = MpscPusInStoreSendError;
+    //
+    //         fn send_tm(&self, tm: PusTmWrapper) -> Result<(), Self::Error> {
+    //             match tm {
+    //                 PusTmWrapper::InStore(addr) => {
+    //                     self.tx.send(addr).unwrap();
+    //                     Ok(())
+    //                 }
+    //                 PusTmWrapper::Direct(tm) => {
+    //                     let operation = |mut mg: RwLockWriteGuard<ShareablePoolProvider>| {
+    //                         let (addr, buf) = mg.free_element(tm.len_packed())?;
+    //                         tm.write_to_bytes(buf)
+    //                             .map_err(MpscPusInStoreSendError::Pus)?;
+    //                         drop(mg);
+    //                         self.tx
+    //                             .send(addr)
+    //                             .map_err(|_| MpscPusInStoreSendError::RxDisconnected(addr))?;
+    //                         Ok(())
+    //                     };
+    //                     match self.tm_store.write() {
+    //                         Ok(lock) => operation(lock),
+    //                         Err(poison_error) => {
+    //                             if self.ignore_poison_error {
+    //                                 operation(poison_error.into_inner())
+    //                             } else {
+    //                                 Err(MpscPusInStoreSendError::StoreLock)
+    //                             }
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
 }
 
 #[cfg(test)]
@@ -1510,11 +1525,11 @@ mod tests {
     use crate::pool::{LocalPool, PoolCfg, SharedPool};
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
-        EcssTmSenderCore, EcssTmtcError, FailParams, FailParamsWithStep, MpscVerifSender,
-        RequestId, TcStateNone, VerificationReporter, VerificationReporterCfg,
-        VerificationReporterWithSender, VerificationToken,
+        EcssTmSenderCore, EcssTmtcError, FailParams, FailParamsWithStep, RequestId, TcStateNone,
+        VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
+        VerificationToken,
     };
-    use crate::pus::{EcssSender, EcssTmtcErrorWithSend};
+    use crate::pus::{EcssSender, EcssTmtcErrorWithSend, MpscTmInStoreSender, PusTmWrapper};
     use crate::SenderId;
     use alloc::boxed::Box;
     use alloc::format;
@@ -1523,6 +1538,7 @@ mod tests {
     use spacepackets::tm::PusTm;
     use spacepackets::util::UnsignedEnum;
     use spacepackets::{ByteConversionError, CcsdsPacket, SpHeader};
+    use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::sync::{mpsc, Arc, RwLock};
     use std::time::Duration;
@@ -1545,7 +1561,7 @@ mod tests {
 
     #[derive(Default, Clone)]
     struct TestSender {
-        pub service_queue: VecDeque<TmInfo>,
+        pub service_queue: RefCell<VecDeque<TmInfo>>,
     }
 
     impl EcssSender for TestSender {
@@ -1560,26 +1576,34 @@ mod tests {
     impl EcssTmSenderCore for TestSender {
         type Error = ();
 
-        fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
-            assert_eq!(PusPacket::service(&tm), 1);
-            assert!(tm.source_data().is_some());
-            let mut time_stamp = [0; 7];
-            time_stamp.clone_from_slice(&tm.timestamp().unwrap()[0..7]);
-            let src_data = tm.source_data().unwrap();
-            assert!(src_data.len() >= 4);
-            let req_id = RequestId::from_bytes(&src_data[0..RequestId::SIZE_AS_BYTES]).unwrap();
-            let mut vec = None;
-            if src_data.len() > 4 {
-                let mut new_vec = Vec::new();
-                new_vec.extend_from_slice(&src_data[RequestId::SIZE_AS_BYTES..]);
-                vec = Some(new_vec);
+        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), Self::Error> {
+            match tm {
+                PusTmWrapper::InStore(_) => {
+                    panic!("TestSender: Can not deal with addresses");
+                }
+                PusTmWrapper::Direct(tm) => {
+                    assert_eq!(PusPacket::service(&tm), 1);
+                    assert!(tm.source_data().is_some());
+                    let mut time_stamp = [0; 7];
+                    time_stamp.clone_from_slice(&tm.timestamp().unwrap()[0..7]);
+                    let src_data = tm.source_data().unwrap();
+                    assert!(src_data.len() >= 4);
+                    let req_id =
+                        RequestId::from_bytes(&src_data[0..RequestId::SIZE_AS_BYTES]).unwrap();
+                    let mut vec = None;
+                    if src_data.len() > 4 {
+                        let mut new_vec = Vec::new();
+                        new_vec.extend_from_slice(&src_data[RequestId::SIZE_AS_BYTES..]);
+                        vec = Some(new_vec);
+                    }
+                    self.service_queue.borrow_mut().push_back(TmInfo {
+                        common: CommonTmInfo::new_from_tm(&tm),
+                        req_id,
+                        additional_data: vec,
+                    });
+                    Ok(())
+                }
             }
-            self.service_queue.push_back(TmInfo {
-                common: CommonTmInfo::new_from_tm(&tm),
-                req_id,
-                additional_data: vec,
-            });
-            Ok(())
         }
     }
 
@@ -1595,7 +1619,7 @@ mod tests {
     }
     impl EcssTmSenderCore for FallibleSender {
         type Error = DummyError;
-        fn send_tm(&mut self, _: PusTm) -> Result<(), Self::Error> {
+        fn send_tm(&self, _: PusTmWrapper) -> Result<(), Self::Error> {
             Err(DummyError {})
         }
     }
@@ -1672,8 +1696,9 @@ mod tests {
             additional_data: None,
             req_id: req_id.clone(),
         };
-        assert_eq!(sender.service_queue.len(), 1);
-        let info = sender.service_queue.pop_front().unwrap();
+        let mut service_queue = sender.service_queue.borrow_mut();
+        assert_eq!(service_queue.len(), 1);
+        let info = service_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
     }
 
@@ -1682,7 +1707,7 @@ mod tests {
         let pool = LocalPool::new(PoolCfg::new(vec![(8, 8)]));
         let shared_pool: SharedPool = Arc::new(RwLock::new(Box::new(pool)));
         let (tx, _) = mpsc::channel();
-        let mpsc_verif_sender = MpscVerifSender::new(0, "verif_sender", shared_pool, tx);
+        let mpsc_verif_sender = MpscTmInStoreSender::new(0, "verif_sender", shared_pool, tx);
         is_send(&mpsc_verif_sender);
     }
 
@@ -1742,8 +1767,9 @@ mod tests {
             additional_data: Some([0, 2].to_vec()),
             req_id,
         };
-        assert_eq!(sender.service_queue.len(), 1);
-        let info = sender.service_queue.pop_front().unwrap();
+        let mut service_queue = sender.service_queue.borrow_mut();
+        assert_eq!(service_queue.len(), 1);
+        let info = service_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
     }
 
@@ -1793,20 +1819,18 @@ mod tests {
         let err_with_token = res.unwrap_err();
         assert_eq!(err_with_token.1, tok);
         match err_with_token.0 {
-            EcssTmtcErrorWithSend::EcssTmtcError(EcssTmtcError::ByteConversionError(e)) => {
-                match e {
-                    ByteConversionError::ToSliceTooSmall(missmatch) => {
-                        assert_eq!(
-                            missmatch.expected,
-                            fail_data.len() + RequestId::SIZE_AS_BYTES + fail_code.size()
-                        );
-                        assert_eq!(missmatch.found, b.rep().allowed_source_data_len());
-                    }
-                    _ => {
-                        panic!("{}", format!("Unexpected error {:?}", e))
-                    }
+            EcssTmtcErrorWithSend::EcssTmtcError(EcssTmtcError::ByteConversion(e)) => match e {
+                ByteConversionError::ToSliceTooSmall(missmatch) => {
+                    assert_eq!(
+                        missmatch.expected,
+                        fail_data.len() + RequestId::SIZE_AS_BYTES + fail_code.size()
+                    );
+                    assert_eq!(missmatch.found, b.rep().allowed_source_data_len());
                 }
-            }
+                _ => {
+                    panic!("{}", format!("Unexpected error {:?}", e))
+                }
+            },
             _ => {
                 panic!("{}", format!("Unexpected error {:?}", err_with_token.0))
             }
@@ -1839,13 +1863,15 @@ mod tests {
             additional_data: Some([10, 0, 0, 0, 12].to_vec()),
             req_id: tok.req_id,
         };
-        assert_eq!(sender.service_queue.len(), 1);
-        let info = sender.service_queue.pop_front().unwrap();
+        let mut service_queue = sender.service_queue.borrow_mut();
+        assert_eq!(service_queue.len(), 1);
+        let info = service_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
     }
 
     fn start_fail_check(sender: &mut TestSender, req_id: RequestId, fail_data_raw: [u8; 4]) {
-        assert_eq!(sender.service_queue.len(), 2);
+        let mut srv_queue = sender.service_queue.borrow_mut();
+        assert_eq!(srv_queue.len(), 2);
         let mut cmp_info = TmInfo {
             common: CommonTmInfo {
                 subservice: 1,
@@ -1857,7 +1883,7 @@ mod tests {
             additional_data: None,
             req_id,
         };
-        let mut info = sender.service_queue.pop_front().unwrap();
+        let mut info = srv_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
 
         cmp_info = TmInfo {
@@ -1871,7 +1897,7 @@ mod tests {
             additional_data: Some([&[22], fail_data_raw.as_slice()].concat().to_vec()),
             req_id,
         };
-        info = sender.service_queue.pop_front().unwrap();
+        info = srv_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
     }
 
@@ -1937,7 +1963,8 @@ mod tests {
             additional_data: None,
             req_id,
         };
-        let mut info = sender.service_queue.pop_front().unwrap();
+        let mut srv_queue = sender.service_queue.borrow_mut();
+        let mut info = srv_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
         cmp_info = TmInfo {
             common: CommonTmInfo {
@@ -1950,7 +1977,7 @@ mod tests {
             additional_data: None,
             req_id,
         };
-        info = sender.service_queue.pop_front().unwrap();
+        info = srv_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
         cmp_info = TmInfo {
             common: CommonTmInfo {
@@ -1963,7 +1990,7 @@ mod tests {
             additional_data: Some([0].to_vec()),
             req_id,
         };
-        info = sender.service_queue.pop_front().unwrap();
+        info = srv_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
         cmp_info = TmInfo {
             common: CommonTmInfo {
@@ -1976,7 +2003,7 @@ mod tests {
             additional_data: Some([1].to_vec()),
             req_id,
         };
-        info = sender.service_queue.pop_front().unwrap();
+        info = srv_queue.pop_front().unwrap();
         assert_eq!(info, cmp_info);
     }
 
@@ -2011,7 +2038,7 @@ mod tests {
             )
             .expect("Sending step 1 success failed");
         assert_eq!(empty, ());
-        assert_eq!(sender.service_queue.len(), 4);
+        assert_eq!(sender.service_queue.borrow().len(), 4);
         step_success_check(&mut sender, tok.req_id);
     }
 
@@ -2037,12 +2064,12 @@ mod tests {
             .expect("Sending step 1 success failed");
         assert_eq!(empty, ());
         let sender: &mut TestSender = b.helper.sender.downcast_mut().unwrap();
-        assert_eq!(sender.service_queue.len(), 4);
+        assert_eq!(sender.service_queue.borrow().len(), 4);
         step_success_check(sender, tok.req_id);
     }
 
     fn check_step_failure(sender: &mut TestSender, req_id: RequestId, fail_data_raw: [u8; 4]) {
-        assert_eq!(sender.service_queue.len(), 4);
+        assert_eq!(sender.service_queue.borrow().len(), 4);
         let mut cmp_info = TmInfo {
             common: CommonTmInfo {
                 subservice: 1,
@@ -2054,7 +2081,7 @@ mod tests {
             additional_data: None,
             req_id,
         };
-        let mut info = sender.service_queue.pop_front().unwrap();
+        let mut info = sender.service_queue.borrow_mut().pop_front().unwrap();
         assert_eq!(info, cmp_info);
 
         cmp_info = TmInfo {
@@ -2068,7 +2095,7 @@ mod tests {
             additional_data: None,
             req_id,
         };
-        info = sender.service_queue.pop_front().unwrap();
+        info = sender.service_queue.borrow_mut().pop_front().unwrap();
         assert_eq!(info, cmp_info);
 
         cmp_info = TmInfo {
@@ -2082,7 +2109,7 @@ mod tests {
             additional_data: Some([0].to_vec()),
             req_id,
         };
-        info = sender.service_queue.pop_front().unwrap();
+        info = sender.service_queue.get_mut().pop_front().unwrap();
         assert_eq!(info, cmp_info);
 
         cmp_info = TmInfo {
@@ -2104,7 +2131,7 @@ mod tests {
             ),
             req_id,
         };
-        info = sender.service_queue.pop_front().unwrap();
+        info = sender.service_queue.get_mut().pop_front().unwrap();
         assert_eq!(info, cmp_info);
     }
 
@@ -2186,7 +2213,7 @@ mod tests {
     }
 
     fn completion_fail_check(sender: &mut TestSender, req_id: RequestId) {
-        assert_eq!(sender.service_queue.len(), 3);
+        assert_eq!(sender.service_queue.borrow().len(), 3);
 
         let mut cmp_info = TmInfo {
             common: CommonTmInfo {
@@ -2199,7 +2226,7 @@ mod tests {
             additional_data: None,
             req_id,
         };
-        let mut info = sender.service_queue.pop_front().unwrap();
+        let mut info = sender.service_queue.get_mut().pop_front().unwrap();
         assert_eq!(info, cmp_info);
 
         cmp_info = TmInfo {
@@ -2213,7 +2240,7 @@ mod tests {
             additional_data: None,
             req_id,
         };
-        info = sender.service_queue.pop_front().unwrap();
+        info = sender.service_queue.get_mut().pop_front().unwrap();
         assert_eq!(info, cmp_info);
 
         cmp_info = TmInfo {
@@ -2227,7 +2254,7 @@ mod tests {
             additional_data: Some([0, 0, 0x10, 0x20].to_vec()),
             req_id,
         };
-        info = sender.service_queue.pop_front().unwrap();
+        info = sender.service_queue.get_mut().pop_front().unwrap();
         assert_eq!(info, cmp_info);
     }
 
@@ -2277,7 +2304,7 @@ mod tests {
     }
 
     fn completion_success_check(sender: &mut TestSender, req_id: RequestId) {
-        assert_eq!(sender.service_queue.len(), 3);
+        assert_eq!(sender.service_queue.borrow().len(), 3);
         let cmp_info = TmInfo {
             common: CommonTmInfo {
                 subservice: 1,
@@ -2289,7 +2316,7 @@ mod tests {
             additional_data: None,
             req_id,
         };
-        let mut info = sender.service_queue.pop_front().unwrap();
+        let mut info = sender.service_queue.borrow_mut().pop_front().unwrap();
         assert_eq!(info, cmp_info);
 
         let cmp_info = TmInfo {
@@ -2303,7 +2330,7 @@ mod tests {
             additional_data: None,
             req_id,
         };
-        info = sender.service_queue.pop_front().unwrap();
+        info = sender.service_queue.borrow_mut().pop_front().unwrap();
         assert_eq!(info, cmp_info);
         let cmp_info = TmInfo {
             common: CommonTmInfo {
@@ -2316,7 +2343,7 @@ mod tests {
             additional_data: None,
             req_id,
         };
-        info = sender.service_queue.pop_front().unwrap();
+        info = sender.service_queue.borrow_mut().pop_front().unwrap();
         assert_eq!(info, cmp_info);
     }
 
@@ -2365,7 +2392,7 @@ mod tests {
             Arc::new(RwLock::new(Box::new(LocalPool::new(pool_cfg.clone()))));
         let (verif_tx, verif_rx) = mpsc::channel();
         let sender =
-            MpscVerifSender::new(0, "Verification Sender", shared_tm_pool.clone(), verif_tx);
+            MpscTmInStoreSender::new(0, "Verification Sender", shared_tm_pool.clone(), verif_tx);
         let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
         let mut reporter = VerificationReporterWithSender::new(&cfg, Box::new(sender));
 

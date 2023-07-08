@@ -138,6 +138,16 @@ pub struct StoreAddr {
     pub(crate) packet_idx: NumBlocks,
 }
 
+impl Display for StoreAddr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "StoreAddr(pool index: {}, packet index: {})",
+            self.pool_idx, self.packet_idx
+        )
+    }
+}
+
 impl StoreAddr {
     pub const INVALID_ADDR: u32 = 0xFFFFFFFF;
 
