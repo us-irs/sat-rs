@@ -217,10 +217,9 @@ fn core_tm_handling(udp_tmtc_server: &mut UdpTmtcServer, recv_addr: &SocketAddr)
         } else {
             info!("Sending PUS TM");
         }
-        udp_tmtc_server
-            .udp_tc_server
-            .socket
-            .send_to(buf, recv_addr)
-            .expect("sending TM failed");
+        let result = udp_tmtc_server.udp_tc_server.socket.send_to(buf, recv_addr);
+        if let Err(e) = result {
+            warn!("Sending TM with UDP socket failed: {e}")
+        }
     }
 }
