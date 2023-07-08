@@ -316,11 +316,11 @@ pub mod std_mod {
     #[derive(Debug, Clone, Error)]
     pub enum PartialPusHandlingError {
         #[error("Generic timestamp generation error")]
-        TimeError(StdTimestampError),
+        Time(StdTimestampError),
         #[error("Error sending telemetry: {0}")]
-        TmSendError(String),
+        TmSend(String),
         #[error("Error sending verification message")]
-        VerificationError,
+        Verification,
     }
 
     /// Generic result type for handlers which can process PUS packets.
@@ -386,7 +386,7 @@ pub mod std_mod {
         ) -> [u8; 7] {
             let mut time_stamp: [u8; 7] = [0; 7];
             let time_provider =
-                TimeProvider::from_now_with_u16_days().map_err(PartialPusHandlingError::TimeError);
+                TimeProvider::from_now_with_u16_days().map_err(PartialPusHandlingError::Time);
             if let Ok(time_provider) = time_provider {
                 time_provider.write_to_bytes(&mut time_stamp).unwrap();
             } else {

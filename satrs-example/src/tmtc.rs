@@ -204,9 +204,7 @@ fn poll_tc_server(udp_tmtc_server: &mut UdpTmtcServer) -> bool {
 
 fn core_tm_handling(udp_tmtc_server: &mut UdpTmtcServer, recv_addr: &SocketAddr) {
     while let Ok(addr) = udp_tmtc_server.tm_rx.try_recv() {
-        let store_lock = udp_tmtc_server
-            .tm_store
-            .write();
+        let store_lock = udp_tmtc_server.tm_store.write();
         if store_lock.is_err() {
             warn!("Locking TM store failed");
             continue;

@@ -79,7 +79,7 @@ impl PusServiceHandler for PusService5EventHandler {
                 .verification_handler
                 .borrow_mut()
                 .start_success(token, Some(&stamp))
-                .map_err(|_| PartialPusHandlingError::VerificationError);
+                .map_err(|_| PartialPusHandlingError::Verification);
             let partial_error = start_token.clone().err();
             let mut token: TcStateToken = token.into();
             if let Ok(start_token) = start_token {

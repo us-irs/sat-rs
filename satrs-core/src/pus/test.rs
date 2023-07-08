@@ -66,7 +66,7 @@ impl PusServiceHandler for PusService17TestHandler {
                 .verification_handler
                 .get_mut()
                 .start_success(token, Some(&time_stamp))
-                .map_err(|_| PartialPusHandlingError::VerificationError);
+                .map_err(|_| PartialPusHandlingError::Verification);
             let start_token = if let Ok(result) = result {
                 Some(result)
             } else {
@@ -82,7 +82,7 @@ impl PusServiceHandler for PusService17TestHandler {
                 .psb
                 .tm_tx
                 .send(addr)
-                .map_err(|e| PartialPusHandlingError::TmSendError(format!("{e}")))
+                .map_err(|e| PartialPusHandlingError::TmSend(format!("{e}")))
             {
                 partial_error = Some(e);
             }
@@ -94,7 +94,7 @@ impl PusServiceHandler for PusService17TestHandler {
                     .completion_success(start_token, Some(&time_stamp))
                     .is_err()
                 {
-                    partial_error = Some(PartialPusHandlingError::VerificationError)
+                    partial_error = Some(PartialPusHandlingError::Verification)
                 }
             }
             if let Some(partial_error) = partial_error {
