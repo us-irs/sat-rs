@@ -1,4 +1,4 @@
-use log::info;
+use log::{info, warn};
 use satrs_core::hal::host::udp_server::{ReceiveResult, UdpTcServer};
 use std::net::SocketAddr;
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
@@ -118,7 +118,7 @@ pub fn core_tmtc_task(
     let ccsds_distributor = CcsdsDistributor::new(Box::new(ccsds_receiver));
 
     let udp_tc_server = UdpTcServer::new(socket_addr, 2048, Box::new(ccsds_distributor))
-        .expect("Creating UDP TMTC server failed");
+        .expect("creating UDP TMTC server failed");
 
     let mut udp_tmtc_server = UdpTmtcServer {
         udp_tc_server,
@@ -163,14 +163,14 @@ fn core_tmtc_loop(
                         .ok();
                 }
                 Err(e) => {
-                    println!("error creating PUS TC from raw data: {e}");
-                    println!("raw data: {tc_buf:x?}");
+                    warn!("error creating PUS TC from raw data: {e}");
+                    warn!("raw data: {tc_buf:x?}");
                 }
             }
         }
         Err(e) => {
             if let TryRecvError::Disconnected = e {
-                println!("tmtc thread: sender disconnected")
+                warn!("tmtc thread: sender disconnected")
             }
         }
     }
@@ -185,16 +185,16 @@ fn poll_tc_server(udp_tmtc_server: &mut UdpTmtcServer) -> bool {
         Err(e) => match e {
             ReceiveResult::ReceiverError(e) => match e {
                 CcsdsError::ByteConversionError(e) => {
-                    println!("Got packet error: {e:?}");
+                    warn!("packet error: {e:?}");
                     true
                 }
-                CcsdsError::CustomError(_) => {
-                    println!("Unknown receiver error");
+                CcsdsError::CustomError(e) => {
+                    warn!("mpsc store and send error {e:?}");
                     true
                 }
             },
             ReceiveResult::IoError(e) => {
-                println!("IO error {e}");
+                warn!("IO error {e}");
                 false
             }
             ReceiveResult::NothingReceived => false,
