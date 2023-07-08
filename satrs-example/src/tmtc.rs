@@ -1,16 +1,16 @@
 use log::info;
 use satrs_core::hal::host::udp_server::{ReceiveResult, UdpTcServer};
-use std::error::Error;
-use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
+use thiserror::Error;
 
 use crate::ccsds::CcsdsReceiver;
 use crate::pus::{PusReceiver, PusTcMpscRouter};
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
+use satrs_core::pus::AcceptedTc;
 use satrs_core::spacepackets::ecss::{PusPacket, SerializablePusPacket};
 use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::spacepackets::SpHeader;
@@ -37,44 +37,14 @@ impl TcArgs {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum MpscStoreAndSendError {
-    StoreError(StoreError),
-    SendError(SendError<StoreAddr>),
-}
-
-impl Display for MpscStoreAndSendError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MpscStoreAndSendError::StoreError(s) => {
-                write!(f, "store error {s}")
-            }
-            MpscStoreAndSendError::SendError(s) => {
-                write!(f, "send error {s}")
-            }
-        }
-    }
-}
-
-impl Error for MpscStoreAndSendError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            MpscStoreAndSendError::StoreError(s) => Some(s),
-            MpscStoreAndSendError::SendError(s) => Some(s),
-        }
-    }
-}
-
-impl From<StoreError> for MpscStoreAndSendError {
-    fn from(value: StoreError) -> Self {
-        Self::StoreError(value)
-    }
-}
-
-impl From<SendError<StoreAddr>> for MpscStoreAndSendError {
-    fn from(value: SendError<StoreAddr>) -> Self {
-        Self::SendError(value)
-    }
+    #[error("Store error: {0}")]
+    Store(#[from] StoreError),
+    #[error("TC send error: {0}")]
+    TcSend(#[from] SendError<AcceptedTc>),
+    #[error("TMTC send error: {0}")]
+    TmTcSend(#[from] SendError<StoreAddr>),
 }
 
 #[derive(Clone)]

@@ -1,7 +1,8 @@
 use crate::tmtc::MpscStoreAndSendError;
+use log::warn;
 use satrs_core::pool::StoreAddr;
 use satrs_core::pus::verification::{FailParams, StdVerifReporterWithSender};
-use satrs_core::pus::AcceptedTc;
+use satrs_core::pus::{AcceptedTc, PusPacketHandlerResult};
 use satrs_core::spacepackets::ecss::PusServiceId;
 use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::spacepackets::time::cds::TimeProvider;
@@ -72,7 +73,7 @@ impl PusReceiver {
         store_addr: StoreAddr,
         service: u8,
         pus_tc: &PusTc,
-    ) -> Result<(), MpscStoreAndSendError> {
+    ) -> Result<PusPacketHandlerResult, MpscStoreAndSendError> {
         let init_token = self.verif_reporter.add_tc(pus_tc);
         self.stamp_helper.update_from_now();
         let accepted_token = self
@@ -83,43 +84,35 @@ impl PusReceiver {
         match service {
             Ok(standard_service) => match standard_service {
                 PusServiceId::Test => {
-                    let res = self
-                        .pus_router
+                    self.pus_router
                         .test_service_receiver
-                        .send((store_addr, accepted_token));
-                    match res {
-                        Ok(_) => {}
-                        Err(e) => {
-                            println!("Error {e}")
-                        }
-                    }
+                        .send((store_addr, accepted_token))?;
                 }
                 PusServiceId::Housekeeping => self
                     .pus_router
                     .hk_service_receiver
-                    .send((store_addr, accepted_token))
-                    .unwrap(),
+                    .send((store_addr, accepted_token))?,
                 PusServiceId::Event => self
                     .pus_router
                     .event_service_receiver
-                    .send((store_addr, accepted_token))
-                    .unwrap(),
+                    .send((store_addr, accepted_token))?,
                 PusServiceId::Scheduling => self
                     .pus_router
                     .sched_service_receiver
-                    .send((store_addr, accepted_token))
-                    .unwrap(),
-                _ => self
-                    .verif_reporter
-                    .start_failure(
+                    .send((store_addr, accepted_token))?,
+                _ => {
+                    let result = self.verif_reporter.start_failure(
                         accepted_token,
                         FailParams::new(
                             Some(self.stamp_helper.stamp()),
                             &tmtc_err::PUS_SERVICE_NOT_IMPLEMENTED,
                             Some(&[standard_service as u8]),
                         ),
-                    )
-                    .expect("Start failure verification failed"),
+                    );
+                    if result.is_err() {
+                        warn!("Sending verification failure failed");
+                    }
+                }
             },
             Err(e) => {
                 if let Ok(custom_service) = CustomPusServiceId::try_from(e.number) {
@@ -143,6 +136,6 @@ impl PusReceiver {
                 }
             }
         }
-        Ok(())
+        Ok(PusPacketHandlerResult::RequestHandled)
     }
 }
