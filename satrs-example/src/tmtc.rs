@@ -204,12 +204,21 @@ fn poll_tc_server(udp_tmtc_server: &mut UdpTmtcServer) -> bool {
 
 fn core_tm_handling(udp_tmtc_server: &mut UdpTmtcServer, recv_addr: &SocketAddr) {
     while let Ok(addr) = udp_tmtc_server.tm_rx.try_recv() {
-        let mut store_lock = udp_tmtc_server
+        let store_lock = udp_tmtc_server
             .tm_store
-            .write()
-            .expect("locking TM store failed");
+            .write();
+        if store_lock.is_err() {
+            warn!("Locking TM store failed");
+            continue;
+        }
+        let mut store_lock = store_lock.unwrap();
         let pg = store_lock.read_with_guard(addr);
-        let buf = pg.read().expect("error reading TM pool data");
+        let read_res = pg.read();
+        if read_res.is_err() {
+            warn!("Error reading TM pool data");
+            continue;
+        }
+        let buf = read_res.unwrap();
         if buf.len() > 9 {
             let service = buf[7];
             let subservice = buf[8];
