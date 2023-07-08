@@ -9,10 +9,14 @@ use log::{info, warn};
 
 use crate::hk::AcsHkIds;
 use crate::logging::setup_logger;
+use crate::pus::action::{Pus8Wrapper, PusService8ActionHandler};
+use crate::pus::event::Pus5Wrapper;
+use crate::pus::hk::{Pus3Wrapper, PusService3HkHandler};
+use crate::pus::scheduler::Pus11Wrapper;
+use crate::pus::test::Service17CustomWrapper;
+use crate::pus::PusTcMpscRouter;
 use crate::requests::{Request, RequestWithToken};
-use crate::tmtc::{
-    core_tmtc_task, OtherArgs, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, TmStore, PUS_APID,
-};
+use crate::tmtc::{core_tmtc_task, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, PUS_APID};
 use satrs_core::event_man::{
     EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
 };
@@ -23,19 +27,23 @@ use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, EventRequest, EventRequestWithToken,
     PusEventDispatcher,
 };
+use satrs_core::pus::event_srv::PusService5EventHandler;
 use satrs_core::pus::hk::Subservice as HkSubservice;
-use satrs_core::pus::verification::{
-    MpscVerifSender, VerificationReporterCfg, VerificationReporterWithSender,
-};
-use satrs_core::pus::MpscTmtcInStoreSender;
-use satrs_core::seq_count::{SeqCountProviderSimple, SeqCountProviderSyncClonable};
+use satrs_core::pus::scheduler::PusScheduler;
+use satrs_core::pus::scheduler_srv::PusService11SchedHandler;
+use satrs_core::pus::test::PusService17TestHandler;
+use satrs_core::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
+use satrs_core::pus::MpscTmInStoreSender;
+use satrs_core::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore};
+use satrs_core::spacepackets::tm::PusTmZeroCopyWriter;
 use satrs_core::spacepackets::{
     time::cds::TimeProvider,
     time::TimeWriter,
     tm::{PusTm, PusTmSecondaryHeader},
     SequenceFlags, SpHeader,
 };
-use satrs_core::tmtc::AddressableId;
+use satrs_core::tmtc::tm_helper::SharedTmStore;
+use satrs_core::tmtc::{AddressableId, TargetId};
 use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -55,9 +63,8 @@ fn main() {
         (15, 1024),
         (15, 2048),
     ]));
-    let tm_store = TmStore {
-        pool: Arc::new(RwLock::new(Box::new(tm_pool))),
-    };
+    let tm_store = SharedTmStore::new(Arc::new(RwLock::new(Box::new(tm_pool))));
+    let tm_store_event = tm_store.clone();
     let tc_pool = LocalPool::new(PoolCfg::new(vec![
         (30, 32),
         (15, 64),
@@ -70,29 +77,19 @@ fn main() {
         pool: Arc::new(RwLock::new(Box::new(tc_pool))),
     };
 
-    let seq_count_provider = SeqCountProviderSyncClonable::default();
-    let seq_count_provider_verif = seq_count_provider.clone();
-    let seq_count_provider_tmtc = seq_count_provider;
+    let seq_count_provider = CcsdsSimpleSeqCountProvider::new();
+    let mut msg_counter_map: HashMap<u8, u16> = HashMap::new();
     let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
     let (tc_source_tx, tc_source_rx) = channel();
     let (tm_funnel_tx, tm_funnel_rx) = channel();
     let (tm_server_tx, tm_server_rx) = channel();
-    let verif_sender = MpscVerifSender::new(
+    let verif_sender = MpscTmInStoreSender::new(
         0,
         "verif_sender",
-        tm_store.pool.clone(),
+        tm_store.backing_pool(),
         tm_funnel_tx.clone(),
     );
-    let verif_cfg = VerificationReporterCfg::new(
-        PUS_APID,
-        Box::new(seq_count_provider_verif),
-        #[allow(clippy::box_default)]
-        Box::new(SeqCountProviderSimple::default()),
-        1,
-        2,
-        8,
-    )
-    .unwrap();
+    let verif_cfg = VerificationReporterCfg::new(PUS_APID, 1, 2, 8).unwrap();
     // Every software component which needs to generate verification telemetry, gets a cloned
     // verification reporter.
     let verif_reporter = VerificationReporterWithSender::new(&verif_cfg, Box::new(verif_sender));
@@ -107,6 +104,7 @@ fn main() {
     // The event manager will receive the RX handle to receive all the events.
     let (event_sender, event_man_rx) = channel();
     let event_recv = MpscEventReceiver::<EventU32>::new(event_man_rx);
+    let test_srv_event_sender = event_sender;
     let mut event_man = EventManagerWithMpscQueue::new(Box::new(event_recv));
 
     // All events sent to the manager are routed to the PUS event manager, which generates PUS event
@@ -123,24 +121,16 @@ fn main() {
     // Some request are targetable. This map is used to retrieve sender handles based on a target ID.
     let mut request_map = HashMap::new();
     let (acs_thread_tx, acs_thread_rx) = channel::<RequestWithToken>();
-    request_map.insert(RequestTargetId::AcsSubsystem as u32, acs_thread_tx);
+    request_map.insert(RequestTargetId::AcsSubsystem as TargetId, acs_thread_tx);
 
-    let tc_source = PusTcSource {
-        tc_store,
+    let tc_source_wrapper = PusTcSource {
+        tc_store: tc_store.clone(),
         tc_source: tc_source_tx,
     };
 
     // Create clones here to allow moving the values
-    let core_args = OtherArgs {
-        sock_addr,
-        verif_reporter,
-        event_sender,
-        event_request_tx,
-        request_map,
-        seq_count_provider: seq_count_provider_tmtc,
-    };
     let tc_args = TcArgs {
-        tc_source,
+        tc_source: tc_source_wrapper.clone(),
         tc_receiver: tc_source_rx,
     };
     let tm_args = TmArgs {
@@ -149,14 +139,86 @@ fn main() {
         tm_server_rx,
     };
 
-    let aocs_to_funnel = tm_funnel_tx.clone();
+    let aocs_tm_funnel = tm_funnel_tx.clone();
     let mut aocs_tm_store = tm_store.clone();
+
+    let (pus_test_tx, pus_test_rx) = channel();
+    let (pus_event_tx, pus_event_rx) = channel();
+    let (pus_sched_tx, pus_sched_rx) = channel();
+    let (pus_hk_tx, pus_hk_rx) = channel();
+    let (pus_action_tx, pus_action_rx) = channel();
+    let pus_router = PusTcMpscRouter {
+        test_service_receiver: pus_test_tx,
+        event_service_receiver: pus_event_tx,
+        sched_service_receiver: pus_sched_tx,
+        hk_service_receiver: pus_hk_tx,
+        action_service_receiver: pus_action_tx,
+    };
+    let pus17_handler = PusService17TestHandler::new(
+        pus_test_rx,
+        tc_store.pool.clone(),
+        tm_funnel_tx.clone(),
+        tm_store.clone(),
+        PUS_APID,
+        verif_reporter.clone(),
+    );
+    let mut pus_17_wrapper = Service17CustomWrapper {
+        pus17_handler,
+        test_srv_event_sender,
+    };
+    let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
+        .expect("Creating PUS Scheduler failed");
+    let pus_11_handler = PusService11SchedHandler::new(
+        pus_sched_rx,
+        tc_store.pool.clone(),
+        tm_funnel_tx.clone(),
+        tm_store.clone(),
+        PUS_APID,
+        verif_reporter.clone(),
+        scheduler,
+    );
+    let mut pus_11_wrapper = Pus11Wrapper {
+        pus_11_handler,
+        tc_source_wrapper,
+    };
+    let pus_5_handler = PusService5EventHandler::new(
+        pus_event_rx,
+        tc_store.pool.clone(),
+        tm_funnel_tx.clone(),
+        tm_store.clone(),
+        PUS_APID,
+        verif_reporter.clone(),
+        event_request_tx,
+    );
+    let mut pus_5_wrapper = Pus5Wrapper { pus_5_handler };
+
+    let pus_8_handler = PusService8ActionHandler::new(
+        pus_action_rx,
+        tc_store.pool.clone(),
+        tm_funnel_tx.clone(),
+        tm_store.clone(),
+        PUS_APID,
+        verif_reporter.clone(),
+        request_map.clone(),
+    );
+    let mut pus_8_wrapper = Pus8Wrapper { pus_8_handler };
+
+    let pus_3_handler = PusService3HkHandler::new(
+        pus_hk_rx,
+        tc_store.pool.clone(),
+        tm_funnel_tx.clone(),
+        tm_store.clone(),
+        PUS_APID,
+        verif_reporter.clone(),
+        request_map,
+    );
+    let mut pus_3_wrapper = Pus3Wrapper { pus_3_handler };
 
     info!("Starting TMTC task");
     let jh0 = thread::Builder::new()
         .name("TMTC".to_string())
         .spawn(move || {
-            core_tmtc_task(core_args, tc_args, tm_args);
+            core_tmtc_task(sock_addr, tc_args, tm_args, verif_reporter, pus_router);
         })
         .unwrap();
 
@@ -170,6 +232,29 @@ fn main() {
             };
             loop {
                 if let Ok(addr) = tm_funnel.tm_funnel_rx.recv() {
+                    // Read the TM, set sequence counter and message counter, and finally update
+                    // the CRC.
+                    let shared_pool = tm_store.backing_pool();
+                    let mut pool_guard = shared_pool.write().expect("Locking TM pool failed");
+                    let tm_raw = pool_guard
+                        .modify(&addr)
+                        .expect("Reading TM from pool failed");
+                    let mut zero_copy_writer = PusTmZeroCopyWriter::new(tm_raw)
+                        .expect("Creating TM zero copy writer failed");
+                    zero_copy_writer.set_apid(PUS_APID);
+                    zero_copy_writer.set_seq_count(seq_count_provider.get_and_increment());
+                    let entry = msg_counter_map
+                        .entry(zero_copy_writer.service())
+                        .or_insert(0);
+                    zero_copy_writer.set_msg_count(*entry);
+                    if *entry == u16::MAX {
+                        *entry = 0;
+                    } else {
+                        *entry += 1;
+                    }
+
+                    // This operation has to come last!
+                    zero_copy_writer.finish();
                     tm_funnel
                         .tm_server_tx
                         .send(addr)
@@ -184,12 +269,16 @@ fn main() {
         .name("Event".to_string())
         .spawn(move || {
             let mut timestamp: [u8; 7] = [0; 7];
-            let mut sender =
-                MpscTmtcInStoreSender::new(1, "event_sender", tm_store.pool, tm_funnel_tx);
+            let mut sender = MpscTmInStoreSender::new(
+                1,
+                "event_sender",
+                tm_store_event.backing_pool(),
+                tm_funnel_tx,
+            );
             let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
             let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
                 reporter_event_handler
-                    .completion_success(event_req.token, Some(timestamp))
+                    .completion_success(event_req.token.try_into().unwrap(), Some(timestamp))
                     .expect("Sending completion success failed");
             };
             loop {
@@ -245,7 +334,7 @@ fn main() {
                         );
                         update_time(&mut time_provider, &mut timestamp);
                         match request.targeted_request.request {
-                            Request::HkRequest(hk_req) => match hk_req {
+                            Request::Hk(hk_req) => match hk_req {
                                 HkRequest::OneShot(unique_id) => {
                                     let target = request.targeted_request.target_id;
                                     assert_eq!(target, RequestTargetId::AcsSubsystem as u32);
@@ -277,15 +366,18 @@ fn main() {
                                             true,
                                         );
                                         let addr = aocs_tm_store.add_pus_tm(&pus_tm);
-                                        aocs_to_funnel.send(addr).expect("Sending HK TM failed");
+                                        aocs_tm_funnel.send(addr).expect("Sending HK TM failed");
                                     }
                                 }
                                 HkRequest::Enable(_) => {}
                                 HkRequest::Disable(_) => {}
                                 HkRequest::ModifyCollectionInterval(_, _) => {}
                             },
-                            Request::ModeRequest(_mode_req) => {
+                            Request::Mode(_mode_req) => {
                                 warn!("mode request handling not implemented yet")
+                            }
+                            Request::Action(_action_req) => {
+                                warn!("action request handling not implemented yet")
                             }
                         }
                         let started_token = reporter_aocs
@@ -307,10 +399,35 @@ fn main() {
         })
         .unwrap();
 
+    info!("Starting PUS handler thread");
+    let jh4 = thread::Builder::new()
+        .name("PUS".to_string())
+        .spawn(move || loop {
+            pus_11_wrapper.release_tcs();
+            loop {
+                let mut all_queues_empty = true;
+                let mut is_srv_finished = |srv_handler_finished: bool| {
+                    if !srv_handler_finished {
+                        all_queues_empty = false;
+                    }
+                };
+                is_srv_finished(pus_17_wrapper.handle_next_packet());
+                is_srv_finished(pus_11_wrapper.handle_next_packet());
+                is_srv_finished(pus_5_wrapper.handle_next_packet());
+                is_srv_finished(pus_8_wrapper.handle_next_packet());
+                is_srv_finished(pus_3_wrapper.handle_next_packet());
+                if all_queues_empty {
+                    break;
+                }
+            }
+            thread::sleep(Duration::from_millis(200));
+        })
+        .unwrap();
     jh0.join().expect("Joining UDP TMTC server thread failed");
     jh1.join().expect("Joining TM Funnel thread failed");
     jh2.join().expect("Joining Event Manager thread failed");
     jh3.join().expect("Joining AOCS thread failed");
+    jh4.join().expect("Joining PUS handler thread failed");
 }
 
 pub fn update_time(time_provider: &mut TimeProvider, timestamp: &mut [u8]) {

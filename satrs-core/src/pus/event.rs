@@ -110,7 +110,7 @@ impl EventReporterBase {
     ) -> Result<(), EcssTmtcErrorWithSend<E>> {
         let tm = self.generate_generic_event_tm(buf, subservice, time_stamp, event_id, aux_data)?;
         sender
-            .send_tm(tm)
+            .send_tm(tm.into())
             .map_err(|e| EcssTmtcErrorWithSend::SendError(e))?;
         self.msg_count += 1;
         Ok(())
@@ -243,8 +243,10 @@ mod tests {
     use super::*;
     use crate::events::{EventU32, Severity};
     use crate::pus::tests::CommonTmInfo;
+    use crate::pus::{EcssSender, PusTmWrapper};
     use crate::SenderId;
     use spacepackets::ByteConversionError;
+    use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::vec::Vec;
 
@@ -263,30 +265,41 @@ mod tests {
 
     #[derive(Default, Clone)]
     struct TestSender {
-        pub service_queue: VecDeque<TmInfo>,
+        pub service_queue: RefCell<VecDeque<TmInfo>>,
+    }
+
+    impl EcssSender for TestSender {
+        fn id(&self) -> SenderId {
+            0
+        }
     }
 
     impl EcssTmSenderCore for TestSender {
         type Error = ();
 
-        fn id(&self) -> SenderId {
-            0
-        }
-        fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error> {
-            assert!(tm.source_data().is_some());
-            let src_data = tm.source_data().unwrap();
-            assert!(src_data.len() >= 4);
-            let event = EventU32::from(u32::from_be_bytes(src_data[0..4].try_into().unwrap()));
-            let mut aux_data = Vec::new();
-            if src_data.len() > 4 {
-                aux_data.extend_from_slice(&src_data[4..]);
+        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), Self::Error> {
+            match tm {
+                PusTmWrapper::InStore(_) => {
+                    panic!("TestSender: unexpected call with address");
+                }
+                PusTmWrapper::Direct(tm) => {
+                    assert!(tm.source_data().is_some());
+                    let src_data = tm.source_data().unwrap();
+                    assert!(src_data.len() >= 4);
+                    let event =
+                        EventU32::from(u32::from_be_bytes(src_data[0..4].try_into().unwrap()));
+                    let mut aux_data = Vec::new();
+                    if src_data.len() > 4 {
+                        aux_data.extend_from_slice(&src_data[4..]);
+                    }
+                    self.service_queue.borrow_mut().push_back(TmInfo {
+                        common: CommonTmInfo::new_from_tm(&tm),
+                        event,
+                        aux_data,
+                    });
+                    Ok(())
+                }
             }
-            self.service_queue.push_back(TmInfo {
-                common: CommonTmInfo::new_from_tm(&tm),
-                event,
-                aux_data,
-            });
-            Ok(())
         }
     }
 
@@ -355,8 +368,9 @@ mod tests {
             severity,
             error_data,
         );
-        assert_eq!(sender.service_queue.len(), 1);
-        let tm_info = sender.service_queue.pop_front().unwrap();
+        let mut service_queue = sender.service_queue.borrow_mut();
+        assert_eq!(service_queue.len(), 1);
+        let tm_info = service_queue.pop_front().unwrap();
         assert_eq!(
             tm_info.common.subservice,
             severity_to_subservice(severity) as u8
@@ -413,7 +427,7 @@ mod tests {
         let err = reporter.event_info(sender, &time_stamp_empty, event, None);
         assert!(err.is_err());
         let err = err.unwrap_err();
-        if let EcssTmErrorWithSend::EcssTmError(EcssTmtcError::ByteConversionError(
+        if let EcssTmtcErrorWithSend::EcssTmtcError(EcssTmtcError::ByteConversion(
             ByteConversionError::ToSliceTooSmall(missmatch),
         )) = err
         {

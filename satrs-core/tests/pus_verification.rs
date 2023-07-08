@@ -1,18 +1,18 @@
 // TODO: Refactor this to also test the STD impl using mpsc
+// TODO: Change back to cross-beam as soon as STD impl was added back for TM.
 #[cfg(feature = "crossbeam")]
 pub mod crossbeam_test {
     use hashbrown::HashMap;
     use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
     use satrs_core::pus::verification::{
-        CrossbeamVerifSender, FailParams, RequestId, VerificationReporterCfg,
-        VerificationReporterWithSender,
+        FailParams, RequestId, VerificationReporterCfg, VerificationReporterWithSender,
     };
-    use satrs_core::seq_count::SeqCountProviderSyncClonable;
-    use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket};
+    use satrs_core::pus::MpscTmInStoreSender;
+    use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket, SerializablePusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::tm::PusTm;
     use spacepackets::SpHeader;
-    use std::sync::{Arc, RwLock};
+    use std::sync::{mpsc, Arc, RwLock};
     use std::thread;
     use std::time::Duration;
 
@@ -32,24 +32,16 @@ pub mod crossbeam_test {
         // We use a synced sequence count provider here because both verification reporters have the
         // the same APID. If they had distinct APIDs, the more correct approach would be to have
         // each reporter have an own sequence count provider.
-        let cfg = VerificationReporterCfg::new(
-            TEST_APID,
-            Box::new(SeqCountProviderSyncClonable::default()),
-            Box::new(SeqCountProviderSyncClonable::default()),
-            1,
-            2,
-            8,
-        )
-        .unwrap();
+        let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
         // Shared pool object to store the verification PUS telemetry
         let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
         let shared_tm_pool: SharedPool =
             Arc::new(RwLock::new(Box::new(LocalPool::new(pool_cfg.clone()))));
         let shared_tc_pool_0 = Arc::new(RwLock::new(LocalPool::new(pool_cfg)));
         let shared_tc_pool_1 = shared_tc_pool_0.clone();
-        let (tx, rx) = crossbeam_channel::bounded(5);
+        let (tx, rx) = mpsc::channel();
         let sender =
-            CrossbeamVerifSender::new(0, "verif_sender", shared_tm_pool.clone(), tx.clone());
+            MpscTmInStoreSender::new(0, "verif_sender", shared_tm_pool.clone(), tx.clone());
         let mut reporter_with_sender_0 =
             VerificationReporterWithSender::new(&cfg, Box::new(sender));
         let mut reporter_with_sender_1 = reporter_with_sender_0.clone();

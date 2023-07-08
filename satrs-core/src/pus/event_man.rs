@@ -10,7 +10,7 @@ use hashbrown::HashSet;
 
 #[cfg(feature = "alloc")]
 pub use crate::pus::event::EventReporter;
-use crate::pus::verification::{TcStateStarted, VerificationToken};
+use crate::pus::verification::TcStateToken;
 #[cfg(feature = "alloc")]
 use crate::pus::EcssTmSenderCore;
 use crate::pus::EcssTmtcErrorWithSend;
@@ -91,7 +91,7 @@ pub enum EventRequest<Event: GenericEvent = EventU32> {
 #[derive(Debug)]
 pub struct EventRequestWithToken<Event: GenericEvent = EventU32> {
     pub request: EventRequest<Event>,
-    pub token: VerificationToken<TcStateStarted>,
+    pub token: TcStateToken,
 }
 
 #[derive(Debug)]
