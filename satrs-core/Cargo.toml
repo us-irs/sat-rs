@@ -64,7 +64,7 @@ optional = true
 # version = "0.6"
 # path = "../spacepackets"
 git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
-rev = "e3d2d885385"
+rev = "784564a20ed"
 default-features = false
 
 [dev-dependencies]

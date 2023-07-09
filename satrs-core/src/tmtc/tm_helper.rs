@@ -26,7 +26,7 @@ pub mod std_mod {
             }
         }
 
-        pub fn backing_pool(&self) -> SharedPool {
+        pub fn clone_backing_pool(&self) -> SharedPool {
             self.pool.clone()
         }
 

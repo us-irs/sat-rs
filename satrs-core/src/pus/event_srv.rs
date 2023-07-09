@@ -1,18 +1,18 @@
 use crate::events::EventU32;
-use crate::pool::{PoolGuard, SharedPool, StoreAddr};
+use crate::pool::{SharedPool, StoreAddr};
 use crate::pus::event_man::{EventRequest, EventRequestWithToken};
 use crate::pus::verification::{
     StdVerifReporterWithSender, TcStateAccepted, TcStateToken, VerificationToken,
 };
 use crate::pus::{
-    AcceptedTc, EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
-    PusPacketHandlingError, PusServiceBase, PusServiceHandler, ReceivedTcWrapper,
+    EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
+    PusPacketHandlingError, PusServiceBase, PusServiceHandler,
 };
 use spacepackets::ecss::event::Subservice;
 use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
 use std::boxed::Box;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Sender;
 
 pub struct PusService5EventHandler {
     psb: PusServiceBase,
@@ -22,13 +22,20 @@ pub struct PusService5EventHandler {
 impl PusService5EventHandler {
     pub fn new(
         tc_receiver: Box<dyn EcssTcReceiver>,
+        shared_tc_store: SharedPool,
         tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
         event_request_tx: Sender<EventRequestWithToken>,
     ) -> Self {
         Self {
-            psb: PusServiceBase::new(tc_receiver, tm_sender, tm_apid, verification_handler),
+            psb: PusServiceBase::new(
+                tc_receiver,
+                shared_tc_store,
+                tm_sender,
+                tm_apid,
+                verification_handler,
+            ),
             event_request_tx,
         }
     }
@@ -44,16 +51,17 @@ impl PusServiceHandler for PusService5EventHandler {
 
     fn handle_one_tc(
         &mut self,
-        tc: PusTc,
-        _tc_guard: PoolGuard,
+        addr: StoreAddr,
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        self.copy_tc_to_buf(addr)?;
+        let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf)?;
         let subservice = tc.subservice();
         let srv = Subservice::try_from(subservice);
         if srv.is_err() {
             return Ok(PusPacketHandlerResult::CustomSubservice(
                 tc.subservice(),
-                token.into(),
+                token,
             ));
         }
         let handle_enable_disable_request = |enable: bool, stamp: [u8; 7]| {
@@ -115,8 +123,7 @@ impl PusServiceHandler for PusService5EventHandler {
             }
             Subservice::TcReportDisabledList | Subservice::TmDisabledEventsReport => {
                 return Ok(PusPacketHandlerResult::SubserviceNotImplemented(
-                    subservice,
-                    token.into(),
+                    subservice, token,
                 ));
             }
         }

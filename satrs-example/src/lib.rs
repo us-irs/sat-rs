@@ -83,4 +83,14 @@ pub enum TmSenderId {
     PusHk = 3,
     PusAction = 4,
     PusSched = 5,
+    AllEvents = 6,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum TcReceiverId {
+    PusTest = 1,
+    PusEvent = 2,
+    PusHk = 3,
+    PusAction = 4,
+    PusSched = 5,
 }

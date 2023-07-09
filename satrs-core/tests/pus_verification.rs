@@ -3,11 +3,12 @@
 #[cfg(feature = "crossbeam")]
 pub mod crossbeam_test {
     use hashbrown::HashMap;
-    use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
+    use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider};
     use satrs_core::pus::verification::{
         FailParams, RequestId, VerificationReporterCfg, VerificationReporterWithSender,
     };
     use satrs_core::pus::MpscTmInStoreSender;
+    use satrs_core::tmtc::tm_helper::SharedTmStore;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket, SerializablePusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::tm::PusTm;
@@ -35,13 +36,12 @@ pub mod crossbeam_test {
         let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
         // Shared pool object to store the verification PUS telemetry
         let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
-        let shared_tm_pool: SharedPool =
-            Arc::new(RwLock::new(Box::new(LocalPool::new(pool_cfg.clone()))));
+        let shared_tm_store = SharedTmStore::new(Box::new(LocalPool::new(pool_cfg.clone())));
         let shared_tc_pool_0 = Arc::new(RwLock::new(LocalPool::new(pool_cfg)));
         let shared_tc_pool_1 = shared_tc_pool_0.clone();
         let (tx, rx) = mpsc::channel();
         let sender =
-            MpscTmInStoreSender::new(0, "verif_sender", shared_tm_pool.clone(), tx.clone());
+            MpscTmInStoreSender::new(0, "verif_sender", shared_tm_store.clone(), tx.clone());
         let mut reporter_with_sender_0 =
             VerificationReporterWithSender::new(&cfg, Box::new(sender));
         let mut reporter_with_sender_1 = reporter_with_sender_0.clone();
@@ -146,8 +146,9 @@ pub mod crossbeam_test {
                     .recv_timeout(Duration::from_millis(50))
                     .expect("Packet reception timeout");
                 let tm_len;
+                let shared_tm_store = shared_tm_store.clone_backing_pool();
                 {
-                    let mut rg = shared_tm_pool.write().expect("Error locking shared pool");
+                    let mut rg = shared_tm_store.write().expect("Error locking shared pool");
                     let store_guard = rg.read_with_guard(verif_addr);
                     let slice = store_guard.read().expect("Error reading TM slice");
                     tm_len = slice.len();

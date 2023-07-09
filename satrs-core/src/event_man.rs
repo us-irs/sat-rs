@@ -66,7 +66,7 @@ use core::slice::Iter;
 #[cfg(feature = "alloc")]
 use hashbrown::HashMap;
 
-use crate::SenderId;
+use crate::ChannelId;
 #[cfg(feature = "std")]
 pub use stdmod::*;
 
@@ -88,7 +88,7 @@ pub type EventU16WithAuxData = EventWithAuxData<EventU16>;
 pub trait SendEventProvider<Provider: GenericEvent, AuxDataProvider = Params> {
     type Error;
 
-    fn id(&self) -> SenderId;
+    fn id(&self) -> ChannelId;
     fn send_no_data(&self, event: Provider) -> Result<(), Self::Error> {
         self.send(event, None)
     }
@@ -109,16 +109,16 @@ pub trait EventReceiver<Event: GenericEvent, AuxDataProvider = Params> {
 pub trait ListenerTable {
     fn get_listeners(&self) -> Vec<ListenerKey>;
     fn contains_listener(&self, key: &ListenerKey) -> bool;
-    fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<SenderId>>;
-    fn add_listener(&mut self, key: ListenerKey, sender_id: SenderId) -> bool;
+    fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<ChannelId>>;
+    fn add_listener(&mut self, key: ListenerKey, sender_id: ChannelId) -> bool;
     fn remove_duplicates(&mut self, key: &ListenerKey);
 }
 
 pub trait SenderTable<SendProviderError, Event: GenericEvent = EventU32, AuxDataProvider = Params> {
-    fn contains_send_event_provider(&self, id: &SenderId) -> bool;
+    fn contains_send_event_provider(&self, id: &ChannelId) -> bool;
     fn get_send_event_provider(
         &mut self,
-        id: &SenderId,
+        id: &ChannelId,
     ) -> Option<&mut Box<dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>>;
     fn add_send_event_provider(
         &mut self,
@@ -171,7 +171,7 @@ pub enum EventRoutingResult<Event: GenericEvent, AuxDataProvider> {
 pub enum EventRoutingError<E> {
     SendError(E),
     NoSendersForKey(ListenerKey),
-    NoSenderForId(SenderId),
+    NoSenderForId(ChannelId),
 }
 
 #[derive(Debug)]
@@ -186,12 +186,12 @@ impl<E, Event: GenericEvent + Copy> EventManager<E, Event> {
     }
 
     /// Subscribe for a unique event.
-    pub fn subscribe_single(&mut self, event: &Event, sender_id: SenderId) {
+    pub fn subscribe_single(&mut self, event: &Event, sender_id: ChannelId) {
         self.update_listeners(ListenerKey::Single(event.raw_as_largest_type()), sender_id);
     }
 
     /// Subscribe for an event group.
-    pub fn subscribe_group(&mut self, group_id: LargestGroupIdRaw, sender_id: SenderId) {
+    pub fn subscribe_group(&mut self, group_id: LargestGroupIdRaw, sender_id: ChannelId) {
         self.update_listeners(ListenerKey::Group(group_id), sender_id);
     }
 
@@ -199,7 +199,7 @@ impl<E, Event: GenericEvent + Copy> EventManager<E, Event> {
     ///
     /// For example, this can be useful for a handler component which sends every event as
     /// a telemetry packet.
-    pub fn subscribe_all(&mut self, sender_id: SenderId) {
+    pub fn subscribe_all(&mut self, sender_id: ChannelId) {
         self.update_listeners(ListenerKey::All, sender_id);
     }
 }
@@ -245,7 +245,7 @@ impl<E, Event: GenericEvent + Copy, AuxDataProvider: Clone>
         }
     }
 
-    fn update_listeners(&mut self, key: ListenerKey, sender_id: SenderId) {
+    fn update_listeners(&mut self, key: ListenerKey, sender_id: ChannelId) {
         self.listener_table.add_listener(key, sender_id);
     }
 
@@ -311,7 +311,7 @@ impl<E, Event: GenericEvent + Copy, AuxDataProvider: Clone>
 
 #[derive(Default)]
 pub struct DefaultListenerTableProvider {
-    listeners: HashMap<ListenerKey, Vec<SenderId>>,
+    listeners: HashMap<ListenerKey, Vec<ChannelId>>,
 }
 
 pub struct DefaultSenderTableProvider<
@@ -320,7 +320,7 @@ pub struct DefaultSenderTableProvider<
     AuxDataProvider = Params,
 > {
     senders: HashMap<
-        SenderId,
+        ChannelId,
         Box<dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>,
     >,
 }
@@ -348,11 +348,11 @@ impl ListenerTable for DefaultListenerTableProvider {
         self.listeners.contains_key(key)
     }
 
-    fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<SenderId>> {
+    fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<ChannelId>> {
         self.listeners.get(key).map(|vec| vec.iter())
     }
 
-    fn add_listener(&mut self, key: ListenerKey, sender_id: SenderId) -> bool {
+    fn add_listener(&mut self, key: ListenerKey, sender_id: ChannelId) -> bool {
         if let Some(existing_list) = self.listeners.get_mut(&key) {
             existing_list.push(sender_id);
         } else {
@@ -374,13 +374,13 @@ impl<SendProviderError, Event: GenericEvent, AuxDataProvider>
     SenderTable<SendProviderError, Event, AuxDataProvider>
     for DefaultSenderTableProvider<SendProviderError, Event, AuxDataProvider>
 {
-    fn contains_send_event_provider(&self, id: &SenderId) -> bool {
+    fn contains_send_event_provider(&self, id: &ChannelId) -> bool {
         self.senders.contains_key(id)
     }
 
     fn get_send_event_provider(
         &mut self,
-        id: &SenderId,
+        id: &ChannelId,
     ) -> Option<&mut Box<dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>>
     {
         self.senders.get_mut(id).filter(|sender| sender.id() == *id)
@@ -486,7 +486,7 @@ mod tests {
         fn id(&self) -> u32 {
             self.id
         }
-        fn send(&mut self, event: EventU32, aux_data: Option<Params>) -> Result<(), Self::Error> {
+        fn send(&self, event: EventU32, aux_data: Option<Params>) -> Result<(), Self::Error> {
             self.mpsc_sender.send((event, aux_data))
         }
     }

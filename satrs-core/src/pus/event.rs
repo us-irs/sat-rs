@@ -244,7 +244,7 @@ mod tests {
     use crate::events::{EventU32, Severity};
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::{EcssChannel, PusTmWrapper};
-    use crate::SenderId;
+    use crate::ChannelId;
     use spacepackets::ByteConversionError;
     use std::cell::RefCell;
     use std::collections::VecDeque;
@@ -269,7 +269,7 @@ mod tests {
     }
 
     impl EcssChannel for TestSender {
-        fn id(&self) -> SenderId {
+        fn id(&self) -> ChannelId {
             0
         }
     }
@@ -425,9 +425,9 @@ mod tests {
         let err = reporter.event_info(sender, &time_stamp_empty, event, None);
         assert!(err.is_err());
         let err = err.unwrap_err();
-        if let EcssTmtcError::EcssTmtcError(EcssTmtcError::ByteConversion(
-            ByteConversionError::ToSliceTooSmall(missmatch),
-        )) = err
+        if let EcssTmtcError::Pus(PusError::ByteConversion(ByteConversionError::ToSliceTooSmall(
+            missmatch,
+        ))) = err
         {
             assert_eq!(missmatch.expected, 4);
             assert_eq!(missmatch.found, expected_found_len);

@@ -223,7 +223,7 @@ pub mod alloc_mod {
             self.backend.disable_event_reporting(event.as_ref())
         }
 
-        pub fn generate_pus_event_tm<E, Severity: HasSeverity>(
+        pub fn generate_pus_event_tm<Severity: HasSeverity>(
             &mut self,
             sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],

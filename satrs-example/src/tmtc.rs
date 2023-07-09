@@ -10,7 +10,7 @@ use crate::ccsds::CcsdsReceiver;
 use crate::pus::{PusReceiver, PusTcMpscRouter};
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
-use satrs_core::pus::{AcceptedTc, ReceivesEcssPusTc};
+use satrs_core::pus::{ReceivesEcssPusTc, TcAddrWithToken};
 use satrs_core::spacepackets::ecss::{PusPacket, SerializablePusPacket};
 use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::spacepackets::SpHeader;
@@ -42,7 +42,7 @@ pub enum MpscStoreAndSendError {
     #[error("Store error: {0}")]
     Store(#[from] StoreError),
     #[error("TC send error: {0}")]
-    TcSend(#[from] SendError<AcceptedTc>),
+    TcSend(#[from] SendError<TcAddrWithToken>),
     #[error("TMTC send error: {0}")]
     TmTcSend(#[from] SendError<StoreAddr>),
 }
@@ -123,7 +123,7 @@ pub fn core_tmtc_task(
     let mut udp_tmtc_server = UdpTmtcServer {
         udp_tc_server,
         tm_rx: tm_args.tm_server_rx,
-        tm_store: tm_args.tm_store.backing_pool(),
+        tm_store: tm_args.tm_store.clone_backing_pool(),
     };
 
     let mut tc_buf: [u8; 4096] = [0; 4096];

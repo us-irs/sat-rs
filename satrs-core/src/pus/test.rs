@@ -1,15 +1,14 @@
-use crate::pool::{PoolGuard, SharedPool, StoreAddr};
+use crate::pool::{SharedPool, StoreAddr};
 use crate::pus::verification::{StdVerifReporterWithSender, TcStateAccepted, VerificationToken};
 use crate::pus::{
-    AcceptedTc, EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
-    PusPacketHandlingError, PusServiceBase, PusServiceHandler, PusTmWrapper, ReceivedTcWrapper,
+    EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
+    PusPacketHandlingError, PusServiceBase, PusServiceHandler, PusTmWrapper,
 };
 use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
 use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::SpHeader;
 use std::boxed::Box;
-use std::sync::mpsc::Receiver;
 
 /// This is a helper class for [std] environments to handle generic PUS 17 (test service) packets.
 /// This handler only processes ping requests and generates a ping reply for them accordingly.
@@ -20,12 +19,19 @@ pub struct PusService17TestHandler {
 impl PusService17TestHandler {
     pub fn new(
         tc_receiver: Box<dyn EcssTcReceiver>,
+        shared_tc_store: SharedPool,
         tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
     ) -> Self {
         Self {
-            psb: PusServiceBase::new(tc_receiver, tm_sender, tm_apid, verification_handler),
+            psb: PusServiceBase::new(
+                tc_receiver,
+                shared_tc_store,
+                tm_sender,
+                tm_apid,
+                verification_handler,
+            ),
         }
     }
 }
@@ -40,10 +46,11 @@ impl PusServiceHandler for PusService17TestHandler {
 
     fn handle_one_tc(
         &mut self,
-        tc: PusTc,
-        _tc_guard: PoolGuard,
+        addr: StoreAddr,
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        self.copy_tc_to_buf(addr)?;
+        let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf)?;
         if tc.service() != 17 {
             return Err(PusPacketHandlingError::WrongService(tc.service()));
         }
@@ -95,7 +102,7 @@ impl PusServiceHandler for PusService17TestHandler {
         }
         Ok(PusPacketHandlerResult::CustomSubservice(
             tc.subservice(),
-            token.into(),
+            token,
         ))
     }
 }
@@ -107,7 +114,7 @@ mod tests {
     use crate::pus::verification::{
         RequestId, StdVerifReporterWithSender, VerificationReporterCfg,
     };
-    use crate::pus::{MpscTmInStoreSender, PusServiceHandler};
+    use crate::pus::{MpscTcInStoreReceiver, MpscTmInStoreSender, PusServiceHandler};
     use crate::tmtc::tm_helper::SharedTmStore;
     use spacepackets::ecss::{PusPacket, SerializablePusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
@@ -126,24 +133,21 @@ mod tests {
         let tc_pool = LocalPool::new(pool_cfg.clone());
         let tm_pool = LocalPool::new(pool_cfg);
         let tc_pool_shared = SharedPool::new(RwLock::new(Box::new(tc_pool)));
-        let tm_pool_shared = SharedPool::new(RwLock::new(Box::new(tm_pool)));
-        let shared_tm_store = SharedTmStore::new(tm_pool_shared.clone());
-        let (test_srv_tx, test_srv_rx) = mpsc::channel();
+        let shared_tm_store = SharedTmStore::new(Box::new(tm_pool));
+        let tm_pool_shared = shared_tm_store.clone_backing_pool();
+        let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::channel();
         let (tm_tx, tm_rx) = mpsc::channel();
-        let verif_sender = MpscTmInStoreSender::new(
-            0,
-            "verif_sender",
-            shared_tm_store.backing_pool(),
-            tm_tx.clone(),
-        );
+        let verif_sender =
+            MpscTmInStoreSender::new(0, "verif_sender", shared_tm_store.clone(), tm_tx.clone());
         let verif_cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
         let mut verification_handler =
             StdVerifReporterWithSender::new(&verif_cfg, Box::new(verif_sender));
+        let test_srv_tm_sender = MpscTmInStoreSender::new(0, "TEST_SENDER", shared_tm_store, tm_tx);
+        let test_srv_tc_receiver = MpscTcInStoreReceiver::new(0, "TEST_RECEIVER", test_srv_tc_rx);
         let mut pus_17_handler = PusService17TestHandler::new(
-            test_srv_rx,
+            Box::new(test_srv_tc_receiver),
             tc_pool_shared.clone(),
-            tm_tx,
-            shared_tm_store,
+            Box::new(test_srv_tm_sender),
             TEST_APID,
             verification_handler.clone(),
         );
@@ -160,7 +164,7 @@ mod tests {
         let addr = tc_pool.add(&pus_buf[..tc_size]).unwrap();
         drop(tc_pool);
         // Send accepted TC to test service handler.
-        test_srv_tx.send((addr, token)).unwrap();
+        test_srv_tc_tx.send((addr, token.into())).unwrap();
         let result = pus_17_handler.handle_next_packet();
         assert!(result.is_ok());
         // We should see 4 replies in the TM queue now: Acceptance TM, Start TM, ping reply and

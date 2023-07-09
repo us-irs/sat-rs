@@ -45,5 +45,5 @@ pub mod tmtc;
 
 pub use spacepackets;
 
-// Generic sender ID type.
-pub type SenderId = u32;
+// Generic channel ID type.
+pub type ChannelId = u32;

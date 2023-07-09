@@ -32,8 +32,10 @@ use satrs_core::pus::hk::Subservice as HkSubservice;
 use satrs_core::pus::scheduler::PusScheduler;
 use satrs_core::pus::scheduler_srv::PusService11SchedHandler;
 use satrs_core::pus::test::PusService17TestHandler;
-use satrs_core::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
-use satrs_core::pus::MpscTmInStoreSender;
+use satrs_core::pus::verification::{
+    TcStateStarted, VerificationReporterCfg, VerificationReporterWithSender, VerificationToken,
+};
+use satrs_core::pus::{MpscTcInStoreReceiver, MpscTmInStoreSender};
 use satrs_core::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore};
 use satrs_core::spacepackets::tm::PusTmZeroCopyWriter;
 use satrs_core::spacepackets::{
@@ -44,8 +46,8 @@ use satrs_core::spacepackets::{
 };
 use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::{AddressableId, TargetId};
-use satrs_core::SenderId;
-use satrs_example::{RequestTargetId, TmSenderId, OBSW_SERVER_ADDR, SERVER_PORT};
+use satrs_core::ChannelId;
+use satrs_example::{RequestTargetId, TcReceiverId, TmSenderId, OBSW_SERVER_ADDR, SERVER_PORT};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};
@@ -85,7 +87,7 @@ fn main() {
     let (tm_funnel_tx, tm_funnel_rx) = channel();
     let (tm_server_tx, tm_server_rx) = channel();
     let verif_sender = MpscTmInStoreSender::new(
-        TmSenderId::PusVerification as SenderId,
+        TmSenderId::PusVerification as ChannelId,
         "verif_sender",
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
@@ -156,13 +158,18 @@ fn main() {
         action_service_receiver: pus_action_tx,
     };
     let test_srv_tm_sender = MpscTmInStoreSender::new(
-        TmSenderId::PusTest as SenderId,
+        TmSenderId::PusTest as ChannelId,
         "PUS_17_TM_SENDER",
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
-    let pus17_handler = PusService17TestHandler::new(
+    let test_srv_receiver = MpscTcInStoreReceiver::new(
+        TcReceiverId::PusTest as ChannelId,
+        "PUS_17_TC_RECV",
         pus_test_rx,
+    );
+    let pus17_handler = PusService17TestHandler::new(
+        Box::new(test_srv_receiver),
         tc_store.pool.clone(),
         Box::new(test_srv_tm_sender),
         PUS_APID,
@@ -174,15 +181,20 @@ fn main() {
     };
 
     let sched_srv_tm_sender = MpscTmInStoreSender::new(
-        TmSenderId::PusSched as SenderId,
+        TmSenderId::PusSched as ChannelId,
         "PUS_11_TM_SENDER",
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
+    let sched_srv_receiver = MpscTcInStoreReceiver::new(
+        TcReceiverId::PusSched as ChannelId,
+        "PUS_11_TC_RECV",
+        pus_sched_rx,
+    );
     let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
         .expect("Creating PUS Scheduler failed");
     let pus_11_handler = PusService11SchedHandler::new(
-        pus_sched_rx,
+        Box::new(sched_srv_receiver),
         tc_store.pool.clone(),
         Box::new(sched_srv_tm_sender),
         PUS_APID,
@@ -195,13 +207,18 @@ fn main() {
     };
 
     let event_srv_tm_sender = MpscTmInStoreSender::new(
-        TmSenderId::PusEvent as SenderId,
+        TmSenderId::PusEvent as ChannelId,
         "PUS_5_TM_SENDER",
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
-    let pus_5_handler = PusService5EventHandler::new(
+    let event_srv_receiver = MpscTcInStoreReceiver::new(
+        TcReceiverId::PusEvent as ChannelId,
+        "PUS_5_TC_RECV",
         pus_event_rx,
+    );
+    let pus_5_handler = PusService5EventHandler::new(
+        Box::new(event_srv_receiver),
         tc_store.pool.clone(),
         Box::new(event_srv_tm_sender),
         PUS_APID,
@@ -211,13 +228,18 @@ fn main() {
     let mut pus_5_wrapper = Pus5Wrapper { pus_5_handler };
 
     let action_srv_tm_sender = MpscTmInStoreSender::new(
-        TmSenderId::PusAction as SenderId,
+        TmSenderId::PusAction as ChannelId,
         "PUS_8_TM_SENDER",
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
-    let pus_8_handler = PusService8ActionHandler::new(
+    let action_srv_receiver = MpscTcInStoreReceiver::new(
+        TcReceiverId::PusAction as ChannelId,
+        "PUS_8_TC_RECV",
         pus_action_rx,
+    );
+    let pus_8_handler = PusService8ActionHandler::new(
+        Box::new(action_srv_receiver),
         tc_store.pool.clone(),
         Box::new(action_srv_tm_sender),
         PUS_APID,
@@ -227,13 +249,15 @@ fn main() {
     let mut pus_8_wrapper = Pus8Wrapper { pus_8_handler };
 
     let hk_srv_tm_sender = MpscTmInStoreSender::new(
-        TmSenderId::PusHk as SenderId,
+        TmSenderId::PusHk as ChannelId,
         "PUS_3_TM_SENDER",
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
+    let hk_srv_receiver =
+        MpscTcInStoreReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
     let pus_3_handler = PusService3HkHandler::new(
-        pus_hk_rx,
+        Box::new(hk_srv_receiver),
         tc_store.pool.clone(),
         Box::new(hk_srv_tm_sender),
         PUS_APID,
@@ -262,7 +286,7 @@ fn main() {
                 if let Ok(addr) = tm_funnel.tm_funnel_rx.recv() {
                     // Read the TM, set sequence counter and message counter, and finally update
                     // the CRC.
-                    let shared_pool = shared_tm_store.backing_pool();
+                    let shared_pool = shared_tm_store.clone_backing_pool();
                     let mut pool_guard = shared_pool.write().expect("Locking TM pool failed");
                     let tm_raw = pool_guard
                         .modify(&addr)
@@ -297,12 +321,20 @@ fn main() {
         .name("Event".to_string())
         .spawn(move || {
             let mut timestamp: [u8; 7] = [0; 7];
-            let mut sender =
-                MpscTmInStoreSender::new(1, "event_sender", tm_store_event.clone(), tm_funnel_tx);
+            let mut sender = MpscTmInStoreSender::new(
+                TmSenderId::AllEvents as ChannelId,
+                "ALL_EVENTS_TX",
+                tm_store_event.clone(),
+                tm_funnel_tx,
+            );
             let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
             let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
+                let started_token: VerificationToken<TcStateStarted> = event_req
+                    .token
+                    .try_into()
+                    .expect("expected start verification token");
                 reporter_event_handler
-                    .completion_success(event_req.token.try_into().unwrap(), Some(timestamp))
+                    .completion_success(started_token, Some(timestamp))
                     .expect("Sending completion success failed");
             };
             loop {

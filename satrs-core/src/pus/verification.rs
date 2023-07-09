@@ -19,6 +19,7 @@
 //! use satrs_core::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
 //! use satrs_core::seq_count::SeqCountProviderSimple;
 //! use satrs_core::pus::MpscTmInStoreSender;
+//! use satrs_core::tmtc::tm_helper::SharedTmStore;
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
 //! use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
@@ -28,9 +29,11 @@
 //! const TEST_APID: u16 = 0x02;
 //!
 //! let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
-//! let shared_tm_pool: SharedPool = Arc::new(RwLock::new(Box::new(LocalPool::new(pool_cfg.clone()))));
+//! let tm_pool = LocalPool::new(pool_cfg.clone());
+//! let shared_tm_store = SharedTmStore::new(Box::new(tm_pool));
+//! let tm_store = shared_tm_store.clone_backing_pool();
 //! let (verif_tx, verif_rx) = mpsc::channel();
-//! let sender = MpscTmInStoreSender::new(0, "Test Sender", shared_tm_pool.clone(), verif_tx);
+//! let sender = MpscTmInStoreSender::new(0, "Test Sender", shared_tm_store, verif_tx);
 //! let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
 //! let mut  reporter = VerificationReporterWithSender::new(&cfg , Box::new(sender));
 //!
@@ -51,7 +54,7 @@
 //!     let addr = verif_rx.recv_timeout(Duration::from_millis(10)).unwrap();
 //!     let tm_len;
 //!     {
-//!         let mut rg = shared_tm_pool.write().expect("Error locking shared pool");
+//!         let mut rg = tm_store.write().expect("Error locking shared pool");
 //!         let store_guard = rg.read_with_guard(addr);
 //!         let slice = store_guard.read().expect("Error reading TM slice");
 //!         tm_len = slice.len();
@@ -1491,25 +1494,26 @@ mod std_mod {
 
 #[cfg(test)]
 mod tests {
-    use crate::pool::{LocalPool, PoolCfg, SharedPool};
+    use crate::pool::{LocalPool, PoolCfg};
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
         EcssTmSenderCore, EcssTmtcError, FailParams, FailParamsWithStep, RequestId, TcStateNone,
         VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
         VerificationToken,
     };
-    use crate::pus::{EcssChannel, EcssTmtcError, MpscTmInStoreSender, PusTmWrapper};
-    use crate::SenderId;
+    use crate::pus::{EcssChannel, MpscTmInStoreSender, PusTmWrapper};
+    use crate::tmtc::tm_helper::SharedTmStore;
+    use crate::ChannelId;
     use alloc::boxed::Box;
     use alloc::format;
-    use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, PusPacket};
+    use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, PusError, PusPacket};
     use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::tm::PusTm;
     use spacepackets::util::UnsignedEnum;
     use spacepackets::{ByteConversionError, CcsdsPacket, SpHeader};
     use std::cell::RefCell;
     use std::collections::VecDeque;
-    use std::sync::{mpsc, Arc, RwLock};
+    use std::sync::mpsc;
     use std::time::Duration;
     use std::vec;
     use std::vec::Vec;
@@ -1534,7 +1538,7 @@ mod tests {
     }
 
     impl EcssChannel for TestSender {
-        fn id(&self) -> SenderId {
+        fn id(&self) -> ChannelId {
             0
         }
         fn name(&self) -> &'static str {
@@ -1543,9 +1547,7 @@ mod tests {
     }
 
     impl EcssTmSenderCore for TestSender {
-        type Error = ();
-
-        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), Self::Error> {
+        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
             match tm {
                 PusTmWrapper::InStore(_) => {
                     panic!("TestSender: Can not deal with addresses");
@@ -1576,23 +1578,6 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-    struct DummyError {}
-    #[derive(Default, Clone)]
-    struct FallibleSender {}
-
-    impl EcssChannel for FallibleSender {
-        fn id(&self) -> SenderId {
-            0
-        }
-    }
-    impl EcssTmSenderCore for FallibleSender {
-        type Error = DummyError;
-        fn send_tm(&self, _: PusTmWrapper) -> Result<(), Self::Error> {
-            Err(DummyError {})
-        }
-    }
-
     struct TestBase<'a> {
         vr: VerificationReporter,
         #[allow(dead_code)]
@@ -1604,13 +1589,13 @@ mod tests {
             &mut self.vr
         }
     }
-    struct TestBaseWithHelper<'a, E> {
-        helper: VerificationReporterWithSender<E>,
+    struct TestBaseWithHelper<'a> {
+        helper: VerificationReporterWithSender,
         #[allow(dead_code)]
         tc: PusTc<'a>,
     }
 
-    impl<'a, E> TestBaseWithHelper<'a, E> {
+    impl<'a> TestBaseWithHelper<'a> {
         fn rep(&mut self) -> &mut VerificationReporter {
             &mut self.helper.reporter
         }
@@ -1641,10 +1626,7 @@ mod tests {
         (TestBase { vr: reporter, tc }, init_tok)
     }
 
-    fn base_with_helper_init() -> (
-        TestBaseWithHelper<'static, ()>,
-        VerificationToken<TcStateNone>,
-    ) {
+    fn base_with_helper_init() -> (TestBaseWithHelper<'static>, VerificationToken<TcStateNone>) {
         let mut reporter = base_reporter();
         let (tc, _) = base_tc_init(None);
         let init_tok = reporter.add_tc(&tc);
@@ -1674,9 +1656,10 @@ mod tests {
     #[test]
     fn test_mpsc_verif_send_sync() {
         let pool = LocalPool::new(PoolCfg::new(vec![(8, 8)]));
-        let shared_pool: SharedPool = Arc::new(RwLock::new(Box::new(pool)));
+        let tm_store = Box::new(pool);
+        let shared_tm_store = SharedTmStore::new(tm_store);
         let (tx, _) = mpsc::channel();
-        let mpsc_verif_sender = MpscTmInStoreSender::new(0, "verif_sender", shared_pool, tx);
+        let mpsc_verif_sender = MpscTmInStoreSender::new(0, "verif_sender", shared_tm_store, tx);
         is_send(&mpsc_verif_sender);
     }
 
@@ -1705,23 +1688,6 @@ mod tests {
             .expect("Sending acceptance success failed");
         let sender: &mut TestSender = b.helper.sender.downcast_mut().unwrap();
         acceptance_check(sender, &tok.req_id);
-    }
-
-    #[test]
-    fn test_acceptance_send_fails() {
-        let (mut b, tok) = base_init(false);
-        let mut faulty_sender = FallibleSender::default();
-        let res =
-            b.vr.acceptance_success(tok, &mut faulty_sender, Some(&EMPTY_STAMP));
-        assert!(res.is_err());
-        let err = res.unwrap_err();
-        assert_eq!(err.1, tok);
-        match err.0 {
-            EcssTmtcError::SendError(e) => {
-                assert_eq!(e, DummyError {})
-            }
-            _ => panic!("{}", format!("Unexpected error {:?}", err.0)),
-        }
     }
 
     fn acceptance_fail_check(sender: &mut TestSender, req_id: RequestId, stamp_buf: [u8; 7]) {
@@ -1788,7 +1754,7 @@ mod tests {
         let err_with_token = res.unwrap_err();
         assert_eq!(err_with_token.1, tok);
         match err_with_token.0 {
-            EcssTmtcError::EcssTmtcError(EcssTmtcError::ByteConversion(e)) => match e {
+            EcssTmtcError::Pus(PusError::ByteConversion(e)) => match e {
                 ByteConversionError::ToSliceTooSmall(missmatch) => {
                     assert_eq!(
                         missmatch.expected,
@@ -2357,11 +2323,11 @@ mod tests {
     // TODO: maybe a bit more extensive testing, all I have time for right now
     fn test_seq_count_increment() {
         let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
-        let shared_tm_pool: SharedPool =
-            Arc::new(RwLock::new(Box::new(LocalPool::new(pool_cfg.clone()))));
+        let tm_pool = Box::new(LocalPool::new(pool_cfg.clone()));
+        let shared_tm_store = SharedTmStore::new(tm_pool);
+        let shared_tm_pool = shared_tm_store.clone_backing_pool();
         let (verif_tx, verif_rx) = mpsc::channel();
-        let sender =
-            MpscTmInStoreSender::new(0, "Verification Sender", shared_tm_pool.clone(), verif_tx);
+        let sender = MpscTmInStoreSender::new(0, "Verification Sender", shared_tm_store, verif_tx);
         let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
         let mut reporter = VerificationReporterWithSender::new(&cfg, Box::new(sender));
 
