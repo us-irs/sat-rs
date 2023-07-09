@@ -9,8 +9,8 @@ use crate::pus::{
     PusPacketHandlingError, PusServiceBase, PusServiceHandler,
 };
 use spacepackets::ecss::event::Subservice;
+use spacepackets::ecss::tc::PusTc;
 use spacepackets::ecss::PusPacket;
-use spacepackets::tc::PusTc;
 use std::boxed::Box;
 use std::sync::mpsc::Sender;
 

@@ -8,8 +8,8 @@ use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, PusEventDispatcher,
 };
 use satrs_core::pus::MpscTmAsVecSender;
+use spacepackets::ecss::tm::PusTm;
 use spacepackets::ecss::{PusError, PusPacket};
-use spacepackets::tm::PusTm;
 use std::sync::mpsc::{channel, SendError, TryRecvError};
 use std::thread;
 

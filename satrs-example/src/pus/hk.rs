@@ -9,8 +9,8 @@ use satrs_core::pus::{
     EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
     PusServiceHandler,
 };
+use satrs_core::spacepackets::ecss::tc::PusTc;
 use satrs_core::spacepackets::ecss::{hk, PusPacket};
-use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::tmtc::{AddressableId, TargetId};
 use satrs_example::{hk_err, tmtc_err};
 use std::collections::HashMap;

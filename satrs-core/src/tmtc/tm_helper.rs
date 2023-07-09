@@ -1,6 +1,6 @@
+use spacepackets::ecss::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::time::cds::TimeProvider;
 use spacepackets::time::TimeWriter;
-use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::SpHeader;
 
 #[cfg(feature = "std")]
@@ -10,8 +10,8 @@ pub use std_mod::*;
 pub mod std_mod {
     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr};
     use crate::pus::EcssTmtcError;
+    use spacepackets::ecss::tm::{PusTm, PusTmCreator};
     use spacepackets::ecss::SerializablePusPacket;
-    use spacepackets::tm::PusTm;
     use std::sync::{Arc, RwLock};
 
     #[derive(Clone)]
@@ -30,7 +30,7 @@ pub mod std_mod {
             self.pool.clone()
         }
 
-        pub fn add_pus_tm(&self, pus_tm: &PusTm) -> Result<StoreAddr, EcssTmtcError> {
+        pub fn add_pus_tm(&self, pus_tm: &PusTmCreator) -> Result<StoreAddr, EcssTmtcError> {
             let mut pg = self.pool.write().map_err(|_| EcssTmtcError::StoreLock)?;
             let (addr, buf) = pg.free_element(pus_tm.len_packed())?;
             pus_tm

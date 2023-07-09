@@ -22,8 +22,8 @@
 //! use satrs_core::tmtc::tm_helper::SharedTmStore;
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
-//! use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
-//! use spacepackets::tm::PusTm;
+//! use spacepackets::ecss::tc::{PusTc, PusTcSecondaryHeader};
+//! use spacepackets::ecss::tm::PusTm;
 //!
 //! const EMPTY_STAMP: [u8; 7] = [0; 7];
 //! const TEST_APID: u16 = 0x02;
@@ -85,9 +85,9 @@ use core::mem::size_of;
 use delegate::delegate;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use spacepackets::ecss::tc::PusTc;
+use spacepackets::ecss::tm::{PusTm, PusTmCreator, PusTmSecondaryHeader};
 use spacepackets::ecss::{EcssEnumeration, PusError, SerializablePusPacket};
-use spacepackets::tc::PusTc;
-use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
 use spacepackets::{SpHeader, MAX_APID};
 
@@ -332,19 +332,19 @@ pub enum VerifFailure {}
 /// This struct generally mutably borrows the source data buffer.
 pub struct VerificationSendable<'src_data, State, SuccessOrFailure> {
     token: Option<VerificationToken<State>>,
-    pus_tm: Option<PusTm<'src_data>>,
+    pus_tm: Option<PusTmCreator<'src_data>>,
     phantom: PhantomData<SuccessOrFailure>,
 }
 
 impl<'src_data, State, SuccessOrFailure> VerificationSendable<'src_data, State, SuccessOrFailure> {
-    pub(crate) fn new(pus_tm: PusTm<'src_data>, token: VerificationToken<State>) -> Self {
+    pub(crate) fn new(pus_tm: PusTmCreator<'src_data>, token: VerificationToken<State>) -> Self {
         Self {
             token: Some(token),
             pus_tm: Some(pus_tm),
             phantom: PhantomData,
         }
     }
-    pub(crate) fn new_no_token(pus_tm: PusTm<'src_data>) -> Self {
+    pub(crate) fn new_no_token(pus_tm: PusTmCreator<'src_data>) -> Self {
         Self {
             token: None,
             pus_tm: Some(pus_tm),
@@ -356,11 +356,11 @@ impl<'src_data, State, SuccessOrFailure> VerificationSendable<'src_data, State, 
         self.pus_tm.as_ref().unwrap().len_packed()
     }
 
-    pub fn pus_tm(&self) -> &PusTm<'src_data> {
+    pub fn pus_tm(&self) -> &PusTmCreator<'src_data> {
         self.pus_tm.as_ref().unwrap()
     }
 
-    pub fn pus_tm_mut(&mut self) -> &mut PusTm<'src_data> {
+    pub fn pus_tm_mut(&mut self) -> &mut PusTmCreator<'src_data> {
         self.pus_tm.as_mut().unwrap()
     }
 }
@@ -370,7 +370,7 @@ impl<'src_data, State> VerificationSendable<'src_data, State, VerifFailure> {
 }
 
 impl<'src_data, State> VerificationSendable<'src_data, State, VerifFailure> {
-    pub fn send_failure(self) -> (PusTm<'src_data>, VerificationToken<State>) {
+    pub fn send_failure(self) -> (PusTmCreator<'src_data>, VerificationToken<State>) {
         (self.pus_tm.unwrap(), self.token.unwrap())
     }
 }
@@ -787,7 +787,7 @@ impl VerificationReporterCore {
         req_id: &RequestId,
         time_stamp: Option<&'src_data [u8]>,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
-    ) -> Result<PusTm<'src_data>, EcssTmtcError> {
+    ) -> Result<PusTmCreator<'src_data>, EcssTmtcError> {
         let mut source_data_len = size_of::<u32>();
         if let Some(step) = step {
             source_data_len += step.size();
@@ -823,7 +823,7 @@ impl VerificationReporterCore {
         req_id: &RequestId,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
         params: &FailParams<'src_data, '_>,
-    ) -> Result<PusTm<'src_data>, EcssTmtcError> {
+    ) -> Result<PusTmCreator<'src_data>, EcssTmtcError> {
         let mut idx = 0;
         let mut source_data_len = RequestId::SIZE_AS_BYTES + params.failure_code.size();
         if let Some(step) = step {
@@ -868,10 +868,10 @@ impl VerificationReporterCore {
         sp_header: &mut SpHeader,
         time_stamp: Option<&'src_data [u8]>,
         source_data_len: usize,
-    ) -> PusTm<'src_data> {
+    ) -> PusTmCreator<'src_data> {
         let tm_sec_header =
             PusTmSecondaryHeader::new(1, subservice, msg_counter, self.dest_id, time_stamp);
-        PusTm::new(
+        PusTmCreator::new(
             sp_header,
             tm_sec_header,
             Some(&src_data_buf[0..source_data_len]),
@@ -1506,9 +1506,9 @@ mod tests {
     use crate::ChannelId;
     use alloc::boxed::Box;
     use alloc::format;
+    use spacepackets::ecss::tc::{PusTc, PusTcSecondaryHeader};
+    use spacepackets::ecss::tm::PusTm;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, PusError, PusPacket};
-    use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
-    use spacepackets::tm::PusTm;
     use spacepackets::util::UnsignedEnum;
     use spacepackets::{ByteConversionError, CcsdsPacket, SpHeader};
     use std::cell::RefCell;

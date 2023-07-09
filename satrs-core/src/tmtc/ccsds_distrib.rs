@@ -22,7 +22,7 @@
 //! use satrs_core::tmtc::{ReceivesTc, ReceivesTcCore};
 //! use spacepackets::{CcsdsPacket, SpHeader};
 //! use spacepackets::ecss::SerializablePusPacket;
-//! use spacepackets::tc::PusTc;
+//! use spacepackets::ecss::tc::PusTc;
 //!
 //! #[derive (Default)]
 //! struct ConcreteApidHandler {
@@ -225,8 +225,8 @@ impl<E: 'static> CcsdsDistributor<E> {
 pub(crate) mod tests {
     use super::*;
     use crate::tmtc::ccsds_distrib::{CcsdsDistributor, CcsdsPacketHandler};
+    use spacepackets::ecss::tc::PusTc;
     use spacepackets::ecss::SerializablePusPacket;
-    use spacepackets::tc::PusTc;
     use spacepackets::CcsdsPacket;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};

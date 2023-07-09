@@ -11,8 +11,8 @@ use crate::pus::{PusReceiver, PusTcMpscRouter};
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::pus::{ReceivesEcssPusTc, TcAddrWithToken};
+use satrs_core::spacepackets::ecss::tc::{PusTc, PusTcCreator, PusTcReader};
 use satrs_core::spacepackets::ecss::{PusPacket, SerializablePusPacket};
-use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::spacepackets::SpHeader;
 use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc};
@@ -53,7 +53,7 @@ pub struct TcStore {
 }
 
 impl TcStore {
-    pub fn add_pus_tc(&mut self, pus_tc: &PusTc) -> Result<StoreAddr, StoreError> {
+    pub fn add_pus_tc(&mut self, pus_tc: &PusTcCreator) -> Result<StoreAddr, StoreError> {
         let mut pg = self.pool.write().expect("error locking TC store");
         let (addr, buf) = pg.free_element(pus_tc.len_packed())?;
         pus_tc
@@ -83,7 +83,7 @@ pub struct PusTcSource {
 impl ReceivesEcssPusTc for PusTcSource {
     type Error = MpscStoreAndSendError;
 
-    fn pass_pus_tc(&mut self, _: &SpHeader, pus_tc: &PusTc) -> Result<(), Self::Error> {
+    fn pass_pus_tc(&mut self, _: &SpHeader, pus_tc: &PusTcReader) -> Result<(), Self::Error> {
         let addr = self.tc_store.add_pus_tc(pus_tc)?;
         self.tc_source.send(addr)?;
         Ok(())

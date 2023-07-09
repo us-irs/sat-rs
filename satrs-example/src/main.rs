@@ -37,11 +37,11 @@ use satrs_core::pus::verification::{
 };
 use satrs_core::pus::{MpscTcInStoreReceiver, MpscTmInStoreSender};
 use satrs_core::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore};
-use satrs_core::spacepackets::tm::PusTmZeroCopyWriter;
+use satrs_core::spacepackets::ecss::tm::PusTmZeroCopyWriter;
 use satrs_core::spacepackets::{
+    ecss::tm::{PusTm, PusTmSecondaryHeader},
     time::cds::TimeProvider,
     time::TimeWriter,
-    tm::{PusTm, PusTmSecondaryHeader},
     SequenceFlags, SpHeader,
 };
 use satrs_core::tmtc::tm_helper::SharedTmStore;

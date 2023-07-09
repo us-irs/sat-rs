@@ -21,7 +21,7 @@
 //! use satrs_core::tmtc::pus_distrib::{PusDistributor, PusServiceProvider};
 //! use satrs_core::tmtc::{ReceivesTc, ReceivesTcCore};
 //! use spacepackets::SpHeader;
-//! use spacepackets::tc::PusTc;
+//! use spacepackets::ecss::tc::PusTc;
 //! struct ConcretePusHandler {
 //!     handler_call_count: u32
 //! }
@@ -66,8 +66,8 @@ use crate::tmtc::{ReceivesCcsdsTc, ReceivesTcCore};
 use alloc::boxed::Box;
 use core::fmt::{Display, Formatter};
 use downcast_rs::Downcast;
+use spacepackets::ecss::tc::{PusTc, PusTcReader};
 use spacepackets::ecss::{PusError, PusPacket};
-use spacepackets::tc::PusTc;
 use spacepackets::SpHeader;
 #[cfg(feature = "std")]
 use std::error::Error;
@@ -78,7 +78,7 @@ pub trait PusServiceProvider: Downcast {
         &mut self,
         service: u8,
         header: &SpHeader,
-        pus_tc: &PusTc,
+        pus_tc: &PusTcReader,
     ) -> Result<(), Self::Error>;
 }
 downcast_rs::impl_downcast!(PusServiceProvider assoc Error);
@@ -141,14 +141,14 @@ impl<E: 'static> ReceivesTcCore for PusDistributor<E> {
 impl<E: 'static> ReceivesCcsdsTc for PusDistributor<E> {
     type Error = PusDistribError<E>;
     fn pass_ccsds(&mut self, header: &SpHeader, tm_raw: &[u8]) -> Result<(), Self::Error> {
-        let (tc, _) = PusTc::from_bytes(tm_raw).map_err(|e| PusDistribError::PusError(e))?;
+        let (tc, _) = PusTcReader::new(tm_raw).map_err(|e| PusDistribError::PusError(e))?;
         self.pass_pus_tc(header, &tc)
     }
 }
 
 impl<E: 'static> ReceivesEcssPusTc for PusDistributor<E> {
     type Error = PusDistribError<E>;
-    fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTc) -> Result<(), Self::Error> {
+    fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTcReader) -> Result<(), Self::Error> {
         self.service_provider
             .handle_pus_tc_packet(pus_tc.service(), header, pus_tc)
             .map_err(|e| PusDistribError::CustomError(e))
@@ -175,8 +175,8 @@ mod tests {
     };
     use crate::tmtc::ccsds_distrib::{CcsdsDistributor, CcsdsPacketHandler};
     use alloc::vec::Vec;
+    use spacepackets::ecss::tc::PusTc;
     use spacepackets::ecss::PusError;
-    use spacepackets::tc::PusTc;
     use spacepackets::CcsdsPacket;
     #[cfg(feature = "std")]
     use std::collections::VecDeque;

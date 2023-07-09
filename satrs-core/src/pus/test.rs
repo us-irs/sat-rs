@@ -4,9 +4,9 @@ use crate::pus::{
     EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
     PusPacketHandlingError, PusServiceBase, PusServiceHandler, PusTmWrapper,
 };
+use spacepackets::ecss::tc::PusTc;
+use spacepackets::ecss::tm::{PusTm, PusTmCreator, PusTmSecondaryHeader};
 use spacepackets::ecss::PusPacket;
-use spacepackets::tc::PusTc;
-use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::SpHeader;
 use std::boxed::Box;
 
@@ -72,7 +72,7 @@ impl PusServiceHandler for PusService17TestHandler {
             // Sequence count will be handled centrally in TM funnel.
             let mut reply_header = SpHeader::tm_unseg(self.psb.tm_apid, 0, 0).unwrap();
             let tc_header = PusTmSecondaryHeader::new_simple(17, 2, &time_stamp);
-            let ping_reply = PusTm::new(&mut reply_header, tc_header, None, true);
+            let ping_reply = PusTmCreator::new(&mut reply_header, tc_header, None, true);
             let result = self
                 .psb
                 .tm_sender
@@ -116,9 +116,9 @@ mod tests {
     };
     use crate::pus::{MpscTcInStoreReceiver, MpscTmInStoreSender, PusServiceHandler};
     use crate::tmtc::tm_helper::SharedTmStore;
+    use spacepackets::ecss::tc::{PusTc, PusTcSecondaryHeader};
+    use spacepackets::ecss::tm::PusTm;
     use spacepackets::ecss::{PusPacket, SerializablePusPacket};
-    use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
-    use spacepackets::tm::PusTm;
     use spacepackets::{SequenceFlags, SpHeader};
     use std::boxed::Box;
     use std::sync::{mpsc, RwLock};

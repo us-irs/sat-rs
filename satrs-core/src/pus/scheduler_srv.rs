@@ -5,8 +5,8 @@ use crate::pus::{
     EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
     PusServiceHandler,
 };
+use spacepackets::ecss::tc::PusTc;
 use spacepackets::ecss::{scheduling, PusPacket};
-use spacepackets::tc::PusTc;
 use spacepackets::time::cds::TimeProvider;
 use std::boxed::Box;
 

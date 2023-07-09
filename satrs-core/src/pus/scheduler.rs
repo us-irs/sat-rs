@@ -8,8 +8,8 @@ use core::time::Duration;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::scheduling::TimeWindowType;
+use spacepackets::ecss::tc::{GenericPusTcSecondaryHeader, PusTc};
 use spacepackets::ecss::PusError;
-use spacepackets::tc::{GenericPusTcSecondaryHeader, PusTc};
 use spacepackets::time::{CcsdsTimeProvider, TimestampError, UnixTimestamp};
 use spacepackets::CcsdsPacket;
 #[cfg(feature = "std")]
@@ -239,8 +239,8 @@ pub mod alloc_mod {
     use alloc::vec::Vec;
     use core::time::Duration;
     use spacepackets::ecss::scheduling::TimeWindowType;
+    use spacepackets::ecss::tc::PusTc;
     use spacepackets::ecss::PusPacket;
-    use spacepackets::tc::PusTc;
     use spacepackets::time::cds::DaysLen24Bits;
     use spacepackets::time::{cds, CcsdsTimeProvider, TimeReader, UnixTimestamp};
 
@@ -641,8 +641,8 @@ mod tests {
     use super::*;
     use crate::pool::{LocalPool, PoolCfg, PoolProvider, StoreAddr, StoreError};
     use alloc::collections::btree_map::Range;
+    use spacepackets::ecss::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::ecss::SerializablePusPacket;
-    use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::time::{cds, TimeWriter, UnixTimestamp};
     use spacepackets::SpHeader;
     use std::time::Duration;

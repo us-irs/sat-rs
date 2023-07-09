@@ -9,9 +9,9 @@ pub mod crossbeam_test {
     };
     use satrs_core::pus::MpscTmInStoreSender;
     use satrs_core::tmtc::tm_helper::SharedTmStore;
+    use spacepackets::ecss::tc::{PusTc, PusTcSecondaryHeader};
+    use spacepackets::ecss::tm::PusTm;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket, SerializablePusPacket};
-    use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
-    use spacepackets::tm::PusTm;
     use spacepackets::SpHeader;
     use std::sync::{mpsc, Arc, RwLock};
     use std::thread;

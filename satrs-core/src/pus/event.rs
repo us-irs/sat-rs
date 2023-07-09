@@ -1,7 +1,7 @@
 use crate::pus::{source_buffer_large_enough, EcssTmtcError};
+use spacepackets::ecss::tm::PusTmCreator;
+use spacepackets::ecss::tm::PusTmSecondaryHeader;
 use spacepackets::ecss::{EcssEnumeration, PusError};
-use spacepackets::tm::PusTm;
-use spacepackets::tm::PusTmSecondaryHeader;
 use spacepackets::{SpHeader, MAX_APID};
 
 use crate::pus::EcssTmSenderCore;
@@ -121,7 +121,7 @@ impl EventReporterBase {
         time_stamp: &'a [u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
-    ) -> Result<PusTm, EcssTmtcError> {
+    ) -> Result<PusTmCreator, EcssTmtcError> {
         let mut src_data_len = event_id.size();
         if let Some(aux_data) = aux_data {
             src_data_len += aux_data.len();
@@ -144,7 +144,7 @@ impl EventReporterBase {
             buf[current_idx..current_idx + aux_data.len()].copy_from_slice(aux_data);
             current_idx += aux_data.len();
         }
-        Ok(PusTm::new(
+        Ok(PusTmCreator::new(
             &mut sp_header,
             sec_header,
             Some(&buf[0..current_idx]),
