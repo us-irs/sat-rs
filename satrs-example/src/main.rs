@@ -44,7 +44,8 @@ use satrs_core::spacepackets::{
 };
 use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::{AddressableId, TargetId};
-use satrs_example::{RequestTargetId, OBSW_SERVER_ADDR, SERVER_PORT};
+use satrs_core::SenderId;
+use satrs_example::{RequestTargetId, TmSenderId, OBSW_SERVER_ADDR, SERVER_PORT};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};
@@ -84,7 +85,7 @@ fn main() {
     let (tm_funnel_tx, tm_funnel_rx) = channel();
     let (tm_server_tx, tm_server_rx) = channel();
     let verif_sender = MpscTmInStoreSender::new(
-        0,
+        TmSenderId::PusVerification as SenderId,
         "verif_sender",
         tm_store.backing_pool(),
         tm_funnel_tx.clone(),
@@ -154,11 +155,16 @@ fn main() {
         hk_service_receiver: pus_hk_tx,
         action_service_receiver: pus_action_tx,
     };
+    let test_srv_tm_sender = MpscTmInStoreSender::new(
+        TmSenderId::PusTest as SenderId,
+        "PUS_17_TM_SENDER",
+        tm_store.backing_pool().clone(),
+        tm_funnel_tx.clone(),
+    );
     let pus17_handler = PusService17TestHandler::new(
         pus_test_rx,
         tc_store.pool.clone(),
-        tm_funnel_tx.clone(),
-        tm_store.clone(),
+        Box::new(test_srv_tm_sender),
         PUS_APID,
         verif_reporter.clone(),
     );
@@ -166,13 +172,19 @@ fn main() {
         pus17_handler,
         test_srv_event_sender,
     };
+
+    let sched_srv_tm_sender = MpscTmInStoreSender::new(
+        TmSenderId::PusSched as SenderId,
+        "PUS_11_TM_SENDER",
+        tm_store.backing_pool().clone(),
+        tm_funnel_tx.clone(),
+    );
     let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
         .expect("Creating PUS Scheduler failed");
     let pus_11_handler = PusService11SchedHandler::new(
         pus_sched_rx,
         tc_store.pool.clone(),
-        tm_funnel_tx.clone(),
-        tm_store.clone(),
+        Box::new(sched_srv_tm_sender),
         PUS_APID,
         verif_reporter.clone(),
         scheduler,
@@ -181,33 +193,49 @@ fn main() {
         pus_11_handler,
         tc_source_wrapper,
     };
+
+    let event_srv_tm_sender = MpscTmInStoreSender::new(
+        TmSenderId::PusEvent as SenderId,
+        "PUS_5_TM_SENDER",
+        tm_store.backing_pool().clone(),
+        tm_funnel_tx.clone(),
+    );
     let pus_5_handler = PusService5EventHandler::new(
         pus_event_rx,
         tc_store.pool.clone(),
-        tm_funnel_tx.clone(),
-        tm_store.clone(),
+        Box::new(event_srv_tm_sender),
         PUS_APID,
         verif_reporter.clone(),
         event_request_tx,
     );
     let mut pus_5_wrapper = Pus5Wrapper { pus_5_handler };
 
+    let action_srv_tm_sender = MpscTmInStoreSender::new(
+        TmSenderId::PusAction as SenderId,
+        "PUS_8_TM_SENDER",
+        tm_store.backing_pool().clone(),
+        tm_funnel_tx.clone(),
+    );
     let pus_8_handler = PusService8ActionHandler::new(
         pus_action_rx,
         tc_store.pool.clone(),
-        tm_funnel_tx.clone(),
-        tm_store.clone(),
+        Box::new(action_srv_tm_sender),
         PUS_APID,
         verif_reporter.clone(),
         request_map.clone(),
     );
     let mut pus_8_wrapper = Pus8Wrapper { pus_8_handler };
 
+    let hk_srv_tm_sender = MpscTmInStoreSender::new(
+        TmSenderId::PusHk as SenderId,
+        "PUS_3_TM_SENDER",
+        tm_store.backing_pool().clone(),
+        tm_funnel_tx.clone(),
+    );
     let pus_3_handler = PusService3HkHandler::new(
         pus_hk_rx,
         tc_store.pool.clone(),
-        tm_funnel_tx.clone(),
-        tm_store.clone(),
+        Box::new(hk_srv_tm_sender),
         PUS_APID,
         verif_reporter.clone(),
         request_map,

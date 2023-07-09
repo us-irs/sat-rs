@@ -5,11 +5,11 @@ use satrs_core::pus::verification::{
     FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
 };
 use satrs_core::pus::{
-    AcceptedTc, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHandler,
+    AcceptedTc, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
+    PusServiceHandler,
 };
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::spacepackets::tc::PusTc;
-use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::TargetId;
 use satrs_example::tmtc_err;
 use std::collections::HashMap;
@@ -24,21 +24,13 @@ impl PusService8ActionHandler {
     pub fn new(
         receiver: Receiver<AcceptedTc>,
         tc_pool: SharedPool,
-        tm_tx: Sender<StoreAddr>,
-        tm_store: SharedTmStore,
+        tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
         request_handlers: HashMap<TargetId, Sender<RequestWithToken>>,
     ) -> Self {
         Self {
-            psb: PusServiceBase::new(
-                receiver,
-                tc_pool,
-                tm_tx,
-                tm_store,
-                tm_apid,
-                verification_handler,
-            ),
+            psb: PusServiceBase::new(receiver, tc_pool, tm_sender, tm_apid, verification_handler),
             request_handlers,
         }
     }

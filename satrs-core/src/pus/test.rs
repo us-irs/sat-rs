@@ -4,14 +4,12 @@ use crate::pus::{
     AcceptedTc, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
     PusPacketHandlingError, PusServiceBase, PusServiceHandler, PusTmWrapper,
 };
-use crate::tmtc::tm_helper::SharedTmStore;
 use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
 use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::SpHeader;
 use std::boxed::Box;
-use std::format;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
 
 /// This is a helper class for [std] environments to handle generic PUS 17 (test service) packets.
 /// This handler only processes ping requests and generates a ping reply for them accordingly.
@@ -70,7 +68,14 @@ impl PusServiceHandler for PusService17TestHandler {
             let mut reply_header = SpHeader::tm_unseg(self.psb.tm_apid, 0, 0).unwrap();
             let tc_header = PusTmSecondaryHeader::new_simple(17, 2, &time_stamp);
             let ping_reply = PusTm::new(&mut reply_header, tc_header, None, true);
-            let result = self.psb.tm_sender.send_tm(PusTmWrapper::Direct(ping_reply));
+            let result = self
+                .psb
+                .tm_sender
+                .send_tm(PusTmWrapper::Direct(ping_reply))
+                .map_err(PartialPusHandlingError::TmSend);
+            if let Err(err) = result {
+                partial_error = Some(err);
+            }
 
             if let Some(start_token) = start_token {
                 if self

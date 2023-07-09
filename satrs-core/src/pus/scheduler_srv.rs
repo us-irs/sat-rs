@@ -5,12 +5,11 @@ use crate::pus::{
     AcceptedTc, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
     PusServiceHandler,
 };
-use crate::tmtc::tm_helper::SharedTmStore;
 use spacepackets::ecss::{scheduling, PusPacket};
 use spacepackets::tc::PusTc;
 use spacepackets::time::cds::TimeProvider;
 use std::boxed::Box;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
 
 /// This is a helper class for [std] environments to handle generic PUS 11 (scheduling service)
 /// packets. This handler is constrained to using the [PusScheduler], but is able to process

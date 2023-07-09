@@ -8,7 +8,6 @@ use crate::pus::{
     AcceptedTc, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
     PusPacketHandlingError, PusServiceBase, PusServiceHandler,
 };
-use crate::tmtc::tm_helper::SharedTmStore;
 use spacepackets::ecss::event::Subservice;
 use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
