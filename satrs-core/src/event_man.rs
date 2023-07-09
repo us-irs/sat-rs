@@ -89,14 +89,10 @@ pub trait SendEventProvider<Provider: GenericEvent, AuxDataProvider = Params> {
     type Error;
 
     fn id(&self) -> SenderId;
-    fn send_no_data(&mut self, event: Provider) -> Result<(), Self::Error> {
+    fn send_no_data(&self, event: Provider) -> Result<(), Self::Error> {
         self.send(event, None)
     }
-    fn send(
-        &mut self,
-        event: Provider,
-        aux_data: Option<AuxDataProvider>,
-    ) -> Result<(), Self::Error>;
+    fn send(&self, event: Provider, aux_data: Option<AuxDataProvider>) -> Result<(), Self::Error>;
 }
 
 /// Generic abstraction for an event receiver.
@@ -107,7 +103,7 @@ pub trait EventReceiver<Event: GenericEvent, AuxDataProvider = Params> {
     /// To allow returning arbitrary additional auxiliary data, a mutable slice is passed to the
     /// [Self::receive] call as well. Receivers can write data to this slice, but care must be taken
     /// to avoid panics due to size missmatches or out of bound writes.
-    fn receive(&mut self) -> Option<(Event, Option<AuxDataProvider>)>;
+    fn receive(&self) -> Option<(Event, Option<AuxDataProvider>)>;
 }
 
 pub trait ListenerTable {
@@ -424,7 +420,7 @@ pub mod stdmod {
         }
     }
     impl<Event: GenericEvent + Send> EventReceiver<Event> for MpscEventReceiver<Event> {
-        fn receive(&mut self) -> Option<EventWithAuxData<Event>> {
+        fn receive(&self) -> Option<EventWithAuxData<Event>> {
             if let Ok(event_and_data) = self.mpsc_receiver.try_recv() {
                 return Some(event_and_data);
             }
@@ -453,7 +449,7 @@ pub mod stdmod {
         fn id(&self) -> u32 {
             self.id
         }
-        fn send(&mut self, event: Event, aux_data: Option<Params>) -> Result<(), Self::Error> {
+        fn send(&self, event: Event, aux_data: Option<Params>) -> Result<(), Self::Error> {
             self.sender.send((event, aux_data))
         }
     }
