@@ -21,7 +21,7 @@ doc = ::embed_doc_image::embed_image!("event_man_arch", "images/event_man_arch.p
 //! ![Event flow][event_man_arch]
 //!
 //! The event manager has a listener table abstracted by the [ListenerTable], which maps
-//! listener groups identified by [ListenerKey]s to a [sender ID][SenderId].
+//! listener groups identified by [ListenerKey]s to a [sender ID][ChannelId].
 //! It also contains a sender table abstracted by the [SenderTable] which maps these sender IDs
 //! to a concrete [SendEventProvider]s. A simple approach would be to use one send event provider
 //! for each OBSW thread and then subscribe for all interesting events for a particular thread
