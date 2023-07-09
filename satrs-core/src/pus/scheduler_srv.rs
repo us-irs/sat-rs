@@ -1,4 +1,4 @@
-use crate::pool::{SharedPool, StoreAddr};
+use crate::pool::{PoolGuard, SharedPool, StoreAddr};
 use crate::pus::scheduler::PusScheduler;
 use crate::pus::verification::{StdVerifReporterWithSender, TcStateAccepted, VerificationToken};
 use crate::pus::{
@@ -21,6 +21,7 @@ use std::sync::mpsc::Receiver;
 /// telecommands when applicable.
 pub struct PusService11SchedHandler {
     psb: PusServiceBase,
+    shared_tc_store: SharedPool,
     scheduler: PusScheduler,
 }
 
@@ -30,10 +31,12 @@ impl PusService11SchedHandler {
         tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
+        shared_tc_store: SharedPool,
         scheduler: PusScheduler,
     ) -> Self {
         Self {
             psb: PusServiceBase::new(tc_receiver, tm_sender, tm_apid, verification_handler),
+            shared_tc_store,
             scheduler,
         }
     }
@@ -57,18 +60,15 @@ impl PusServiceHandler for PusService11SchedHandler {
 
     fn handle_one_tc(
         &mut self,
-        tc_in_store_with_token: ReceivedTcWrapper,
+        tc: PusTc,
+        tc_guard: PoolGuard,
+        token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        let ReceivedTcWrapper {
-            tc,
-            pool_guard,
-            token,
-        } = tc_in_store_with_token;
         let std_service = scheduling::Subservice::try_from(tc.subservice());
         if std_service.is_err() {
             return Ok(PusPacketHandlerResult::CustomSubservice(
                 tc.subservice(),
-                token,
+                token.into(),
             ));
         }
         let mut partial_error = None;
@@ -120,7 +120,7 @@ impl PusServiceHandler for PusService11SchedHandler {
                     .start_success(token, Some(&time_stamp))
                     .expect("Error sending start success");
 
-                let mut pool = self.psb.tc_store.write().expect("Locking pool failed");
+                let mut pool = self.shared_tc_store.write().expect("Locking pool failed");
 
                 self.scheduler
                     .reset(pool.as_mut())
@@ -140,7 +140,7 @@ impl PusServiceHandler for PusService11SchedHandler {
                     .start_success(token, Some(&time_stamp))
                     .expect("error sending start success");
 
-                let mut pool = self.psb.tc_store.write().expect("locking pool failed");
+                let mut pool = self.shared_tc_store.write().expect("locking pool failed");
                 self.scheduler
                     .insert_wrapped_tc::<TimeProvider>(&tc, pool.as_mut())
                     .expect("insertion of activity into pool failed");
@@ -154,7 +154,7 @@ impl PusServiceHandler for PusService11SchedHandler {
             _ => {
                 return Ok(PusPacketHandlerResult::CustomSubservice(
                     tc.subservice(),
-                    token,
+                    token.into(),
                 ));
             }
         }
@@ -165,7 +165,7 @@ impl PusServiceHandler for PusService11SchedHandler {
         }
         Ok(PusPacketHandlerResult::CustomSubservice(
             tc.subservice(),
-            token,
+            token.into(),
         ))
     }
 }

@@ -282,7 +282,7 @@ mod alloc_mod {
 
 #[cfg(feature = "std")]
 pub mod std_mod {
-    use crate::pool::{SharedPool, StoreAddr};
+    use crate::pool::{PoolGuard, SharedPool, StoreAddr};
     use crate::pus::verification::{
         StdVerifReporterWithSender, TcStateAccepted, TcStateToken, VerificationToken,
     };
@@ -394,11 +394,12 @@ pub mod std_mod {
                 TryRecvError::Empty => GenericRecvError::Empty,
                 TryRecvError::Disconnected => GenericRecvError::TxDisconnected,
             })?;
-            let shared_tc_pool = self
+            let mut shared_tc_pool = self
                 .shared_tc_pool
                 .read()
                 .map_err(|_| EcssTmtcError::StoreLock)?;
-            let tc_raw = shared_tc_pool.read(&addr)?;
+            let pool_guard = shared_tc_pool.read_with_guard(addr);
+            let tc_raw = pool_guard.read()?;
             if buf.len() < tc_raw.len() {
                 return Err(
                     PusError::ByteConversion(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
@@ -410,7 +411,11 @@ pub mod std_mod {
             }
             buf[..tc_raw.len()].copy_from_slice(tc_raw);
             let (tc, _) = PusTc::from_bytes(buf)?;
-            Ok((tc, token))
+            Ok((ReceivedTcWrapper {
+                tc,
+                pool_guard,
+                token: Some(token),
+            }))
         }
     }
 
@@ -474,6 +479,8 @@ pub mod std_mod {
         InvalidAppData(String),
         #[error("generic ECSS tmtc error: {0}")]
         EcssTmtc(#[from] EcssTmtcError),
+        #[error("invalid verification token")]
+        InvalidVerificationToken,
         #[error("other error {0}")]
         Other(String),
     }
@@ -564,30 +571,31 @@ pub mod std_mod {
         fn psb(&self) -> &PusServiceBase;
         fn handle_one_tc(
             &mut self,
-            tc_in_store_with_token: ReceivedTcWrapper,
+            tc: PusTc,
+            tc_guard: PoolGuard,
+            token: VerificationToken<TcStateAccepted>,
         ) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
 
-        fn copy_tc_to_buf(&mut self, addr: StoreAddr) -> Result<(), PusPacketHandlingError> {
-            // Keep locked section as short as possible.
-            let psb_mut = self.psb_mut();
-            let mut tc_pool = psb_mut
-                .tc_store
-                .write()
-                .map_err(|_| PusPacketHandlingError::EcssTmtc(EcssTmtcError::StoreLock))?;
-            let tc_guard = tc_pool.read_with_guard(addr);
-            let tc_raw = tc_guard.read().unwrap();
-            psb_mut.pus_buf[0..tc_raw.len()].copy_from_slice(tc_raw);
-            Ok(())
-        }
-
         fn handle_next_packet(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-            match self.psb().tc_receiver.recv_tc()? {
-                Ok((addr, token)) => self.handle_one_tc(addr, token),
+            match self.psb().tc_receiver.recv_tc(&mut self.psb_mut().pus_buf) {
+                Ok(ReceivedTcWrapper {
+                    tc,
+                    pool_guard,
+                    token,
+                }) => {
+                    if token.is_none() {
+                        return Err(PusPacketHandlingError::InvalidVerificationToken);
+                    }
+                    let token = token.unwrap();
+                    self.handle_one_tc(tc, pool_guard, token.try_into().unwrap())
+                }
                 Err(e) => match e {
-                    TryRecvError::Empty => Ok(PusPacketHandlerResult::Empty),
-                    TryRecvError::Disconnected => Err(PusPacketHandlingError::EcssTmtc(
-                        EcssTmtcError::Recv(GenericRecvError::TxDisconnected),
-                    )),
+                    EcssTmtcError::StoreLock => {}
+                    EcssTmtcError::Store(_) => {}
+                    EcssTmtcError::Pus(_) => {}
+                    EcssTmtcError::CantSendAddr(_) => {}
+                    EcssTmtcError::Send(_) => {}
+                    EcssTmtcError::Recv(_) => {}
                 },
             }
         }

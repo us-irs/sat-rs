@@ -1,7 +1,7 @@
-use crate::pool::{SharedPool, StoreAddr};
+use crate::pool::{PoolGuard, SharedPool, StoreAddr};
 use crate::pus::verification::{StdVerifReporterWithSender, TcStateAccepted, VerificationToken};
 use crate::pus::{
-    AcceptedTc, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
+    AcceptedTc, EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
     PusPacketHandlingError, PusServiceBase, PusServiceHandler, PusTmWrapper, ReceivedTcWrapper,
 };
 use spacepackets::ecss::PusPacket;
@@ -19,14 +19,13 @@ pub struct PusService17TestHandler {
 
 impl PusService17TestHandler {
     pub fn new(
-        receiver: Receiver<AcceptedTc>,
-        tc_pool: SharedPool,
+        tc_receiver: Box<dyn EcssTcReceiver>,
         tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
     ) -> Self {
         Self {
-            psb: PusServiceBase::new(receiver, tc_pool, tm_sender, tm_apid, verification_handler),
+            psb: PusServiceBase::new(tc_receiver, tm_sender, tm_apid, verification_handler),
         }
     }
 }
@@ -41,13 +40,10 @@ impl PusServiceHandler for PusService17TestHandler {
 
     fn handle_one_tc(
         &mut self,
-        tc_in_store_with_token: ReceivedTcWrapper,
+        tc: PusTc,
+        _tc_guard: PoolGuard,
+        token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        let ReceivedTcWrapper {
-            tc,
-            pool_guard,
-            token,
-        } = tc_in_store_with_token;
         if tc.service() != 17 {
             return Err(PusPacketHandlingError::WrongService(tc.service()));
         }
@@ -99,7 +95,7 @@ impl PusServiceHandler for PusService17TestHandler {
         }
         Ok(PusPacketHandlerResult::CustomSubservice(
             tc.subservice(),
-            token,
+            token.into(),
         ))
     }
 }

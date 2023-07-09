@@ -1,5 +1,5 @@
 use crate::events::EventU32;
-use crate::pool::{SharedPool, StoreAddr};
+use crate::pool::{PoolGuard, SharedPool, StoreAddr};
 use crate::pus::event_man::{EventRequest, EventRequestWithToken};
 use crate::pus::verification::{
     StdVerifReporterWithSender, TcStateAccepted, TcStateToken, VerificationToken,
@@ -44,22 +44,16 @@ impl PusServiceHandler for PusService5EventHandler {
 
     fn handle_one_tc(
         &mut self,
-        tc_in_store_with_token: ReceivedTcWrapper,
+        tc: PusTc,
+        _tc_guard: PoolGuard,
+        token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        let ReceivedTcWrapper {
-            tc,
-            token,
-            pool_guard,
-        } = tc_in_store_with_token;
-        // TODO: Better token handling..
-        let token = token.expect("invalid token");
-        let accepted_token = VerificationToken::<TcStateAccepted>::try_from(token).unwrap();
         let subservice = tc.subservice();
         let srv = Subservice::try_from(subservice);
         if srv.is_err() {
             return Ok(PusPacketHandlerResult::CustomSubservice(
                 tc.subservice(),
-                token,
+                token.into(),
             ));
         }
         let handle_enable_disable_request = |enable: bool, stamp: [u8; 7]| {
@@ -74,7 +68,7 @@ impl PusServiceHandler for PusService5EventHandler {
                 .psb
                 .verification_handler
                 .borrow_mut()
-                .start_success(accepted_token, Some(&stamp))
+                .start_success(token, Some(&stamp))
                 .map_err(|_| PartialPusHandlingError::Verification);
             let partial_error = start_token.clone().err();
             let mut token: TcStateToken = token.into();
@@ -121,7 +115,8 @@ impl PusServiceHandler for PusService5EventHandler {
             }
             Subservice::TcReportDisabledList | Subservice::TmDisabledEventsReport => {
                 return Ok(PusPacketHandlerResult::SubserviceNotImplemented(
-                    subservice, token,
+                    subservice,
+                    token.into(),
                 ));
             }
         }
