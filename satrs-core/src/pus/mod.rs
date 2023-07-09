@@ -9,6 +9,7 @@ use downcast_rs::{impl_downcast, Downcast};
 #[cfg(feature = "alloc")]
 use dyn_clone::DynClone;
 use spacepackets::ecss::PusError;
+use spacepackets::tc::PusTc;
 use spacepackets::tm::PusTm;
 use spacepackets::{ByteConversionError, SizeMissmatch};
 use std::error::Error;
@@ -28,6 +29,7 @@ pub mod verification;
 pub use alloc_mod::*;
 
 use crate::pool::{StoreAddr, StoreError};
+use crate::pus::verification::TcStateToken;
 #[cfg(feature = "std")]
 pub use std_mod::*;
 
@@ -140,6 +142,21 @@ pub trait EcssSender: Send {
     }
 }
 
+/// Generic trait for a user supplied sender object.
+///
+/// This sender object is responsible for sending PUS telemetry to a TM sink.
+pub trait EcssTmSenderCore: EcssSender {
+    fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcErrorWithSend>;
+}
+
+/// Generic trait for a user supplied sender object.
+///
+/// This sender object is responsible for sending PUS telecommands to a TC recipient. Each
+/// telecommand can optionally have a token which contains its verification state.
+pub trait EcssTcSenderCore: EcssSender {
+    fn send_tc(&self, tc: PusTc, token: Option<TcStateToken>) -> Result<(), EcssTmtcErrorWithSend>;
+}
+
 #[cfg(feature = "alloc")]
 mod alloc_mod {
     use super::*;
@@ -191,9 +208,13 @@ pub mod std_mod {
     use crate::pus::verification::{
         StdVerifReporterWithSender, TcStateAccepted, TcStateToken, VerificationToken,
     };
-    use crate::pus::{EcssSender, EcssTmtcErrorWithSend, GenericSendError, PusTmWrapper};
+    use crate::pus::{
+        EcssSender, EcssTmSender, EcssTmSenderCore, EcssTmtcErrorWithSend, GenericSendError,
+        PusTmWrapper,
+    };
     use crate::tmtc::tm_helper::SharedTmStore;
     use crate::SenderId;
+    use alloc::boxed::Box;
     use alloc::vec::Vec;
     use spacepackets::ecss::{PusError, SerializablePusPacket};
     use spacepackets::tc::PusTc;
@@ -205,25 +226,6 @@ pub mod std_mod {
     use std::sync::mpsc::SendError;
     use std::sync::{mpsc, RwLockWriteGuard};
     use thiserror::Error;
-
-    /// Generic trait for a user supplied sender object.
-    ///
-    /// This sender object is responsible for sending PUS telemetry to a TM sink.
-    pub trait EcssTmSenderCore: EcssSender {
-        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcErrorWithSend>;
-    }
-
-    /// Generic trait for a user supplied sender object.
-    ///
-    /// This sender object is responsible for sending PUS telecommands to a TC recipient. Each
-    /// telecommand can optionally have a token which contains its verification state.
-    pub trait EcssTcSenderCore: EcssSender {
-        fn send_tc(
-            &self,
-            tc: PusTc,
-            token: Option<TcStateToken>,
-        ) -> Result<(), EcssTmtcErrorWithSend>;
-    }
 
     #[derive(Clone)]
     pub struct MpscTmInStoreSender {
@@ -375,9 +377,9 @@ pub mod std_mod {
     #[derive(Debug, Clone, Error)]
     pub enum PartialPusHandlingError {
         #[error("Generic timestamp generation error")]
-        Time(StdTimestampError),
+        Time(#[from] StdTimestampError),
         #[error("Error sending telemetry: {0}")]
-        TmSend(String),
+        TmSend(#[from] EcssTmtcErrorWithSend),
         #[error("Error sending verification message")]
         Verification,
     }
@@ -408,8 +410,7 @@ pub mod std_mod {
     pub struct PusServiceBase {
         pub tc_rx: mpsc::Receiver<AcceptedTc>,
         pub tc_store: SharedPool,
-        pub tm_tx: mpsc::Sender<StoreAddr>,
-        pub tm_store: SharedTmStore,
+        pub tm_sender: Box<dyn EcssTmSender>,
         pub tm_apid: u16,
         /// The verification handler is wrapped in a [RefCell] to allow the interior mutability
         /// pattern. This makes writing methods which are not mutable a lot easier.
@@ -422,8 +423,7 @@ pub mod std_mod {
         pub fn new(
             receiver: mpsc::Receiver<AcceptedTc>,
             tc_pool: SharedPool,
-            tm_tx: mpsc::Sender<StoreAddr>,
-            tm_store: SharedTmStore,
+            tm_sender: Box<dyn EcssTmSender>,
             tm_apid: u16,
             verification_handler: StdVerifReporterWithSender,
         ) -> Self {
@@ -431,8 +431,7 @@ pub mod std_mod {
                 tc_rx: receiver,
                 tc_store: tc_pool,
                 tm_apid,
-                tm_tx,
-                tm_store,
+                tm_sender,
                 verification_handler: RefCell::new(verification_handler),
                 pus_buf: [0; 2048],
                 pus_size: 0,

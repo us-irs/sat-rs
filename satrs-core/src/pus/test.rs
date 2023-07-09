@@ -1,14 +1,15 @@
 use crate::pool::{SharedPool, StoreAddr};
 use crate::pus::verification::{StdVerifReporterWithSender, TcStateAccepted, VerificationToken};
 use crate::pus::{
-    AcceptedTc, PartialPusHandlingError, PusPacketHandlerResult, PusPacketHandlingError,
-    PusServiceBase, PusServiceHandler,
+    AcceptedTc, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
+    PusPacketHandlingError, PusServiceBase, PusServiceHandler, PusTmWrapper,
 };
 use crate::tmtc::tm_helper::SharedTmStore;
 use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
 use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::SpHeader;
+use std::boxed::Box;
 use std::format;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -22,20 +23,12 @@ impl PusService17TestHandler {
     pub fn new(
         receiver: Receiver<AcceptedTc>,
         tc_pool: SharedPool,
-        tm_tx: Sender<StoreAddr>,
-        tm_store: SharedTmStore,
+        tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
     ) -> Self {
         Self {
-            psb: PusServiceBase::new(
-                receiver,
-                tc_pool,
-                tm_tx,
-                tm_store,
-                tm_apid,
-                verification_handler,
-            ),
+            psb: PusServiceBase::new(receiver, tc_pool, tm_sender, tm_apid, verification_handler),
         }
     }
 }
@@ -77,15 +70,8 @@ impl PusServiceHandler for PusService17TestHandler {
             let mut reply_header = SpHeader::tm_unseg(self.psb.tm_apid, 0, 0).unwrap();
             let tc_header = PusTmSecondaryHeader::new_simple(17, 2, &time_stamp);
             let ping_reply = PusTm::new(&mut reply_header, tc_header, None, true);
-            let addr = self.psb.tm_store.add_pus_tm(&ping_reply);
-            if let Err(e) = self
-                .psb
-                .tm_tx
-                .send(addr)
-                .map_err(|e| PartialPusHandlingError::TmSend(format!("{e}")))
-            {
-                partial_error = Some(e);
-            }
+            let result = self.psb.tm_sender.send_tm(PusTmWrapper::Direct(ping_reply));
+
             if let Some(start_token) = start_token {
                 if self
                     .psb

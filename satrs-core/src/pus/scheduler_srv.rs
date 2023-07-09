@@ -2,12 +2,14 @@ use crate::pool::{SharedPool, StoreAddr};
 use crate::pus::scheduler::PusScheduler;
 use crate::pus::verification::{StdVerifReporterWithSender, TcStateAccepted, VerificationToken};
 use crate::pus::{
-    AcceptedTc, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHandler,
+    AcceptedTc, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
+    PusServiceHandler,
 };
 use crate::tmtc::tm_helper::SharedTmStore;
 use spacepackets::ecss::{scheduling, PusPacket};
 use spacepackets::tc::PusTc;
 use spacepackets::time::cds::TimeProvider;
+use std::boxed::Box;
 use std::sync::mpsc::{Receiver, Sender};
 
 /// This is a helper class for [std] environments to handle generic PUS 11 (scheduling service)
@@ -27,21 +29,13 @@ impl PusService11SchedHandler {
     pub fn new(
         receiver: Receiver<AcceptedTc>,
         tc_pool: SharedPool,
-        tm_tx: Sender<StoreAddr>,
-        tm_store: SharedTmStore,
+        tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
         scheduler: PusScheduler,
     ) -> Self {
         Self {
-            psb: PusServiceBase::new(
-                receiver,
-                tc_pool,
-                tm_tx,
-                tm_store,
-                tm_apid,
-                verification_handler,
-            ),
+            psb: PusServiceBase::new(receiver, tc_pool, tm_sender, tm_apid, verification_handler),
             scheduler,
         }
     }
