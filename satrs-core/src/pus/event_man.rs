@@ -95,13 +95,13 @@ pub struct EventRequestWithToken<Event: GenericEvent = EventU32> {
 }
 
 #[derive(Debug)]
-pub enum EventManError<SenderE> {
-    EcssTmtcError(EcssTmtcErrorWithSend<SenderE>),
+pub enum EventManError {
+    EcssTmtcError(EcssTmtcErrorWithSend),
     SeverityMissmatch(Severity, Severity),
 }
 
-impl<SenderE> From<EcssTmtcErrorWithSend<SenderE>> for EventManError<SenderE> {
-    fn from(v: EcssTmtcErrorWithSend<SenderE>) -> Self {
+impl From<EcssTmtcErrorWithSend> for EventManError {
+    fn from(v: EcssTmtcErrorWithSend) -> Self {
         Self::EcssTmtcError(v)
     }
 }
@@ -175,11 +175,11 @@ pub mod alloc_mod {
 
         pub fn generate_pus_event_tm_generic<E>(
             &mut self,
-            sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
             event: Event,
             aux_data: Option<&[u8]>,
-        ) -> Result<bool, EventManError<E>> {
+        ) -> Result<bool, EventManError> {
             if !self.backend.event_enabled(&event) {
                 return Ok(false);
             }
@@ -225,11 +225,11 @@ pub mod alloc_mod {
 
         pub fn generate_pus_event_tm<E, Severity: HasSeverity>(
             &mut self,
-            sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
             event: EventU32TypedSev<Severity>,
             aux_data: Option<&[u8]>,
-        ) -> Result<bool, EventManError<E>> {
+        ) -> Result<bool, EventManError> {
             self.generate_pus_event_tm_generic(sender, time_stamp, event.into(), aux_data)
         }
     }

@@ -50,41 +50,36 @@ impl<'tm> From<PusTm<'tm>> for PusTmWrapper<'tm> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum EcssTmtcErrorWithSend<E> {
-    /// Errors related to sending the telemetry to a TMTC recipient
-    SendError(E),
-    EcssTmtcError(EcssTmtcError),
-}
-
-impl<E> From<EcssTmtcError> for EcssTmtcErrorWithSend<E> {
-    fn from(value: EcssTmtcError) -> Self {
-        Self::EcssTmtcError(value)
-    }
-}
-
 /// Generic error type for PUS TM handling.
-#[derive(Debug, Clone)]
-pub enum EcssTmtcError {
-    /// Errors related to the time stamp format of the telemetry
-    Timestamp(TimestampError),
-    /// Errors related to byte conversion, for example insufficient buffer size for given data
-    ByteConversion(ByteConversionError),
-    /// Errors related to PUS packet format
-    Pus(PusError),
+#[derive(Debug, Copy, Clone)]
+pub enum EcssTmtcSendError {
+    RxDisconnected,
+    QueueFull(u32),
 }
 
-impl From<PusError> for EcssTmtcError {
-    fn from(e: PusError) -> Self {
-        EcssTmtcError::Pus(e)
-    }
-}
-
-impl From<ByteConversionError> for EcssTmtcError {
-    fn from(e: ByteConversionError) -> Self {
-        EcssTmtcError::ByteConversion(e)
-    }
-}
+// /// Generic error type for PUS TMTC handling.
+// #[derive(Debug, Clone)]
+// pub enum EcssTmtcErrorWithSend {
+//     /// Errors related to the time stamp format of the telemetry
+//     Timestamp(TimestampError),
+//     /// Errors related to byte conversion, for example insufficient buffer size for given data
+//     ByteConversion(ByteConversionError),
+//     /// Errors related to PUS packet format
+//     Pus(PusError),
+//     Send(EcssTmtcSendError)
+// }
+//
+// impl From<PusError> for EcssTmtcErrorWithSend {
+//     fn from(e: PusError) -> Self {
+//         EcssTmtcErrorWithSend::Pus(e)
+//     }
+// }
+//
+// impl From<ByteConversionError> for EcssTmtcErrorWithSend {
+//     fn from(e: ByteConversionError) -> Self {
+//         EcssTmtcErrorWithSend::ByteConversion(e)
+//     }
+// }
 
 pub trait EcssSender: Send {
     /// Each sender can have an ID associated with it
@@ -92,24 +87,6 @@ pub trait EcssSender: Send {
     fn name(&self) -> &'static str {
         "unset"
     }
-}
-/// Generic trait for a user supplied sender object.
-///
-/// This sender object is responsible for sending PUS telemetry to a TM sink.
-pub trait EcssTmSenderCore: EcssSender {
-    type Error;
-
-    fn send_tm(&self, tm: PusTmWrapper) -> Result<(), Self::Error>;
-}
-
-/// Generic trait for a user supplied sender object.
-///
-/// This sender object is responsible for sending PUS telecommands to a TC recipient. Each
-/// telecommand can optionally have a token which contains its verification state.
-pub trait EcssTcSenderCore: EcssSender {
-    type Error;
-
-    fn send_tc(&self, tc: PusTc, token: Option<TcStateToken>) -> Result<(), Self::Error>;
 }
 
 #[cfg(feature = "alloc")]
@@ -133,8 +110,8 @@ mod alloc_mod {
     /// Blanket implementation for all types which implement [EcssTmSenderCore] and are clonable.
     impl<T> EcssTmSender for T where T: EcssTmSenderCore + Clone + 'static {}
 
-    dyn_clone::clone_trait_object!(<T> EcssTmSender<Error=T>);
-    impl_downcast!(EcssTmSender assoc Error);
+    dyn_clone::clone_trait_object!(EcssTmSender);
+    impl_downcast!(EcssTmSender);
 
     /// Extension trait for [EcssTcSenderCore].
     ///
@@ -153,21 +130,22 @@ mod alloc_mod {
     /// Blanket implementation for all types which implement [EcssTcSenderCore] and are clonable.
     impl<T> EcssTcSender for T where T: EcssTcSenderCore + Clone + 'static {}
 
-    dyn_clone::clone_trait_object!(<T> EcssTcSender<Error=T>);
-    impl_downcast!(EcssTcSender assoc Error);
+    dyn_clone::clone_trait_object!(EcssTcSender);
+    impl_downcast!(EcssTcSender);
 }
 
 #[cfg(feature = "std")]
 pub mod std_mod {
     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr, StoreError};
     use crate::pus::verification::{
-        StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
+        StdVerifReporterWithSender, TcStateAccepted, TcStateToken, VerificationToken,
     };
-    use crate::pus::{EcssSender, EcssTmSenderCore, PusTmWrapper};
+    use crate::pus::{EcssSender, EcssTmtcSendError, PusTmWrapper};
     use crate::tmtc::tm_helper::SharedTmStore;
     use crate::SenderId;
     use alloc::vec::Vec;
     use spacepackets::ecss::{PusError, SerializablePusPacket};
+    use spacepackets::tc::PusTc;
     use spacepackets::time::cds::TimeProvider;
     use spacepackets::time::{StdTimestampError, TimeWriter};
     use std::cell::RefCell;
@@ -177,17 +155,36 @@ pub mod std_mod {
     use thiserror::Error;
 
     #[derive(Debug, Clone, Error)]
-    pub enum MpscTmInStoreSenderError {
-        #[error("RwGuard lock error")]
+    pub enum EcssTmtcErrorWithSend {
+        #[error("store locking error")]
         StoreLock,
-        #[error("Generic PUS error: {0}")]
-        Pus(#[from] PusError),
-        #[error("Generic store error: {0}")]
+        #[error("generic store error: {0}")]
         Store(#[from] StoreError),
-        #[error("MPSC channel send error: {0}")]
-        Send(#[from] mpsc::SendError<StoreAddr>),
-        #[error("RX handle has disconnected")]
-        RxDisconnected,
+        #[error("generic PUS error: {0}")]
+        Pus(#[from] PusError),
+        #[error("not able to send address {0}")]
+        CantSendAddr(StoreAddr),
+        #[error("generic channel send error: {0}")]
+        Send(#[from] EcssTmtcSendError),
+    }
+
+    /// Generic trait for a user supplied sender object.
+    ///
+    /// This sender object is responsible for sending PUS telemetry to a TM sink.
+    pub trait EcssTmSenderCore: EcssSender {
+        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcErrorWithSend>;
+    }
+
+    /// Generic trait for a user supplied sender object.
+    ///
+    /// This sender object is responsible for sending PUS telecommands to a TC recipient. Each
+    /// telecommand can optionally have a token which contains its verification state.
+    pub trait EcssTcSenderCore: EcssSender {
+        fn send_tc(
+            &self,
+            tc: PusTc,
+            token: Option<TcStateToken>,
+        ) -> Result<(), EcssTmtcErrorWithSend>;
     }
 
     #[derive(Clone)]
@@ -213,7 +210,7 @@ pub mod std_mod {
         pub fn send_direct_tm(
             &self,
             tmtc: impl SerializablePusPacket,
-        ) -> Result<(), MpscTmInStoreSenderError> {
+        ) -> Result<(), EcssTmtcErrorWithSend> {
             let operation = |mut store: RwLockWriteGuard<ShareablePoolProvider>| {
                 let (addr, slice) = store.free_element(tmtc.len_packed())?;
                 tmtc.write_to_bytes(slice)?;
@@ -226,7 +223,9 @@ pub mod std_mod {
                     if self.ignore_poison_errors {
                         operation(e.into_inner())
                     } else {
-                        Err(MpscTmInStoreSenderError::StoreLock)
+                        Err(EcssTmtcErrorWithSend::Send(
+                            EcssTmtcSendError::RxDisconnected,
+                        ))
                     }
                 }
             }
@@ -234,14 +233,11 @@ pub mod std_mod {
     }
 
     impl EcssTmSenderCore for MpscTmInStoreSender {
-        type Error = MpscTmInStoreSenderError;
-
-        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), Self::Error> {
+        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcErrorWithSend> {
             match tm {
-                PusTmWrapper::InStore(addr) => self
-                    .sender
-                    .send(addr)
-                    .map_err(MpscTmInStoreSenderError::Send),
+                PusTmWrapper::InStore(addr) => self.sender.send(addr).map_err(
+                    EcssTmtcErrorWithSend::Send(EcssTmtcSendError::RxDisconnected),
+                ),
                 PusTmWrapper::Direct(tm) => self.send_direct_tm(tm),
             }
         }
@@ -303,11 +299,9 @@ pub mod std_mod {
     }
 
     impl EcssTmSenderCore for MpscTmAsVecSender {
-        type Error = MpscTmAsVecSenderError;
-
-        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), Self::Error> {
+        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcErrorWithSend> {
             match tm {
-                PusTmWrapper::InStore(addr) => Err(MpscTmAsVecSenderError::CantSendAddr(addr)),
+                PusTmWrapper::InStore(addr) => Err(EcssTmtcErrorWithSend::CantSendAddr(addr)),
                 PusTmWrapper::Direct(tm) => {
                     let mut vec = Vec::new();
                     tm.append_to_vec(&mut vec)
@@ -470,9 +464,12 @@ pub mod std_mod {
     }
 }
 
-pub(crate) fn source_buffer_large_enough(cap: usize, len: usize) -> Result<(), EcssTmtcError> {
+pub(crate) fn source_buffer_large_enough(
+    cap: usize,
+    len: usize,
+) -> Result<(), EcssTmtcErrorWithSend> {
     if len > cap {
-        return Err(EcssTmtcError::ByteConversion(
+        return Err(EcssTmtcErrorWithSend::ByteConversion(
             ByteConversionError::ToSliceTooSmall(SizeMissmatch {
                 found: cap,
                 expected: len,
