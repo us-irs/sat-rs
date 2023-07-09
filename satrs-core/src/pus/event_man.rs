@@ -173,7 +173,7 @@ pub mod alloc_mod {
             self.backend.disable_event_reporting(event)
         }
 
-        pub fn generate_pus_event_tm_generic<E>(
+        pub fn generate_pus_event_tm_generic(
             &mut self,
             sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],

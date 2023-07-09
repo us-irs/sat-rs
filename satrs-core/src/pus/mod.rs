@@ -2,17 +2,16 @@
 //!
 //! This module contains structures to make working with the PUS C standard easier.
 //! The satrs-example application contains various usage examples of these components.
-use crate::pus::verification::TcStateToken;
 use crate::SenderId;
+use core::fmt::{Display, Formatter};
 #[cfg(feature = "alloc")]
 use downcast_rs::{impl_downcast, Downcast};
 #[cfg(feature = "alloc")]
 use dyn_clone::DynClone;
 use spacepackets::ecss::PusError;
-use spacepackets::tc::PusTc;
-use spacepackets::time::TimestampError;
 use spacepackets::tm::PusTm;
 use spacepackets::{ByteConversionError, SizeMissmatch};
+use std::error::Error;
 
 pub mod event;
 pub mod event_man;
@@ -28,7 +27,7 @@ pub mod verification;
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
 
-use crate::pool::StoreAddr;
+use crate::pool::{StoreAddr, StoreError};
 #[cfg(feature = "std")]
 pub use std_mod::*;
 
@@ -50,37 +49,89 @@ impl<'tm> From<PusTm<'tm>> for PusTmWrapper<'tm> {
     }
 }
 
-/// Generic error type for PUS TM handling.
+/// Generic error type for sending something via a message queue.
 #[derive(Debug, Copy, Clone)]
-pub enum EcssTmtcSendError {
+pub enum GenericSendError {
     RxDisconnected,
     QueueFull(u32),
 }
 
-// /// Generic error type for PUS TMTC handling.
-// #[derive(Debug, Clone)]
-// pub enum EcssTmtcErrorWithSend {
-//     /// Errors related to the time stamp format of the telemetry
-//     Timestamp(TimestampError),
-//     /// Errors related to byte conversion, for example insufficient buffer size for given data
-//     ByteConversion(ByteConversionError),
-//     /// Errors related to PUS packet format
-//     Pus(PusError),
-//     Send(EcssTmtcSendError)
-// }
-//
-// impl From<PusError> for EcssTmtcErrorWithSend {
-//     fn from(e: PusError) -> Self {
-//         EcssTmtcErrorWithSend::Pus(e)
-//     }
-// }
-//
-// impl From<ByteConversionError> for EcssTmtcErrorWithSend {
-//     fn from(e: ByteConversionError) -> Self {
-//         EcssTmtcErrorWithSend::ByteConversion(e)
-//     }
-// }
+impl Display for GenericSendError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        match self {
+            GenericSendError::RxDisconnected => {
+                write!(f, "rx side has disconnected")
+            }
+            GenericSendError::QueueFull(max_cap) => {
+                write!(f, "queue with max capacity of {max_cap} is full")
+            }
+        }
+    }
+}
 
+#[cfg(feature = "std")]
+impl Error for GenericSendError {}
+
+#[derive(Debug, Clone)]
+pub enum EcssTmtcErrorWithSend {
+    StoreLock,
+    Store(StoreError),
+    Pus(PusError),
+    CantSendAddr(StoreAddr),
+    Send(GenericSendError),
+}
+
+impl Display for EcssTmtcErrorWithSend {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        match self {
+            EcssTmtcErrorWithSend::StoreLock => {
+                write!(f, "store lock error")
+            }
+            EcssTmtcErrorWithSend::Store(store) => {
+                write!(f, "store error: {store}")
+            }
+            EcssTmtcErrorWithSend::Pus(pus_e) => {
+                write!(f, "PUS error: {pus_e}")
+            }
+            EcssTmtcErrorWithSend::CantSendAddr(addr) => {
+                write!(f, "can not send address {addr}")
+            }
+            EcssTmtcErrorWithSend::Send(send_e) => {
+                write!(f, "send error {send_e}")
+            }
+        }
+    }
+}
+
+impl From<StoreError> for EcssTmtcErrorWithSend {
+    fn from(value: StoreError) -> Self {
+        Self::Store(value)
+    }
+}
+
+impl From<PusError> for EcssTmtcErrorWithSend {
+    fn from(value: PusError) -> Self {
+        Self::Pus(value)
+    }
+}
+
+impl From<GenericSendError> for EcssTmtcErrorWithSend {
+    fn from(value: GenericSendError) -> Self {
+        Self::Send(value)
+    }
+}
+
+#[cfg(feature = "std")]
+impl Error for EcssTmtcErrorWithSend {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            EcssTmtcErrorWithSend::Store(e) => Some(e),
+            EcssTmtcErrorWithSend::Pus(e) => Some(e),
+            EcssTmtcErrorWithSend::Send(e) => Some(e),
+            _ => None,
+        }
+    }
+}
 pub trait EcssSender: Send {
     /// Each sender can have an ID associated with it
     fn id(&self) -> SenderId;
@@ -140,7 +191,7 @@ pub mod std_mod {
     use crate::pus::verification::{
         StdVerifReporterWithSender, TcStateAccepted, TcStateToken, VerificationToken,
     };
-    use crate::pus::{EcssSender, EcssTmtcSendError, PusTmWrapper};
+    use crate::pus::{EcssSender, EcssTmtcErrorWithSend, GenericSendError, PusTmWrapper};
     use crate::tmtc::tm_helper::SharedTmStore;
     use crate::SenderId;
     use alloc::vec::Vec;
@@ -151,22 +202,9 @@ pub mod std_mod {
     use std::cell::RefCell;
     use std::format;
     use std::string::String;
+    use std::sync::mpsc::SendError;
     use std::sync::{mpsc, RwLockWriteGuard};
     use thiserror::Error;
-
-    #[derive(Debug, Clone, Error)]
-    pub enum EcssTmtcErrorWithSend {
-        #[error("store locking error")]
-        StoreLock,
-        #[error("generic store error: {0}")]
-        Store(#[from] StoreError),
-        #[error("generic PUS error: {0}")]
-        Pus(#[from] PusError),
-        #[error("not able to send address {0}")]
-        CantSendAddr(StoreAddr),
-        #[error("generic channel send error: {0}")]
-        Send(#[from] EcssTmtcSendError),
-    }
 
     /// Generic trait for a user supplied sender object.
     ///
@@ -206,6 +244,11 @@ pub mod std_mod {
         }
     }
 
+    impl From<SendError<StoreAddr>> for EcssTmtcErrorWithSend {
+        fn from(_: SendError<StoreAddr>) -> Self {
+            Self::Send(GenericSendError::RxDisconnected)
+        }
+    }
     impl MpscTmInStoreSender {
         pub fn send_direct_tm(
             &self,
@@ -224,7 +267,7 @@ pub mod std_mod {
                         operation(e.into_inner())
                     } else {
                         Err(EcssTmtcErrorWithSend::Send(
-                            EcssTmtcSendError::RxDisconnected,
+                            GenericSendError::RxDisconnected,
                         ))
                     }
                 }
@@ -235,9 +278,7 @@ pub mod std_mod {
     impl EcssTmSenderCore for MpscTmInStoreSender {
         fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcErrorWithSend> {
             match tm {
-                PusTmWrapper::InStore(addr) => self.sender.send(addr).map_err(
-                    EcssTmtcErrorWithSend::Send(EcssTmtcSendError::RxDisconnected),
-                ),
+                PusTmWrapper::InStore(addr) => self.sender.send(addr).map_err(|e| e.into()),
                 PusTmWrapper::Direct(tm) => self.send_direct_tm(tm),
             }
         }
@@ -260,18 +301,6 @@ pub mod std_mod {
         }
     }
 
-    #[derive(Debug, Clone, Error)]
-    pub enum MpscTmAsVecSenderError {
-        #[error("Generic PUS error: {0}")]
-        Pus(#[from] PusError),
-        #[error("MPSC channel send error: {0}")]
-        Send(#[from] mpsc::SendError<Vec<u8>>),
-        #[error("can not handle store addresses")]
-        CantSendAddr(StoreAddr),
-        #[error("RX handle has disconnected")]
-        RxDisconnected,
-    }
-
     /// This class can be used if frequent heap allocations during run-time are not an issue.
     /// PUS TM packets will be sent around as [Vec]s. Please note that the current implementation
     /// of this class can not deal with store addresses, so it is assumed that is is always
@@ -281,6 +310,12 @@ pub mod std_mod {
         id: SenderId,
         sender: mpsc::Sender<Vec<u8>>,
         name: &'static str,
+    }
+
+    impl From<SendError<Vec<u8>>> for EcssTmtcErrorWithSend {
+        fn from(_: SendError<Vec<u8>>) -> Self {
+            Self::Send(GenericSendError::RxDisconnected)
+        }
     }
 
     impl MpscTmAsVecSender {
@@ -305,10 +340,8 @@ pub mod std_mod {
                 PusTmWrapper::Direct(tm) => {
                     let mut vec = Vec::new();
                     tm.append_to_vec(&mut vec)
-                        .map_err(MpscTmAsVecSenderError::Pus)?;
-                    self.sender
-                        .send(vec)
-                        .map_err(MpscTmAsVecSenderError::Send)?;
+                        .map_err(EcssTmtcErrorWithSend::Pus)?;
+                    self.sender.send(vec)?;
                     Ok(())
                 }
             }
@@ -469,12 +502,13 @@ pub(crate) fn source_buffer_large_enough(
     len: usize,
 ) -> Result<(), EcssTmtcErrorWithSend> {
     if len > cap {
-        return Err(EcssTmtcErrorWithSend::ByteConversion(
-            ByteConversionError::ToSliceTooSmall(SizeMissmatch {
+        return Err(
+            PusError::ByteConversionError(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
                 found: cap,
                 expected: len,
-            }),
-        ));
+            }))
+            .into(),
+        );
     }
     Ok(())
 }

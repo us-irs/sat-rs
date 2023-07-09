@@ -1,5 +1,5 @@
 use crate::pus::{source_buffer_large_enough, EcssTmtcErrorWithSend};
-use spacepackets::ecss::EcssEnumeration;
+use spacepackets::ecss::{EcssEnumeration, PusError};
 use spacepackets::tm::PusTm;
 use spacepackets::tm::PusTmSecondaryHeader;
 use spacepackets::{SpHeader, MAX_APID};
@@ -99,7 +99,7 @@ impl EventReporterBase {
         )
     }
 
-    fn generate_and_send_generic_tm<E>(
+    fn generate_and_send_generic_tm(
         &mut self,
         buf: &mut [u8],
         subservice: Subservice,
@@ -109,9 +109,7 @@ impl EventReporterBase {
         aux_data: Option<&[u8]>,
     ) -> Result<(), EcssTmtcErrorWithSend> {
         let tm = self.generate_generic_event_tm(buf, subservice, time_stamp, event_id, aux_data)?;
-        sender
-            .send_tm(tm.into())
-            .map_err(|e| EcssTmtcErrorWithSend::SendError(e))?;
+        sender.send_tm(tm.into())?;
         self.msg_count += 1;
         Ok(())
     }
@@ -138,7 +136,9 @@ impl EventReporterBase {
             Some(time_stamp),
         );
         let mut current_idx = 0;
-        event_id.write_to_be_bytes(&mut buf[0..event_id.size()])?;
+        event_id
+            .write_to_be_bytes(&mut buf[0..event_id.size()])
+            .map_err(PusError::ByteConversionError)?;
         current_idx += event_id.size();
         if let Some(aux_data) = aux_data {
             buf[current_idx..current_idx + aux_data.len()].copy_from_slice(aux_data);
@@ -172,7 +172,7 @@ mod alloc_mod {
                 reporter,
             })
         }
-        pub fn event_info<E>(
+        pub fn event_info(
             &mut self,
             sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
@@ -188,7 +188,7 @@ mod alloc_mod {
             )
         }
 
-        pub fn event_low_severity<E>(
+        pub fn event_low_severity(
             &mut self,
             sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
@@ -204,7 +204,7 @@ mod alloc_mod {
             )
         }
 
-        pub fn event_medium_severity<E>(
+        pub fn event_medium_severity(
             &mut self,
             sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
@@ -220,7 +220,7 @@ mod alloc_mod {
             )
         }
 
-        pub fn event_high_severity<E>(
+        pub fn event_high_severity(
             &mut self,
             sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
