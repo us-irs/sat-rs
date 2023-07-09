@@ -528,9 +528,9 @@ pub mod std_mod {
         }
     }
 
-    /// Base class for handlers which can handle PUS TC packets. Right now, the message queue
-    /// backend is constrained to [mpsc::channel]s and the verification reporter
-    /// is constrained to the [StdVerifReporterWithSender].
+    /// Base class for handlers which can handle PUS TC packets. Right now, the verification
+    /// reporter is constrained to the [StdVerifReporterWithSender] and the service handler
+    /// relies on TMTC packets being exchanged via a [SharedPool].
     pub struct PusServiceBase {
         pub tc_receiver: Box<dyn EcssTcReceiver>,
         pub shared_tc_store: SharedPool,
