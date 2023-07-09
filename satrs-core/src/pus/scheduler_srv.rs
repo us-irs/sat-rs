@@ -2,8 +2,8 @@ use crate::pool::{SharedPool, StoreAddr};
 use crate::pus::scheduler::PusScheduler;
 use crate::pus::verification::{StdVerifReporterWithSender, TcStateAccepted, VerificationToken};
 use crate::pus::{
-    AcceptedTc, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
-    PusServiceHandler,
+    AcceptedTc, EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError,
+    PusServiceBase, PusServiceHandler, ReceivedTcWrapper,
 };
 use spacepackets::ecss::{scheduling, PusPacket};
 use spacepackets::tc::PusTc;
@@ -26,15 +26,14 @@ pub struct PusService11SchedHandler {
 
 impl PusService11SchedHandler {
     pub fn new(
-        receiver: Receiver<AcceptedTc>,
-        tc_pool: SharedPool,
+        tc_receiver: Box<dyn EcssTcReceiver>,
         tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
         scheduler: PusScheduler,
     ) -> Self {
         Self {
-            psb: PusServiceBase::new(receiver, tc_pool, tm_sender, tm_apid, verification_handler),
+            psb: PusServiceBase::new(tc_receiver, tm_sender, tm_apid, verification_handler),
             scheduler,
         }
     }
@@ -58,11 +57,13 @@ impl PusServiceHandler for PusService11SchedHandler {
 
     fn handle_one_tc(
         &mut self,
-        addr: StoreAddr,
-        token: VerificationToken<TcStateAccepted>,
+        tc_in_store_with_token: ReceivedTcWrapper,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf).unwrap();
+        let ReceivedTcWrapper {
+            tc,
+            pool_guard,
+            token,
+        } = tc_in_store_with_token;
         let std_service = scheduling::Subservice::try_from(tc.subservice());
         if std_service.is_err() {
             return Ok(PusPacketHandlerResult::CustomSubservice(

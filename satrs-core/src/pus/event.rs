@@ -1,4 +1,4 @@
-use crate::pus::{source_buffer_large_enough, EcssTmtcErrorWithSend};
+use crate::pus::{source_buffer_large_enough, EcssTmtcError};
 use spacepackets::ecss::{EcssEnumeration, PusError};
 use spacepackets::tm::PusTm;
 use spacepackets::tm::PusTmSecondaryHeader;
@@ -34,7 +34,7 @@ impl EventReporterBase {
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcErrorWithSend> {
+    ) -> Result<(), EcssTmtcError> {
         self.generate_and_send_generic_tm(
             buf,
             Subservice::TmInfoReport,
@@ -52,7 +52,7 @@ impl EventReporterBase {
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcErrorWithSend> {
+    ) -> Result<(), EcssTmtcError> {
         self.generate_and_send_generic_tm(
             buf,
             Subservice::TmLowSeverityReport,
@@ -70,7 +70,7 @@ impl EventReporterBase {
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcErrorWithSend> {
+    ) -> Result<(), EcssTmtcError> {
         self.generate_and_send_generic_tm(
             buf,
             Subservice::TmMediumSeverityReport,
@@ -88,7 +88,7 @@ impl EventReporterBase {
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcErrorWithSend> {
+    ) -> Result<(), EcssTmtcError> {
         self.generate_and_send_generic_tm(
             buf,
             Subservice::TmHighSeverityReport,
@@ -107,7 +107,7 @@ impl EventReporterBase {
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcErrorWithSend> {
+    ) -> Result<(), EcssTmtcError> {
         let tm = self.generate_generic_event_tm(buf, subservice, time_stamp, event_id, aux_data)?;
         sender.send_tm(tm.into())?;
         self.msg_count += 1;
@@ -121,7 +121,7 @@ impl EventReporterBase {
         time_stamp: &'a [u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
-    ) -> Result<PusTm, EcssTmtcErrorWithSend> {
+    ) -> Result<PusTm, EcssTmtcError> {
         let mut src_data_len = event_id.size();
         if let Some(aux_data) = aux_data {
             src_data_len += aux_data.len();
@@ -138,7 +138,7 @@ impl EventReporterBase {
         let mut current_idx = 0;
         event_id
             .write_to_be_bytes(&mut buf[0..event_id.size()])
-            .map_err(PusError::ByteConversionError)?;
+            .map_err(PusError::ByteConversion)?;
         current_idx += event_id.size();
         if let Some(aux_data) = aux_data {
             buf[current_idx..current_idx + aux_data.len()].copy_from_slice(aux_data);
@@ -178,7 +178,7 @@ mod alloc_mod {
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
-        ) -> Result<(), EcssTmtcErrorWithSend> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter.event_info(
                 self.source_data_buf.as_mut_slice(),
                 sender,
@@ -194,7 +194,7 @@ mod alloc_mod {
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
-        ) -> Result<(), EcssTmtcErrorWithSend> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter.event_low_severity(
                 self.source_data_buf.as_mut_slice(),
                 sender,
@@ -210,7 +210,7 @@ mod alloc_mod {
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
-        ) -> Result<(), EcssTmtcErrorWithSend> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter.event_medium_severity(
                 self.source_data_buf.as_mut_slice(),
                 sender,
@@ -226,7 +226,7 @@ mod alloc_mod {
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
-        ) -> Result<(), EcssTmtcErrorWithSend> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter.event_high_severity(
                 self.source_data_buf.as_mut_slice(),
                 sender,
@@ -243,7 +243,7 @@ mod tests {
     use super::*;
     use crate::events::{EventU32, Severity};
     use crate::pus::tests::CommonTmInfo;
-    use crate::pus::{EcssSender, PusTmWrapper};
+    use crate::pus::{EcssChannel, PusTmWrapper};
     use crate::SenderId;
     use spacepackets::ByteConversionError;
     use std::cell::RefCell;
@@ -268,14 +268,14 @@ mod tests {
         pub service_queue: RefCell<VecDeque<TmInfo>>,
     }
 
-    impl EcssSender for TestSender {
+    impl EcssChannel for TestSender {
         fn id(&self) -> SenderId {
             0
         }
     }
 
     impl EcssTmSenderCore for TestSender {
-        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcErrorWithSend> {
+        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
             match tm {
                 PusTmWrapper::InStore(_) => {
                     panic!("TestSender: unexpected call with address");
@@ -425,7 +425,7 @@ mod tests {
         let err = reporter.event_info(sender, &time_stamp_empty, event, None);
         assert!(err.is_err());
         let err = err.unwrap_err();
-        if let EcssTmtcErrorWithSend::EcssTmtcError(EcssTmtcErrorWithSend::ByteConversion(
+        if let EcssTmtcError::EcssTmtcError(EcssTmtcError::ByteConversion(
             ByteConversionError::ToSliceTooSmall(missmatch),
         )) = err
         {

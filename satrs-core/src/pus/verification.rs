@@ -73,7 +73,7 @@
 //! The [integration test](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-core/tests/verification_test.rs)
 //! for the verification module contains examples how this module could be used in a more complex
 //! context involving multiple threads
-use crate::pus::{source_buffer_large_enough, EcssTmSenderCore, EcssTmtcErrorWithSend};
+use crate::pus::{source_buffer_large_enough, EcssTmSenderCore, EcssTmtcError};
 use core::fmt::{Debug, Display, Formatter};
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
@@ -172,10 +172,10 @@ impl RequestId {
 /// If a verification operation fails, the passed token will be returned as well. This allows
 /// re-trying the operation at a later point.
 #[derive(Debug, Clone)]
-pub struct VerificationOrSendErrorWithToken<T>(pub EcssTmtcErrorWithSend, pub VerificationToken<T>);
+pub struct VerificationOrSendErrorWithToken<T>(pub EcssTmtcError, pub VerificationToken<T>);
 
 #[derive(Debug, Clone)]
-pub struct VerificationErrorWithToken<T>(pub EcssTmtcErrorWithSend, pub VerificationToken<T>);
+pub struct VerificationErrorWithToken<T>(pub EcssTmtcError, pub VerificationToken<T>);
 
 impl<T> From<VerificationErrorWithToken<T>> for VerificationOrSendErrorWithToken<T> {
     fn from(value: VerificationErrorWithToken<T>) -> Self {
@@ -205,7 +205,7 @@ impl WasAtLeastAccepted for TcStateAccepted {}
 impl WasAtLeastAccepted for TcStateStarted {}
 impl WasAtLeastAccepted for TcStateCompleted {}
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TcStateToken {
     None(VerificationToken<TcStateNone>),
     Accepted(VerificationToken<TcStateAccepted>),
@@ -230,6 +230,19 @@ impl TryFrom<TcStateToken> for VerificationToken<TcStateAccepted> {
         }
     }
 }
+
+impl TryFrom<TcStateToken> for VerificationToken<TcStateStarted> {
+    type Error = ();
+
+    fn try_from(value: TcStateToken) -> Result<Self, Self::Error> {
+        if let TcStateToken::Started(token) = value {
+            Ok(token)
+        } else {
+            Err(())
+        }
+    }
+}
+
 impl From<VerificationToken<TcStateAccepted>> for TcStateToken {
     fn from(t: VerificationToken<TcStateAccepted>) -> Self {
         TcStateToken::Accepted(t)
@@ -641,8 +654,7 @@ impl VerificationReporterCore {
         msg_count: u16,
         time_stamp: Option<&'src_data [u8]>,
         step: impl EcssEnumeration,
-    ) -> Result<VerificationSendable<'src_data, TcStateStarted, VerifSuccess>, EcssTmtcErrorWithSend>
-    {
+    ) -> Result<VerificationSendable<'src_data, TcStateStarted, VerifSuccess>, EcssTmtcError> {
         Ok(VerificationSendable::new_no_token(
             self.create_pus_verif_success_tm(
                 src_data_buf,
@@ -772,7 +784,7 @@ impl VerificationReporterCore {
         req_id: &RequestId,
         time_stamp: Option<&'src_data [u8]>,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
-    ) -> Result<PusTm<'src_data>, EcssTmtcErrorWithSend> {
+    ) -> Result<PusTm<'src_data>, EcssTmtcError> {
         let mut source_data_len = size_of::<u32>();
         if let Some(step) = step {
             source_data_len += step.size();
@@ -808,7 +820,7 @@ impl VerificationReporterCore {
         req_id: &RequestId,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
         params: &FailParams<'src_data, '_>,
-    ) -> Result<PusTm<'src_data>, EcssTmtcErrorWithSend> {
+    ) -> Result<PusTm<'src_data>, EcssTmtcError> {
         let mut idx = 0;
         let mut source_data_len = RequestId::SIZE_AS_BYTES + params.failure_code.size();
         if let Some(step) = step {
@@ -829,7 +841,7 @@ impl VerificationReporterCore {
         params
             .failure_code
             .write_to_be_bytes(&mut src_data_buf[idx..idx + params.failure_code.size()])
-            .map_err(PusError::ByteConversionError)?;
+            .map_err(PusError::ByteConversion)?;
         idx += params.failure_code.size();
         if let Some(failure_data) = params.failure_data {
             src_data_buf[idx..idx + failure_data.len()].copy_from_slice(failure_data);
@@ -1063,7 +1075,7 @@ mod alloc_mod {
             sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: Option<&[u8]>,
             step: impl EcssEnumeration,
-        ) -> Result<(), EcssTmtcErrorWithSend> {
+        ) -> Result<(), EcssTmtcError> {
             let seq_count = self
                 .seq_count_provider
                 .as_ref()
@@ -1250,7 +1262,7 @@ mod alloc_mod {
             token: &VerificationToken<TcStateStarted>,
             time_stamp: Option<&[u8]>,
             step: impl EcssEnumeration,
-        ) -> Result<(), EcssTmtcErrorWithSend> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter
                 .step_success(token, self.sender.as_mut(), time_stamp, step)
         }
@@ -1482,11 +1494,11 @@ mod tests {
     use crate::pool::{LocalPool, PoolCfg, SharedPool};
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
-        EcssTmSenderCore, EcssTmtcErrorWithSend, FailParams, FailParamsWithStep, RequestId,
-        TcStateNone, VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
+        EcssTmSenderCore, EcssTmtcError, FailParams, FailParamsWithStep, RequestId, TcStateNone,
+        VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
         VerificationToken,
     };
-    use crate::pus::{EcssSender, EcssTmtcErrorWithSend, MpscTmInStoreSender, PusTmWrapper};
+    use crate::pus::{EcssChannel, EcssTmtcError, MpscTmInStoreSender, PusTmWrapper};
     use crate::SenderId;
     use alloc::boxed::Box;
     use alloc::format;
@@ -1521,7 +1533,7 @@ mod tests {
         pub service_queue: RefCell<VecDeque<TmInfo>>,
     }
 
-    impl EcssSender for TestSender {
+    impl EcssChannel for TestSender {
         fn id(&self) -> SenderId {
             0
         }
@@ -1569,7 +1581,7 @@ mod tests {
     #[derive(Default, Clone)]
     struct FallibleSender {}
 
-    impl EcssSender for FallibleSender {
+    impl EcssChannel for FallibleSender {
         fn id(&self) -> SenderId {
             0
         }
@@ -1705,7 +1717,7 @@ mod tests {
         let err = res.unwrap_err();
         assert_eq!(err.1, tok);
         match err.0 {
-            EcssTmtcErrorWithSend::SendError(e) => {
+            EcssTmtcError::SendError(e) => {
                 assert_eq!(e, DummyError {})
             }
             _ => panic!("{}", format!("Unexpected error {:?}", err.0)),
@@ -1776,20 +1788,18 @@ mod tests {
         let err_with_token = res.unwrap_err();
         assert_eq!(err_with_token.1, tok);
         match err_with_token.0 {
-            EcssTmtcErrorWithSend::EcssTmtcError(EcssTmtcErrorWithSend::ByteConversion(e)) => {
-                match e {
-                    ByteConversionError::ToSliceTooSmall(missmatch) => {
-                        assert_eq!(
-                            missmatch.expected,
-                            fail_data.len() + RequestId::SIZE_AS_BYTES + fail_code.size()
-                        );
-                        assert_eq!(missmatch.found, b.rep().allowed_source_data_len());
-                    }
-                    _ => {
-                        panic!("{}", format!("Unexpected error {:?}", e))
-                    }
+            EcssTmtcError::EcssTmtcError(EcssTmtcError::ByteConversion(e)) => match e {
+                ByteConversionError::ToSliceTooSmall(missmatch) => {
+                    assert_eq!(
+                        missmatch.expected,
+                        fail_data.len() + RequestId::SIZE_AS_BYTES + fail_code.size()
+                    );
+                    assert_eq!(missmatch.found, b.rep().allowed_source_data_len());
                 }
-            }
+                _ => {
+                    panic!("{}", format!("Unexpected error {:?}", e))
+                }
+            },
             _ => {
                 panic!("{}", format!("Unexpected error {:?}", err_with_token.0))
             }

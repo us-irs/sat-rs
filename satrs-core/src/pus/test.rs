@@ -2,7 +2,7 @@ use crate::pool::{SharedPool, StoreAddr};
 use crate::pus::verification::{StdVerifReporterWithSender, TcStateAccepted, VerificationToken};
 use crate::pus::{
     AcceptedTc, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
-    PusPacketHandlingError, PusServiceBase, PusServiceHandler, PusTmWrapper,
+    PusPacketHandlingError, PusServiceBase, PusServiceHandler, PusTmWrapper, ReceivedTcWrapper,
 };
 use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
@@ -41,11 +41,13 @@ impl PusServiceHandler for PusService17TestHandler {
 
     fn handle_one_tc(
         &mut self,
-        addr: StoreAddr,
-        token: VerificationToken<TcStateAccepted>,
+        tc_in_store_with_token: ReceivedTcWrapper,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf)?;
+        let ReceivedTcWrapper {
+            tc,
+            pool_guard,
+            token,
+        } = tc_in_store_with_token;
         if tc.service() != 17 {
             return Err(PusPacketHandlingError::WrongService(tc.service()));
         }

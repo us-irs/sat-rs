@@ -13,7 +13,7 @@ pub use crate::pus::event::EventReporter;
 use crate::pus::verification::TcStateToken;
 #[cfg(feature = "alloc")]
 use crate::pus::EcssTmSenderCore;
-use crate::pus::EcssTmtcErrorWithSend;
+use crate::pus::EcssTmtcError;
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub use alloc_mod::*;
@@ -96,12 +96,12 @@ pub struct EventRequestWithToken<Event: GenericEvent = EventU32> {
 
 #[derive(Debug)]
 pub enum EventManError {
-    EcssTmtcError(EcssTmtcErrorWithSend),
+    EcssTmtcError(EcssTmtcError),
     SeverityMissmatch(Severity, Severity),
 }
 
-impl From<EcssTmtcErrorWithSend> for EventManError {
-    fn from(v: EcssTmtcErrorWithSend) -> Self {
+impl From<EcssTmtcError> for EventManError {
+    fn from(v: EcssTmtcError) -> Self {
         Self::EcssTmtcError(v)
     }
 }

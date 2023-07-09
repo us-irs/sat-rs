@@ -64,8 +64,8 @@ fn main() {
         (15, 1024),
         (15, 2048),
     ]));
-    let tm_store = SharedTmStore::new(Arc::new(RwLock::new(Box::new(tm_pool))));
-    let tm_store_event = tm_store.clone();
+    let shared_tm_store = SharedTmStore::new(Box::new(tm_pool));
+    let tm_store_event = shared_tm_store.clone();
     let tc_pool = LocalPool::new(PoolCfg::new(vec![
         (30, 32),
         (15, 64),
@@ -87,7 +87,7 @@ fn main() {
     let verif_sender = MpscTmInStoreSender::new(
         TmSenderId::PusVerification as SenderId,
         "verif_sender",
-        tm_store.backing_pool(),
+        shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
     let verif_cfg = VerificationReporterCfg::new(PUS_APID, 1, 2, 8).unwrap();
@@ -135,13 +135,13 @@ fn main() {
         tc_receiver: tc_source_rx,
     };
     let tm_args = TmArgs {
-        tm_store: tm_store.clone(),
+        tm_store: shared_tm_store.clone(),
         tm_sink_sender: tm_funnel_tx.clone(),
         tm_server_rx,
     };
 
     let aocs_tm_funnel = tm_funnel_tx.clone();
-    let mut aocs_tm_store = tm_store.clone();
+    let aocs_tm_store = shared_tm_store.clone();
 
     let (pus_test_tx, pus_test_rx) = channel();
     let (pus_event_tx, pus_event_rx) = channel();
@@ -158,7 +158,7 @@ fn main() {
     let test_srv_tm_sender = MpscTmInStoreSender::new(
         TmSenderId::PusTest as SenderId,
         "PUS_17_TM_SENDER",
-        tm_store.backing_pool().clone(),
+        shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
     let pus17_handler = PusService17TestHandler::new(
@@ -176,7 +176,7 @@ fn main() {
     let sched_srv_tm_sender = MpscTmInStoreSender::new(
         TmSenderId::PusSched as SenderId,
         "PUS_11_TM_SENDER",
-        tm_store.backing_pool().clone(),
+        shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
     let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
@@ -197,7 +197,7 @@ fn main() {
     let event_srv_tm_sender = MpscTmInStoreSender::new(
         TmSenderId::PusEvent as SenderId,
         "PUS_5_TM_SENDER",
-        tm_store.backing_pool().clone(),
+        shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
     let pus_5_handler = PusService5EventHandler::new(
@@ -213,7 +213,7 @@ fn main() {
     let action_srv_tm_sender = MpscTmInStoreSender::new(
         TmSenderId::PusAction as SenderId,
         "PUS_8_TM_SENDER",
-        tm_store.backing_pool().clone(),
+        shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
     let pus_8_handler = PusService8ActionHandler::new(
@@ -229,7 +229,7 @@ fn main() {
     let hk_srv_tm_sender = MpscTmInStoreSender::new(
         TmSenderId::PusHk as SenderId,
         "PUS_3_TM_SENDER",
-        tm_store.backing_pool().clone(),
+        shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
     let pus_3_handler = PusService3HkHandler::new(
@@ -262,7 +262,7 @@ fn main() {
                 if let Ok(addr) = tm_funnel.tm_funnel_rx.recv() {
                     // Read the TM, set sequence counter and message counter, and finally update
                     // the CRC.
-                    let shared_pool = tm_store.backing_pool();
+                    let shared_pool = shared_tm_store.backing_pool();
                     let mut pool_guard = shared_pool.write().expect("Locking TM pool failed");
                     let tm_raw = pool_guard
                         .modify(&addr)
@@ -297,12 +297,8 @@ fn main() {
         .name("Event".to_string())
         .spawn(move || {
             let mut timestamp: [u8; 7] = [0; 7];
-            let mut sender = MpscTmInStoreSender::new(
-                1,
-                "event_sender",
-                tm_store_event.backing_pool(),
-                tm_funnel_tx,
-            );
+            let mut sender =
+                MpscTmInStoreSender::new(1, "event_sender", tm_store_event.clone(), tm_funnel_tx);
             let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
             let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
                 reporter_event_handler
@@ -393,7 +389,9 @@ fn main() {
                                             Some(&buf),
                                             true,
                                         );
-                                        let addr = aocs_tm_store.add_pus_tm(&pus_tm);
+                                        let addr = aocs_tm_store
+                                            .add_pus_tm(&pus_tm)
+                                            .expect("Adding PUS TM failed");
                                         aocs_tm_funnel.send(addr).expect("Sending HK TM failed");
                                     }
                                 }

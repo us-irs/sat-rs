@@ -86,7 +86,7 @@ impl PusService8ActionHandler {
                     ),
                 )
                 .expect("Sending start failure failed");
-            return Err(PusPacketHandlingError::OtherError(format!(
+            return Err(PusPacketHandlingError::Other(format!(
                 "Unknown target ID {target_id}"
             )));
         }

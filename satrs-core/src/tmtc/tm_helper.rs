@@ -8,9 +8,11 @@ pub use std_mod::*;
 
 #[cfg(feature = "std")]
 pub mod std_mod {
-    use crate::pool::{SharedPool, StoreAddr};
+    use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr};
+    use crate::pus::EcssTmtcError;
     use spacepackets::ecss::SerializablePusPacket;
     use spacepackets::tm::PusTm;
+    use std::sync::{Arc, RwLock};
 
     #[derive(Clone)]
     pub struct SharedTmStore {
@@ -18,21 +20,23 @@ pub mod std_mod {
     }
 
     impl SharedTmStore {
-        pub fn new(backing_pool: SharedPool) -> Self {
-            Self { pool: backing_pool }
+        pub fn new(backing_pool: ShareablePoolProvider) -> Self {
+            Self {
+                pool: Arc::new(RwLock::new(backing_pool)),
+            }
         }
 
         pub fn backing_pool(&self) -> SharedPool {
             self.pool.clone()
         }
 
-        pub fn add_pus_tm(&mut self, pus_tm: &PusTm) -> StoreAddr {
-            let mut pg = self.pool.write().expect("error locking TM store");
-            let (addr, buf) = pg.free_element(pus_tm.len_packed()).expect("Store error");
+        pub fn add_pus_tm(&self, pus_tm: &PusTm) -> Result<StoreAddr, EcssTmtcError> {
+            let mut pg = self.pool.write().map_err(|_| EcssTmtcError::StoreLock)?;
+            let (addr, buf) = pg.free_element(pus_tm.len_packed())?;
             pus_tm
                 .write_to_bytes(buf)
                 .expect("writing PUS TM to store failed");
-            addr
+            Ok(addr)
         }
     }
 }
