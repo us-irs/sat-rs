@@ -10,12 +10,12 @@ use crate::ccsds::CcsdsReceiver;
 use crate::pus::{PusReceiver, PusTcMpscRouter};
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
-use satrs_core::pus::AcceptedTc;
+use satrs_core::pus::{AcceptedTc, ReceivesEcssPusTc};
 use satrs_core::spacepackets::ecss::{PusPacket, SerializablePusPacket};
 use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::spacepackets::SpHeader;
 use satrs_core::tmtc::tm_helper::SharedTmStore;
-use satrs_core::tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc, ReceivesEcssPusTc};
+use satrs_core::tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc};
 
 pub const PUS_APID: u16 = 0x02;
 

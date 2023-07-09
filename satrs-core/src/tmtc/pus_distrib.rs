@@ -61,7 +61,8 @@
 //!     .expect("Casting back to concrete type failed");
 //! assert_eq!(concrete_handler_ref.handler_call_count, 1);
 //! ```
-use crate::tmtc::{ReceivesCcsdsTc, ReceivesEcssPusTc, ReceivesTcCore};
+use crate::pus::ReceivesEcssPusTc;
+use crate::tmtc::{ReceivesCcsdsTc, ReceivesTcCore};
 use alloc::boxed::Box;
 use core::fmt::{Display, Formatter};
 use downcast_rs::Downcast;

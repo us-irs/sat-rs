@@ -11,7 +11,7 @@ use dyn_clone::DynClone;
 use spacepackets::ecss::PusError;
 use spacepackets::tc::PusTc;
 use spacepackets::tm::PusTm;
-use spacepackets::{ByteConversionError, SizeMissmatch};
+use spacepackets::{ByteConversionError, SizeMissmatch, SpHeader};
 use std::error::Error;
 
 pub mod event;
@@ -200,6 +200,14 @@ mod alloc_mod {
 
     dyn_clone::clone_trait_object!(EcssTcSender);
     impl_downcast!(EcssTcSender);
+}
+
+/// Generic trait for objects which can receive ECSS PUS telecommands. This trait is
+/// implemented by the [crate::tmtc::pus_distrib::PusDistributor] objects to allow passing PUS TC
+/// packets into it.
+pub trait ReceivesEcssPusTc {
+    type Error;
+    fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTc) -> Result<(), Self::Error>;
 }
 
 #[cfg(feature = "std")]
