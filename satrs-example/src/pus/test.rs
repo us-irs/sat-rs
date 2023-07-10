@@ -4,7 +4,7 @@ use satrs_core::params::Params;
 use satrs_core::pus::test::PusService17TestHandler;
 use satrs_core::pus::verification::FailParams;
 use satrs_core::pus::{PusPacketHandlerResult, PusServiceHandler};
-use satrs_core::spacepackets::ecss::tc::PusTc;
+use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::spacepackets::time::cds::TimeProvider;
 use satrs_core::spacepackets::time::TimeWriter;
@@ -40,7 +40,7 @@ impl Service17CustomWrapper {
             PusPacketHandlerResult::CustomSubservice(subservice, token) => {
                 let psb_mut = self.pus17_handler.psb_mut();
                 let buf = psb_mut.pus_buf;
-                let (tc, _) = PusTc::from_bytes(&buf).unwrap();
+                let (tc, _) = PusTcReader::new(&buf).unwrap();
                 let time_stamper = TimeProvider::from_now_with_u16_days().unwrap();
                 let mut stamp_buf: [u8; 7] = [0; 7];
                 time_stamper.write_to_bytes(&mut stamp_buf).unwrap();

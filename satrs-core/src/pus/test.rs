@@ -4,7 +4,7 @@ use crate::pus::{
     EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
     PusPacketHandlingError, PusServiceBase, PusServiceHandler, PusTmWrapper,
 };
-use spacepackets::ecss::tc::PusTc;
+use spacepackets::ecss::tc::PusTcReader;
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
 use spacepackets::ecss::PusPacket;
 use spacepackets::SpHeader;
@@ -50,7 +50,7 @@ impl PusServiceHandler for PusService17TestHandler {
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf)?;
+        let (tc, _) = PusTcReader::new(&self.psb.pus_buf)?;
         if tc.service() != 17 {
             return Err(PusPacketHandlingError::WrongService(tc.service()));
         }

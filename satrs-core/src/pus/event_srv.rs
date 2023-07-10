@@ -9,7 +9,7 @@ use crate::pus::{
     PusPacketHandlingError, PusServiceBase, PusServiceHandler,
 };
 use spacepackets::ecss::event::Subservice;
-use spacepackets::ecss::tc::PusTc;
+use spacepackets::ecss::tc::PusTcReader;
 use spacepackets::ecss::PusPacket;
 use std::boxed::Box;
 use std::sync::mpsc::Sender;
@@ -55,7 +55,7 @@ impl PusServiceHandler for PusService5EventHandler {
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf)?;
+        let (tc, _) = PusTcReader::new(&self.psb.pus_buf)?;
         let subservice = tc.subservice();
         let srv = Subservice::try_from(subservice);
         if srv.is_err() {

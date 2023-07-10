@@ -9,7 +9,7 @@ use satrs_core::pus::{
     EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
     PusServiceHandler,
 };
-use satrs_core::spacepackets::ecss::tc::PusTc;
+use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::{hk, PusPacket};
 use satrs_core::tmtc::{AddressableId, TargetId};
 use satrs_example::{hk_err, tmtc_err};
@@ -57,7 +57,7 @@ impl PusServiceHandler for PusService3HkHandler {
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTc::from_bytes(&self.psb().pus_buf).unwrap();
+        let (tc, _) = PusTcReader::new(&self.psb().pus_buf).unwrap();
         let subservice = tc.subservice();
         let mut partial_error = None;
         let time_stamp = self.psb().get_current_timestamp(&mut partial_error);

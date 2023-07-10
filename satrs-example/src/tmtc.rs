@@ -11,7 +11,7 @@ use crate::pus::{PusReceiver, PusTcMpscRouter};
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::pus::{ReceivesEcssPusTc, TcAddrWithToken};
-use satrs_core::spacepackets::ecss::tc::{PusTc, PusTcReader};
+use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::spacepackets::SpHeader;
 use satrs_core::tmtc::tm_helper::SharedTmStore;
@@ -154,7 +154,7 @@ fn core_tmtc_loop(
             let data = pool.read(&addr).expect("reading pool failed");
             tc_buf[0..data.len()].copy_from_slice(data);
             drop(pool);
-            match PusTc::from_bytes(tc_buf) {
+            match PusTcReader::new(tc_buf) {
                 Ok((pus_tc, _)) => {
                     pus_receiver
                         .handle_tc_packet(addr, pus_tc.service(), &pus_tc)

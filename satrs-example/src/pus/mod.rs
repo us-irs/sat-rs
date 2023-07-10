@@ -3,7 +3,7 @@ use log::warn;
 use satrs_core::pool::StoreAddr;
 use satrs_core::pus::verification::{FailParams, StdVerifReporterWithSender};
 use satrs_core::pus::{PusPacketHandlerResult, TcAddrWithToken};
-use satrs_core::spacepackets::ecss::tc::PusTc;
+use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusServiceId;
 use satrs_core::spacepackets::time::cds::TimeProvider;
 use satrs_core::spacepackets::time::TimeWriter;
@@ -72,7 +72,7 @@ impl PusReceiver {
         &mut self,
         store_addr: StoreAddr,
         service: u8,
-        pus_tc: &PusTc,
+        pus_tc: &PusTcReader,
     ) -> Result<PusPacketHandlerResult, MpscStoreAndSendError> {
         let init_token = self.verif_reporter.add_tc(pus_tc);
         self.stamp_helper.update_from_now();
