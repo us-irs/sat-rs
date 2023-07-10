@@ -22,7 +22,7 @@
 //! use satrs_core::tmtc::{ReceivesTc, ReceivesTcCore};
 //! use spacepackets::{CcsdsPacket, SpHeader};
 //! use spacepackets::ecss::SerializablePusPacket;
-//! use spacepackets::ecss::tc::PusTc;
+//! use spacepackets::ecss::tc::{PusTc, PusTcCreator};
 //!
 //! #[derive (Default)]
 //! struct ConcreteApidHandler {
@@ -56,7 +56,7 @@
 //!
 //! // Create and pass PUS telecommand with a valid APID
 //! let mut space_packet_header = SpHeader::tc_unseg(0x002, 0x34, 0).unwrap();
-//! let mut pus_tc = PusTc::new_simple(&mut space_packet_header, 17, 1, None, true);
+//! let mut pus_tc = PusTcCreator::new_simple(&mut space_packet_header, 17, 1, None, true);
 //! let mut test_buf: [u8; 32] = [0; 32];
 //! let mut size = pus_tc
 //!     .write_to_bytes(test_buf.as_mut_slice())
@@ -225,7 +225,7 @@ impl<E: 'static> CcsdsDistributor<E> {
 pub(crate) mod tests {
     use super::*;
     use crate::tmtc::ccsds_distrib::{CcsdsDistributor, CcsdsPacketHandler};
-    use spacepackets::ecss::tc::PusTc;
+    use spacepackets::ecss::tc::PusTcCreator;
     use spacepackets::ecss::SerializablePusPacket;
     use spacepackets::CcsdsPacket;
     use std::collections::VecDeque;
@@ -236,7 +236,7 @@ pub(crate) mod tests {
 
     pub fn generate_ping_tc(buf: &mut [u8]) -> &[u8] {
         let mut sph = SpHeader::tc_unseg(0x002, 0x34, 0).unwrap();
-        let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
+        let pus_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
         let size = pus_tc
             .write_to_bytes(buf)
             .expect("Error writing TC to buffer");
@@ -350,7 +350,7 @@ pub(crate) mod tests {
         };
         let mut ccsds_distrib = CcsdsDistributor::new(Box::new(apid_handler));
         let mut sph = SpHeader::tc_unseg(0x004, 0x34, 0).unwrap();
-        let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
+        let pus_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
         let mut test_buf: [u8; 32] = [0; 32];
         pus_tc
             .write_to_bytes(test_buf.as_mut_slice())

@@ -281,8 +281,8 @@ mod tests {
                     panic!("TestSender: unexpected call with address");
                 }
                 PusTmWrapper::Direct(tm) => {
-                    assert!(tm.source_data().is_some());
-                    let src_data = tm.source_data().unwrap();
+                    assert!(!tm.source_data().is_empty());
+                    let src_data = tm.source_data();
                     assert!(src_data.len() >= 4);
                     let event =
                         EventU32::from(u32::from_be_bytes(src_data[0..4].try_into().unwrap()));

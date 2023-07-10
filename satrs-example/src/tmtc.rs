@@ -11,8 +11,8 @@ use crate::pus::{PusReceiver, PusTcMpscRouter};
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::pus::{ReceivesEcssPusTc, TcAddrWithToken};
-use satrs_core::spacepackets::ecss::tc::{PusTc, PusTcCreator, PusTcReader};
-use satrs_core::spacepackets::ecss::{PusPacket, SerializablePusPacket};
+use satrs_core::spacepackets::ecss::tc::{PusTc, PusTcReader};
+use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::spacepackets::SpHeader;
 use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc};
@@ -53,12 +53,10 @@ pub struct TcStore {
 }
 
 impl TcStore {
-    pub fn add_pus_tc(&mut self, pus_tc: &PusTcCreator) -> Result<StoreAddr, StoreError> {
+    pub fn add_pus_tc(&mut self, pus_tc: &PusTcReader) -> Result<StoreAddr, StoreError> {
         let mut pg = self.pool.write().expect("error locking TC store");
         let (addr, buf) = pg.free_element(pus_tc.len_packed())?;
-        pus_tc
-            .write_to_bytes(buf)
-            .expect("writing PUS TC to store failed");
+        buf[0..pus_tc.len_packed()].copy_from_slice(pus_tc.raw_data());
         Ok(addr)
     }
 }

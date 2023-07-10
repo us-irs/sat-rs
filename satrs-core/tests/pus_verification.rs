@@ -9,7 +9,7 @@ pub mod crossbeam_test {
     };
     use satrs_core::pus::MpscTmInStoreSender;
     use satrs_core::tmtc::tm_helper::SharedTmStore;
-    use spacepackets::ecss::tc::{PusTc, PusTcSecondaryHeader};
+    use spacepackets::ecss::tc::{PusTc, PusTcCreator, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTm;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket, SerializablePusPacket};
     use spacepackets::SpHeader;
@@ -56,14 +56,14 @@ pub mod crossbeam_test {
             let mut tc_guard = shared_tc_pool_0.write().unwrap();
             let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
             let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-            let pus_tc_0 = PusTc::new(&mut sph, tc_header, None, true);
+            let pus_tc_0 = PusTcCreator::new(&mut sph, tc_header, None, true);
             req_id_0 = RequestId::new(&pus_tc_0);
             let (addr, mut buf) = tc_guard.free_element(pus_tc_0.len_packed()).unwrap();
             pus_tc_0.write_to_bytes(&mut buf).unwrap();
             tx_tc_0.send(addr).unwrap();
             let mut sph = SpHeader::tc_unseg(TEST_APID, 1, 0).unwrap();
             let tc_header = PusTcSecondaryHeader::new_simple(5, 1);
-            let pus_tc_1 = PusTc::new(&mut sph, tc_header, None, true);
+            let pus_tc_1 = PusTcCreator::new(&mut sph, tc_header, None, true);
             req_id_1 = RequestId::new(&pus_tc_1);
             let (addr, mut buf) = tc_guard.free_element(pus_tc_0.len_packed()).unwrap();
             pus_tc_1.write_to_bytes(&mut buf).unwrap();
@@ -156,11 +156,9 @@ pub mod crossbeam_test {
                 }
                 let (pus_tm, _) = PusTm::from_bytes(&tm_buf[0..tm_len], 7)
                     .expect("Error reading verification TM");
-                let req_id = RequestId::from_bytes(
-                    &pus_tm.source_data().expect("Invalid TM source data")
-                        [0..RequestId::SIZE_AS_BYTES],
-                )
-                .unwrap();
+                let req_id =
+                    RequestId::from_bytes(&pus_tm.source_data()[0..RequestId::SIZE_AS_BYTES])
+                        .expect("reading request ID from PUS TM source data failed");
                 if !verif_map.contains_key(&req_id) {
                     let mut content = Vec::new();
                     content.push(pus_tm.subservice());

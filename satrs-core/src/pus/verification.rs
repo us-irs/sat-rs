@@ -22,8 +22,8 @@
 //! use satrs_core::tmtc::tm_helper::SharedTmStore;
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
-//! use spacepackets::ecss::tc::{PusTc, PusTcSecondaryHeader};
-//! use spacepackets::ecss::tm::PusTm;
+//! use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
+//! use spacepackets::ecss::tm::PusTmReader;
 //!
 //! const EMPTY_STAMP: [u8; 7] = [0; 7];
 //! const TEST_APID: u16 = 0x02;
@@ -39,7 +39,7 @@
 //!
 //! let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
 //! let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-//! let pus_tc_0 = PusTc::new(&mut sph, tc_header, None, true);
+//! let pus_tc_0 = PusTcCreator::new(&mut sph, tc_header, None, true);
 //! let init_token = reporter.add_tc(&pus_tc_0);
 //!
 //! // Complete success sequence for a telecommand
@@ -60,7 +60,7 @@
 //!         tm_len = slice.len();
 //!         tm_buf[0..tm_len].copy_from_slice(slice);
 //!     }
-//!     let (pus_tm, _) = PusTm::from_bytes(&tm_buf[0..tm_len], 7)
+//!     let (pus_tm, _) = PusTmReader::new(&tm_buf[0..tm_len], 7)
 //!        .expect("Error reading verification TM");
 //!     if packet_idx == 0 {
 //!         assert_eq!(pus_tm.subservice(), 1);
@@ -85,8 +85,8 @@ use core::mem::size_of;
 use delegate::delegate;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use spacepackets::ecss::tc::PusTc;
-use spacepackets::ecss::tm::{PusTm, PusTmCreator, PusTmSecondaryHeader};
+use spacepackets::ecss::tc::IsPusTelecommand;
+use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
 use spacepackets::ecss::{EcssEnumeration, PusError, SerializablePusPacket};
 use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
 use spacepackets::{SpHeader, MAX_APID};
@@ -163,7 +163,7 @@ impl RequestId {
 }
 impl RequestId {
     /// This allows extracting the request ID from a given PUS telecommand.
-    pub fn new(tc: &PusTc) -> Self {
+    pub fn new(tc: &(impl CcsdsPacket + IsPusTelecommand)) -> Self {
         RequestId {
             version_number: tc.ccsds_version(),
             packet_id: tc.packet_id(),
@@ -436,7 +436,10 @@ impl VerificationReporterCore {
 
     /// Initialize verification handling by passing a TC reference. This returns a token required
     /// to call the acceptance functions
-    pub fn add_tc(&mut self, pus_tc: &PusTc) -> VerificationToken<TcStateNone> {
+    pub fn add_tc(
+        &mut self,
+        pus_tc: &(impl CcsdsPacket + IsPusTelecommand),
+    ) -> VerificationToken<TcStateNone> {
         self.add_tc_with_req_id(RequestId::new(pus_tc))
     }
 
@@ -888,6 +891,7 @@ mod alloc_mod {
     use alloc::boxed::Box;
     use alloc::vec;
     use alloc::vec::Vec;
+    use spacepackets::ecss::tc::IsPusTelecommand;
 
     #[derive(Clone)]
     pub struct VerificationReporterCfg {
@@ -949,7 +953,7 @@ mod alloc_mod {
             to self.reporter {
                 pub fn set_apid(&mut self, apid: u16) -> bool;
                 pub fn apid(&self) -> u16;
-                pub fn add_tc(&mut self, pus_tc: &PusTc) -> VerificationToken<TcStateNone>;
+                pub fn add_tc(&mut self, pus_tc: &(impl CcsdsPacket + IsPusTelecommand)) -> VerificationToken<TcStateNone>;
                 pub fn add_tc_with_req_id(&mut self, req_id: RequestId) -> VerificationToken<TcStateNone>;
                 pub fn dest_id(&self) -> u16;
                 pub fn set_dest_id(&mut self, dest_id: u16);
@@ -1213,7 +1217,7 @@ mod alloc_mod {
             to self.reporter {
                 pub fn set_apid(&mut self, apid: u16) -> bool;
                 pub fn apid(&self) -> u16;
-                pub fn add_tc(&mut self, pus_tc: &PusTc) -> VerificationToken<TcStateNone>;
+                pub fn add_tc(&mut self, pus_tc: &(impl CcsdsPacket + IsPusTelecommand)) -> VerificationToken<TcStateNone>;
                 pub fn add_tc_with_req_id(&mut self, req_id: RequestId) -> VerificationToken<TcStateNone>;
                 pub fn dest_id(&self) -> u16;
                 pub fn set_dest_id(&mut self, dest_id: u16);
@@ -1304,192 +1308,8 @@ mod std_mod {
     use crate::pus::verification::VerificationReporterWithSender;
     use std::sync::{Arc, Mutex};
 
-    //     use super::alloc_mod::VerificationReporterWithSender;
-    //     use super::*;
-    //     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr};
-    //     use crate::pus::{EcssSender, MpscPusInStoreSendError, PusTmWrapper};
-    //     use crate::SenderId;
-    //     use delegate::delegate;
-    //     use spacepackets::ecss::SerializablePusPacket;
-    //     use std::sync::{mpsc, Arc, Mutex, RwLockWriteGuard};
-    //
     pub type StdVerifReporterWithSender = VerificationReporterWithSender;
     pub type SharedStdVerifReporterWithSender = Arc<Mutex<StdVerifReporterWithSender>>;
-    //
-    //     trait SendBackend: Send {
-    //         type SendError: Debug;
-    //
-    //         fn send(&self, addr: StoreAddr) -> Result<(), Self::SendError>;
-    //     }
-    //
-    //     #[derive(Clone)]
-    //     struct StdSenderBase<S> {
-    //         id: SenderId,
-    //         name: &'static str,
-    //         tm_store: SharedPool,
-    //         tx: S,
-    //         pub ignore_poison_error: bool,
-    //     }
-    //
-    //     impl<S: SendBackend> StdSenderBase<S> {
-    //         pub fn new(id: SenderId, name: &'static str, tm_store: SharedPool, tx: S) -> Self {
-    //             Self {
-    //                 id,
-    //                 name,
-    //                 tm_store,
-    //                 tx,
-    //                 ignore_poison_error: false,
-    //             }
-    //         }
-    //     }
-    //
-    //     unsafe impl<S: Sync> Sync for StdSenderBase<S> {}
-    //     unsafe impl<S: Send> Send for StdSenderBase<S> {}
-    //
-    //     impl SendBackend for mpsc::Sender<StoreAddr> {
-    //         type SendError = mpsc::SendError<StoreAddr>;
-    //
-    //         fn send(&self, addr: StoreAddr) -> Result<(), Self::SendError> {
-    //             self.send(addr)
-    //         }
-    //     }
-    //
-    //     #[derive(Clone)]
-    //     pub struct MpscVerifSender {
-    //         base: StdSenderBase<mpsc::Sender<StoreAddr>>,
-    //     }
-    //
-    //     /// Verification sender with a [mpsc::Sender] backend.
-    //     /// It implements the [EcssTmSenderCore] trait to be used as PUS Verification TM sender.
-    //     impl MpscVerifSender {
-    //         pub fn new(
-    //             id: SenderId,
-    //             name: &'static str,
-    //             tm_store: SharedPool,
-    //             tx: mpsc::Sender<StoreAddr>,
-    //         ) -> Self {
-    //             Self {
-    //                 base: StdSenderBase::new(id, name, tm_store, tx),
-    //             }
-    //         }
-    //     }
-    //
-    //     //noinspection RsTraitImplementation
-    //     impl EcssSender for MpscVerifSender {
-    //         delegate!(
-    //             to self.base {
-    //                 fn id(&self) -> SenderId;
-    //                 fn name(&self) -> &'static str;
-    //             }
-    //         );
-    //     }
-    //
-    //     //noinspection RsTraitImplementation
-    //     impl EcssTmSenderCore for MpscVerifSender {
-    //         type Error = MpscPusInStoreSendError;
-    //
-    //         delegate!(
-    //             to self.base {
-    //                 fn send_tm(&self, tm: PusTmWrapper) -> Result<(), Self::Error>;
-    //             }
-    //         );
-    //     }
-    //
-    //     impl SendBackend for crossbeam_channel::Sender<StoreAddr> {
-    //         type SendError = crossbeam_channel::SendError<StoreAddr>;
-    //
-    //         fn send(&self, addr: StoreAddr) -> Result<(), Self::SendError> {
-    //             self.send(addr)
-    //         }
-    //     }
-    //
-    //     /// Verification sender with a [crossbeam_channel::Sender] backend.
-    //     /// It implements the [EcssTmSenderCore] trait to be used as PUS Verification TM sender
-    //     #[cfg(feature = "crossbeam")]
-    //     #[derive(Clone)]
-    //     pub struct CrossbeamVerifSender {
-    //         base: StdSenderBase<crossbeam_channel::Sender<StoreAddr>>,
-    //     }
-    //
-    //     #[cfg(feature = "crossbeam")]
-    //     impl CrossbeamVerifSender {
-    //         pub fn new(
-    //             id: SenderId,
-    //             name: &'static str,
-    //             tm_store: SharedPool,
-    //             tx: crossbeam_channel::Sender<StoreAddr>,
-    //         ) -> Self {
-    //             Self {
-    //                 base: StdSenderBase::new(id, name, tm_store, tx),
-    //             }
-    //         }
-    //     }
-    //
-    //     //noinspection RsTraitImplementation
-    //     #[cfg(feature = "crossbeam")]
-    //     impl EcssSender for CrossbeamVerifSender {
-    //         delegate!(
-    //             to self.base {
-    //                 fn id(&self) -> SenderId;
-    //                 fn name(&self) -> &'static str;
-    //             }
-    //         );
-    //     }
-    //
-    //     //noinspection RsTraitImplementation
-    //     #[cfg(feature = "crossbeam")]
-    //     impl EcssTmSenderCore for CrossbeamVerifSender {
-    //         type Error = MpscPusInStoreSendError;
-    //
-    //         delegate!(
-    //             to self.base {
-    //                 fn send_tm(&mut self, tm: PusTm) -> Result<(), Self::Error>;
-    //             }
-    //         );
-    //     }
-    //
-    //     impl<S: SendBackend + Clone + 'static> EcssSender for StdSenderBase<S> {
-    //         fn id(&self) -> SenderId {
-    //             self.id
-    //         }
-    //         fn name(&self) -> &'static str {
-    //             self.name
-    //         }
-    //     }
-    //     impl<S: SendBackend + Clone + 'static> EcssTmSenderCore for StdSenderBase<S> {
-    //         type Error = MpscPusInStoreSendError;
-    //
-    //         fn send_tm(&self, tm: PusTmWrapper) -> Result<(), Self::Error> {
-    //             match tm {
-    //                 PusTmWrapper::InStore(addr) => {
-    //                     self.tx.send(addr).unwrap();
-    //                     Ok(())
-    //                 }
-    //                 PusTmWrapper::Direct(tm) => {
-    //                     let operation = |mut mg: RwLockWriteGuard<ShareablePoolProvider>| {
-    //                         let (addr, buf) = mg.free_element(tm.len_packed())?;
-    //                         tm.write_to_bytes(buf)
-    //                             .map_err(MpscPusInStoreSendError::Pus)?;
-    //                         drop(mg);
-    //                         self.tx
-    //                             .send(addr)
-    //                             .map_err(|_| MpscPusInStoreSendError::RxDisconnected(addr))?;
-    //                         Ok(())
-    //                     };
-    //                     match self.tm_store.write() {
-    //                         Ok(lock) => operation(lock),
-    //                         Err(poison_error) => {
-    //                             if self.ignore_poison_error {
-    //                                 operation(poison_error.into_inner())
-    //                             } else {
-    //                                 Err(MpscPusInStoreSendError::StoreLock)
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
 }
 
 #[cfg(test)]
@@ -1506,7 +1326,7 @@ mod tests {
     use crate::ChannelId;
     use alloc::boxed::Box;
     use alloc::format;
-    use spacepackets::ecss::tc::{PusTc, PusTcSecondaryHeader};
+    use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTm;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, PusError, PusPacket};
     use spacepackets::util::UnsignedEnum;
@@ -1554,10 +1374,10 @@ mod tests {
                 }
                 PusTmWrapper::Direct(tm) => {
                     assert_eq!(PusPacket::service(&tm), 1);
-                    assert!(tm.source_data().is_some());
+                    assert!(!tm.source_data().is_empty());
                     let mut time_stamp = [0; 7];
                     time_stamp.clone_from_slice(&tm.timestamp().unwrap()[0..7]);
-                    let src_data = tm.source_data().unwrap();
+                    let src_data = tm.source_data();
                     assert!(src_data.len() >= 4);
                     let req_id =
                         RequestId::from_bytes(&src_data[0..RequestId::SIZE_AS_BYTES]).unwrap();
@@ -1581,7 +1401,7 @@ mod tests {
     struct TestBase<'a> {
         vr: VerificationReporter,
         #[allow(dead_code)]
-        tc: PusTc<'a>,
+        tc: PusTcCreator<'a>,
     }
 
     impl<'a> TestBase<'a> {
@@ -1592,7 +1412,7 @@ mod tests {
     struct TestBaseWithHelper<'a> {
         helper: VerificationReporterWithSender,
         #[allow(dead_code)]
-        tc: PusTc<'a>,
+        tc: PusTcCreator<'a>,
     }
 
     impl<'a> TestBaseWithHelper<'a> {
@@ -1606,10 +1426,10 @@ mod tests {
         VerificationReporter::new(&cfg)
     }
 
-    fn base_tc_init(app_data: Option<&[u8]>) -> (PusTc, RequestId) {
+    fn base_tc_init(app_data: Option<&[u8]>) -> (PusTcCreator, RequestId) {
         let mut sph = SpHeader::tc_unseg(TEST_APID, 0x34, 0).unwrap();
         let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-        let pus_tc = PusTc::new(&mut sph, tc_header, app_data, true);
+        let pus_tc = PusTcCreator::new(&mut sph, tc_header, app_data, true);
         let req_id = RequestId::new(&pus_tc);
         (pus_tc, req_id)
     }
@@ -2333,7 +2153,7 @@ mod tests {
 
         let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
         let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-        let pus_tc_0 = PusTc::new(&mut sph, tc_header, None, true);
+        let pus_tc_0 = PusTcCreator::new(&mut sph, tc_header, None, true);
         let init_token = reporter.add_tc(&pus_tc_0);
 
         // Complete success sequence for a telecommand

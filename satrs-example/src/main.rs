@@ -37,12 +37,10 @@ use satrs_core::pus::verification::{
 };
 use satrs_core::pus::{MpscTcInStoreReceiver, MpscTmInStoreSender};
 use satrs_core::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore};
-use satrs_core::spacepackets::ecss::tm::PusTmZeroCopyWriter;
+use satrs_core::spacepackets::ecss::tm::{PusTmCreator, PusTmZeroCopyWriter};
 use satrs_core::spacepackets::{
-    ecss::tm::{PusTm, PusTmSecondaryHeader},
-    time::cds::TimeProvider,
-    time::TimeWriter,
-    SequenceFlags, SpHeader,
+    ecss::tm::PusTmSecondaryHeader, time::cds::TimeProvider, time::TimeWriter, SequenceFlags,
+    SpHeader,
 };
 use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::{AddressableId, TargetId};
@@ -415,7 +413,7 @@ fn main() {
                                             unique_id,
                                         };
                                         addressable_id.write_to_be_bytes(&mut buf).unwrap();
-                                        let pus_tm = PusTm::new(
+                                        let pus_tm = PusTmCreator::new(
                                             &mut sp_header,
                                             sec_header,
                                             Some(&buf),

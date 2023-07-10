@@ -232,7 +232,9 @@ pub trait EcssTcReceiverCore: EcssChannel {
 
 /// Generic trait for objects which can receive ECSS PUS telecommands. This trait is
 /// implemented by the [crate::tmtc::pus_distrib::PusDistributor] objects to allow passing PUS TC
-/// packets into it.
+/// packets into it. It is generally assumed that the telecommand is stored in some pool structure,
+/// and the store address is passed as well. This allows efficient zero-copy forwarding of
+/// telecommands.
 pub trait ReceivesEcssPusTc {
     type Error;
     fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTcReader) -> Result<(), Self::Error>;
@@ -317,7 +319,7 @@ pub mod std_mod {
     use crate::ChannelId;
     use alloc::boxed::Box;
     use alloc::vec::Vec;
-    use spacepackets::ecss::tm::{PusTm, PusTmCreator};
+    use spacepackets::ecss::tm::PusTmCreator;
     use spacepackets::ecss::PusError;
     use spacepackets::time::cds::TimeProvider;
     use spacepackets::time::StdTimestampError;
@@ -641,7 +643,7 @@ pub(crate) fn source_buffer_large_enough(cap: usize, len: usize) -> Result<(), E
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use spacepackets::ecss::tm::{GenericPusTmSecondaryHeader, PusTm};
+    use spacepackets::ecss::tm::{GenericPusTmSecondaryHeader, PusTmCreator};
     use spacepackets::CcsdsPacket;
 
     #[derive(Debug, Eq, PartialEq, Clone)]
@@ -654,7 +656,7 @@ pub(crate) mod tests {
     }
 
     impl CommonTmInfo {
-        pub fn new_from_tm(tm: &PusTm) -> Self {
+        pub fn new_from_tm(tm: &PusTmCreator) -> Self {
             let mut time_stamp = [0; 7];
             time_stamp.clone_from_slice(&tm.timestamp().unwrap()[0..7]);
             Self {

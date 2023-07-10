@@ -50,7 +50,7 @@ impl PusService8ActionHandler {
         time_stamp: &[u8],
     ) -> Result<(), PusPacketHandlingError> {
         let user_data = tc.user_data();
-        if user_data.is_none() || user_data.unwrap().len() < 8 {
+        if user_data.len() < 8 {
             self.psb()
                 .verification_handler
                 .borrow_mut()
@@ -63,7 +63,6 @@ impl PusService8ActionHandler {
                 "Expected at least 4 bytes".into(),
             ));
         }
-        let user_data = user_data.unwrap();
         let target_id = u32::from_be_bytes(user_data[0..4].try_into().unwrap());
         let action_id = u32::from_be_bytes(user_data[4..8].try_into().unwrap());
         if let Some(sender) = self.request_handlers.get(&target_id) {

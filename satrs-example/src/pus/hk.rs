@@ -61,8 +61,8 @@ impl PusServiceHandler for PusService3HkHandler {
         let subservice = tc.subservice();
         let mut partial_error = None;
         let time_stamp = self.psb().get_current_timestamp(&mut partial_error);
-        let user_data = tc.user_data().unwrap();
-        if tc.user_data().is_none() {
+        let user_data = tc.user_data();
+        if user_data.is_empty() {
             self.psb
                 .verification_handler
                 .borrow_mut()

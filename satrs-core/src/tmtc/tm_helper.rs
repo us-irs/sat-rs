@@ -1,4 +1,4 @@
-use spacepackets::ecss::tm::{PusTm, PusTmSecondaryHeader};
+use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
 use spacepackets::time::cds::TimeProvider;
 use spacepackets::time::TimeWriter;
 use spacepackets::SpHeader;
@@ -10,7 +10,7 @@ pub use std_mod::*;
 pub mod std_mod {
     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr};
     use crate::pus::EcssTmtcError;
-    use spacepackets::ecss::tm::{PusTm, PusTmCreator};
+    use spacepackets::ecss::tm::PusTmCreator;
     use spacepackets::ecss::SerializablePusPacket;
     use std::sync::{Arc, RwLock};
 
@@ -61,7 +61,7 @@ impl PusTmWithCdsShortHelper {
         subservice: u8,
         source_data: Option<&'a [u8]>,
         seq_count: u16,
-    ) -> PusTm {
+    ) -> PusTmCreator {
         let time_stamp = TimeProvider::from_now_with_u16_days().unwrap();
         time_stamp.write_to_bytes(&mut self.cds_short_buf).unwrap();
         self.create_pus_tm_common(service, subservice, source_data, seq_count)
@@ -74,7 +74,7 @@ impl PusTmWithCdsShortHelper {
         source_data: Option<&'a [u8]>,
         stamper: &TimeProvider,
         seq_count: u16,
-    ) -> PusTm {
+    ) -> PusTmCreator {
         stamper.write_to_bytes(&mut self.cds_short_buf).unwrap();
         self.create_pus_tm_common(service, subservice, source_data, seq_count)
     }
@@ -85,9 +85,9 @@ impl PusTmWithCdsShortHelper {
         subservice: u8,
         source_data: Option<&'a [u8]>,
         seq_count: u16,
-    ) -> PusTm {
+    ) -> PusTmCreator {
         let mut reply_header = SpHeader::tm_unseg(self.apid, seq_count, 0).unwrap();
         let tc_header = PusTmSecondaryHeader::new_simple(service, subservice, &self.cds_short_buf);
-        PusTm::new(&mut reply_header, tc_header, source_data, true)
+        PusTmCreator::new(&mut reply_header, tc_header, source_data, true)
     }
 }

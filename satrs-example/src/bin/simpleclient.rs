@@ -1,7 +1,7 @@
 use satrs_core::pus::verification::RequestId;
+use satrs_core::spacepackets::ecss::tc::PusTcCreator;
+use satrs_core::spacepackets::ecss::tm::PusTmReader;
 use satrs_core::{
-    spacepackets::ecss::tc::PusTc,
-    spacepackets::ecss::tm::PusTm,
     spacepackets::ecss::{PusPacket, SerializablePusPacket},
     spacepackets::SpHeader,
 };
@@ -13,7 +13,7 @@ fn main() {
     let mut buf = [0; 32];
     let addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
     let mut sph = SpHeader::tc_unseg(0x02, 0, 0).unwrap();
-    let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
+    let pus_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
     let client = UdpSocket::bind("127.0.0.1:7302").expect("Connecting to UDP server failed");
     let tc_req_id = RequestId::new(&pus_tc);
     println!("Packing and sending PUS ping command TC[17,1] with request ID {tc_req_id}");
@@ -30,14 +30,14 @@ fn main() {
         let res = client.recv(&mut buf);
         match res {
             Ok(_len) => {
-                let (pus_tm, size) = PusTm::from_bytes(&buf, 7).expect("Parsing PUS TM failed");
+                let (pus_tm, size) = PusTmReader::new(&buf, 7).expect("Parsing PUS TM failed");
                 if pus_tm.service() == 17 && pus_tm.subservice() == 2 {
                     println!("Received PUS Ping Reply TM[17,2]")
                 } else if pus_tm.service() == 1 {
-                    if pus_tm.source_data().is_none() {
+                    if pus_tm.source_data().is_empty() {
                         println!("Invalid verification TM, no source data");
                     }
-                    let src_data = pus_tm.source_data().unwrap();
+                    let src_data = pus_tm.source_data();
                     if src_data.len() < 4 {
                         println!("Invalid verification TM source data, less than 4 bytes")
                     }

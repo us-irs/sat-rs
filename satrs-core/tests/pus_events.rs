@@ -107,8 +107,7 @@ fn test_threaded_usage() {
                     assert_eq!(tm.0.service(), 5);
                     assert_eq!(tm.0.subservice(), 1);
                     let src_data = tm.0.source_data();
-                    assert!(src_data.is_some());
-                    let src_data = src_data.unwrap();
+                    assert!(!src_data.is_empty());
                     assert_eq!(src_data.len(), 4);
                     let event =
                         EventU32::from(u32::from_be_bytes(src_data[0..4].try_into().unwrap()));
@@ -137,8 +136,7 @@ fn test_threaded_usage() {
                     assert_eq!(tm.0.service(), 5);
                     assert_eq!(tm.0.subservice(), 2);
                     let src_data = tm.0.source_data();
-                    assert!(src_data.is_some());
-                    let src_data = src_data.unwrap();
+                    assert!(!src_data.is_empty());
                     assert_eq!(src_data.len(), 12);
                     let event =
                         EventU32::from(u32::from_be_bytes(src_data[0..4].try_into().unwrap()));
