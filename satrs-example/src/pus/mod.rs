@@ -118,6 +118,7 @@ impl PusReceiver {
                 if let Ok(custom_service) = CustomPusServiceId::try_from(e.number) {
                     match custom_service {
                         CustomPusServiceId::Mode => {
+                            // TODO: Fix mode service.
                             //self.handle_mode_service(pus_tc, accepted_token)
                         }
                         CustomPusServiceId::Health => {}
