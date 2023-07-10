@@ -6,6 +6,8 @@ use std::net::Ipv4Addr;
 use satrs_mib::res_code::{ResultU16, ResultU16Info};
 use satrs_mib::resultcode;
 
+pub const PUS_APID: u16 = 0x02;
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
 pub enum CustomPusServiceId {

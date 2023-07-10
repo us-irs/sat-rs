@@ -16,7 +16,7 @@ use crate::pus::scheduler::Pus11Wrapper;
 use crate::pus::test::Service17CustomWrapper;
 use crate::pus::PusTcMpscRouter;
 use crate::requests::{Request, RequestWithToken};
-use crate::tmtc::{core_tmtc_task, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, PUS_APID};
+use crate::tmtc::{core_tmtc_task, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel};
 use satrs_core::event_man::{
     EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
 };
@@ -45,7 +45,9 @@ use satrs_core::spacepackets::{
 use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::{AddressableId, TargetId};
 use satrs_core::ChannelId;
-use satrs_example::{RequestTargetId, TcReceiverId, TmSenderId, OBSW_SERVER_ADDR, SERVER_PORT};
+use satrs_example::{
+    RequestTargetId, TcReceiverId, TmSenderId, OBSW_SERVER_ADDR, PUS_APID, SERVER_PORT,
+};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};

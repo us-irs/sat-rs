@@ -17,8 +17,6 @@ use satrs_core::spacepackets::SpHeader;
 use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc};
 
-pub const PUS_APID: u16 = 0x02;
-
 pub struct TmArgs {
     pub tm_store: SharedTmStore,
     pub tm_sink_sender: Sender<StoreAddr>,
