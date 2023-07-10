@@ -5,14 +5,14 @@ use crate::pus::verification::{
     StdVerifReporterWithSender, TcStateAccepted, TcStateToken, VerificationToken,
 };
 use crate::pus::{
-    AcceptedTc, PartialPusHandlingError, PusPacketHandlerResult, PusPacketHandlingError,
-    PusServiceBase, PusServiceHandler,
+    EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
+    PusPacketHandlingError, PusServiceBase, PusServiceHandler,
 };
-use crate::tmtc::tm_helper::SharedTmStore;
 use spacepackets::ecss::event::Subservice;
 use spacepackets::ecss::PusPacket;
 use spacepackets::tc::PusTc;
-use std::sync::mpsc::{Receiver, Sender};
+use std::boxed::Box;
+use std::sync::mpsc::Sender;
 
 pub struct PusService5EventHandler {
     psb: PusServiceBase,
@@ -21,20 +21,18 @@ pub struct PusService5EventHandler {
 
 impl PusService5EventHandler {
     pub fn new(
-        receiver: Receiver<AcceptedTc>,
-        tc_pool: SharedPool,
-        tm_tx: Sender<StoreAddr>,
-        tm_store: SharedTmStore,
+        tc_receiver: Box<dyn EcssTcReceiver>,
+        shared_tc_store: SharedPool,
+        tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
         event_request_tx: Sender<EventRequestWithToken>,
     ) -> Self {
         Self {
             psb: PusServiceBase::new(
-                receiver,
-                tc_pool,
-                tm_tx,
-                tm_store,
+                tc_receiver,
+                shared_tc_store,
+                tm_sender,
                 tm_apid,
                 verification_handler,
             ),
@@ -57,7 +55,7 @@ impl PusServiceHandler for PusService5EventHandler {
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf).unwrap();
+        let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf)?;
         let subservice = tc.subservice();
         let srv = Subservice::try_from(subservice);
         if srv.is_err() {
@@ -99,7 +97,7 @@ impl PusServiceHandler for PusService5EventHandler {
             self.event_request_tx
                 .send(event_req_with_token)
                 .map_err(|_| {
-                    PusPacketHandlingError::SendError("Forwarding event request failed".into())
+                    PusPacketHandlingError::Other("Forwarding event request failed".into())
                 })?;
             if let Some(partial_error) = partial_error {
                 return Ok(PusPacketHandlerResult::RequestHandledPartialSuccess(

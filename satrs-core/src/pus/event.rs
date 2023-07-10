@@ -1,12 +1,12 @@
-use crate::pus::{source_buffer_large_enough, EcssTmtcError, EcssTmtcErrorWithSend};
-use spacepackets::ecss::EcssEnumeration;
+use crate::pus::{source_buffer_large_enough, EcssTmtcError};
+use spacepackets::ecss::{EcssEnumeration, PusError};
 use spacepackets::tm::PusTm;
 use spacepackets::tm::PusTmSecondaryHeader;
 use spacepackets::{SpHeader, MAX_APID};
 
 use crate::pus::EcssTmSenderCore;
 #[cfg(feature = "alloc")]
-pub use allocvec::EventReporter;
+pub use alloc_mod::EventReporter;
 pub use spacepackets::ecss::event::*;
 
 pub struct EventReporterBase {
@@ -27,14 +27,14 @@ impl EventReporterBase {
         })
     }
 
-    pub fn event_info<E>(
+    pub fn event_info(
         &mut self,
         buf: &mut [u8],
-        sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderCore + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcErrorWithSend<E>> {
+    ) -> Result<(), EcssTmtcError> {
         self.generate_and_send_generic_tm(
             buf,
             Subservice::TmInfoReport,
@@ -45,14 +45,14 @@ impl EventReporterBase {
         )
     }
 
-    pub fn event_low_severity<E>(
+    pub fn event_low_severity(
         &mut self,
         buf: &mut [u8],
-        sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderCore + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcErrorWithSend<E>> {
+    ) -> Result<(), EcssTmtcError> {
         self.generate_and_send_generic_tm(
             buf,
             Subservice::TmLowSeverityReport,
@@ -63,14 +63,14 @@ impl EventReporterBase {
         )
     }
 
-    pub fn event_medium_severity<E>(
+    pub fn event_medium_severity(
         &mut self,
         buf: &mut [u8],
-        sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderCore + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcErrorWithSend<E>> {
+    ) -> Result<(), EcssTmtcError> {
         self.generate_and_send_generic_tm(
             buf,
             Subservice::TmMediumSeverityReport,
@@ -81,14 +81,14 @@ impl EventReporterBase {
         )
     }
 
-    pub fn event_high_severity<E>(
+    pub fn event_high_severity(
         &mut self,
         buf: &mut [u8],
-        sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderCore + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcErrorWithSend<E>> {
+    ) -> Result<(), EcssTmtcError> {
         self.generate_and_send_generic_tm(
             buf,
             Subservice::TmHighSeverityReport,
@@ -99,19 +99,17 @@ impl EventReporterBase {
         )
     }
 
-    fn generate_and_send_generic_tm<E>(
+    fn generate_and_send_generic_tm(
         &mut self,
         buf: &mut [u8],
         subservice: Subservice,
-        sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+        sender: &mut (impl EcssTmSenderCore + ?Sized),
         time_stamp: &[u8],
         event_id: impl EcssEnumeration,
         aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcErrorWithSend<E>> {
+    ) -> Result<(), EcssTmtcError> {
         let tm = self.generate_generic_event_tm(buf, subservice, time_stamp, event_id, aux_data)?;
-        sender
-            .send_tm(tm.into())
-            .map_err(|e| EcssTmtcErrorWithSend::SendError(e))?;
+        sender.send_tm(tm.into())?;
         self.msg_count += 1;
         Ok(())
     }
@@ -138,7 +136,9 @@ impl EventReporterBase {
             Some(time_stamp),
         );
         let mut current_idx = 0;
-        event_id.write_to_be_bytes(&mut buf[0..event_id.size()])?;
+        event_id
+            .write_to_be_bytes(&mut buf[0..event_id.size()])
+            .map_err(PusError::ByteConversion)?;
         current_idx += event_id.size();
         if let Some(aux_data) = aux_data {
             buf[current_idx..current_idx + aux_data.len()].copy_from_slice(aux_data);
@@ -154,7 +154,7 @@ impl EventReporterBase {
 }
 
 #[cfg(feature = "alloc")]
-mod allocvec {
+mod alloc_mod {
     use super::*;
     use alloc::vec;
     use alloc::vec::Vec;
@@ -172,13 +172,13 @@ mod allocvec {
                 reporter,
             })
         }
-        pub fn event_info<E>(
+        pub fn event_info(
             &mut self,
-            sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
-        ) -> Result<(), EcssTmtcErrorWithSend<E>> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter.event_info(
                 self.source_data_buf.as_mut_slice(),
                 sender,
@@ -188,13 +188,13 @@ mod allocvec {
             )
         }
 
-        pub fn event_low_severity<E>(
+        pub fn event_low_severity(
             &mut self,
-            sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
-        ) -> Result<(), EcssTmtcErrorWithSend<E>> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter.event_low_severity(
                 self.source_data_buf.as_mut_slice(),
                 sender,
@@ -204,13 +204,13 @@ mod allocvec {
             )
         }
 
-        pub fn event_medium_severity<E>(
+        pub fn event_medium_severity(
             &mut self,
-            sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
-        ) -> Result<(), EcssTmtcErrorWithSend<E>> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter.event_medium_severity(
                 self.source_data_buf.as_mut_slice(),
                 sender,
@@ -220,13 +220,13 @@ mod allocvec {
             )
         }
 
-        pub fn event_high_severity<E>(
+        pub fn event_high_severity(
             &mut self,
-            sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
-        ) -> Result<(), EcssTmtcErrorWithSend<E>> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter.event_high_severity(
                 self.source_data_buf.as_mut_slice(),
                 sender,
@@ -243,8 +243,8 @@ mod tests {
     use super::*;
     use crate::events::{EventU32, Severity};
     use crate::pus::tests::CommonTmInfo;
-    use crate::pus::{EcssSender, PusTmWrapper};
-    use crate::SenderId;
+    use crate::pus::{EcssChannel, PusTmWrapper};
+    use crate::ChannelId;
     use spacepackets::ByteConversionError;
     use std::cell::RefCell;
     use std::collections::VecDeque;
@@ -268,16 +268,14 @@ mod tests {
         pub service_queue: RefCell<VecDeque<TmInfo>>,
     }
 
-    impl EcssSender for TestSender {
-        fn id(&self) -> SenderId {
+    impl EcssChannel for TestSender {
+        fn id(&self) -> ChannelId {
             0
         }
     }
 
     impl EcssTmSenderCore for TestSender {
-        type Error = ();
-
-        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), Self::Error> {
+        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
             match tm {
                 PusTmWrapper::InStore(_) => {
                     panic!("TestSender: unexpected call with address");
@@ -427,9 +425,9 @@ mod tests {
         let err = reporter.event_info(sender, &time_stamp_empty, event, None);
         assert!(err.is_err());
         let err = err.unwrap_err();
-        if let EcssTmtcErrorWithSend::EcssTmtcError(EcssTmtcError::ByteConversion(
-            ByteConversionError::ToSliceTooSmall(missmatch),
-        )) = err
+        if let EcssTmtcError::Pus(PusError::ByteConversion(ByteConversionError::ToSliceTooSmall(
+            missmatch,
+        ))) = err
         {
             assert_eq!(missmatch.expected, 4);
             assert_eq!(missmatch.found, expected_found_len);

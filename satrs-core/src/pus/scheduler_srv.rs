@@ -2,13 +2,13 @@ use crate::pool::{SharedPool, StoreAddr};
 use crate::pus::scheduler::PusScheduler;
 use crate::pus::verification::{StdVerifReporterWithSender, TcStateAccepted, VerificationToken};
 use crate::pus::{
-    AcceptedTc, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHandler,
+    EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
+    PusServiceHandler,
 };
-use crate::tmtc::tm_helper::SharedTmStore;
 use spacepackets::ecss::{scheduling, PusPacket};
 use spacepackets::tc::PusTc;
 use spacepackets::time::cds::TimeProvider;
-use std::sync::mpsc::{Receiver, Sender};
+use std::boxed::Box;
 
 /// This is a helper class for [std] environments to handle generic PUS 11 (scheduling service)
 /// packets. This handler is constrained to using the [PusScheduler], but is able to process
@@ -25,20 +25,18 @@ pub struct PusService11SchedHandler {
 
 impl PusService11SchedHandler {
     pub fn new(
-        receiver: Receiver<AcceptedTc>,
-        tc_pool: SharedPool,
-        tm_tx: Sender<StoreAddr>,
-        tm_store: SharedTmStore,
+        tc_receiver: Box<dyn EcssTcReceiver>,
+        shared_tc_store: SharedPool,
+        tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
         scheduler: PusScheduler,
     ) -> Self {
         Self {
             psb: PusServiceBase::new(
-                receiver,
-                tc_pool,
-                tm_tx,
-                tm_store,
+                tc_receiver,
+                shared_tc_store,
+                tm_sender,
                 tm_apid,
                 verification_handler,
             ),
@@ -69,8 +67,9 @@ impl PusServiceHandler for PusService11SchedHandler {
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf).unwrap();
-        let std_service = scheduling::Subservice::try_from(tc.subservice());
+        let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf)?;
+        let subservice = tc.subservice();
+        let std_service = scheduling::Subservice::try_from(subservice);
         if std_service.is_err() {
             return Ok(PusPacketHandlerResult::CustomSubservice(
                 tc.subservice(),
@@ -126,7 +125,11 @@ impl PusServiceHandler for PusService11SchedHandler {
                     .start_success(token, Some(&time_stamp))
                     .expect("Error sending start success");
 
-                let mut pool = self.psb.tc_store.write().expect("Locking pool failed");
+                let mut pool = self
+                    .psb
+                    .shared_tc_store
+                    .write()
+                    .expect("Locking pool failed");
 
                 self.scheduler
                     .reset(pool.as_mut())
@@ -146,7 +149,11 @@ impl PusServiceHandler for PusService11SchedHandler {
                     .start_success(token, Some(&time_stamp))
                     .expect("error sending start success");
 
-                let mut pool = self.psb.tc_store.write().expect("locking pool failed");
+                let mut pool = self
+                    .psb
+                    .shared_tc_store
+                    .write()
+                    .expect("locking pool failed");
                 self.scheduler
                     .insert_wrapped_tc::<TimeProvider>(&tc, pool.as_mut())
                     .expect("insertion of activity into pool failed");

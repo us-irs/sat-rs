@@ -9,7 +9,6 @@
 use downcast_rs::{impl_downcast, Downcast};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use spacepackets::tc::PusTc;
 use spacepackets::{ByteConversionError, SizeMissmatch, SpHeader};
 
 #[cfg(feature = "alloc")]
@@ -92,12 +91,4 @@ impl_downcast!(ReceivesTc assoc Error);
 pub trait ReceivesCcsdsTc {
     type Error;
     fn pass_ccsds(&mut self, header: &SpHeader, tc_raw: &[u8]) -> Result<(), Self::Error>;
-}
-
-/// Generic trait for objects which can receive ECSS PUS telecommands. This trait is
-/// implemented by the [crate::tmtc::pus_distrib::PusDistributor] objects to allow passing PUS TC
-/// packets into it.
-pub trait ReceivesEcssPusTc {
-    type Error;
-    fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTc) -> Result<(), Self::Error>;
 }

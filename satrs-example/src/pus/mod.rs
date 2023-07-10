@@ -2,7 +2,7 @@ use crate::tmtc::MpscStoreAndSendError;
 use log::warn;
 use satrs_core::pool::StoreAddr;
 use satrs_core::pus::verification::{FailParams, StdVerifReporterWithSender};
-use satrs_core::pus::{AcceptedTc, PusPacketHandlerResult};
+use satrs_core::pus::{PusPacketHandlerResult, TcAddrWithToken};
 use satrs_core::spacepackets::ecss::PusServiceId;
 use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::spacepackets::time::cds::TimeProvider;
@@ -17,11 +17,11 @@ pub mod scheduler;
 pub mod test;
 
 pub struct PusTcMpscRouter {
-    pub test_service_receiver: Sender<AcceptedTc>,
-    pub event_service_receiver: Sender<AcceptedTc>,
-    pub sched_service_receiver: Sender<AcceptedTc>,
-    pub hk_service_receiver: Sender<AcceptedTc>,
-    pub action_service_receiver: Sender<AcceptedTc>,
+    pub test_service_receiver: Sender<TcAddrWithToken>,
+    pub event_service_receiver: Sender<TcAddrWithToken>,
+    pub sched_service_receiver: Sender<TcAddrWithToken>,
+    pub hk_service_receiver: Sender<TcAddrWithToken>,
+    pub action_service_receiver: Sender<TcAddrWithToken>,
 }
 
 pub struct PusReceiver {
@@ -86,20 +86,20 @@ impl PusReceiver {
                 PusServiceId::Test => {
                     self.pus_router
                         .test_service_receiver
-                        .send((store_addr, accepted_token))?;
+                        .send((store_addr, accepted_token.into()))?;
                 }
                 PusServiceId::Housekeeping => self
                     .pus_router
                     .hk_service_receiver
-                    .send((store_addr, accepted_token))?,
+                    .send((store_addr, accepted_token.into()))?,
                 PusServiceId::Event => self
                     .pus_router
                     .event_service_receiver
-                    .send((store_addr, accepted_token))?,
+                    .send((store_addr, accepted_token.into()))?,
                 PusServiceId::Scheduling => self
                     .pus_router
                     .sched_service_receiver
-                    .send((store_addr, accepted_token))?,
+                    .send((store_addr, accepted_token.into()))?,
                 _ => {
                     let result = self.verif_reporter.start_failure(
                         accepted_token,

@@ -13,7 +13,7 @@ pub use crate::pus::event::EventReporter;
 use crate::pus::verification::TcStateToken;
 #[cfg(feature = "alloc")]
 use crate::pus::EcssTmSenderCore;
-use crate::pus::EcssTmtcErrorWithSend;
+use crate::pus::EcssTmtcError;
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub use alloc_mod::*;
@@ -95,13 +95,13 @@ pub struct EventRequestWithToken<Event: GenericEvent = EventU32> {
 }
 
 #[derive(Debug)]
-pub enum EventManError<SenderE> {
-    EcssTmtcError(EcssTmtcErrorWithSend<SenderE>),
+pub enum EventManError {
+    EcssTmtcError(EcssTmtcError),
     SeverityMissmatch(Severity, Severity),
 }
 
-impl<SenderE> From<EcssTmtcErrorWithSend<SenderE>> for EventManError<SenderE> {
-    fn from(v: EcssTmtcErrorWithSend<SenderE>) -> Self {
+impl From<EcssTmtcError> for EventManError {
+    fn from(v: EcssTmtcError) -> Self {
         Self::EcssTmtcError(v)
     }
 }
@@ -173,13 +173,13 @@ pub mod alloc_mod {
             self.backend.disable_event_reporting(event)
         }
 
-        pub fn generate_pus_event_tm_generic<E>(
+        pub fn generate_pus_event_tm_generic(
             &mut self,
-            sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
             event: Event,
             aux_data: Option<&[u8]>,
-        ) -> Result<bool, EventManError<E>> {
+        ) -> Result<bool, EventManError> {
             if !self.backend.event_enabled(&event) {
                 return Ok(false);
             }
@@ -223,13 +223,13 @@ pub mod alloc_mod {
             self.backend.disable_event_reporting(event.as_ref())
         }
 
-        pub fn generate_pus_event_tm<E, Severity: HasSeverity>(
+        pub fn generate_pus_event_tm<Severity: HasSeverity>(
             &mut self,
-            sender: &mut (impl EcssTmSenderCore<Error = E> + ?Sized),
+            sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
             event: EventU32TypedSev<Severity>,
             aux_data: Option<&[u8]>,
-        ) -> Result<bool, EventManError<E>> {
+        ) -> Result<bool, EventManError> {
             self.generate_pus_event_tm_generic(sender, time_stamp, event.into(), aux_data)
         }
     }

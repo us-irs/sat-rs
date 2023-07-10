@@ -61,7 +61,8 @@
 //!     .expect("Casting back to concrete type failed");
 //! assert_eq!(concrete_handler_ref.handler_call_count, 1);
 //! ```
-use crate::tmtc::{ReceivesCcsdsTc, ReceivesEcssPusTc, ReceivesTcCore};
+use crate::pus::ReceivesEcssPusTc;
+use crate::tmtc::{ReceivesCcsdsTc, ReceivesTcCore};
 use alloc::boxed::Box;
 use core::fmt::{Display, Formatter};
 use downcast_rs::Downcast;
@@ -132,7 +133,7 @@ impl<E: 'static> ReceivesTcCore for PusDistributor<E> {
     fn pass_tc(&mut self, tm_raw: &[u8]) -> Result<(), Self::Error> {
         // Convert to ccsds and call pass_ccsds
         let (sp_header, _) = SpHeader::from_be_bytes(tm_raw)
-            .map_err(|e| PusDistribError::PusError(PusError::ByteConversionError(e)))?;
+            .map_err(|e| PusDistribError::PusError(PusError::ByteConversion(e)))?;
         self.pass_ccsds(&sp_header, tm_raw)
     }
 }
