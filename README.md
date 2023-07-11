@@ -1,11 +1,9 @@
-sat-rs launchpad
+sat-rs
 =========
 
-This is the prototyping repository for the initial version of the sat-rs framework.
-
-Its primary goal is to provide re-usable components to write on-board software for remote
-systems like rovers or satellites. It is specifically written for the special requirements
-for these systems.
+This is the repository of the sat-rs framework. Its primary goal is to provide re-usable components
+to write on-board software for remote systems like rovers or satellites. It is specifically written
+for the special requirements for these systems.
 
 # Overview
 
