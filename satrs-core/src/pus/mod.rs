@@ -319,6 +319,7 @@ pub mod std_mod {
     use crate::ChannelId;
     use alloc::boxed::Box;
     use alloc::vec::Vec;
+    use crossbeam_channel as cb;
     use spacepackets::ecss::tm::PusTmCreator;
     use spacepackets::ecss::PusError;
     use spacepackets::time::cds::TimeProvider;
@@ -329,7 +330,6 @@ pub mod std_mod {
     use std::sync::mpsc;
     use std::sync::mpsc::TryRecvError;
     use thiserror::Error;
-    use crossbeam_channel as cb;
 
     impl From<mpsc::SendError<StoreAddr>> for EcssTmtcError {
         fn from(_: mpsc::SendError<StoreAddr>) -> Self {
@@ -444,11 +444,7 @@ pub mod std_mod {
             name: &'static str,
             receiver: mpsc::Receiver<TcAddrWithToken>,
         ) -> Self {
-            Self {
-                id,
-                name,
-                receiver,
-            }
+            Self { id, name, receiver }
         }
     }
 
@@ -504,7 +500,6 @@ pub mod std_mod {
         name: &'static str,
         shared_tm_store: SharedTmStore,
         sender: crossbeam_channel::Sender<StoreAddr>,
-        pub ignore_poison_errors: bool,
     }
 
     impl CrossbeamTmInStoreSender {
@@ -513,14 +508,12 @@ pub mod std_mod {
             name: &'static str,
             shared_tm_store: SharedTmStore,
             sender: crossbeam_channel::Sender<StoreAddr>,
-            ignore_poison_errors: bool,
         ) -> Self {
             Self {
                 id,
                 name,
                 shared_tm_store,
                 sender,
-                ignore_poison_errors,
             }
         }
     }
@@ -558,13 +551,9 @@ pub mod std_mod {
         pub fn new(
             id: ChannelId,
             name: &'static str,
-            receiver: cb::Receiver<TcAddrWithToken>
+            receiver: cb::Receiver<TcAddrWithToken>,
         ) -> Self {
-            Self {
-                id,
-                name,
-                receiver,
-            }
+            Self { id, name, receiver }
         }
     }
 

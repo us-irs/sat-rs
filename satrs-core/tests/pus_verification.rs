@@ -1,5 +1,3 @@
-// TODO: Refactor this to also test the STD impl using mpsc
-// TODO: Change back to cross-beam as soon as STD impl was added back for TM.
 #[cfg(feature = "crossbeam")]
 pub mod crossbeam_test {
     use hashbrown::HashMap;
@@ -7,13 +5,13 @@ pub mod crossbeam_test {
     use satrs_core::pus::verification::{
         FailParams, RequestId, VerificationReporterCfg, VerificationReporterWithSender,
     };
-    use satrs_core::pus::MpscTmInStoreSender;
+    use satrs_core::pus::CrossbeamTmInStoreSender;
     use satrs_core::tmtc::tm_helper::SharedTmStore;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTmReader;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket, SerializablePusPacket};
     use spacepackets::SpHeader;
-    use std::sync::{mpsc, Arc, RwLock};
+    use std::sync::{Arc, RwLock};
     use std::thread;
     use std::time::Duration;
 
@@ -39,9 +37,9 @@ pub mod crossbeam_test {
         let shared_tm_store = SharedTmStore::new(Box::new(LocalPool::new(pool_cfg.clone())));
         let shared_tc_pool_0 = Arc::new(RwLock::new(LocalPool::new(pool_cfg)));
         let shared_tc_pool_1 = shared_tc_pool_0.clone();
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = crossbeam_channel::bounded(10);
         let sender =
-            MpscTmInStoreSender::new(0, "verif_sender", shared_tm_store.clone(), tx.clone());
+            CrossbeamTmInStoreSender::new(0, "verif_sender", shared_tm_store.clone(), tx.clone());
         let mut reporter_with_sender_0 =
             VerificationReporterWithSender::new(&cfg, Box::new(sender));
         let mut reporter_with_sender_1 = reporter_with_sender_0.clone();
