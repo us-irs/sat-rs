@@ -9,8 +9,8 @@ use crate::pus::{
     PusPacketHandlingError, PusServiceBase, PusServiceHandler,
 };
 use spacepackets::ecss::event::Subservice;
+use spacepackets::ecss::tc::PusTcReader;
 use spacepackets::ecss::PusPacket;
-use spacepackets::tc::PusTc;
 use std::boxed::Box;
 use std::sync::mpsc::Sender;
 
@@ -55,7 +55,7 @@ impl PusServiceHandler for PusService5EventHandler {
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf)?;
+        let (tc, _) = PusTcReader::new(&self.psb.pus_buf)?;
         let subservice = tc.subservice();
         let srv = Subservice::try_from(subservice);
         if srv.is_err() {
@@ -65,12 +65,12 @@ impl PusServiceHandler for PusService5EventHandler {
             ));
         }
         let handle_enable_disable_request = |enable: bool, stamp: [u8; 7]| {
-            if tc.user_data().is_none() || tc.user_data().unwrap().len() < 4 {
+            if tc.user_data().len() < 4 {
                 return Err(PusPacketHandlingError::NotEnoughAppData(
                     "At least 4 bytes event ID expected".into(),
                 ));
             }
-            let user_data = tc.user_data().unwrap();
+            let user_data = tc.user_data();
             let event_u32 = EventU32::from(u32::from_be_bytes(user_data[0..4].try_into().unwrap()));
             let start_token = self
                 .psb

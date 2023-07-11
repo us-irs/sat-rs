@@ -16,7 +16,7 @@ use crate::pus::scheduler::Pus11Wrapper;
 use crate::pus::test::Service17CustomWrapper;
 use crate::pus::PusTcMpscRouter;
 use crate::requests::{Request, RequestWithToken};
-use crate::tmtc::{core_tmtc_task, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, PUS_APID};
+use crate::tmtc::{core_tmtc_task, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel};
 use satrs_core::event_man::{
     EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
 };
@@ -37,17 +37,17 @@ use satrs_core::pus::verification::{
 };
 use satrs_core::pus::{MpscTcInStoreReceiver, MpscTmInStoreSender};
 use satrs_core::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore};
-use satrs_core::spacepackets::tm::PusTmZeroCopyWriter;
+use satrs_core::spacepackets::ecss::tm::{PusTmCreator, PusTmZeroCopyWriter};
 use satrs_core::spacepackets::{
-    time::cds::TimeProvider,
-    time::TimeWriter,
-    tm::{PusTm, PusTmSecondaryHeader},
-    SequenceFlags, SpHeader,
+    ecss::tm::PusTmSecondaryHeader, time::cds::TimeProvider, time::TimeWriter, SequenceFlags,
+    SpHeader,
 };
 use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::{AddressableId, TargetId};
 use satrs_core::ChannelId;
-use satrs_example::{RequestTargetId, TcReceiverId, TmSenderId, OBSW_SERVER_ADDR, SERVER_PORT};
+use satrs_example::{
+    RequestTargetId, TcReceiverId, TmSenderId, OBSW_SERVER_ADDR, PUS_APID, SERVER_PORT,
+};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};
@@ -415,7 +415,7 @@ fn main() {
                                             unique_id,
                                         };
                                         addressable_id.write_to_be_bytes(&mut buf).unwrap();
-                                        let pus_tm = PusTm::new(
+                                        let pus_tm = PusTmCreator::new(
                                             &mut sp_header,
                                             sec_header,
                                             Some(&buf),

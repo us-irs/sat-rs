@@ -11,13 +11,11 @@ use crate::pus::{PusReceiver, PusTcMpscRouter};
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
 use satrs_core::pus::verification::StdVerifReporterWithSender;
 use satrs_core::pus::{ReceivesEcssPusTc, TcAddrWithToken};
-use satrs_core::spacepackets::ecss::{PusPacket, SerializablePusPacket};
-use satrs_core::spacepackets::tc::PusTc;
+use satrs_core::spacepackets::ecss::tc::PusTcReader;
+use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::spacepackets::SpHeader;
 use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc};
-
-pub const PUS_APID: u16 = 0x02;
 
 pub struct TmArgs {
     pub tm_store: SharedTmStore,
@@ -53,12 +51,10 @@ pub struct TcStore {
 }
 
 impl TcStore {
-    pub fn add_pus_tc(&mut self, pus_tc: &PusTc) -> Result<StoreAddr, StoreError> {
+    pub fn add_pus_tc(&mut self, pus_tc: &PusTcReader) -> Result<StoreAddr, StoreError> {
         let mut pg = self.pool.write().expect("error locking TC store");
         let (addr, buf) = pg.free_element(pus_tc.len_packed())?;
-        pus_tc
-            .write_to_bytes(buf)
-            .expect("writing PUS TC to store failed");
+        buf[0..pus_tc.len_packed()].copy_from_slice(pus_tc.raw_data());
         Ok(addr)
     }
 }
@@ -83,7 +79,7 @@ pub struct PusTcSource {
 impl ReceivesEcssPusTc for PusTcSource {
     type Error = MpscStoreAndSendError;
 
-    fn pass_pus_tc(&mut self, _: &SpHeader, pus_tc: &PusTc) -> Result<(), Self::Error> {
+    fn pass_pus_tc(&mut self, _: &SpHeader, pus_tc: &PusTcReader) -> Result<(), Self::Error> {
         let addr = self.tc_store.add_pus_tc(pus_tc)?;
         self.tc_source.send(addr)?;
         Ok(())
@@ -156,7 +152,7 @@ fn core_tmtc_loop(
             let data = pool.read(&addr).expect("reading pool failed");
             tc_buf[0..data.len()].copy_from_slice(data);
             drop(pool);
-            match PusTc::from_bytes(tc_buf) {
+            match PusTcReader::new(tc_buf) {
                 Ok((pus_tc, _)) => {
                     pus_receiver
                         .handle_tc_packet(addr, pus_tc.service(), &pus_tc)

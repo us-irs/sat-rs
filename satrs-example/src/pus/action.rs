@@ -8,8 +8,8 @@ use satrs_core::pus::{
     EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
     PusServiceHandler,
 };
+use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
-use satrs_core::spacepackets::tc::PusTc;
 use satrs_core::tmtc::TargetId;
 use satrs_example::tmtc_err;
 use std::collections::HashMap;
@@ -46,11 +46,11 @@ impl PusService8ActionHandler {
     fn handle_action_request_with_id(
         &self,
         token: VerificationToken<TcStateAccepted>,
-        tc: &PusTc,
+        tc: &PusTcReader,
         time_stamp: &[u8],
     ) -> Result<(), PusPacketHandlingError> {
         let user_data = tc.user_data();
-        if user_data.is_none() || user_data.unwrap().len() < 8 {
+        if user_data.len() < 8 {
             self.psb()
                 .verification_handler
                 .borrow_mut()
@@ -63,7 +63,6 @@ impl PusService8ActionHandler {
                 "Expected at least 4 bytes".into(),
             ));
         }
-        let user_data = user_data.unwrap();
         let target_id = u32::from_be_bytes(user_data[0..4].try_into().unwrap());
         let action_id = u32::from_be_bytes(user_data[4..8].try_into().unwrap());
         if let Some(sender) = self.request_handlers.get(&target_id) {
@@ -114,7 +113,7 @@ impl PusServiceHandler for PusService8ActionHandler {
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTc::from_bytes(&self.psb().pus_buf).unwrap();
+        let (tc, _) = PusTcReader::new(&self.psb().pus_buf).unwrap();
         let subservice = tc.subservice();
         let mut partial_error = None;
         let time_stamp = self.psb().get_current_timestamp(&mut partial_error);

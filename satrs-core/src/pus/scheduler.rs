@@ -8,8 +8,8 @@ use core::time::Duration;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::scheduling::TimeWindowType;
+use spacepackets::ecss::tc::{GenericPusTcSecondaryHeader, IsPusTelecommand};
 use spacepackets::ecss::PusError;
-use spacepackets::tc::{GenericPusTcSecondaryHeader, PusTc};
 use spacepackets::time::{CcsdsTimeProvider, TimestampError, UnixTimestamp};
 use spacepackets::CcsdsPacket;
 #[cfg(feature = "std")]
@@ -46,7 +46,9 @@ impl RequestId {
         self.seq_count
     }
 
-    pub fn from_tc(tc: &PusTc) -> Self {
+    pub fn from_tc(
+        tc: &(impl CcsdsPacket + GenericPusTcSecondaryHeader + IsPusTelecommand),
+    ) -> Self {
         RequestId {
             source_id: tc.source_id(),
             apid: tc.apid(),
@@ -57,22 +59,6 @@ impl RequestId {
     pub fn as_u64(&self) -> u64 {
         ((self.source_id as u64) << 32) | ((self.apid as u64) << 16) | self.seq_count as u64
     }
-
-    /*
-    pub fn from_bytes(buf: &[u8]) -> Result<Self, ByteConversionError> {
-        if buf.len() < core::mem::size_of::<u64>() {
-            return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
-                found: buf.len(),
-                expected: core::mem::size_of::<u64>(),
-            }));
-        }
-        Ok(Self {
-            source_id: u16::from_be_bytes(buf[0..2].try_into().unwrap()),
-            apid: u16::from_be_bytes(buf[2..4].try_into().unwrap()),
-            seq_count: u16::from_be_bytes(buf[4..6].try_into().unwrap()),
-        })
-    }
-     */
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,8 +225,10 @@ pub mod alloc_mod {
     use alloc::vec::Vec;
     use core::time::Duration;
     use spacepackets::ecss::scheduling::TimeWindowType;
+    use spacepackets::ecss::tc::{
+        GenericPusTcSecondaryHeader, IsPusTelecommand, PusTc, PusTcReader,
+    };
     use spacepackets::ecss::PusPacket;
-    use spacepackets::tc::PusTc;
     use spacepackets::time::cds::DaysLen24Bits;
     use spacepackets::time::{cds, CcsdsTimeProvider, TimeReader, UnixTimestamp};
 
@@ -387,7 +375,7 @@ pub mod alloc_mod {
             tc: &[u8],
             pool: &mut (impl PoolProvider + ?Sized),
         ) -> Result<TcInfo, ScheduleError> {
-            let check_tc = PusTc::from_bytes(tc)?;
+            let check_tc = PusTcReader::new(tc)?;
             if PusPacket::service(&check_tc.0) == 11 && PusPacket::subservice(&check_tc.0) == 4 {
                 return Err(ScheduleError::NestedScheduledTc);
             }
@@ -407,7 +395,7 @@ pub mod alloc_mod {
         /// provider needs to be supplied via a generic.
         pub fn insert_wrapped_tc<TimeStamp: CcsdsTimeProvider + TimeReader>(
             &mut self,
-            pus_tc: &PusTc,
+            pus_tc: &(impl IsPusTelecommand + PusPacket + GenericPusTcSecondaryHeader),
             pool: &mut (impl PoolProvider + ?Sized),
         ) -> Result<TcInfo, ScheduleError> {
             if PusPacket::service(pus_tc) != 11 {
@@ -416,14 +404,14 @@ pub mod alloc_mod {
             if PusPacket::subservice(pus_tc) != 4 {
                 return Err(ScheduleError::WrongSubservice);
             }
-            return if let Some(user_data) = pus_tc.user_data() {
-                let stamp: TimeStamp = TimeReader::from_bytes(user_data)?;
-                let unix_stamp = stamp.unix_stamp();
-                let stamp_len = stamp.len_as_bytes();
-                self.insert_unwrapped_tc(unix_stamp, &user_data[stamp_len..], pool)
-            } else {
-                Err(ScheduleError::TcDataEmpty)
-            };
+            if pus_tc.user_data().is_empty() {
+                return Err(ScheduleError::TcDataEmpty);
+            }
+            let user_data = pus_tc.user_data();
+            let stamp: TimeStamp = TimeReader::from_bytes(user_data)?;
+            let unix_stamp = stamp.unix_stamp();
+            let stamp_len = stamp.len_as_bytes();
+            self.insert_unwrapped_tc(unix_stamp, &user_data[stamp_len..], pool)
         }
 
         /// Insert a telecommand based on the fully wrapped time-tagged telecommand using a CDS
@@ -641,8 +629,8 @@ mod tests {
     use super::*;
     use crate::pool::{LocalPool, PoolCfg, PoolProvider, StoreAddr, StoreError};
     use alloc::collections::btree_map::Range;
+    use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::SerializablePusPacket;
-    use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
     use spacepackets::time::{cds, TimeWriter, UnixTimestamp};
     use spacepackets::SpHeader;
     use std::time::Duration;
@@ -662,32 +650,32 @@ mod tests {
         )
     }
 
-    fn scheduled_tc(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
+    fn scheduled_tc(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTcCreator {
         let (mut sph, len_app_data) = pus_tc_base(timestamp, buf);
-        PusTc::new_simple(&mut sph, 11, 4, Some(&buf[..len_app_data]), true)
+        PusTcCreator::new_simple(&mut sph, 11, 4, Some(&buf[..len_app_data]), true)
     }
 
-    fn wrong_tc_service(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
+    fn wrong_tc_service(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTcCreator {
         let (mut sph, len_app_data) = pus_tc_base(timestamp, buf);
-        PusTc::new_simple(&mut sph, 12, 4, Some(&buf[..len_app_data]), true)
+        PusTcCreator::new_simple(&mut sph, 12, 4, Some(&buf[..len_app_data]), true)
     }
 
-    fn wrong_tc_subservice(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
+    fn wrong_tc_subservice(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTcCreator {
         let (mut sph, len_app_data) = pus_tc_base(timestamp, buf);
-        PusTc::new_simple(&mut sph, 11, 5, Some(&buf[..len_app_data]), true)
+        PusTcCreator::new_simple(&mut sph, 11, 5, Some(&buf[..len_app_data]), true)
     }
 
-    fn double_wrapped_time_tagged_tc(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTc {
+    fn double_wrapped_time_tagged_tc(timestamp: UnixTimestamp, buf: &mut [u8]) -> PusTcCreator {
         let cds_time = cds::TimeProvider::from_unix_secs_with_u16_days(&timestamp).unwrap();
         let len_time_stamp = cds_time.write_to_bytes(buf).unwrap();
         let mut sph = SpHeader::tc_unseg(0x02, 0x34, 0).unwrap();
         // app data should not matter, double wrapped time-tagged commands should be rejected right
         // away
-        let inner_time_tagged_tc = PusTc::new_simple(&mut sph, 11, 4, None, true);
+        let inner_time_tagged_tc = PusTcCreator::new_simple(&mut sph, 11, 4, None, true);
         let packet_len = inner_time_tagged_tc
             .write_to_bytes(&mut buf[len_time_stamp..])
             .expect("writing inner time tagged tc failed");
-        PusTc::new_simple(
+        PusTcCreator::new_simple(
             &mut sph,
             11,
             4,
@@ -696,14 +684,17 @@ mod tests {
         )
     }
 
-    fn invalid_time_tagged_cmd() -> PusTc<'static> {
+    fn invalid_time_tagged_cmd() -> PusTcCreator<'static> {
         let mut sph = SpHeader::tc_unseg(0x02, 0x34, 1).unwrap();
-        PusTc::new_simple(&mut sph, 11, 4, None, true)
+        PusTcCreator::new_simple(&mut sph, 11, 4, None, true)
     }
 
-    fn base_ping_tc_simple_ctor(seq_count: u16, app_data: Option<&'static [u8]>) -> PusTc<'static> {
+    fn base_ping_tc_simple_ctor(
+        seq_count: u16,
+        app_data: Option<&'static [u8]>,
+    ) -> PusTcCreator<'static> {
         let mut sph = SpHeader::tc_unseg(0x02, seq_count, 0).unwrap();
-        PusTc::new_simple(&mut sph, 17, 1, app_data, true)
+        PusTcCreator::new_simple(&mut sph, 17, 1, app_data, true)
     }
 
     fn ping_tc_to_store(
@@ -870,7 +861,7 @@ mod tests {
         let mut sp_header = SpHeader::tc_unseg(apid_to_set, 105, 0).unwrap();
         let mut sec_header = PusTcSecondaryHeader::new_simple(17, 1);
         sec_header.source_id = src_id_to_set;
-        let ping_tc = PusTc::new(&mut sp_header, sec_header, None, true);
+        let ping_tc = PusTcCreator::new(&mut sp_header, sec_header, None, true);
         let req_id = RequestId::from_tc(&ping_tc);
         assert_eq!(req_id.source_id(), src_id_to_set);
         assert_eq!(req_id.apid(), apid_to_set);
@@ -1085,7 +1076,7 @@ mod tests {
         assert!(pool.has_element_at(&tc_info_0.addr()).unwrap());
 
         let data = pool.read(&tc_info_0.addr()).unwrap();
-        let check_tc = PusTc::from_bytes(&data).expect("incorrect Pus tc raw data");
+        let check_tc = PusTcReader::new(&data).expect("incorrect Pus tc raw data");
         assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, None));
 
         assert_eq!(scheduler.num_scheduled_telecommands(), 1);
@@ -1107,7 +1098,7 @@ mod tests {
             .unwrap();
 
         let data = pool.read(&addr_vec[0]).unwrap();
-        let check_tc = PusTc::from_bytes(&data).expect("incorrect Pus tc raw data");
+        let check_tc = PusTcReader::new(&data).expect("incorrect Pus tc raw data");
         assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, None));
     }
 
@@ -1131,7 +1122,7 @@ mod tests {
         assert!(pool.has_element_at(&info.addr).unwrap());
 
         let data = pool.read(&info.addr).unwrap();
-        let check_tc = PusTc::from_bytes(&data).expect("incorrect Pus tc raw data");
+        let check_tc = PusTcReader::new(&data).expect("incorrect Pus tc raw data");
         assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, None));
 
         assert_eq!(scheduler.num_scheduled_telecommands(), 1);
@@ -1153,7 +1144,7 @@ mod tests {
             .unwrap();
 
         let data = pool.read(&addr_vec[0]).unwrap();
-        let check_tc = PusTc::from_bytes(&data).expect("incorrect Pus tc raw data");
+        let check_tc = PusTcReader::new(&data).expect("incorrect PUS tc raw data");
         assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, None));
     }
 

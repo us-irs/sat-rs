@@ -4,9 +4,9 @@ use crate::pus::{
     EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
     PusPacketHandlingError, PusServiceBase, PusServiceHandler, PusTmWrapper,
 };
+use spacepackets::ecss::tc::PusTcReader;
+use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
 use spacepackets::ecss::PusPacket;
-use spacepackets::tc::PusTc;
-use spacepackets::tm::{PusTm, PusTmSecondaryHeader};
 use spacepackets::SpHeader;
 use std::boxed::Box;
 
@@ -50,7 +50,7 @@ impl PusServiceHandler for PusService17TestHandler {
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf)?;
+        let (tc, _) = PusTcReader::new(&self.psb.pus_buf)?;
         if tc.service() != 17 {
             return Err(PusPacketHandlingError::WrongService(tc.service()));
         }
@@ -72,7 +72,7 @@ impl PusServiceHandler for PusService17TestHandler {
             // Sequence count will be handled centrally in TM funnel.
             let mut reply_header = SpHeader::tm_unseg(self.psb.tm_apid, 0, 0).unwrap();
             let tc_header = PusTmSecondaryHeader::new_simple(17, 2, &time_stamp);
-            let ping_reply = PusTm::new(&mut reply_header, tc_header, None, true);
+            let ping_reply = PusTmCreator::new(&mut reply_header, tc_header, None, true);
             let result = self
                 .psb
                 .tm_sender
@@ -116,9 +116,9 @@ mod tests {
     };
     use crate::pus::{MpscTcInStoreReceiver, MpscTmInStoreSender, PusServiceHandler};
     use crate::tmtc::tm_helper::SharedTmStore;
+    use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
+    use spacepackets::ecss::tm::PusTmReader;
     use spacepackets::ecss::{PusPacket, SerializablePusPacket};
-    use spacepackets::tc::{PusTc, PusTcSecondaryHeader};
-    use spacepackets::tm::PusTm;
     use spacepackets::{SequenceFlags, SpHeader};
     use std::boxed::Box;
     use std::sync::{mpsc, RwLock};
@@ -154,7 +154,7 @@ mod tests {
         // Create a ping TC, verify acceptance.
         let mut sp_header = SpHeader::tc(TEST_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
         let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
-        let ping_tc = PusTc::new(&mut sp_header, sec_header, None, true);
+        let ping_tc = PusTcCreator::new(&mut sp_header, sec_header, None, true);
         let token = verification_handler.add_tc(&ping_tc);
         let token = verification_handler
             .acceptance_success(token, None)
@@ -174,10 +174,10 @@ mod tests {
         let mut tm_addr = next_msg.unwrap();
         let tm_pool = tm_pool_shared.read().unwrap();
         let tm_raw = tm_pool.read(&tm_addr).unwrap();
-        let (tm, _) = PusTm::from_bytes(&tm_raw, 0).unwrap();
+        let (tm, _) = PusTmReader::new(&tm_raw, 0).unwrap();
         assert_eq!(tm.service(), 1);
         assert_eq!(tm.subservice(), 1);
-        let req_id = RequestId::from_bytes(tm.user_data().unwrap()).unwrap();
+        let req_id = RequestId::from_bytes(tm.user_data()).expect("generating request ID failed");
         assert_eq!(req_id, token.req_id());
 
         // Acceptance TM
@@ -186,10 +186,10 @@ mod tests {
         tm_addr = next_msg.unwrap();
         let tm_raw = tm_pool.read(&tm_addr).unwrap();
         // Is generated with CDS short timestamp.
-        let (tm, _) = PusTm::from_bytes(&tm_raw, 7).unwrap();
+        let (tm, _) = PusTmReader::new(&tm_raw, 7).unwrap();
         assert_eq!(tm.service(), 1);
         assert_eq!(tm.subservice(), 3);
-        let req_id = RequestId::from_bytes(tm.user_data().unwrap()).unwrap();
+        let req_id = RequestId::from_bytes(tm.user_data()).expect("generating request ID failed");
         assert_eq!(req_id, token.req_id());
 
         // Ping reply
@@ -198,10 +198,10 @@ mod tests {
         tm_addr = next_msg.unwrap();
         let tm_raw = tm_pool.read(&tm_addr).unwrap();
         // Is generated with CDS short timestamp.
-        let (tm, _) = PusTm::from_bytes(&tm_raw, 7).unwrap();
+        let (tm, _) = PusTmReader::new(&tm_raw, 7).unwrap();
         assert_eq!(tm.service(), 17);
         assert_eq!(tm.subservice(), 2);
-        assert!(tm.user_data().is_none());
+        assert!(tm.user_data().is_empty());
 
         // TM completion
         next_msg = tm_rx.try_recv();
@@ -209,10 +209,10 @@ mod tests {
         tm_addr = next_msg.unwrap();
         let tm_raw = tm_pool.read(&tm_addr).unwrap();
         // Is generated with CDS short timestamp.
-        let (tm, _) = PusTm::from_bytes(&tm_raw, 7).unwrap();
+        let (tm, _) = PusTmReader::new(&tm_raw, 7).unwrap();
         assert_eq!(tm.service(), 1);
         assert_eq!(tm.subservice(), 7);
-        let req_id = RequestId::from_bytes(tm.user_data().unwrap()).unwrap();
+        let req_id = RequestId::from_bytes(tm.user_data()).expect("generating request ID failed");
         assert_eq!(req_id, token.req_id());
     }
 }

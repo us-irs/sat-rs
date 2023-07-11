@@ -22,7 +22,7 @@ use std::vec::Vec;
 /// use satrs_core::hal::host::udp_server::UdpTcServer;
 /// use satrs_core::tmtc::{ReceivesTc, ReceivesTcCore};
 /// use spacepackets::SpHeader;
-/// use spacepackets::tc::PusTc;
+/// use spacepackets::ecss::tc::PusTcCreator;
 ///
 /// #[derive (Default)]
 /// struct PingReceiver {}
@@ -40,7 +40,7 @@ use std::vec::Vec;
 /// let mut udp_tc_server = UdpTcServer::new(dest_addr, 2048, Box::new(ping_receiver))
 ///       .expect("Creating UDP TMTC server failed");
 /// let mut sph = SpHeader::tc_unseg(0x02, 0, 0).unwrap();
-/// let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
+/// let pus_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
 /// let len = pus_tc
 ///     .write_to_bytes(&mut buf)
 ///     .expect("Error writing PUS TC packet");
@@ -142,8 +142,8 @@ impl<E: 'static> UdpTcServer<E> {
 mod tests {
     use crate::hal::host::udp_server::{ReceiveResult, UdpTcServer};
     use crate::tmtc::ReceivesTcCore;
+    use spacepackets::ecss::tc::PusTcCreator;
     use spacepackets::ecss::SerializablePusPacket;
-    use spacepackets::tc::PusTc;
     use spacepackets::SpHeader;
     use std::boxed::Box;
     use std::collections::VecDeque;
@@ -178,7 +178,7 @@ mod tests {
             .expect("Creating UDP TMTC server failed");
         is_send(&udp_tc_server);
         let mut sph = SpHeader::tc_unseg(0x02, 0, 0).unwrap();
-        let pus_tc = PusTc::new_simple(&mut sph, 17, 1, None, true);
+        let pus_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
         let len = pus_tc
             .write_to_bytes(&mut buf)
             .expect("Error writing PUS TC packet");

@@ -1,6 +1,7 @@
-use crate::tmtc::{MpscStoreAndSendError, PusTcSource, PUS_APID};
+use crate::tmtc::{MpscStoreAndSendError, PusTcSource};
 use satrs_core::spacepackets::{CcsdsPacket, SpHeader};
 use satrs_core::tmtc::{CcsdsPacketHandler, ReceivesCcsdsTc};
+use satrs_example::PUS_APID;
 
 pub struct CcsdsReceiver {
     pub tc_source: PusTcSource,

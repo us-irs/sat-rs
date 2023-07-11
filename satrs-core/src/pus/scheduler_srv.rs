@@ -5,8 +5,8 @@ use crate::pus::{
     EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
     PusServiceHandler,
 };
+use spacepackets::ecss::tc::PusTcReader;
 use spacepackets::ecss::{scheduling, PusPacket};
-use spacepackets::tc::PusTc;
 use spacepackets::time::cds::TimeProvider;
 use std::boxed::Box;
 
@@ -67,7 +67,7 @@ impl PusServiceHandler for PusService11SchedHandler {
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTc::from_bytes(&self.psb.pus_buf)?;
+        let (tc, _) = PusTcReader::new(&self.psb.pus_buf)?;
         let subservice = tc.subservice();
         let std_service = scheduling::Subservice::try_from(subservice);
         if std_service.is_err() {

@@ -8,9 +8,9 @@ use core::fmt::{Display, Formatter};
 use downcast_rs::{impl_downcast, Downcast};
 #[cfg(feature = "alloc")]
 use dyn_clone::DynClone;
+use spacepackets::ecss::tc::{PusTcCreator, PusTcReader};
+use spacepackets::ecss::tm::PusTmCreator;
 use spacepackets::ecss::PusError;
-use spacepackets::tc::PusTc;
-use spacepackets::tm::PusTm;
 use spacepackets::{ByteConversionError, SizeMissmatch, SpHeader};
 use std::error::Error;
 
@@ -36,7 +36,7 @@ pub use std_mod::*;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PusTmWrapper<'tm> {
     InStore(StoreAddr),
-    Direct(PusTm<'tm>),
+    Direct(PusTmCreator<'tm>),
 }
 
 impl From<StoreAddr> for PusTmWrapper<'_> {
@@ -45,8 +45,8 @@ impl From<StoreAddr> for PusTmWrapper<'_> {
     }
 }
 
-impl<'tm> From<PusTm<'tm>> for PusTmWrapper<'tm> {
-    fn from(value: PusTm<'tm>) -> Self {
+impl<'tm> From<PusTmCreator<'tm>> for PusTmWrapper<'tm> {
+    fn from(value: PusTmCreator<'tm>) -> Self {
         Self::Direct(value)
     }
 }
@@ -193,7 +193,7 @@ pub trait EcssTmSenderCore: EcssChannel {
 /// This sender object is responsible for sending PUS telecommands to a TC recipient. Each
 /// telecommand can optionally have a token which contains its verification state.
 pub trait EcssTcSenderCore: EcssChannel {
-    fn send_tc(&self, tc: PusTc, token: Option<TcStateToken>) -> Result<(), EcssTmtcError>;
+    fn send_tc(&self, tc: PusTcCreator, token: Option<TcStateToken>) -> Result<(), EcssTmtcError>;
 }
 
 pub struct ReceivedTcWrapper {
@@ -232,10 +232,12 @@ pub trait EcssTcReceiverCore: EcssChannel {
 
 /// Generic trait for objects which can receive ECSS PUS telecommands. This trait is
 /// implemented by the [crate::tmtc::pus_distrib::PusDistributor] objects to allow passing PUS TC
-/// packets into it.
+/// packets into it. It is generally assumed that the telecommand is stored in some pool structure,
+/// and the store address is passed as well. This allows efficient zero-copy forwarding of
+/// telecommands.
 pub trait ReceivesEcssPusTc {
     type Error;
-    fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTc) -> Result<(), Self::Error>;
+    fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTcReader) -> Result<(), Self::Error>;
 }
 
 #[cfg(feature = "alloc")]
@@ -317,11 +319,11 @@ pub mod std_mod {
     use crate::ChannelId;
     use alloc::boxed::Box;
     use alloc::vec::Vec;
+    use spacepackets::ecss::tm::PusTmCreator;
     use spacepackets::ecss::PusError;
     use spacepackets::time::cds::TimeProvider;
     use spacepackets::time::StdTimestampError;
     use spacepackets::time::TimeWriter;
-    use spacepackets::tm::PusTm;
     use std::cell::RefCell;
     use std::string::String;
     use std::sync::mpsc;
@@ -353,7 +355,7 @@ pub mod std_mod {
         }
     }
     impl MpscTmInStoreSender {
-        pub fn send_direct_tm(&self, tm: PusTm) -> Result<(), EcssTmtcError> {
+        pub fn send_direct_tm(&self, tm: PusTmCreator) -> Result<(), EcssTmtcError> {
             let addr = self.shared_tm_store.add_pus_tm(&tm)?;
             self.sender
                 .send(addr)
@@ -641,7 +643,7 @@ pub(crate) fn source_buffer_large_enough(cap: usize, len: usize) -> Result<(), E
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use spacepackets::tm::{GenericPusTmSecondaryHeader, PusTm};
+    use spacepackets::ecss::tm::{GenericPusTmSecondaryHeader, PusTmCreator};
     use spacepackets::CcsdsPacket;
 
     #[derive(Debug, Eq, PartialEq, Clone)]
@@ -654,9 +656,9 @@ pub(crate) mod tests {
     }
 
     impl CommonTmInfo {
-        pub fn new_from_tm(tm: &PusTm) -> Self {
+        pub fn new_from_tm(tm: &PusTmCreator) -> Self {
             let mut time_stamp = [0; 7];
-            time_stamp.clone_from_slice(&tm.timestamp().unwrap()[0..7]);
+            time_stamp.clone_from_slice(&tm.timestamp()[0..7]);
             Self {
                 subservice: tm.subservice(),
                 apid: tm.apid(),
