@@ -658,7 +658,7 @@ pub(crate) mod tests {
     impl CommonTmInfo {
         pub fn new_from_tm(tm: &PusTmCreator) -> Self {
             let mut time_stamp = [0; 7];
-            time_stamp.clone_from_slice(&tm.timestamp().unwrap()[0..7]);
+            time_stamp.clone_from_slice(&tm.timestamp()[0..7]);
             Self {
                 subservice: tm.subservice(),
                 apid: tm.apid(),

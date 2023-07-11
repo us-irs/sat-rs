@@ -8,7 +8,7 @@ use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, PusEventDispatcher,
 };
 use satrs_core::pus::MpscTmAsVecSender;
-use spacepackets::ecss::tm::PusTm;
+use spacepackets::ecss::tm::PusTmReader;
 use spacepackets::ecss::{PusError, PusPacket};
 use std::sync::mpsc::{channel, SendError, TryRecvError};
 use std::thread;
@@ -103,7 +103,7 @@ fn test_threaded_usage() {
                 // Event TM received successfully
                 Ok(event_tm) => {
                     let tm =
-                        PusTm::from_bytes(event_tm.as_slice(), 7).expect("Deserializing TM failed");
+                        PusTmReader::new(event_tm.as_slice(), 7).expect("Deserializing TM failed");
                     assert_eq!(tm.0.service(), 5);
                     assert_eq!(tm.0.subservice(), 1);
                     let src_data = tm.0.source_data();
@@ -132,7 +132,7 @@ fn test_threaded_usage() {
                 // Event TM received successfully
                 Ok(event_tm) => {
                     let tm =
-                        PusTm::from_bytes(event_tm.as_slice(), 7).expect("Deserializing TM failed");
+                        PusTmReader::new(event_tm.as_slice(), 7).expect("Deserializing TM failed");
                     assert_eq!(tm.0.service(), 5);
                     assert_eq!(tm.0.subservice(), 2);
                     let src_data = tm.0.source_data();

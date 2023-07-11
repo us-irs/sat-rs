@@ -9,8 +9,8 @@ pub mod crossbeam_test {
     };
     use satrs_core::pus::MpscTmInStoreSender;
     use satrs_core::tmtc::tm_helper::SharedTmStore;
-    use spacepackets::ecss::tc::{PusTc, PusTcCreator, PusTcSecondaryHeader};
-    use spacepackets::ecss::tm::PusTm;
+    use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
+    use spacepackets::ecss::tm::PusTmReader;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket, SerializablePusPacket};
     use spacepackets::SpHeader;
     use std::sync::{mpsc, Arc, RwLock};
@@ -82,7 +82,7 @@ pub mod crossbeam_test {
                 tc_len = buf.len();
                 tc_buf[0..tc_len].copy_from_slice(buf);
             }
-            let (_tc, _) = PusTc::from_bytes(&tc_buf[0..tc_len]).unwrap();
+            let (_tc, _) = PusTcReader::new(&tc_buf[0..tc_len]).unwrap();
             let accepted_token;
 
             let token = reporter_with_sender_0.add_tc_with_req_id(req_id_0);
@@ -122,7 +122,7 @@ pub mod crossbeam_test {
                 tc_len = buf.len();
                 tc_buf[0..tc_len].copy_from_slice(buf);
             }
-            let (tc, _) = PusTc::from_bytes(&tc_buf[0..tc_len]).unwrap();
+            let (tc, _) = PusTcReader::new(&tc_buf[0..tc_len]).unwrap();
             let token = reporter_with_sender_1.add_tc(&tc);
             let accepted_token = reporter_with_sender_1
                 .acceptance_success(token, Some(&FIXED_STAMP))
@@ -154,8 +154,8 @@ pub mod crossbeam_test {
                     tm_len = slice.len();
                     tm_buf[0..tm_len].copy_from_slice(slice);
                 }
-                let (pus_tm, _) = PusTm::from_bytes(&tm_buf[0..tm_len], 7)
-                    .expect("Error reading verification TM");
+                let (pus_tm, _) =
+                    PusTmReader::new(&tm_buf[0..tm_len], 7).expect("Error reading verification TM");
                 let req_id =
                     RequestId::from_bytes(&pus_tm.source_data()[0..RequestId::SIZE_AS_BYTES])
                         .expect("reading request ID from PUS TM source data failed");

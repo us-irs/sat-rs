@@ -1327,7 +1327,7 @@ mod tests {
     use alloc::boxed::Box;
     use alloc::format;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
-    use spacepackets::ecss::tm::PusTm;
+    use spacepackets::ecss::tm::PusTmReader;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, PusError, PusPacket};
     use spacepackets::util::UnsignedEnum;
     use spacepackets::{ByteConversionError, CcsdsPacket, SpHeader};
@@ -1376,7 +1376,7 @@ mod tests {
                     assert_eq!(PusPacket::service(&tm), 1);
                     assert!(!tm.source_data().is_empty());
                     let mut time_stamp = [0; 7];
-                    time_stamp.clone_from_slice(&tm.timestamp().unwrap()[0..7]);
+                    time_stamp.clone_from_slice(&tm.timestamp()[0..7]);
                     let src_data = tm.source_data();
                     assert!(src_data.len() >= 4);
                     let req_id =
@@ -2181,7 +2181,7 @@ mod tests {
                 tm_buf[0..tm_len].copy_from_slice(slice);
             }
             let (pus_tm, _) =
-                PusTm::from_bytes(&tm_buf[0..tm_len], 7).expect("Error reading verification TM");
+                PusTmReader::new(&tm_buf[0..tm_len], 7).expect("Error reading verification TM");
             if packet_idx == 0 {
                 assert_eq!(pus_tm.subservice(), 1);
                 assert_eq!(pus_tm.sp_header.seq_count(), 0);
