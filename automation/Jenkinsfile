@@ -40,7 +40,7 @@ pipeline {
         }
         stage('Check Cross Embedded Bare Metal') {
             steps {
-                sh 'cargo check --target thumbv7em-none-eabihf --no-default-features'
+                sh 'cargo check -p satrs-core --target thumbv7em-none-eabihf --no-default-features'
             }
         }
         stage('Check Cross Embedded Linux') {
