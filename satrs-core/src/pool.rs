@@ -180,12 +180,9 @@ impl Error for StoreError {
     }
 }
 
-
 #[cfg(feature = "alloc")]
 mod alloc_mod {
-    use crate::pool::{
-        NumBlocks, PoolSize, StoreAddr, StoreError, StoreIdError, POOL_MAX_SIZE, STORE_FREE,
-    };
+    use crate::pool::{NumBlocks, StoreAddr, StoreError, StoreIdError};
     use alloc::boxed::Box;
     use alloc::vec;
     use alloc::vec::Vec;
@@ -200,7 +197,7 @@ mod alloc_mod {
 
     type PoolSize = usize;
     const STORE_FREE: PoolSize = PoolSize::MAX;
-    const POOL_MAX_SIZE: PoolSize = STORE_FREE - 1;
+    pub const POOL_MAX_SIZE: PoolSize = STORE_FREE - 1;
 
     /// Configuration structure of the [local pool][LocalPool]
     ///
@@ -533,7 +530,7 @@ mod alloc_mod {
 mod tests {
     use crate::pool::{
         LocalPool, PoolCfg, PoolGuard, PoolProvider, PoolRwGuard, StoreAddr, StoreError,
-        StoreIdError,
+        StoreIdError, POOL_MAX_SIZE,
     };
     use std::vec;
 
@@ -546,19 +543,19 @@ mod tests {
     #[test]
     fn test_cfg() {
         // Values where number of buckets is 0 or size is too large should be removed
-        let mut pool_cfg = PoolCfg::new(vec![(0, 0), (1, 0), (2, LocalPool::MAX_SIZE)]);
+        let mut pool_cfg = PoolCfg::new(vec![(0, 0), (1, 0), (2, POOL_MAX_SIZE)]);
         pool_cfg.sanitize();
-        assert_eq!(pool_cfg.cfg(), vec![(1, 0)]);
+        assert_eq!(*pool_cfg.cfg(), vec![(1, 0)]);
         // Entries should be ordered according to bucket size
         pool_cfg = PoolCfg::new(vec![(16, 6), (32, 3), (8, 12)]);
         pool_cfg.sanitize();
-        assert_eq!(pool_cfg.cfg(), vec![(32, 3), (16, 6), (8, 12)]);
+        assert_eq!(*pool_cfg.cfg(), vec![(32, 3), (16, 6), (8, 12)]);
         // Unstable sort is used, so order of entries with same block length should not matter
         pool_cfg = PoolCfg::new(vec![(12, 12), (14, 16), (10, 12)]);
         pool_cfg.sanitize();
         assert!(
-            pool_cfg.cfg() == vec![(12, 12), (10, 12), (14, 16)]
-                || pool_cfg.cfg() == vec![(10, 12), (12, 12), (14, 16)]
+            *pool_cfg.cfg() == vec![(12, 12), (10, 12), (14, 16)]
+                || *pool_cfg.cfg() == vec![(10, 12), (12, 12), (14, 16)]
         );
     }
 
@@ -730,11 +727,11 @@ mod tests {
     #[test]
     fn test_data_too_large_1() {
         let mut local_pool = basic_small_pool();
-        let res = local_pool.free_element(LocalPool::MAX_SIZE + 1);
+        let res = local_pool.free_element(POOL_MAX_SIZE + 1);
         assert!(res.is_err());
         assert_eq!(
             res.unwrap_err(),
-            StoreError::DataTooLarge(LocalPool::MAX_SIZE + 1)
+            StoreError::DataTooLarge(POOL_MAX_SIZE + 1)
         );
     }
 

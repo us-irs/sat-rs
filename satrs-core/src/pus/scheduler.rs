@@ -149,7 +149,7 @@ pub mod alloc_mod {
     };
     use spacepackets::ecss::{PusError, PusPacket};
     use spacepackets::time::cds::DaysLen24Bits;
-    use spacepackets::time::{cds, CcsdsTimeProvider, TimeReader, UnixTimestamp, TimestampError};
+    use spacepackets::time::{cds, CcsdsTimeProvider, TimeReader, TimestampError, UnixTimestamp};
 
     #[cfg(feature = "std")]
     use std::time::SystemTimeError;
