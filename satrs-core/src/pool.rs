@@ -180,11 +180,9 @@ impl Error for StoreError {
     }
 }
 
-type PoolSize = usize;
-const STORE_FREE: PoolSize = PoolSize::MAX;
-const POOL_MAX_SIZE: PoolSize = STORE_FREE - 1;
 
-pub mod alloc_mod {
+#[cfg(feature = "alloc")]
+mod alloc_mod {
     use crate::pool::{
         NumBlocks, PoolSize, StoreAddr, StoreError, StoreIdError, POOL_MAX_SIZE, STORE_FREE,
     };
@@ -199,6 +197,10 @@ pub mod alloc_mod {
     pub type ShareablePoolProvider = Box<dyn PoolProvider + Send + Sync>;
     #[cfg(feature = "std")]
     pub type SharedPool = Arc<RwLock<ShareablePoolProvider>>;
+
+    type PoolSize = usize;
+    const STORE_FREE: PoolSize = PoolSize::MAX;
+    const POOL_MAX_SIZE: PoolSize = STORE_FREE - 1;
 
     /// Configuration structure of the [local pool][LocalPool]
     ///

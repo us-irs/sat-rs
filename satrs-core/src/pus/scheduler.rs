@@ -2,13 +2,12 @@
 //!
 //! The core data structure of this module is the [PusScheduler]. This structure can be used
 //! to perform the scheduling of telecommands like specified in the ECSS standard.
-use core::fmt::{Debug, Display, Formatter};
+use core::fmt::Debug;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::scheduling::TimeWindowType;
 use spacepackets::ecss::tc::{GenericPusTcSecondaryHeader, IsPusTelecommand};
-use spacepackets::ecss::PusError;
-use spacepackets::time::{CcsdsTimeProvider, TimestampError};
+use spacepackets::time::CcsdsTimeProvider;
 use spacepackets::CcsdsPacket;
 #[cfg(feature = "std")]
 use std::error::Error;
@@ -142,14 +141,15 @@ pub mod alloc_mod {
     use alloc::collections::BTreeMap;
     use alloc::vec;
     use alloc::vec::Vec;
+    use core::fmt::{Display, Formatter};
     use core::time::Duration;
     use spacepackets::ecss::scheduling::TimeWindowType;
     use spacepackets::ecss::tc::{
         GenericPusTcSecondaryHeader, IsPusTelecommand, PusTc, PusTcReader,
     };
-    use spacepackets::ecss::PusPacket;
+    use spacepackets::ecss::{PusError, PusPacket};
     use spacepackets::time::cds::DaysLen24Bits;
-    use spacepackets::time::{cds, CcsdsTimeProvider, TimeReader, UnixTimestamp};
+    use spacepackets::time::{cds, CcsdsTimeProvider, TimeReader, UnixTimestamp, TimestampError};
 
     #[cfg(feature = "std")]
     use std::time::SystemTimeError;
