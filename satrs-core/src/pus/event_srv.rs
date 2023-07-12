@@ -8,10 +8,10 @@ use crate::pus::{
     EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
     PusPacketHandlingError, PusServiceBase, PusServiceHandler,
 };
+use alloc::boxed::Box;
 use spacepackets::ecss::event::Subservice;
 use spacepackets::ecss::tc::PusTcReader;
 use spacepackets::ecss::PusPacket;
-use std::boxed::Box;
 use std::sync::mpsc::Sender;
 
 pub struct PusService5EventHandler {

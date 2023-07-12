@@ -2,22 +2,17 @@
 //!
 //! The core data structure of this module is the [PusScheduler]. This structure can be used
 //! to perform the scheduling of telecommands like specified in the ECSS standard.
-use crate::pool::{StoreAddr, StoreError};
-use core::fmt::{Debug, Display, Formatter};
-use core::time::Duration;
+use core::fmt::Debug;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::scheduling::TimeWindowType;
 use spacepackets::ecss::tc::{GenericPusTcSecondaryHeader, IsPusTelecommand};
-use spacepackets::ecss::PusError;
-use spacepackets::time::{CcsdsTimeProvider, TimestampError, UnixTimestamp};
+use spacepackets::time::CcsdsTimeProvider;
 use spacepackets::CcsdsPacket;
 #[cfg(feature = "std")]
 use std::error::Error;
 
-//#[cfg(feature = "std")]
-//pub use std_mod::*;
-
+use crate::pool::StoreAddr;
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
 
@@ -61,78 +56,6 @@ impl RequestId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ScheduleError {
-    PusError(PusError),
-    /// The release time is within the time-margin added on top of the current time.
-    /// The first parameter is the current time, the second one the time margin, and the third one
-    /// the release time.
-    ReleaseTimeInTimeMargin(UnixTimestamp, Duration, UnixTimestamp),
-    /// Nested time-tagged commands are not allowed.
-    NestedScheduledTc,
-    StoreError(StoreError),
-    TcDataEmpty,
-    TimestampError(TimestampError),
-    WrongSubservice,
-    WrongService,
-}
-
-impl Display for ScheduleError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            ScheduleError::PusError(e) => {
-                write!(f, "Pus Error: {e}")
-            }
-            ScheduleError::ReleaseTimeInTimeMargin(current_time, margin, timestamp) => {
-                write!(
-                    f,
-                    "Error: time margin too short, current time: {current_time:?}, time margin: {margin:?}, release time: {timestamp:?}"
-                )
-            }
-            ScheduleError::NestedScheduledTc => {
-                write!(f, "Error: nested scheduling is not allowed")
-            }
-            ScheduleError::StoreError(e) => {
-                write!(f, "Store Error: {e}")
-            }
-            ScheduleError::TcDataEmpty => {
-                write!(f, "Error: empty Tc Data field")
-            }
-            ScheduleError::TimestampError(e) => {
-                write!(f, "Timestamp Error: {e}")
-            }
-            ScheduleError::WrongService => {
-                write!(f, "Error: Service not 11.")
-            }
-            ScheduleError::WrongSubservice => {
-                write!(f, "Error: Subservice not 4.")
-            }
-        }
-    }
-}
-
-impl From<PusError> for ScheduleError {
-    fn from(e: PusError) -> Self {
-        ScheduleError::PusError(e)
-    }
-}
-
-impl From<StoreError> for ScheduleError {
-    fn from(e: StoreError) -> Self {
-        ScheduleError::StoreError(e)
-    }
-}
-
-impl From<TimestampError> for ScheduleError {
-    fn from(e: TimestampError) -> Self {
-        ScheduleError::TimestampError(e)
-    }
-}
-
-#[cfg(feature = "std")]
-impl Error for ScheduleError {}
-
 /// This is the format stored internally by the TC scheduler for each scheduled telecommand.
 /// It consists of the address of that telecommand in the TC pool and a request ID.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -154,11 +77,6 @@ impl TcInfo {
     pub fn new(addr: StoreAddr, request_id: RequestId) -> Self {
         TcInfo { addr, request_id }
     }
-}
-
-enum DeletionResult {
-    WithoutStoreDeletion(Option<StoreAddr>),
-    WithStoreDeletion(Result<bool, StoreError>),
 }
 
 pub struct TimeWindow<TimeProvder> {
@@ -217,23 +135,101 @@ impl<TimeProvider: CcsdsTimeProvider + Clone> TimeWindow<TimeProvider> {
 
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
+    use super::*;
     use crate::pool::{PoolProvider, StoreAddr, StoreError};
-    use crate::pus::scheduler::{DeletionResult, RequestId, ScheduleError, TcInfo, TimeWindow};
     use alloc::collections::btree_map::{Entry, Range};
     use alloc::collections::BTreeMap;
     use alloc::vec;
     use alloc::vec::Vec;
+    use core::fmt::{Display, Formatter};
     use core::time::Duration;
     use spacepackets::ecss::scheduling::TimeWindowType;
     use spacepackets::ecss::tc::{
         GenericPusTcSecondaryHeader, IsPusTelecommand, PusTc, PusTcReader,
     };
-    use spacepackets::ecss::PusPacket;
+    use spacepackets::ecss::{PusError, PusPacket};
     use spacepackets::time::cds::DaysLen24Bits;
-    use spacepackets::time::{cds, CcsdsTimeProvider, TimeReader, UnixTimestamp};
+    use spacepackets::time::{cds, CcsdsTimeProvider, TimeReader, TimestampError, UnixTimestamp};
 
     #[cfg(feature = "std")]
     use std::time::SystemTimeError;
+
+    enum DeletionResult {
+        WithoutStoreDeletion(Option<StoreAddr>),
+        WithStoreDeletion(Result<bool, StoreError>),
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub enum ScheduleError {
+        PusError(PusError),
+        /// The release time is within the time-margin added on top of the current time.
+        /// The first parameter is the current time, the second one the time margin, and the third one
+        /// the release time.
+        ReleaseTimeInTimeMargin(UnixTimestamp, Duration, UnixTimestamp),
+        /// Nested time-tagged commands are not allowed.
+        NestedScheduledTc,
+        StoreError(StoreError),
+        TcDataEmpty,
+        TimestampError(TimestampError),
+        WrongSubservice,
+        WrongService,
+    }
+
+    impl Display for ScheduleError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+            match self {
+                ScheduleError::PusError(e) => {
+                    write!(f, "Pus Error: {e}")
+                }
+                ScheduleError::ReleaseTimeInTimeMargin(current_time, margin, timestamp) => {
+                    write!(
+                        f,
+                        "Error: time margin too short, current time: {current_time:?}, time margin: {margin:?}, release time: {timestamp:?}"
+                    )
+                }
+                ScheduleError::NestedScheduledTc => {
+                    write!(f, "Error: nested scheduling is not allowed")
+                }
+                ScheduleError::StoreError(e) => {
+                    write!(f, "Store Error: {e}")
+                }
+                ScheduleError::TcDataEmpty => {
+                    write!(f, "Error: empty Tc Data field")
+                }
+                ScheduleError::TimestampError(e) => {
+                    write!(f, "Timestamp Error: {e}")
+                }
+                ScheduleError::WrongService => {
+                    write!(f, "Error: Service not 11.")
+                }
+                ScheduleError::WrongSubservice => {
+                    write!(f, "Error: Subservice not 4.")
+                }
+            }
+        }
+    }
+
+    impl From<PusError> for ScheduleError {
+        fn from(e: PusError) -> Self {
+            ScheduleError::PusError(e)
+        }
+    }
+
+    impl From<StoreError> for ScheduleError {
+        fn from(e: StoreError) -> Self {
+            ScheduleError::StoreError(e)
+        }
+    }
+
+    impl From<TimestampError> for ScheduleError {
+        fn from(e: TimestampError) -> Self {
+            ScheduleError::TimestampError(e)
+        }
+    }
+
+    #[cfg(feature = "std")]
+    impl Error for ScheduleError {}
 
     /// This is the core data structure for scheduling PUS telecommands with [alloc] support.
     ///
