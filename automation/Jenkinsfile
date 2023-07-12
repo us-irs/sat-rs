@@ -1,0 +1,52 @@
+pipeline {
+
+    agent {
+        dockerfile {
+            dir 'automation'
+            reuseNode true
+        }
+    }
+
+    stages {
+        stage('Clippy') {
+            steps {
+                sh 'cargo clippy'
+            }
+        }
+        stage('Docs') {
+            steps {
+                sh 'cargo +nightly doc --all-features'
+            }
+        }
+        stage('Rustfmt') {
+            steps {
+                sh 'cargo fmt --all --check'
+            }
+        }
+        stage('Test') {
+            steps {
+                sh 'cargo test --all-features'
+            }
+        }
+        stage('Check with all features') {
+            steps {
+                sh 'cargo check --all-features'
+            }
+        }
+        stage('Check with no features') {
+            steps {
+                sh 'cargo check --no-default-features'
+            }
+        }
+        stage('Check Cross Embedded Bare Metal') {
+            steps {
+                sh 'cargo check --target thumbv7em-none-eabihf --no-default-features'
+            }
+        }
+        stage('Check Cross Embedded Linux') {
+            steps {
+                sh 'cargo check --target armv7-unknown-linux-gnueabihf'
+            }
+        }
+    }
+}
