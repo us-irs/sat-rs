@@ -8,18 +8,22 @@ use core::fmt::{Display, Formatter};
 use downcast_rs::{impl_downcast, Downcast};
 #[cfg(feature = "alloc")]
 use dyn_clone::DynClone;
+#[cfg(feature = "std")]
+use std::error::Error;
+
 use spacepackets::ecss::tc::{PusTcCreator, PusTcReader};
 use spacepackets::ecss::tm::PusTmCreator;
 use spacepackets::ecss::PusError;
 use spacepackets::{ByteConversionError, SizeMissmatch, SpHeader};
-use std::error::Error;
 
 pub mod event;
 pub mod event_man;
+#[cfg(feature = "std")]
 pub mod event_srv;
 pub mod hk;
 pub mod mode;
 pub mod scheduler;
+#[cfg(feature = "std")]
 pub mod scheduler_srv;
 #[cfg(feature = "std")]
 pub mod test;

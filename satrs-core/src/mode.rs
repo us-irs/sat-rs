@@ -1,5 +1,6 @@
 use crate::tmtc::TargetId;
 use core::mem::size_of;
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use spacepackets::{ByteConversionError, SizeMissmatch};
 
