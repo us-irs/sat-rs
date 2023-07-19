@@ -119,7 +119,7 @@ pub trait SenderTable<SendProviderError, Event: GenericEvent = EventU32, AuxData
     fn get_send_event_provider(
         &self,
         id: &ChannelId,
-    ) -> Option<&Box<dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>>;
+    ) -> Option<&dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>;
     fn add_send_event_provider(
         &mut self,
         send_provider: Box<
@@ -381,9 +381,11 @@ impl<SendProviderError, Event: GenericEvent, AuxDataProvider>
     fn get_send_event_provider(
         &self,
         id: &ChannelId,
-    ) -> Option<&Box<dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>>
-    {
-        self.senders.get(id).filter(|sender| sender.id() == *id)
+    ) -> Option<&dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>> {
+        self.senders
+            .get(id)
+            .filter(|sender| sender.id() == *id)
+            .map(|v| v.as_ref())
     }
 
     fn add_send_event_provider(
