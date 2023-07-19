@@ -96,8 +96,8 @@ fn main() {
     // Every software component which needs to generate verification telemetry, gets a cloned
     // verification reporter.
     let verif_reporter = VerificationReporterWithSender::new(&verif_cfg, Box::new(verif_sender));
-    let mut reporter_event_handler = verif_reporter.clone();
-    let mut reporter_aocs = verif_reporter.clone();
+    let reporter_event_handler = verif_reporter.clone();
+    let reporter_aocs = verif_reporter.clone();
 
     // Create event handling components
     // These sender handles are used to send event requests, for example to enable or disable
@@ -328,7 +328,7 @@ fn main() {
                 tm_funnel_tx,
             );
             let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
-            let mut report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
+            let report_completion = |event_req: EventRequestWithToken, timestamp: &[u8]| {
                 let started_token: VerificationToken<TcStateStarted> = event_req
                     .token
                     .try_into()
