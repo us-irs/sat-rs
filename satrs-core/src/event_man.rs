@@ -117,9 +117,9 @@ pub trait ListenerTable {
 pub trait SenderTable<SendProviderError, Event: GenericEvent = EventU32, AuxDataProvider = Params> {
     fn contains_send_event_provider(&self, id: &ChannelId) -> bool;
     fn get_send_event_provider(
-        &mut self,
+        &self,
         id: &ChannelId,
-    ) -> Option<&mut Box<dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>>;
+    ) -> Option<&Box<dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>>;
     fn add_send_event_provider(
         &mut self,
         send_provider: Box<
@@ -257,7 +257,7 @@ impl<E, Event: GenericEvent + Copy, AuxDataProvider: Clone>
     /// This function will track up to 3 errors returned as part of the
     /// [EventRoutingErrorsWithResult] error struct.
     pub fn try_event_handling(
-        &mut self,
+        &self,
     ) -> Result<
         EventRoutingResult<Event, AuxDataProvider>,
         EventRoutingErrorsWithResult<Event, AuxDataProvider, E>,
@@ -379,11 +379,11 @@ impl<SendProviderError, Event: GenericEvent, AuxDataProvider>
     }
 
     fn get_send_event_provider(
-        &mut self,
+        &self,
         id: &ChannelId,
-    ) -> Option<&mut Box<dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>>
+    ) -> Option<&Box<dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>>
     {
-        self.senders.get_mut(id).filter(|sender| sender.id() == *id)
+        self.senders.get(id).filter(|sender| sender.id() == *id)
     }
 
     fn add_send_event_provider(
