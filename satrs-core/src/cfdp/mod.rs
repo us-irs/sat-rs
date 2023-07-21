@@ -7,7 +7,7 @@ pub enum TransactionStep {
     ReceivingFileDataPdus = 2,
     SendingAckPdu = 3,
     TransferCompletion = 4,
-    SendingFinishedPdu = 5
+    SendingFinishedPdu = 5,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -20,6 +20,5 @@ pub enum State {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn basic_test() {
-    }
+    fn basic_test() {}
 }
