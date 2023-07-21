@@ -40,6 +40,7 @@ pub mod request;
 pub mod res_code;
 pub mod seq_count;
 pub mod tmtc;
+pub mod cfdp;
 
 pub use spacepackets;
 
