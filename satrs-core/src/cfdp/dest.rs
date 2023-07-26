@@ -1,6 +1,9 @@
 use super::{State, TransactionStep};
 use spacepackets::cfdp::{
-    pdu::{metadata::MetadataPdu, CommonPduConfig, FileDirectiveType, PduError},
+    pdu::{
+        metadata::{MetadataGenericParams, MetadataPdu},
+        CommonPduConfig, FileDirectiveType, PduError,
+    },
     PduType,
 };
 
@@ -8,6 +11,12 @@ pub struct DestinationHandler {
     step: TransactionStep,
     state: State,
     pdu_conf: CommonPduConfig,
+    transaction_params: TransactionParams,
+}
+
+#[derive(Default)]
+struct TransactionParams {
+    metadata_params: MetadataGenericParams,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -32,6 +41,7 @@ impl DestinationHandler {
             step: TransactionStep::Idle,
             state: State::Idle,
             pdu_conf: CommonPduConfig::new_with_defaults(),
+            transaction_params: Default::default(),
         }
     }
 
@@ -86,8 +96,7 @@ impl DestinationHandler {
             return Err(DestError::RecvdMetadataButIsBusy);
         }
         let metadata_pdu = MetadataPdu::from_bytes(raw_packet)?;
-        let params = metadata_pdu.metadata_params();
-
+        self.transaction_params.metadata_params = *metadata_pdu.metadata_params();
         Ok(())
     }
 
