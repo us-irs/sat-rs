@@ -1,13 +1,29 @@
 use super::{State, TransactionStep};
 use spacepackets::cfdp::{
-    pdu::{CommonPduConfig, FileDirectiveType},
+    pdu::{metadata::MetadataPdu, CommonPduConfig, FileDirectiveType, PduError},
     PduType,
 };
 
 pub struct DestinationHandler {
     step: TransactionStep,
     state: State,
-    //pdu_conf: CommonPduConfig,
+    pdu_conf: CommonPduConfig,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum DestError {
+    /// File directive expected, but none specified
+    DirectiveExpected,
+    CantProcessPacketType(FileDirectiveType),
+    // Received new metadata PDU while being already being busy with a file transfer.
+    RecvdMetadataButIsBusy,
+    Pdu(PduError),
+}
+
+impl From<PduError> for DestError {
+    fn from(value: PduError) -> Self {
+        Self::Pdu(value)
+    }
 }
 
 impl DestinationHandler {
@@ -15,7 +31,7 @@ impl DestinationHandler {
         Self {
             step: TransactionStep::Idle,
             state: State::Idle,
-            //pdu_conf: CommonPduConfig::new_with_defaults(),
+            pdu_conf: CommonPduConfig::new_with_defaults(),
         }
     }
 
@@ -24,11 +40,11 @@ impl DestinationHandler {
         pdu_type: PduType,
         pdu_directive: Option<FileDirectiveType>,
         raw_packet: &[u8],
-    ) -> Result<(), ()> {
+    ) -> Result<(), DestError> {
         match pdu_type {
             PduType::FileDirective => {
                 if pdu_directive.is_none() {
-                    return Err(());
+                    return Err(DestError::DirectiveExpected);
                 }
                 self.handle_file_directive(pdu_directive.unwrap(), raw_packet)
             }
@@ -36,7 +52,7 @@ impl DestinationHandler {
         }
     }
 
-    pub fn handle_file_data(&mut self, raw_packet: &[u8]) -> Result<(), ()> {
+    pub fn handle_file_data(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
         Ok(())
     }
 
@@ -44,7 +60,16 @@ impl DestinationHandler {
         &mut self,
         pdu_directive: FileDirectiveType,
         raw_packet: &[u8],
-    ) -> Result<(), ()> {
+    ) -> Result<(), DestError> {
+        match pdu_directive {
+            FileDirectiveType::EofPdu => todo!(),
+            FileDirectiveType::FinishedPdu => todo!(),
+            FileDirectiveType::AckPdu => todo!(),
+            FileDirectiveType::MetadataPdu => self.handle_metadata_pdu(raw_packet),
+            FileDirectiveType::NakPdu => todo!(),
+            FileDirectiveType::PromptPdu => todo!(),
+            FileDirectiveType::KeepAlivePdu => todo!(),
+        };
         Ok(())
     }
 
@@ -54,6 +79,19 @@ impl DestinationHandler {
             State::BusyClass1Nacked => self.fsm_nacked(),
             State::BusyClass2Acked => todo!(),
         }
+    }
+
+    pub fn handle_metadata_pdu(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
+        if self.state != State::Idle {
+            return Err(DestError::RecvdMetadataButIsBusy);
+        }
+        let metadata_pdu = MetadataPdu::from_bytes(raw_packet)?;
+
+        Ok(())
+    }
+
+    pub fn handle_eof_pdu(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
+        Ok(())
     }
 
     fn fsm_nacked(&self) {
@@ -78,5 +116,17 @@ impl DestinationHandler {
     /// is used if it is active.
     pub fn state(&self) -> State {
         self.state
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic() {
+        let dest_handler = DestinationHandler::new();
+        assert_eq!(dest_handler.state(), State::Idle);
+        assert_eq!(dest_handler.step(), TransactionStep::Idle);
     }
 }

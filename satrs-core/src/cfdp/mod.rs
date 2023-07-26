@@ -1,6 +1,6 @@
 pub mod dest;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TransactionStep {
     Idle = 0,
     TransactionStart = 1,
@@ -10,7 +10,7 @@ pub enum TransactionStep {
     SendingFinishedPdu = 5,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum State {
     Idle = 0,
     BusyClass1Nacked = 2,
