@@ -14,9 +14,24 @@ pub struct DestinationHandler {
     transaction_params: TransactionParams,
 }
 
-#[derive(Default)]
 struct TransactionParams {
     metadata_params: MetadataGenericParams,
+    src_file_name: [u8; u8::MAX as usize],
+    src_file_name_len: usize,
+    dest_file_name: [u8; u8::MAX as usize],
+    dest_file_name_len: usize,
+}
+
+impl Default for TransactionParams {
+    fn default() -> Self {
+        Self {
+            metadata_params: Default::default(),
+            src_file_name: [0; u8::MAX as usize],
+            src_file_name_len: Default::default(),
+            dest_file_name: [0; u8::MAX as usize],
+            dest_file_name_len: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -26,6 +41,8 @@ pub enum DestError {
     CantProcessPacketType(FileDirectiveType),
     // Received new metadata PDU while being already being busy with a file transfer.
     RecvdMetadataButIsBusy,
+    EmptySrcFileField,
+    EmptyDestFileField,
     Pdu(PduError),
 }
 
@@ -97,6 +114,20 @@ impl DestinationHandler {
         }
         let metadata_pdu = MetadataPdu::from_bytes(raw_packet)?;
         self.transaction_params.metadata_params = *metadata_pdu.metadata_params();
+        let src_name = metadata_pdu.src_file_name();
+        if src_name.is_empty() {
+            return Err(DestError::EmptySrcFileField);
+        }
+        self.transaction_params.src_file_name[..src_name.len_value()]
+            .copy_from_slice(src_name.value().unwrap());
+        self.transaction_params.src_file_name_len = src_name.len_value();
+        let dest_name = metadata_pdu.dest_file_name();
+        if dest_name.is_empty() {
+            return Err(DestError::EmptyDestFileField);
+        }
+        self.transaction_params.dest_file_name[..dest_name.len_value()]
+            .copy_from_slice(dest_name.value().unwrap());
+        self.transaction_params.dest_file_name_len = dest_name.len_value();
         Ok(())
     }
 
