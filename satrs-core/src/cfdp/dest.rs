@@ -86,6 +86,7 @@ impl DestinationHandler {
             return Err(DestError::RecvdMetadataButIsBusy);
         }
         let metadata_pdu = MetadataPdu::from_bytes(raw_packet)?;
+        let params = metadata_pdu.metadata_params();
 
         Ok(())
     }
