@@ -1,3 +1,5 @@
+use crc::{Crc, CRC_32_CKSUM};
+
 pub mod dest;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -16,6 +18,8 @@ pub enum State {
     BusyClass1Nacked = 2,
     BusyClass2Acked = 3,
 }
+
+pub const CRC_32: Crc<u32> = Crc::<u32>::new(&CRC_32_CKSUM);
 
 #[cfg(test)]
 mod tests {

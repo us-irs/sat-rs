@@ -21,6 +21,10 @@ embed-doc-image = "0.1"
 version = "0.6"
 default-features = false
 
+[dependencies.crc]
+version = "3"
+optional = true
+
 [dependencies.dyn-clone]
 version = "1"
 optional = true
@@ -87,7 +91,8 @@ std = [
 	"serde/std",
 	"spacepackets/std",
 	"num_enum/std",
-	"thiserror"
+	"thiserror",
+  "crc"
 ]
 alloc = [
 	"serde/alloc",

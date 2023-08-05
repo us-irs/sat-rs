@@ -1,11 +1,22 @@
-use super::{State, TransactionStep};
+use core::str::{from_utf8, Utf8Error};
+use std::{
+    fs::{metadata, File},
+    io::{BufReader, Read, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
+};
+
+use super::{State, TransactionStep, CRC_32};
 use spacepackets::cfdp::{
     pdu::{
+        eof::EofPdu,
+        file_data::FileDataPdu,
+        finished::DeliveryCode,
         metadata::{MetadataGenericParams, MetadataPdu},
         CommonPduConfig, FileDirectiveType, PduError,
     },
-    PduType,
+    ConditionCode, PduType,
 };
+use thiserror::Error;
 
 pub struct DestinationHandler {
     step: TransactionStep,
@@ -20,6 +31,10 @@ struct TransactionParams {
     src_file_name_len: usize,
     dest_file_name: [u8; u8::MAX as usize],
     dest_file_name_len: usize,
+    dest_path_buf: PathBuf,
+    condition_code: ConditionCode,
+    delivery_code: DeliveryCode,
+    cksum_buf: [u8; 1024],
 }
 
 impl Default for TransactionParams {
@@ -30,26 +45,45 @@ impl Default for TransactionParams {
             src_file_name_len: Default::default(),
             dest_file_name: [0; u8::MAX as usize],
             dest_file_name_len: Default::default(),
+            dest_path_buf: Default::default(),
+            condition_code: ConditionCode::NoError,
+            delivery_code: DeliveryCode::Incomplete,
+            cksum_buf: [0; 1024],
         }
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum DestError {
-    /// File directive expected, but none specified
-    DirectiveExpected,
-    CantProcessPacketType(FileDirectiveType),
-    // Received new metadata PDU while being already being busy with a file transfer.
-    RecvdMetadataButIsBusy,
-    EmptySrcFileField,
-    EmptyDestFileField,
-    Pdu(PduError),
+impl TransactionParams {
+    fn reset(&mut self) {
+        self.condition_code = ConditionCode::NoError;
+        self.delivery_code = DeliveryCode::Incomplete;
+    }
 }
 
-impl From<PduError> for DestError {
-    fn from(value: PduError) -> Self {
-        Self::Pdu(value)
-    }
+#[derive(Debug, Error)]
+pub enum DestError {
+    /// File directive expected, but none specified
+    #[error("expected file directive")]
+    DirectiveExpected,
+    #[error("can not process packet type {0:?}")]
+    CantProcessPacketType(FileDirectiveType),
+    #[error("can not process file data PDUs in current state")]
+    WrongStateForFileDataAndEof,
+    // Received new metadata PDU while being already being busy with a file transfer.
+    #[error("busy with transfer")]
+    RecvdMetadataButIsBusy,
+    #[error("empty source file field")]
+    EmptySrcFileField,
+    #[error("empty dest file field")]
+    EmptyDestFileField,
+    #[error("pdu error {0}")]
+    Pdu(#[from] PduError),
+    #[error("io error {0}")]
+    Io(#[from] std::io::Error),
+    #[error("path conversion error {0}")]
+    PathConversion(#[from] Utf8Error),
+    #[error("error building dest path from source file name and dest folder")]
+    PathConcatError,
 }
 
 impl DestinationHandler {
@@ -59,6 +93,14 @@ impl DestinationHandler {
             state: State::Idle,
             pdu_conf: CommonPduConfig::new_with_defaults(),
             transaction_params: Default::default(),
+        }
+    }
+
+    pub fn state_machine(&mut self) -> Result<(), DestError> {
+        match self.state {
+            State::Idle => todo!(),
+            State::BusyClass1Nacked => self.fsm_nacked(),
+            State::BusyClass2Acked => todo!(),
         }
     }
 
@@ -79,33 +121,27 @@ impl DestinationHandler {
         }
     }
 
-    pub fn handle_file_data(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
-        Ok(())
-    }
-
     pub fn handle_file_directive(
         &mut self,
         pdu_directive: FileDirectiveType,
         raw_packet: &[u8],
     ) -> Result<(), DestError> {
         match pdu_directive {
-            FileDirectiveType::EofPdu => todo!(),
-            FileDirectiveType::FinishedPdu => todo!(),
-            FileDirectiveType::AckPdu => todo!(),
-            FileDirectiveType::MetadataPdu => self.handle_metadata_pdu(raw_packet),
-            FileDirectiveType::NakPdu => todo!(),
-            FileDirectiveType::PromptPdu => todo!(),
-            FileDirectiveType::KeepAlivePdu => todo!(),
+            FileDirectiveType::EofPdu => self.handle_eof_pdu(raw_packet)?,
+            FileDirectiveType::FinishedPdu
+            | FileDirectiveType::NakPdu
+            | FileDirectiveType::KeepAlivePdu => {
+                return Err(DestError::CantProcessPacketType(pdu_directive));
+            }
+            FileDirectiveType::AckPdu => {
+                todo!(
+                "check whether ACK pdu handling is applicable by checking the acked directive field"
+                )
+            }
+            FileDirectiveType::MetadataPdu => self.handle_metadata_pdu(raw_packet)?,
+            FileDirectiveType::PromptPdu => self.handle_prompt_pdu(raw_packet)?,
         };
         Ok(())
-    }
-
-    pub fn state_machine(&mut self) {
-        match self.state {
-            State::Idle => todo!(),
-            State::BusyClass1Nacked => self.fsm_nacked(),
-            State::BusyClass2Acked => todo!(),
-        }
     }
 
     pub fn handle_metadata_pdu(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
@@ -113,6 +149,7 @@ impl DestinationHandler {
             return Err(DestError::RecvdMetadataButIsBusy);
         }
         let metadata_pdu = MetadataPdu::from_bytes(raw_packet)?;
+        self.transaction_params.reset();
         self.transaction_params.metadata_params = *metadata_pdu.metadata_params();
         let src_name = metadata_pdu.src_file_name();
         if src_name.is_empty() {
@@ -131,21 +168,78 @@ impl DestinationHandler {
         Ok(())
     }
 
+    pub fn handle_file_data(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
+        if self.state == State::Idle || self.step != TransactionStep::ReceivingFileDataPdus {
+            return Err(DestError::WrongStateForFileDataAndEof);
+        }
+        let fd_pdu = FileDataPdu::from_bytes(raw_packet)?;
+        let mut dest_file = File::options()
+            .write(true)
+            .open(&self.transaction_params.dest_path_buf)?;
+        dest_file.seek(SeekFrom::Start(fd_pdu.offset()))?;
+        dest_file.write_all(fd_pdu.file_data())?;
+        Ok(())
+    }
     pub fn handle_eof_pdu(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
+        if self.state == State::Idle || self.step != TransactionStep::ReceivingFileDataPdus {
+            return Err(DestError::WrongStateForFileDataAndEof);
+        }
+        let eof_pdu = EofPdu::from_bytes(raw_packet)?;
+        let checksum = eof_pdu.file_checksum();
+        self.checksum_check(checksum)?;
+        if self.state == State::BusyClass1Nacked {
+            self.step = TransactionStep::TransferCompletion;
+        } else {
+            self.step = TransactionStep::SendingAckPdu;
+        }
         Ok(())
     }
 
-    fn fsm_nacked(&self) {
+    pub fn handle_prompt_pdu(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
+        todo!();
+        Ok(())
+    }
+
+    fn checksum_check(&mut self, expected_checksum: u32) -> Result<(), DestError> {
+        let mut digest = CRC_32.digest();
+        let file_to_check = File::open(&self.transaction_params.dest_path_buf)?;
+        let mut buf_reader = BufReader::new(file_to_check);
+        loop {
+            let bytes_read = buf_reader.read(&mut self.transaction_params.cksum_buf)?;
+            if bytes_read == 0 {
+                break;
+            }
+            digest.update(&self.transaction_params.cksum_buf[0..bytes_read]);
+        }
+        if digest.finalize() == expected_checksum {
+            self.transaction_params.condition_code = ConditionCode::NoError;
+            self.transaction_params.delivery_code = DeliveryCode::Complete;
+        } else {
+            self.transaction_params.condition_code = ConditionCode::FileChecksumFailure;
+        }
+        Ok(())
+    }
+
+    fn fsm_nacked(&mut self) -> Result<(), DestError> {
         match self.step {
             TransactionStep::Idle => {
                 // TODO: Should not happen. Determine what to do later
             }
-            TransactionStep::TransactionStart => {}
-            TransactionStep::ReceivingFileDataPdus => todo!(),
+            TransactionStep::TransactionStart => {
+                self.transaction_start()?;
+            }
+            TransactionStep::ReceivingFileDataPdus => {
+                todo!("advance the fsm if everything is finished")
+            }
+            TransactionStep::TransferCompletion => {
+                self.transfer_completion()?;
+            }
             TransactionStep::SendingAckPdu => todo!(),
-            TransactionStep::TransferCompletion => todo!(),
-            TransactionStep::SendingFinishedPdu => todo!(),
+            TransactionStep::SendingFinishedPdu => {
+                self.send_finished_pdu()?;
+            }
         }
+        Ok(())
     }
 
     /// Get the step, which denotes the exact step of a pending CFDP transaction when applicable.
@@ -157,6 +251,45 @@ impl DestinationHandler {
     /// is used if it is active.
     pub fn state(&self) -> State {
         self.state
+    }
+
+    fn transaction_start(&mut self) -> Result<(), DestError> {
+        let dest_path = Path::new(from_utf8(
+            &self.transaction_params.dest_file_name[..self.transaction_params.dest_file_name_len],
+        )?);
+
+        self.transaction_params.dest_path_buf = dest_path.to_path_buf();
+
+        let metadata = metadata(dest_path)?;
+        if metadata.is_dir() {
+            // Create new destination path by concatenating the last part of the source source
+            // name and the destination folder. For example, for a source file of /tmp/hello.txt
+            // and a destination name of /home/test, the resulting file name should be
+            // /home/test/hello.txt
+            let source_path = Path::new(from_utf8(
+                &self.transaction_params.src_file_name[..self.transaction_params.src_file_name_len],
+            )?);
+
+            let source_name = source_path.file_name();
+            if source_name.is_none() {
+                return Err(DestError::PathConcatError);
+            }
+            let source_name = source_name.unwrap();
+            self.transaction_params.dest_path_buf.push(source_name);
+        }
+        // This function does exactly what we require: Create a new file if it does not exist yet
+        // and trucate an existing one.
+        File::create(&self.transaction_params.dest_path_buf)?;
+        Ok(())
+    }
+
+    fn transfer_completion(&mut self) -> Result<(), DestError> {
+        todo!();
+        Ok(())
+    }
+
+    fn send_finished_pdu(&mut self) -> Result<(), DestError> {
+        Ok(())
     }
 }
 
