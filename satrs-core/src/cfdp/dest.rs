@@ -6,23 +6,35 @@ use std::{
 };
 
 use super::{State, TransactionStep, CRC_32};
-use spacepackets::cfdp::{
-    pdu::{
-        eof::EofPdu,
-        file_data::FileDataPdu,
-        finished::DeliveryCode,
-        metadata::{MetadataGenericParams, MetadataPdu},
-        CommonPduConfig, FileDirectiveType, PduError,
+use spacepackets::{
+    cfdp::{
+        pdu::{
+            eof::EofPdu,
+            file_data::FileDataPdu,
+            finished::{DeliveryCode, FileStatus, FinishedPdu},
+            metadata::{MetadataGenericParams, MetadataPdu},
+            CommonPduConfig, FileDirectiveType, PduError, PduHeader,
+        },
+        tlv::EntityIdTlv,
+        ConditionCode, PduType,
     },
-    ConditionCode, PduType,
+    util::UnsignedByteField,
 };
 use thiserror::Error;
 
 pub struct DestinationHandler {
+    id: UnsignedByteField,
     step: TransactionStep,
     state: State,
     pdu_conf: CommonPduConfig,
     transaction_params: TransactionParams,
+    packets_to_send_ctx: PacketsToSendContext,
+}
+
+#[derive(Debug, Default)]
+struct PacketsToSendContext {
+    packet_available: bool,
+    directive: Option<FileDirectiveType>,
 }
 
 struct TransactionParams {
@@ -34,6 +46,7 @@ struct TransactionParams {
     dest_path_buf: PathBuf,
     condition_code: ConditionCode,
     delivery_code: DeliveryCode,
+    file_status: FileStatus,
     cksum_buf: [u8; 1024],
 }
 
@@ -48,6 +61,7 @@ impl Default for TransactionParams {
             dest_path_buf: Default::default(),
             condition_code: ConditionCode::NoError,
             delivery_code: DeliveryCode::Incomplete,
+            file_status: FileStatus::Unreported,
             cksum_buf: [0; 1024],
         }
     }
@@ -87,12 +101,14 @@ pub enum DestError {
 }
 
 impl DestinationHandler {
-    pub fn new() -> Self {
+    pub fn new(id: impl Into<UnsignedByteField>) -> Self {
         Self {
+            id: id.into(),
             step: TransactionStep::Idle,
             state: State::Idle,
-            pdu_conf: CommonPduConfig::new_with_defaults(),
+            pdu_conf: Default::default(),
             transaction_params: Default::default(),
+            packets_to_send_ctx: Default::default(),
         }
     }
 
@@ -119,6 +135,55 @@ impl DestinationHandler {
             }
             PduType::FileData => self.handle_file_data(raw_packet),
         }
+    }
+
+    pub fn packet_to_send_ready(&self) -> bool {
+        self.packets_to_send_ctx.packet_available
+    }
+
+    pub fn get_next_packet_to_send(
+        &self,
+        buf: &mut [u8],
+    ) -> Result<Option<(FileDirectiveType, usize)>, DestError> {
+        if !self.packet_to_send_ready() {
+            return Ok(None);
+        }
+        let directive = self.packets_to_send_ctx.directive.unwrap();
+        let mut writte_size = 0;
+        match directive {
+            FileDirectiveType::EofPdu => todo!(),
+            FileDirectiveType::FinishedPdu => {
+                let pdu_header = PduHeader::new_no_file_data(self.pdu_conf, 0);
+                let finished_pdu = if self.transaction_params.condition_code
+                    == ConditionCode::NoError
+                    || self.transaction_params.condition_code
+                        == ConditionCode::UnsupportedChecksumType
+                {
+                    FinishedPdu::new_default(
+                        pdu_header,
+                        self.transaction_params.delivery_code,
+                        self.transaction_params.file_status,
+                    )
+                } else {
+                    // TODO: Are there cases where this ID is actually the source entity ID?
+                    let entity_id = EntityIdTlv::new(self.id);
+                    FinishedPdu::new_with_error(
+                        pdu_header,
+                        self.transaction_params.condition_code,
+                        self.transaction_params.delivery_code,
+                        self.transaction_params.file_status,
+                        entity_id,
+                    )
+                };
+                writte_size = finished_pdu.write_to_bytes(buf)?;
+            }
+            FileDirectiveType::AckPdu => todo!(),
+            FileDirectiveType::MetadataPdu => todo!(),
+            FileDirectiveType::NakPdu => todo!(),
+            FileDirectiveType::PromptPdu => todo!(),
+            FileDirectiveType::KeepAlivePdu => todo!(),
+        }
+        Ok(Some((directive, writte_size)))
     }
 
     pub fn handle_file_directive(
@@ -180,13 +245,22 @@ impl DestinationHandler {
         dest_file.write_all(fd_pdu.file_data())?;
         Ok(())
     }
+
     pub fn handle_eof_pdu(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
         if self.state == State::Idle || self.step != TransactionStep::ReceivingFileDataPdus {
             return Err(DestError::WrongStateForFileDataAndEof);
         }
         let eof_pdu = EofPdu::from_bytes(raw_packet)?;
         let checksum = eof_pdu.file_checksum();
-        self.checksum_check(checksum)?;
+        // For a standard disk based file system, which is assumed to be used for now, the file
+        // will always be retained. This might change in the future.
+        self.transaction_params.file_status = FileStatus::Retained;
+        if self.checksum_check(checksum)? {
+            self.transaction_params.condition_code = ConditionCode::NoError;
+            self.transaction_params.delivery_code = DeliveryCode::Complete;
+        } else {
+            self.transaction_params.condition_code = ConditionCode::FileChecksumFailure;
+        }
         if self.state == State::BusyClass1Nacked {
             self.step = TransactionStep::TransferCompletion;
         } else {
@@ -200,7 +274,7 @@ impl DestinationHandler {
         Ok(())
     }
 
-    fn checksum_check(&mut self, expected_checksum: u32) -> Result<(), DestError> {
+    fn checksum_check(&mut self, expected_checksum: u32) -> Result<bool, DestError> {
         let mut digest = CRC_32.digest();
         let file_to_check = File::open(&self.transaction_params.dest_path_buf)?;
         let mut buf_reader = BufReader::new(file_to_check);
@@ -212,12 +286,9 @@ impl DestinationHandler {
             digest.update(&self.transaction_params.cksum_buf[0..bytes_read]);
         }
         if digest.finalize() == expected_checksum {
-            self.transaction_params.condition_code = ConditionCode::NoError;
-            self.transaction_params.delivery_code = DeliveryCode::Complete;
-        } else {
-            self.transaction_params.condition_code = ConditionCode::FileChecksumFailure;
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 
     fn fsm_nacked(&mut self) -> Result<(), DestError> {
@@ -236,7 +307,7 @@ impl DestinationHandler {
             }
             TransactionStep::SendingAckPdu => todo!(),
             TransactionStep::SendingFinishedPdu => {
-                self.send_finished_pdu()?;
+                self.prepare_finished_pdu()?;
             }
         }
         Ok(())
@@ -288,18 +359,23 @@ impl DestinationHandler {
         Ok(())
     }
 
-    fn send_finished_pdu(&mut self) -> Result<(), DestError> {
+    fn prepare_finished_pdu(&mut self) -> Result<(), DestError> {
+        self.packets_to_send_ctx.packet_available = true;
+        self.packets_to_send_ctx.directive = Some(FileDirectiveType::FinishedPdu);
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use spacepackets::util::UnsignedByteFieldU8;
+
     use super::*;
 
     #[test]
     fn test_basic() {
-        let dest_handler = DestinationHandler::new();
+        let test_id = UnsignedByteFieldU8::new(1);
+        let dest_handler = DestinationHandler::new(test_id);
         assert_eq!(dest_handler.state(), State::Idle);
         assert_eq!(dest_handler.step(), TransactionStep::Idle);
     }
