@@ -149,7 +149,7 @@ impl DestinationHandler {
             return Ok(None);
         }
         let directive = self.packets_to_send_ctx.directive.unwrap();
-        let mut writte_size = 0;
+        let mut written_size = 0;
         match directive {
             FileDirectiveType::EofPdu => todo!(),
             FileDirectiveType::FinishedPdu => {
@@ -175,7 +175,7 @@ impl DestinationHandler {
                         entity_id,
                     )
                 };
-                writte_size = finished_pdu.write_to_bytes(buf)?;
+                written_size = finished_pdu.write_to_bytes(buf)?;
             }
             FileDirectiveType::AckPdu => todo!(),
             FileDirectiveType::MetadataPdu => todo!(),
@@ -183,7 +183,7 @@ impl DestinationHandler {
             FileDirectiveType::PromptPdu => todo!(),
             FileDirectiveType::KeepAlivePdu => todo!(),
         }
-        Ok(Some((directive, writte_size)))
+        Ok(Some((directive, written_size)))
     }
 
     pub fn handle_file_directive(
@@ -292,23 +292,21 @@ impl DestinationHandler {
     }
 
     fn fsm_nacked(&mut self) -> Result<(), DestError> {
-        match self.step {
-            TransactionStep::Idle => {
-                // TODO: Should not happen. Determine what to do later
-            }
-            TransactionStep::TransactionStart => {
-                self.transaction_start()?;
-            }
-            TransactionStep::ReceivingFileDataPdus => {
-                todo!("advance the fsm if everything is finished")
-            }
-            TransactionStep::TransferCompletion => {
-                self.transfer_completion()?;
-            }
-            TransactionStep::SendingAckPdu => todo!(),
-            TransactionStep::SendingFinishedPdu => {
-                self.prepare_finished_pdu()?;
-            }
+        if self.step == TransactionStep::Idle {}
+        if self.step == TransactionStep::TransactionStart {
+            self.transaction_start()?;
+        }
+        if self.step == TransactionStep::ReceivingFileDataPdus {
+            todo!("advance the fsm if everything is finished")
+        }
+        if self.step == TransactionStep::TransferCompletion {
+            self.transfer_completion()?;
+        }
+        if self.step == TransactionStep::SendingAckPdu {
+            todo!();
+        }
+        if self.step == TransactionStep::SendingFinishedPdu {
+            return Ok(());
         }
         Ok(())
     }
@@ -355,13 +353,17 @@ impl DestinationHandler {
     }
 
     fn transfer_completion(&mut self) -> Result<(), DestError> {
-        todo!();
+        if self.transaction_params.metadata_params.closure_requested {
+            self.prepare_finished_pdu()?;
+        }
+        todo!("user indication");
         Ok(())
     }
 
     fn prepare_finished_pdu(&mut self) -> Result<(), DestError> {
         self.packets_to_send_ctx.packet_available = true;
         self.packets_to_send_ctx.directive = Some(FileDirectiveType::FinishedPdu);
+        self.step = TransactionStep::SendingFinishedPdu;
         Ok(())
     }
 }
