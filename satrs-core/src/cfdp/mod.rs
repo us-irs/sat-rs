@@ -1,6 +1,28 @@
 use crc::{Crc, CRC_32_CKSUM};
+use spacepackets::util::UnsignedByteField;
 
 pub mod dest;
+pub mod user;
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub struct TransactionId {
+    source_id: UnsignedByteField,
+    seq_num: UnsignedByteField,
+}
+
+impl TransactionId {
+    pub fn new(source_id: UnsignedByteField, seq_num: UnsignedByteField) -> Self {
+        Self { source_id, seq_num }
+    }
+
+    pub fn source_id(&self) -> &UnsignedByteField {
+        &self.source_id
+    }
+
+    pub fn seq_num(&self) -> &UnsignedByteField {
+        &self.seq_num
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TransactionStep {
