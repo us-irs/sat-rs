@@ -149,9 +149,7 @@ impl DestinationHandler {
             return Ok(None);
         }
         let directive = self.packets_to_send_ctx.directive.unwrap();
-        let mut written_size = 0;
-        match directive {
-            FileDirectiveType::EofPdu => todo!(),
+        let written_size = match directive {
             FileDirectiveType::FinishedPdu => {
                 let pdu_header = PduHeader::new_no_file_data(self.pdu_conf, 0);
                 let finished_pdu = if self.transaction_params.condition_code
@@ -175,14 +173,16 @@ impl DestinationHandler {
                         entity_id,
                     )
                 };
-                written_size = finished_pdu.write_to_bytes(buf)?;
+                finished_pdu.write_to_bytes(buf)?
             }
             FileDirectiveType::AckPdu => todo!(),
-            FileDirectiveType::MetadataPdu => todo!(),
             FileDirectiveType::NakPdu => todo!(),
-            FileDirectiveType::PromptPdu => todo!(),
             FileDirectiveType::KeepAlivePdu => todo!(),
-        }
+            _ => {
+                // This should never happen and is considered an internal impl error
+                panic!("invalid file directive {directive:?} for dest handler send packet");
+            }
+        };
         Ok(Some((directive, written_size)))
     }
 
@@ -306,6 +306,7 @@ impl DestinationHandler {
             todo!();
         }
         if self.step == TransactionStep::SendingFinishedPdu {
+            self.reset();
             return Ok(());
         }
         Ok(())
@@ -358,6 +359,13 @@ impl DestinationHandler {
         }
         todo!("user indication");
         Ok(())
+    }
+
+    fn reset(&mut self) {
+        self.step = TransactionStep::Idle;
+        self.state = State::Idle;
+        self.packets_to_send_ctx.packet_available = false;
+        self.transaction_params.reset();
     }
 
     fn prepare_finished_pdu(&mut self) -> Result<(), DestError> {
