@@ -292,9 +292,8 @@ impl DestinationHandler {
         Ok(())
     }
 
-    pub fn handle_prompt_pdu(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
+    pub fn handle_prompt_pdu(&mut self, _raw_packet: &[u8]) -> Result<(), DestError> {
         todo!();
-        Ok(())
     }
 
     fn checksum_check(&mut self, expected_checksum: u32) -> Result<bool, DestError> {
@@ -407,7 +406,6 @@ impl DestinationHandler {
             self.prepare_finished_pdu()?;
         }
         todo!("user indication");
-        Ok(())
     }
 
     fn reset(&mut self) {
@@ -434,56 +432,56 @@ mod tests {
     pub struct TestCfdpUser {}
 
     impl CfdpUser for TestCfdpUser {
-        fn transaction_indication(&mut self, id: &crate::cfdp::TransactionId) {}
+        fn transaction_indication(&mut self, _id: &crate::cfdp::TransactionId) {}
 
-        fn eof_sent_indication(&mut self, id: &crate::cfdp::TransactionId) {}
+        fn eof_sent_indication(&mut self, _id: &crate::cfdp::TransactionId) {}
 
         fn transaction_finished_indication(
             &mut self,
-            finished_params: &crate::cfdp::user::TransactionFinishedParams,
+            _finished_params: &crate::cfdp::user::TransactionFinishedParams,
         ) {
         }
 
         fn metadata_recvd_indication(
             &mut self,
-            md_recvd_params: &crate::cfdp::user::MetadataReceivedParams,
+            _md_recvd_params: &crate::cfdp::user::MetadataReceivedParams,
         ) {
         }
 
         fn file_segment_recvd_indication(
             &mut self,
-            segment_recvd_params: &crate::cfdp::user::FileSegmentRecvdParams,
+            _segment_recvd_params: &crate::cfdp::user::FileSegmentRecvdParams,
         ) {
         }
 
-        fn report_indication(&mut self, id: &crate::cfdp::TransactionId) {}
+        fn report_indication(&mut self, _id: &crate::cfdp::TransactionId) {}
 
         fn suspended_indication(
             &mut self,
-            id: &crate::cfdp::TransactionId,
-            condition_code: ConditionCode,
+            _id: &crate::cfdp::TransactionId,
+            _condition_code: ConditionCode,
         ) {
         }
 
-        fn resumed_indication(&mut self, id: &crate::cfdp::TransactionId, progress: u64) {}
+        fn resumed_indication(&mut self, _id: &crate::cfdp::TransactionId,_progresss: u64) {}
 
         fn fault_indication(
             &mut self,
-            id: &crate::cfdp::TransactionId,
-            condition_code: ConditionCode,
-            progress: u64,
+            _id: &crate::cfdp::TransactionId,
+            _condition_code: ConditionCode,
+            _progress: u64,
         ) {
         }
 
         fn abandoned_indication(
             &mut self,
-            id: &crate::cfdp::TransactionId,
-            condition_code: ConditionCode,
-            progress: u64,
+            _id: &crate::cfdp::TransactionId,
+            _condition_code: ConditionCode,
+            _progress: u64,
         ) {
         }
 
-        fn eof_recvd_indication(&mut self, id: &crate::cfdp::TransactionId) {}
+        fn eof_recvd_indication(&mut self, _id: &crate::cfdp::TransactionId) {}
     }
 
     #[test]
