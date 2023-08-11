@@ -5,7 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{State, TransactionStep, CRC_32};
+use super::{user::CfdpUser, State, TransactionStep, CRC_32};
+use alloc::boxed::Box;
 use spacepackets::{
     cfdp::{
         pdu::{
@@ -29,6 +30,7 @@ pub struct DestinationHandler {
     pdu_conf: CommonPduConfig,
     transaction_params: TransactionParams,
     packets_to_send_ctx: PacketsToSendContext,
+    cfdp_user: Box<dyn CfdpUser>,
 }
 
 #[derive(Debug, Default)]
@@ -101,7 +103,7 @@ pub enum DestError {
 }
 
 impl DestinationHandler {
-    pub fn new(id: impl Into<UnsignedByteField>) -> Self {
+    pub fn new(id: impl Into<UnsignedByteField>, cfdp_user: Box<dyn CfdpUser>) -> Self {
         Self {
             id: id.into(),
             step: TransactionStep::Idle,
@@ -109,6 +111,7 @@ impl DestinationHandler {
             pdu_conf: Default::default(),
             transaction_params: Default::default(),
             packets_to_send_ctx: Default::default(),
+            cfdp_user,
         }
     }
 
@@ -382,10 +385,66 @@ mod tests {
 
     use super::*;
 
+    pub struct TestCfdpUser {}
+
+    impl CfdpUser for TestCfdpUser {
+        fn transaction_indication(&mut self, id: &crate::cfdp::TransactionId) {}
+
+        fn eof_sent_indication(&mut self, id: &crate::cfdp::TransactionId) {}
+
+        fn transaction_finished_indication(
+            &mut self,
+            finished_params: &crate::cfdp::user::TransactionFinishedParams,
+        ) {
+        }
+
+        fn metadata_recvd_indication(
+            &mut self,
+            md_recvd_params: &crate::cfdp::user::MetadataReceivedParams,
+        ) {
+        }
+
+        fn file_segment_recvd_indication(
+            &mut self,
+            segment_recvd_params: &crate::cfdp::user::FileSegmentRecvdParams,
+        ) {
+        }
+
+        fn report_indication(&mut self, id: &crate::cfdp::TransactionId) {}
+
+        fn suspended_indication(
+            &mut self,
+            id: &crate::cfdp::TransactionId,
+            condition_code: ConditionCode,
+        ) {
+        }
+
+        fn resumed_indication(&mut self, id: &crate::cfdp::TransactionId, progress: u64) {}
+
+        fn fault_indication(
+            &mut self,
+            id: &crate::cfdp::TransactionId,
+            condition_code: ConditionCode,
+            progress: u64,
+        ) {
+        }
+
+        fn abandoned_indication(
+            &mut self,
+            id: &crate::cfdp::TransactionId,
+            condition_code: ConditionCode,
+            progress: u64,
+        ) {
+        }
+
+        fn eof_recvd_indication(&mut self, id: &crate::cfdp::TransactionId) {}
+    }
+
     #[test]
     fn test_basic() {
         let test_id = UnsignedByteFieldU8::new(1);
-        let dest_handler = DestinationHandler::new(test_id);
+        let test_user = TestCfdpUser {};
+        let dest_handler = DestinationHandler::new(test_id, test_user);
         assert_eq!(dest_handler.state(), State::Idle);
         assert_eq!(dest_handler.step(), TransactionStep::Idle);
     }

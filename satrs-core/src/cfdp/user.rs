@@ -55,6 +55,11 @@ pub trait CfdpUser {
         condition_code: ConditionCode,
         progress: u64,
     );
-    fn abandoned_indication(&mut self, id: &TransactionId, condition_code: ConditionCode, progress: u64);
+    fn abandoned_indication(
+        &mut self,
+        id: &TransactionId,
+        condition_code: ConditionCode,
+        progress: u64,
+    );
     fn eof_recvd_indication(&mut self, id: &TransactionId);
 }
