@@ -45,4 +45,16 @@ pub trait CfdpUser {
     fn transaction_finished_indication(&mut self, finished_params: &TransactionFinishedParams);
     fn metadata_recvd_indication(&mut self, md_recvd_params: &MetadataReceivedParams);
     fn file_segment_recvd_indication(&mut self, segment_recvd_params: &FileSegmentRecvdParams);
+    // TODO: The standard does not strictly specify how the report information looks..
+    fn report_indication(&mut self, id: &TransactionId);
+    fn suspended_indication(&mut self, id: &TransactionId, condition_code: ConditionCode);
+    fn resumed_indication(&mut self, id: &TransactionId, progress: u64);
+    fn fault_indication(
+        &mut self,
+        id: &TransactionId,
+        condition_code: ConditionCode,
+        progress: u64,
+    );
+    fn abandoned_indication(&mut self, id: &TransactionId, condition_code: ConditionCode, progress: u64);
+    fn eof_recvd_indication(&mut self, id: &TransactionId);
 }
