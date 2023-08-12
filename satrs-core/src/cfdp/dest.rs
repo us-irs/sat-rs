@@ -369,8 +369,7 @@ impl DestinationHandler {
             msgs_to_user: &[],
         };
         self.transaction_params.transaction_id = Some(id);
-        cfdp_user
-            .metadata_recvd_indication(&metadata_recvd_params);
+        cfdp_user.metadata_recvd_indication(&metadata_recvd_params);
 
         let metadata = metadata(dest_path)?;
         if metadata.is_dir() {
@@ -424,21 +423,39 @@ impl DestinationHandler {
 
 #[cfg(test)]
 mod tests {
-    use spacepackets::util::UnsignedByteFieldU8;
+    use spacepackets::util::UnsignedByteFieldU16;
 
     use super::*;
 
-    pub struct TestCfdpUser {}
+    const LOCAL_ID: UnsignedByteFieldU16 = UnsignedByteFieldU16::new(1);
+    const REMOTE_ID: UnsignedByteFieldU16 = UnsignedByteFieldU16::new(2);
+
+    #[derive(Default)]
+    struct TestCfdpUser {
+        next_expected_seq_num: u64,
+    }
+
+    impl TestCfdpUser {
+        fn generic_id_check(&self, id: &crate::cfdp::TransactionId) {
+            assert_eq!(id.source_id, REMOTE_ID.into());
+            assert_eq!(id.seq_num().value(), self.next_expected_seq_num);
+        }
+    }
 
     impl CfdpUser for TestCfdpUser {
-        fn transaction_indication(&mut self, _id: &crate::cfdp::TransactionId) {}
+        fn transaction_indication(&mut self, id: &crate::cfdp::TransactionId) {
+            self.generic_id_check(id);
+        }
 
-        fn eof_sent_indication(&mut self, _id: &crate::cfdp::TransactionId) {}
+        fn eof_sent_indication(&mut self, id: &crate::cfdp::TransactionId) {
+            self.generic_id_check(id);
+        }
 
         fn transaction_finished_indication(
             &mut self,
-            _finished_params: &crate::cfdp::user::TransactionFinishedParams,
+            finished_params: &crate::cfdp::user::TransactionFinishedParams,
         ) {
+            self.generic_id_check(&finished_params.id);
         }
 
         fn metadata_recvd_indication(
@@ -462,7 +479,7 @@ mod tests {
         ) {
         }
 
-        fn resumed_indication(&mut self, _id: &crate::cfdp::TransactionId,_progresss: u64) {}
+        fn resumed_indication(&mut self, _id: &crate::cfdp::TransactionId, _progresss: u64) {}
 
         fn fault_indication(
             &mut self,
@@ -483,12 +500,23 @@ mod tests {
         fn eof_recvd_indication(&mut self, _id: &crate::cfdp::TransactionId) {}
     }
 
+    fn init_check(handler: &DestinationHandler) {
+        assert_eq!(handler.state(), State::Idle);
+        assert_eq!(handler.step(), TransactionStep::Idle);
+    }
+
     #[test]
     fn test_basic() {
-        let test_id = UnsignedByteFieldU8::new(1);
-        let test_user = TestCfdpUser {};
-        let dest_handler = DestinationHandler::new(test_id);
-        assert_eq!(dest_handler.state(), State::Idle);
-        assert_eq!(dest_handler.step(), TransactionStep::Idle);
+        let dest_handler = DestinationHandler::new(LOCAL_ID);
+        init_check(&dest_handler);
+    }
+
+    #[test]
+    fn test_empty_file_transfer() {
+        let test_user = TestCfdpUser::default();
+        let mut dest_handler = DestinationHandler::new(LOCAL_ID);
+        init_check(&dest_handler);
+        // TODO: Create Metadata PDU and EOF PDU for empty file transfer.
+        //dest_handler.insert_packet(pdu_type, pdu_directive, raw_packet)
     }
 }
