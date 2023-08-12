@@ -9,7 +9,6 @@ use super::{
     user::{CfdpUser, MetadataReceivedParams},
     State, TransactionId, TransactionStep, CRC_32,
 };
-use alloc::boxed::Box;
 use spacepackets::{
     cfdp::{
         pdu::{
@@ -32,7 +31,7 @@ pub struct DestinationHandler {
     state: State,
     transaction_params: TransactionParams,
     packets_to_send_ctx: PacketsToSendContext,
-    cfdp_user: Box<dyn CfdpUser>,
+    //cfdp_user: Box<dyn CfdpUser>,
 }
 
 #[derive(Debug, Default)]
@@ -123,21 +122,21 @@ pub enum DestError {
 }
 
 impl DestinationHandler {
-    pub fn new(id: impl Into<UnsignedByteField>, cfdp_user: Box<dyn CfdpUser>) -> Self {
+    pub fn new(id: impl Into<UnsignedByteField>) -> Self {
         Self {
             id: id.into(),
             step: TransactionStep::Idle,
             state: State::Idle,
             transaction_params: Default::default(),
             packets_to_send_ctx: Default::default(),
-            cfdp_user,
+            //cfdp_user,
         }
     }
 
-    pub fn state_machine(&mut self) -> Result<(), DestError> {
+    pub fn state_machine(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
         match self.state {
             State::Idle => todo!(),
-            State::BusyClass1Nacked => self.fsm_nacked(),
+            State::BusyClass1Nacked => self.fsm_nacked(cfdp_user),
             State::BusyClass2Acked => todo!(),
         }
     }
@@ -313,10 +312,10 @@ impl DestinationHandler {
         Ok(false)
     }
 
-    fn fsm_nacked(&mut self) -> Result<(), DestError> {
+    fn fsm_nacked(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
         if self.step == TransactionStep::Idle {}
         if self.step == TransactionStep::TransactionStart {
-            self.transaction_start()?;
+            self.transaction_start(cfdp_user)?;
         }
         if self.step == TransactionStep::ReceivingFileDataPdus {
             todo!("advance the fsm if everything is finished")
@@ -345,7 +344,7 @@ impl DestinationHandler {
         self.state
     }
 
-    fn transaction_start(&mut self) -> Result<(), DestError> {
+    fn transaction_start(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
         let dest_name = from_utf8(
             &self.transaction_params.file_properties.dest_file_name
                 [..self.transaction_params.file_properties.dest_file_name_len],
@@ -370,7 +369,7 @@ impl DestinationHandler {
             msgs_to_user: &[],
         };
         self.transaction_params.transaction_id = Some(id);
-        self.cfdp_user
+        cfdp_user
             .metadata_recvd_indication(&metadata_recvd_params);
 
         let metadata = metadata(dest_path)?;
@@ -488,7 +487,7 @@ mod tests {
     fn test_basic() {
         let test_id = UnsignedByteFieldU8::new(1);
         let test_user = TestCfdpUser {};
-        let dest_handler = DestinationHandler::new(test_id, Box::new(test_user));
+        let dest_handler = DestinationHandler::new(test_id);
         assert_eq!(dest_handler.state(), State::Idle);
         assert_eq!(dest_handler.step(), TransactionStep::Idle);
     }
