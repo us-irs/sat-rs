@@ -412,7 +412,7 @@ fn main() {
                                         );
                                         let mut buf: [u8; 8] = [0; 8];
 
-                                        target.target.write_to_be_bytes(&mut buf).unwrap();
+                                        addressable_id.write_to_be_bytes(&mut buf).unwrap();
                                         let pus_tm = PusTmCreator::new(
                                             &mut sp_header,
                                             sec_header,
