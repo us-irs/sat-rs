@@ -11,13 +11,13 @@ use satrs_core::pus::{
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::tmtc::TargetId;
-use satrs_example::tmtc_err;
+use satrs_example::{TargetIdWithApid, tmtc_err};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
 pub struct PusService8ActionHandler {
     psb: PusServiceBase,
-    request_handlers: HashMap<TargetId, Sender<RequestWithToken>>,
+    request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
 }
 
 impl PusService8ActionHandler {
@@ -27,7 +27,7 @@ impl PusService8ActionHandler {
         tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
-        request_handlers: HashMap<TargetId, Sender<RequestWithToken>>,
+        request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
     ) -> Self {
         Self {
             psb: PusServiceBase::new(
@@ -63,7 +63,8 @@ impl PusService8ActionHandler {
                 "Expected at least 4 bytes".into(),
             ));
         }
-        let target_id = u32::from_be_bytes(user_data[0..4].try_into().unwrap());
+        //let target_id = u32::from_be_bytes(user_data[0..4].try_into().unwrap());
+        let target_id = TargetIdWithApid::from_tc(tc).unwrap();
         let action_id = u32::from_be_bytes(user_data[4..8].try_into().unwrap());
         if let Some(sender) = self.request_handlers.get(&target_id) {
             sender
@@ -78,7 +79,7 @@ impl PusService8ActionHandler {
                 .expect("Forwarding action request failed");
         } else {
             let mut fail_data: [u8; 4] = [0; 4];
-            fail_data.copy_from_slice(&target_id.to_be_bytes());
+            fail_data.copy_from_slice(&target_id.target.to_be_bytes());
             self.psb()
                 .verification_handler
                 .borrow_mut()

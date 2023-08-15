@@ -15,9 +15,16 @@ zerocopy = "0.6"
 csv = "1"
 num_enum = "0.6"
 thiserror = "1"
+embedded-can = "0.4"
+#socketcan = "2.0"
+derive-new = "0.5"
+num-traits = "0.2"
+num-derive = "0.3"
 
 [dependencies.satrs-core]
 path = "../satrs-core"
 
 [dependencies.satrs-mib]
 path = "../satrs-mib"
+
+

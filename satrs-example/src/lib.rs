@@ -1,11 +1,102 @@
+use std::fmt;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use satrs_core::events::{EventU32TypedSev, SeverityInfo};
 use satrs_core::objects::ObjectId;
 use std::net::Ipv4Addr;
+use delegate::delegate;
+use derive_new::new;
+use thiserror::Error;
+use satrs_core::spacepackets::{ByteConversionError, CcsdsPacket, SizeMissmatch};
+use satrs_core::spacepackets::ecss::PusPacket;
+use satrs_core::spacepackets::ecss::tc::{GenericPusTcSecondaryHeader, IsPusTelecommand, PusTc};
+use satrs_core::tmtc::TargetId;
 
 use satrs_mib::res_code::{ResultU16, ResultU16Info};
 use satrs_mib::resultcode;
 
+//pub mod can;
+//mod can_ids;
+mod logger;
+
+pub type Apid = u16;
+
+#[derive(Debug, Error)]
+pub enum TargetIdCreationError {
+    #[error("byte conversion")]
+    ByteConversion(#[from] ByteConversionError),
+    #[error("not enough app data to generate target ID")]
+    NotEnoughAppData(usize)
+}
+
+// TODO: can these stay pub?
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, new)]
+pub struct TargetIdWithApid {
+    pub apid: Apid,
+    pub target: TargetId,
+}
+
+impl fmt::Display for TargetIdWithApid {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}, {}", self.apid, self.target)
+    }
+}
+
+impl TargetIdWithApid {
+    pub fn apid(&self) -> Apid {
+        self.apid
+    }
+    pub fn target_id(&self) -> TargetId{
+        self.target
+    }
+}
+
+impl TargetIdWithApid {
+    pub fn from_tc(tc: &(impl CcsdsPacket + PusPacket + IsPusTelecommand)) -> Result<Self, TargetIdCreationError> {
+        if tc.user_data().len() < 4 {
+            return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
+                found: tc.user_data().len(),
+                expected: 8,
+            }).into());
+        }
+        let target_id = u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap());
+        Ok(Self {
+            apid: tc.apid(),
+            target: u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap()),
+        })
+    }
+}
+
+// #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash, new)]
+// #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+// pub struct TargetIdWithUniqueId {
+//     target_id: TargetIdWithApid,
+//     unique_id: u32,
+// }
+//
+// impl TargetIdWithUniqueId {
+//     delegate! {
+//        to self.target_id {
+//             pub fn apid(&self) -> Apid;
+//             pub fn target_id(&self) -> TargetId;
+//             }
+//         }
+//     pub fn unique_id(&self) -> u32 {
+//         self.unique_id
+//     }
+//
+//     pub fn write_target_id_and_unique_id_as_pus_header(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
+//        if buf.len() < 8 {
+//            return Err(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
+//                found: buf.len(),
+//                expected: 8,
+//            }));
+//        }
+//         buf[0..4].copy_from_slice(&self.target_id.target_id().to_be_bytes());
+//         buf[4..8].copy_from_slice(&self.unique_id.to_be_bytes());
+//         Ok(8)
+//     }
+// }
+//
 pub const PUS_APID: u16 = 0x02;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, TryFromPrimitive, IntoPrimitive)]
@@ -19,6 +110,8 @@ pub enum CustomPusServiceId {
 pub enum RequestTargetId {
     AcsSubsystem = 1,
 }
+
+pub const AOCS_APID: u16 = 1;
 
 pub const ACS_OBJECT_ID: ObjectId = ObjectId {
     id: RequestTargetId::AcsSubsystem as u32,
