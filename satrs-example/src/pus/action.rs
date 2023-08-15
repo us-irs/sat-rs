@@ -11,7 +11,7 @@ use satrs_core::pus::{
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::tmtc::TargetId;
-use satrs_example::{TargetIdWithApid, tmtc_err};
+use satrs_example::{tmtc_err, TargetIdWithApid};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 

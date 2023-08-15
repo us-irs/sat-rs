@@ -9,7 +9,7 @@ mod tmtc;
 
 use log::{info, warn};
 
-use crate::hk::AcsHkIds;
+use crate::hk::{AcsHkIds, HkUniqueId};
 use crate::logging::setup_logger;
 use crate::pus::action::{Pus8Wrapper, PusService8ActionHandler};
 use crate::pus::event::Pus5Wrapper;
@@ -45,9 +45,12 @@ use satrs_core::spacepackets::{
     SpHeader,
 };
 use satrs_core::tmtc::tm_helper::SharedTmStore;
-use satrs_core::tmtc::{TargetId};
+use satrs_core::tmtc::TargetId;
 use satrs_core::ChannelId;
-use satrs_example::{RequestTargetId, TcReceiverId, TmSenderId, OBSW_SERVER_ADDR, PUS_APID, SERVER_PORT, TargetIdWithApid};
+use satrs_example::{
+    RequestTargetId, TargetIdWithApid, TcReceiverId, TmSenderId, OBSW_SERVER_ADDR, PUS_APID,
+    SERVER_PORT,
+};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};
@@ -394,7 +397,10 @@ fn main() {
                             Request::Hk(hk_req) => match hk_req {
                                 HkRequest::OneShot(unique_id) => {
                                     let target = request.targeted_request.target_id;
-                                    assert_eq!(target.target_id(), RequestTargetId::AcsSubsystem as u32);
+                                    assert_eq!(
+                                        target.target_id(),
+                                        RequestTargetId::AcsSubsystem as u32
+                                    );
                                     if request.targeted_request.target_id.target
                                         == AcsHkIds::TestMgmSet as u32
                                     {
@@ -412,7 +418,8 @@ fn main() {
                                         );
                                         let mut buf: [u8; 8] = [0; 8];
 
-                                        addressable_id.write_to_be_bytes(&mut buf).unwrap();
+                                        let hk_id = HkUniqueId::new(1);
+                                        hk_id.bytes_from_target_id_with_apid(&mut buf, target).unwrap();
                                         let pus_tm = PusTmCreator::new(
                                             &mut sp_header,
                                             sec_header,

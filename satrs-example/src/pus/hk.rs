@@ -12,7 +12,7 @@ use satrs_core::pus::{
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::{hk, PusPacket};
 use satrs_core::tmtc::TargetId;
-use satrs_example::{hk_err, TargetIdWithApid, tmtc_err};
+use satrs_example::{hk_err, tmtc_err, TargetIdWithApid};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
@@ -92,10 +92,7 @@ impl PusServiceHandler for PusService3HkHandler {
         }
         let target_id = TargetIdWithApid::from_tc(&tc).expect("invalid tc format");
         let unique_id = u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap());
-        if !self
-            .request_handlers
-            .contains_key(&target_id)
-        {
+        if !self.request_handlers.contains_key(&target_id) {
             self.psb
                 .verification_handler
                 .borrow_mut()
@@ -109,29 +106,17 @@ impl PusServiceHandler for PusService3HkHandler {
             )));
         }
         let send_request = |target: TargetIdWithApid, request: HkRequest| {
-            let sender = self
-                .request_handlers
-                .get(&target)
-                .unwrap();
+            let sender = self.request_handlers.get(&target).unwrap();
             sender
                 .send(RequestWithToken::new(target, Request::Hk(request), token))
                 .unwrap_or_else(|_| panic!("Sending HK request {request:?} failed"));
         };
         if subservice == hk::Subservice::TcEnableHkGeneration as u8 {
-            send_request(
-                target_id,
-                HkRequest::Enable(unique_id),
-            );
+            send_request(target_id, HkRequest::Enable(unique_id));
         } else if subservice == hk::Subservice::TcDisableHkGeneration as u8 {
-            send_request(
-                target_id,
-                HkRequest::Disable(unique_id),
-            );
+            send_request(target_id, HkRequest::Disable(unique_id));
         } else if subservice == hk::Subservice::TcGenerateOneShotHk as u8 {
-            send_request(
-                target_id,
-                HkRequest::OneShot(unique_id),
-            );
+            send_request(target_id, HkRequest::OneShot(unique_id));
         } else if subservice == hk::Subservice::TcModifyHkCollectionInterval as u8 {
             if user_data.len() < 12 {
                 self.psb

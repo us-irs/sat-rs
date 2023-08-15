@@ -1,15 +1,15 @@
-use std::fmt;
+use delegate::delegate;
+use derive_new::new;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use satrs_core::events::{EventU32TypedSev, SeverityInfo};
 use satrs_core::objects::ObjectId;
-use std::net::Ipv4Addr;
-use delegate::delegate;
-use derive_new::new;
-use thiserror::Error;
-use satrs_core::spacepackets::{ByteConversionError, CcsdsPacket, SizeMissmatch};
-use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::spacepackets::ecss::tc::{GenericPusTcSecondaryHeader, IsPusTelecommand, PusTc};
+use satrs_core::spacepackets::ecss::PusPacket;
+use satrs_core::spacepackets::{ByteConversionError, CcsdsPacket, SizeMissmatch};
 use satrs_core::tmtc::TargetId;
+use std::fmt;
+use std::net::Ipv4Addr;
+use thiserror::Error;
 
 use satrs_mib::res_code::{ResultU16, ResultU16Info};
 use satrs_mib::resultcode;
@@ -25,7 +25,7 @@ pub enum TargetIdCreationError {
     #[error("byte conversion")]
     ByteConversion(#[from] ByteConversionError),
     #[error("not enough app data to generate target ID")]
-    NotEnoughAppData(usize)
+    NotEnoughAppData(usize),
 }
 
 // TODO: can these stay pub?
@@ -45,18 +45,21 @@ impl TargetIdWithApid {
     pub fn apid(&self) -> Apid {
         self.apid
     }
-    pub fn target_id(&self) -> TargetId{
+    pub fn target_id(&self) -> TargetId {
         self.target
     }
 }
 
 impl TargetIdWithApid {
-    pub fn from_tc(tc: &(impl CcsdsPacket + PusPacket + IsPusTelecommand)) -> Result<Self, TargetIdCreationError> {
+    pub fn from_tc(
+        tc: &(impl CcsdsPacket + PusPacket + IsPusTelecommand),
+    ) -> Result<Self, TargetIdCreationError> {
         if tc.user_data().len() < 4 {
             return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
                 found: tc.user_data().len(),
                 expected: 8,
-            }).into());
+            })
+            .into());
         }
         let target_id = u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap());
         Ok(Self {
