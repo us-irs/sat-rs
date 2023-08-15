@@ -7,10 +7,7 @@
 //! routing without the overhead and complication of using message queues. However, it also requires
 #[cfg(feature = "alloc")]
 use downcast_rs::{impl_downcast, Downcast};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-use spacepackets::{ByteConversionError, SizeMissmatch, SpHeader};
-use spacepackets::ecss::tc::PusTc;
+use spacepackets::SpHeader;
 
 #[cfg(feature = "alloc")]
 pub mod ccsds_distrib;
