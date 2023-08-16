@@ -146,7 +146,11 @@ impl DestinationHandler {
         }
     }
 
-    pub fn insert_packet(
+    pub fn insert_packet(_raw_packet: &[u8]) -> Result<(), DestError> {
+        todo!();
+        //Ok(())
+    }
+    pub fn insert_packet_with_known_type(
         &mut self,
         pdu_type: PduType,
         pdu_directive: Option<FileDirectiveType>,
@@ -455,12 +459,18 @@ impl DestinationHandler {
 
 #[cfg(test)]
 mod tests {
-    use spacepackets::util::UnsignedByteFieldU16;
+    use spacepackets::{
+        cfdp::{lv::Lv, ChecksumType},
+        util::{UbfU16, UnsignedByteFieldU16},
+    };
 
     use super::*;
 
     const LOCAL_ID: UnsignedByteFieldU16 = UnsignedByteFieldU16::new(1);
     const REMOTE_ID: UnsignedByteFieldU16 = UnsignedByteFieldU16::new(2);
+
+    const SRC_NAME: &str = "source-file.txt";
+    const DEST_NAME: &str = "dest-file.txt";
 
     #[derive(Default)]
     struct TestCfdpUser {
@@ -545,11 +555,30 @@ mod tests {
 
     #[test]
     fn test_empty_file_transfer() {
+        let mut buf: [u8; 512] = [0; 512];
         let test_user = TestCfdpUser::default();
         let mut dest_handler = DestinationHandler::new(LOCAL_ID);
         init_check(&dest_handler);
 
+        let seq_num = UbfU16::new(0);
+        let pdu_conf = CommonPduConfig::new_with_byte_fields(REMOTE_ID, LOCAL_ID, seq_num).unwrap();
+        let pdu_header = PduHeader::new_no_file_data(pdu_conf, 0);
+        let metadata_params = MetadataGenericParams::new(false, ChecksumType::Crc32, 0);
+        let metadata_pdu = MetadataPdu::new(
+            pdu_header,
+            metadata_params,
+            Lv::new_from_str(SRC_NAME).unwrap(),
+            Lv::new_from_str(DEST_NAME).unwrap(),
+            None,
+        );
+        let written_len = metadata_pdu
+            .write_to_bytes(&mut buf)
+            .expect("writing metadata PDU failed");
         // TODO: Create Metadata PDU and EOF PDU for empty file transfer.
-        //dest_handler.insert_packet(pdu_type, pdu_directive, raw_packet)
+        dest_handler.insert_packet(
+            PduType::FileDirective,
+            Some(FileDirectiveType::MetadataPdu),
+            &buf[..written_len],
+        );
     }
 }
