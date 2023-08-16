@@ -65,8 +65,8 @@ default-features = false
 optional = true
 
 [dependencies.spacepackets]
-# version = "0.6"
-path = "../../spacepackets"
+version = "0.7.0-beta.0"
+# path = "../../spacepackets"
 # git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
 # rev = "041959e546e6e72b24eb50986c425a924015e3f4"
 default-features = false
