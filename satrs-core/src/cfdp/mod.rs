@@ -1,6 +1,7 @@
 use crc::{Crc, CRC_32_CKSUM};
 use spacepackets::util::UnsignedByteField;
 
+#[cfg(feature = "std")]
 pub mod dest;
 pub mod user;
 
