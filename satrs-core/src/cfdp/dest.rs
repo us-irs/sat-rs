@@ -59,7 +59,6 @@ struct TransactionParams {
     condition_code: ConditionCode,
     delivery_code: DeliveryCode,
     file_status: FileStatus,
-    //msgs_to_user: Vec<MsgToUserTlv<'static>>,
     cksum_buf: [u8; 1024],
     msgs_to_user_size: usize,
     msgs_to_user_buf: [u8; 1024],
