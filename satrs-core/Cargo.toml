@@ -26,7 +26,6 @@ default-features = false
 
 [dependencies.crc]
 version = "3"
-optional = true
 
 [dependencies.dyn-clone]
 version = "1"
@@ -96,7 +95,6 @@ std = [
   "spacepackets/std",
   "num_enum/std",
   "thiserror",
-  "crc"
 ]
 alloc = [
   "serde/alloc",
