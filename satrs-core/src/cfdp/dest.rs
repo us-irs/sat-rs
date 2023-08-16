@@ -9,6 +9,7 @@ use super::{
     user::{CfdpUser, MetadataReceivedParams},
     State, TransactionId, TransactionStep, CRC_32,
 };
+use smallvec::SmallVec;
 use spacepackets::{
     cfdp::{
         pdu::{
@@ -18,7 +19,7 @@ use spacepackets::{
             metadata::{MetadataGenericParams, MetadataPdu},
             CommonPduConfig, FileDirectiveType, PduError, PduHeader,
         },
-        tlv::EntityIdTlv,
+        tlv::{msg_to_user::MsgToUserTlv, EntityIdTlv, TlvType},
         ConditionCode, PduType,
     },
     util::UnsignedByteField,
@@ -58,7 +59,10 @@ struct TransactionParams {
     condition_code: ConditionCode,
     delivery_code: DeliveryCode,
     file_status: FileStatus,
+    //msgs_to_user: Vec<MsgToUserTlv<'static>>,
     cksum_buf: [u8; 1024],
+    msgs_to_user_size: usize,
+    msgs_to_user_buf: [u8; 1024],
 }
 
 impl Default for FileProperties {
@@ -84,6 +88,8 @@ impl Default for TransactionParams {
             delivery_code: DeliveryCode::Incomplete,
             file_status: FileStatus::Unreported,
             cksum_buf: [0; 1024],
+            msgs_to_user_size: 0,
+            msgs_to_user_buf: [0; 1024],
         }
     }
 }
@@ -242,16 +248,29 @@ impl DestinationHandler {
             return Err(DestError::EmptySrcFileField);
         }
         self.transaction_params.file_properties.src_file_name[..src_name.len_value()]
-            .copy_from_slice(src_name.value().unwrap());
+            .copy_from_slice(src_name.value());
         self.transaction_params.file_properties.src_file_name_len = src_name.len_value();
         let dest_name = metadata_pdu.dest_file_name();
         if dest_name.is_empty() {
             return Err(DestError::EmptyDestFileField);
         }
         self.transaction_params.file_properties.dest_file_name[..dest_name.len_value()]
-            .copy_from_slice(dest_name.value().unwrap());
+            .copy_from_slice(dest_name.value());
         self.transaction_params.file_properties.dest_file_name_len = dest_name.len_value();
         self.transaction_params.pdu_conf = *metadata_pdu.pdu_header().common_pdu_conf();
+        self.transaction_params.msgs_to_user_size = 0;
+        if metadata_pdu.options().is_some() {
+            for option_tlv in metadata_pdu.options_iter().unwrap() {
+                if option_tlv.is_standard_tlv()
+                    && option_tlv.tlv_type().unwrap() == TlvType::MsgToUser
+                {
+                    self.transaction_params
+                        .msgs_to_user_buf
+                        .copy_from_slice(option_tlv.raw_data().unwrap());
+                    self.transaction_params.msgs_to_user_size += option_tlv.len_full();
+                }
+            }
+        }
         Ok(())
     }
 
@@ -360,13 +379,27 @@ impl DestinationHandler {
             &self.transaction_params.file_properties.src_file_name
                 [0..self.transaction_params.file_properties.src_file_name_len],
         )?;
+        let mut msgs_to_user = SmallVec::<[MsgToUserTlv<'_>; 16]>::new();
+        let mut num_msgs_to_user = 0;
+        if self.transaction_params.msgs_to_user_size > 0 {
+            let mut index = 0;
+            while index < self.transaction_params.msgs_to_user_size {
+                // This should never panic as the validity of the options was checked beforehand.
+                let msgs_to_user_tlv =
+                    MsgToUserTlv::from_bytes(&self.transaction_params.msgs_to_user_buf[index..])
+                        .expect("message to user creation failed unexpectedly");
+                msgs_to_user.push(msgs_to_user_tlv);
+                index += msgs_to_user_tlv.len_full();
+                num_msgs_to_user += 1;
+            }
+        }
         let metadata_recvd_params = MetadataReceivedParams {
             id,
             source_id,
             file_size: self.transaction_params.metadata_params.file_size,
             src_file_name: src_name,
             dest_file_name: dest_name,
-            msgs_to_user: &[],
+            msgs_to_user: &msgs_to_user[..num_msgs_to_user],
         };
         self.transaction_params.transaction_id = Some(id);
         cfdp_user.metadata_recvd_indication(&metadata_recvd_params);
@@ -516,6 +549,7 @@ mod tests {
         let test_user = TestCfdpUser::default();
         let mut dest_handler = DestinationHandler::new(LOCAL_ID);
         init_check(&dest_handler);
+
         // TODO: Create Metadata PDU and EOF PDU for empty file transfer.
         //dest_handler.insert_packet(pdu_type, pdu_directive, raw_packet)
     }

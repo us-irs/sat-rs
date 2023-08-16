@@ -4,6 +4,7 @@ use spacepackets::{
             file_data::RecordContinuationState,
             finished::{DeliveryCode, FileStatus},
         },
+        tlv::msg_to_user::MsgToUserTlv,
         ConditionCode,
     },
     util::UnsignedByteField,
@@ -26,8 +27,7 @@ pub struct MetadataReceivedParams<'src_file, 'dest_file, 'msgs_to_user> {
     pub file_size: u64,
     pub src_file_name: &'src_file str,
     pub dest_file_name: &'dest_file str,
-    // TODO: This is pretty low-level. Is there a better way to do this?
-    pub msgs_to_user: &'msgs_to_user [u8],
+    pub msgs_to_user: &'msgs_to_user [MsgToUserTlv<'msgs_to_user>],
 }
 
 #[derive(Debug)]
