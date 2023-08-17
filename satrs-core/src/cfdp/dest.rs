@@ -7,7 +7,7 @@ use std::{
 
 use super::{
     user::{CfdpUser, MetadataReceivedParams},
-    State, TransactionId, TransactionStep, CRC_32,
+    PacketInfo, PacketTarget, State, TransactionId, TransactionStep, CRC_32,
 };
 use smallvec::SmallVec;
 use spacepackets::{
@@ -20,7 +20,7 @@ use spacepackets::{
             CommonPduConfig, FileDirectiveType, PduError, PduHeader,
         },
         tlv::{msg_to_user::MsgToUserTlv, EntityIdTlv, TlvType},
-        ConditionCode, PduType,
+        ConditionCode, PduType, TransmissionMode,
     },
     util::UnsignedByteField,
 };
@@ -142,28 +142,29 @@ impl DestinationHandler {
         match self.state {
             State::Idle => todo!(),
             State::BusyClass1Nacked => self.fsm_nacked(cfdp_user),
-            State::BusyClass2Acked => todo!(),
+            State::BusyClass2Acked => todo!("acknowledged mode not implemented yet"),
         }
     }
 
-    pub fn insert_packet(_raw_packet: &[u8]) -> Result<(), DestError> {
-        todo!();
-        //Ok(())
-    }
-    pub fn insert_packet_with_known_type(
-        &mut self,
-        pdu_type: PduType,
-        pdu_directive: Option<FileDirectiveType>,
-        raw_packet: &[u8],
-    ) -> Result<(), DestError> {
-        match pdu_type {
+    pub fn insert_packet(&mut self, packet_info: &PacketInfo) -> Result<(), DestError> {
+        if packet_info.target() != PacketTarget::DestEntity {
+            // Unwrap is okay here, a PacketInfo for a file data PDU should always have the
+            // destination as the target.
+            return Err(DestError::CantProcessPacketType(
+                packet_info.pdu_directive().unwrap(),
+            ));
+        }
+        match packet_info.pdu_type {
             PduType::FileDirective => {
-                if pdu_directive.is_none() {
+                if packet_info.pdu_directive.is_none() {
                     return Err(DestError::DirectiveExpected);
                 }
-                self.handle_file_directive(pdu_directive.unwrap(), raw_packet)
+                self.handle_file_directive(
+                    packet_info.pdu_directive.unwrap(),
+                    packet_info.raw_packet,
+                )
             }
-            PduType::FileData => self.handle_file_data(raw_packet),
+            PduType::FileData => self.handle_file_data(packet_info.raw_packet),
         }
     }
 
@@ -262,6 +263,13 @@ impl DestinationHandler {
         self.transaction_params.file_properties.dest_file_name_len = dest_name.len_value();
         self.transaction_params.pdu_conf = *metadata_pdu.pdu_header().common_pdu_conf();
         self.transaction_params.msgs_to_user_size = 0;
+        if metadata_pdu.pdu_header().common_pdu_conf().trans_mode
+            == TransmissionMode::Unacknowledged
+        {
+            self.state = State::BusyClass1Nacked;
+        } else {
+            self.state = State::BusyClass2Acked;
+        }
         if metadata_pdu.options().is_some() {
             for option_tlv in metadata_pdu.options_iter().unwrap() {
                 if option_tlv.is_standard_tlv()
@@ -459,6 +467,9 @@ impl DestinationHandler {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use std::println;
+
     use spacepackets::{
         cfdp::{lv::Lv, ChecksumType},
         util::{UbfU16, UnsignedByteFieldU16},
@@ -556,12 +567,14 @@ mod tests {
     #[test]
     fn test_empty_file_transfer() {
         let mut buf: [u8; 512] = [0; 512];
-        let test_user = TestCfdpUser::default();
+        let mut test_user = TestCfdpUser::default();
         let mut dest_handler = DestinationHandler::new(LOCAL_ID);
         init_check(&dest_handler);
 
         let seq_num = UbfU16::new(0);
-        let pdu_conf = CommonPduConfig::new_with_byte_fields(REMOTE_ID, LOCAL_ID, seq_num).unwrap();
+        let mut pdu_conf =
+            CommonPduConfig::new_with_byte_fields(REMOTE_ID, LOCAL_ID, seq_num).unwrap();
+        pdu_conf.trans_mode = TransmissionMode::Unacknowledged;
         let pdu_header = PduHeader::new_no_file_data(pdu_conf, 0);
         let metadata_params = MetadataGenericParams::new(false, ChecksumType::Crc32, 0);
         let metadata_pdu = MetadataPdu::new(
@@ -574,11 +587,13 @@ mod tests {
         let written_len = metadata_pdu
             .write_to_bytes(&mut buf)
             .expect("writing metadata PDU failed");
-        // TODO: Create Metadata PDU and EOF PDU for empty file transfer.
-        dest_handler.insert_packet(
-            PduType::FileDirective,
-            Some(FileDirectiveType::MetadataPdu),
-            &buf[..written_len],
-        );
+        let packet_info =
+            PacketInfo::new(&buf[..written_len]).expect("generating packet info failed");
+        let insert_result = dest_handler.insert_packet(&packet_info);
+        if let Err(e) = insert_result {
+            panic!("insert result error: {e}");
+        }
+        let result = dest_handler.state_machine(&mut test_user);
+        assert!(result.is_ok());
     }
 }

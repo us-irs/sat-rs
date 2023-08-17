@@ -71,7 +71,7 @@ version = "0.7.0-beta.0"
 # path = "../../spacepackets"
 git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
 # rev = ""
-branch = "update-lv-tlv"
+branch = "pdu-additions"
 default-features = false
 
 [dev-dependencies]
