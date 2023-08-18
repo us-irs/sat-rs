@@ -55,7 +55,6 @@ use paste::paste;
 use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU64, EcssEnumU8};
 use spacepackets::util::UnsignedEnum;
 use spacepackets::ByteConversionError;
-use spacepackets::SizeMissmatch;
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
@@ -80,10 +79,10 @@ macro_rules! param_to_be_bytes_impl {
             fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
                 let raw_len = self.raw_len();
                 if buf.len() < raw_len {
-                    return Err(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
+                    return Err(ByteConversionError::ToSliceTooSmall {
                         found: buf.len(),
                         expected: raw_len,
-                    }));
+                    });
                 }
                 buf[0..raw_len].copy_from_slice(&self.to_be_bytes());
                 Ok(raw_len)
@@ -186,10 +185,10 @@ macro_rules! scalar_byte_conversions_impl {
 
                     fn try_from(v: &[u8]) -> Result<Self, Self::Error>  {
                         if v.len() < size_of::<$ty>() {
-                            return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
+                            return Err(ByteConversionError::FromSliceTooSmall{
                                 expected: size_of::<$ty>(),
                                 found: v.len()
-                            }));
+                            });
                         }
                         Ok([<$ty:upper>]($ty::from_be_bytes(v[0..size_of::<$ty>()].try_into().unwrap())))
                     }
@@ -225,10 +224,10 @@ macro_rules! pair_byte_conversions_impl {
 
                     fn try_from(v: &[u8]) -> Result<Self, Self::Error>  {
                         if v.len() < 2 * size_of::<$ty>() {
-                            return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
+                            return Err(ByteConversionError::FromSliceTooSmall{
                                 expected: 2 * size_of::<$ty>(),
                                 found: v.len()
-                            }));
+                            });
                         }
                         Ok([<$ty:upper Pair>](
                             $ty::from_be_bytes(v[0..size_of::<$ty>()].try_into().unwrap()),
@@ -269,10 +268,10 @@ macro_rules! triplet_to_be_bytes_impl {
 
                     fn try_from(v: &[u8]) -> Result<Self, Self::Error>  {
                         if v.len() < 3 * size_of::<$ty>() {
-                            return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
+                            return Err(ByteConversionError::FromSliceTooSmall{
                                 expected: 3 * size_of::<$ty>(),
                                 found: v.len()
-                            }));
+                            });
                         }
                         Ok([<$ty:upper Triplet>](
                             $ty::from_be_bytes(v[0..size_of::<$ty>()].try_into().unwrap()),
