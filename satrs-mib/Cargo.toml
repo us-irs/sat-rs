@@ -5,9 +5,8 @@ edition = "2021"
 rust-version = "1.61"
 authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
 description = """
-Helper crate of the sat-rs framework to build a mission information base (MIB) from the OBSW
-directly.
-"""
+Helper crate of the sat-rs framework to build a mission information base (MIB) from the
+On-Board Software (OBSW) code directly."""
 homepage = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
 repository = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
 license = "Apache-2.0"
