@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
 default-run = "satrs-example"
+homepage = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
+repository = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
 
 [dependencies]
 fern = "0.6"
