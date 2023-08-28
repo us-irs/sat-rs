@@ -33,7 +33,7 @@ use core::marker::PhantomData;
 use delegate::delegate;
 use spacepackets::ecss::EcssEnumeration;
 use spacepackets::util::{ToBeBytes, UnsignedEnum};
-use spacepackets::{ByteConversionError, SizeMissmatch};
+use spacepackets::ByteConversionError;
 
 /// Using a type definition allows to change this to u64 in the future more easily
 pub type LargestEventRaw = u32;
@@ -124,10 +124,10 @@ impl<RAW: ToBeBytes, GID, UID> EventBase<RAW, GID, UID> {
         width: usize,
     ) -> Result<usize, ByteConversionError> {
         if buf.len() < width {
-            return Err(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
+            return Err(ByteConversionError::ToSliceTooSmall {
                 found: buf.len(),
                 expected: width,
-            }));
+            });
         }
         buf.copy_from_slice(raw.to_be_bytes().as_ref());
         Ok(raw.written_len())
@@ -783,9 +783,9 @@ mod tests {
         let err = HIGH_SEV_EVENT.write_to_be_bytes(&mut buf);
         assert!(err.is_err());
         let err = err.unwrap_err();
-        if let ByteConversionError::ToSliceTooSmall(missmatch) = err {
-            assert_eq!(missmatch.expected, 4);
-            assert_eq!(missmatch.found, 3);
+        if let ByteConversionError::ToSliceTooSmall { found, expected } = err {
+            assert_eq!(expected, 4);
+            assert_eq!(found, 3);
         }
     }
 
@@ -795,9 +795,9 @@ mod tests {
         let err = HIGH_SEV_EVENT_SMALL.write_to_be_bytes(&mut buf);
         assert!(err.is_err());
         let err = err.unwrap_err();
-        if let ByteConversionError::ToSliceTooSmall(missmatch) = err {
-            assert_eq!(missmatch.expected, 2);
-            assert_eq!(missmatch.found, 1);
+        if let ByteConversionError::ToSliceTooSmall { found, expected } = err {
+            assert_eq!(expected, 2);
+            assert_eq!(found, 1);
         }
     }
 

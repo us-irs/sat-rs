@@ -89,7 +89,7 @@ use crate::tmtc::{ReceivesCcsdsTc, ReceivesTcCore};
 use alloc::boxed::Box;
 use core::fmt::{Display, Formatter};
 use downcast_rs::Downcast;
-use spacepackets::{ByteConversionError, CcsdsPacket, SizeMissmatch, SpHeader};
+use spacepackets::{ByteConversionError, CcsdsPacket, SpHeader};
 #[cfg(feature = "std")]
 use std::error::Error;
 
@@ -174,10 +174,10 @@ impl<E: 'static> ReceivesTcCore for CcsdsDistributor<E> {
     fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
         if tc_raw.len() < 7 {
             return Err(CcsdsError::ByteConversionError(
-                ByteConversionError::FromSliceTooSmall(SizeMissmatch {
+                ByteConversionError::FromSliceTooSmall {
                     found: tc_raw.len(),
                     expected: 7,
-                }),
+                },
             ));
         }
         let (sp_header, _) =

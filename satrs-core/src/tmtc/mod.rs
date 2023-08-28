@@ -9,7 +9,7 @@
 use downcast_rs::{impl_downcast, Downcast};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use spacepackets::{ByteConversionError, SizeMissmatch, SpHeader};
+use spacepackets::{ByteConversionError, SpHeader};
 
 #[cfg(feature = "alloc")]
 pub mod ccsds_distrib;
@@ -34,10 +34,10 @@ pub struct AddressableId {
 impl AddressableId {
     pub fn from_raw_be(buf: &[u8]) -> Result<Self, ByteConversionError> {
         if buf.len() < 8 {
-            return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
+            return Err(ByteConversionError::FromSliceTooSmall {
                 found: buf.len(),
                 expected: 8,
-            }));
+            });
         }
         Ok(Self {
             target_id: u32::from_be_bytes(buf[0..4].try_into().unwrap()),
@@ -47,10 +47,10 @@ impl AddressableId {
 
     pub fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
         if buf.len() < 8 {
-            return Err(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
+            return Err(ByteConversionError::ToSliceTooSmall {
                 found: buf.len(),
                 expected: 8,
-            }));
+            });
         }
         buf[0..4].copy_from_slice(&self.target_id.to_be_bytes());
         buf[4..8].copy_from_slice(&self.unique_id.to_be_bytes());

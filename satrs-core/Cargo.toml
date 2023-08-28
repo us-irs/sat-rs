@@ -61,10 +61,11 @@ default-features = false
 optional = true
 
 [dependencies.spacepackets]
-# version = "0.6"
-# path = "../spacepackets"
+version = "0.7.0-beta.0"
+# path = "../../spacepackets"
 git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
-rev = "62df510147b"
+rev = "00fdfde015040d0a349444136f6b41f3e44e3a15"
+# branch = "size-missmatch-struct-variant"
 default-features = false
 
 [dev-dependencies]
