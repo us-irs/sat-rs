@@ -16,7 +16,8 @@ quote = "1"
 proc-macro2 = "1"
 
 [dependencies.satrs-core]
-path = "../../satrs-core"
+version = "0.1.0-alpha.0"
+# path = "../../satrs-core"
 
 [dev-dependencies]
 trybuild = { version = "1", features = ["diff"] }
