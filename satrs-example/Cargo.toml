@@ -15,11 +15,13 @@ crossbeam-channel = "0.5"
 delegate = "0.10"
 zerocopy = "0.6"
 csv = "1"
-num_enum = "0.6"
+num_enum = "0.7"
 thiserror = "1"
 
 [dependencies.satrs-core]
+# version = "0.1.0-alpha.0"
 path = "../satrs-core"
+
 
 [dependencies.satrs-mib]
 path = "../satrs-mib"
