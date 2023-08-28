@@ -14,7 +14,7 @@ use std::error::Error;
 use spacepackets::ecss::tc::{PusTcCreator, PusTcReader};
 use spacepackets::ecss::tm::PusTmCreator;
 use spacepackets::ecss::PusError;
-use spacepackets::{ByteConversionError, SizeMissmatch, SpHeader};
+use spacepackets::{ByteConversionError, SpHeader};
 
 pub mod event;
 pub mod event_man;
@@ -735,10 +735,10 @@ pub mod std_mod {
 pub(crate) fn source_buffer_large_enough(cap: usize, len: usize) -> Result<(), EcssTmtcError> {
     if len > cap {
         return Err(
-            PusError::ByteConversion(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
+            PusError::ByteConversion(ByteConversionError::ToSliceTooSmall {
                 found: cap,
                 expected: len,
-            }))
+            })
             .into(),
         );
     }
