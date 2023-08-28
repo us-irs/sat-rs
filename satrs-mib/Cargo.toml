@@ -2,6 +2,17 @@
 name = "satrs-mib"
 version = "0.1.0-alpha.0"
 edition = "2021"
+rust-version = "1.61"
+authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
+description = """
+Helper crate of the sat-rs framework to build a mission information base (MIB) from the OBSW
+directly.
+"""
+homepage = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
+repository = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
+license = "Apache-2.0"
+keywords = ["no-std", "space", "aerospace"]
+categories = ["aerospace", "aerospace::space-protocols", "no-std", "hardware-support", "embedded"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
