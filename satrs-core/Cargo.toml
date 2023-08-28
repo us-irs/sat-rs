@@ -61,16 +61,16 @@ default-features = false
 optional = true
 
 [dependencies.spacepackets]
-version = "0.7.0-beta.0"
+version = "0.7.0-beta.1"
 # path = "../../spacepackets"
-git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
-rev = "00fdfde015040d0a349444136f6b41f3e44e3a15"
-# branch = "size-missmatch-struct-variant"
+# git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
+# rev = ""
+# branch = ""
 default-features = false
 
 [dev-dependencies]
 serde = "1"
-zerocopy = ">0.5, <=0.7"
+zerocopy = "0.7"
 once_cell = "1.13"
 serde_json = "1"
 
