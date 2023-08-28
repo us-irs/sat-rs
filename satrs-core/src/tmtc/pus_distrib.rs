@@ -9,8 +9,9 @@
 //! [ReceivesTcCore] trait which allows to pass raw packets, CCSDS packets and PUS TC packets into
 //! it. Upon receiving a packet, it performs the following steps:
 //!
-//! 1. It tries to extract the [SpHeader] and [spacepackets::ecss::tc::PusTc] objects from the raw
-//!    bytestream. If this process fails, a [PusDistribError::PusError] is returned to the user.
+//! 1. It tries to extract the [SpHeader] and [spacepackets::ecss::tc::PusTcReader] objects from
+//!    the raw bytestream. If this process fails, a [PusDistribError::PusError] is returned to the
+//!    user.
 //! 2. If it was possible to extract both components, the packet will be passed to the
 //!    [PusServiceProvider::handle_pus_tc_packet] method provided by the user.
 //!
