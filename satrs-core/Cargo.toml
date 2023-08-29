@@ -5,20 +5,20 @@ edition = "2021"
 rust-version = "1.61"
 authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
 description = "Core components of the sat-rs framework to build software for remote systems"
-homepage = "https://egit.irs.uni-stuttgart.de/rust/satrs-core"
-repository = "https://egit.irs.uni-stuttgart.de/rust/satrs-core"
+homepage = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
+repository = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
 license = "Apache-2.0"
 keywords = ["no-std", "space", "aerospace"]
 categories = ["aerospace", "aerospace::space-protocols", "no-std", "hardware-support", "embedded"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-delegate = ">=0.8, <0.11"
+delegate = ">0.7, <=0.10"
 paste = "1"
 embed-doc-image = "0.1"
 
 [dependencies.num_enum]
-version = "0.6"
+version = ">0.5, <=0.7"
 default-features = false
 
 [dependencies.dyn-clone]
@@ -61,15 +61,16 @@ default-features = false
 optional = true
 
 [dependencies.spacepackets]
-# version = "0.6"
-# path = "../spacepackets"
-git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
-rev = "62df510147b"
+version = "0.7.0-beta.1"
+# path = "../../spacepackets"
+# git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
+# rev = ""
+# branch = ""
 default-features = false
 
 [dev-dependencies]
 serde = "1"
-zerocopy = "0.6"
+zerocopy = "0.7"
 once_cell = "1.13"
 serde_json = "1"
 

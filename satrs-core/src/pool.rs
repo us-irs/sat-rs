@@ -344,7 +344,7 @@ mod alloc_mod {
     }
 
     /// Pool implementation providing sub-pools with fixed size memory blocks. More details in
-    /// the [module documentation][super::pool]
+    /// the [module documentation][crate::pool]
     pub struct LocalPool {
         pool_cfg: PoolCfg,
         pool: Vec<Vec<u8>>,

@@ -419,7 +419,9 @@ fn main() {
                                         let mut buf: [u8; 8] = [0; 8];
 
                                         let hk_id = HkUniqueId::new(1);
-                                        hk_id.bytes_from_target_id_with_apid(&mut buf, target).unwrap();
+                                        hk_id
+                                            .bytes_from_target_id_with_apid(&mut buf, target)
+                                            .unwrap();
                                         let pus_tm = PusTmCreator::new(
                                             &mut sp_header,
                                             sec_header,

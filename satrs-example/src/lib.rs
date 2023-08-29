@@ -1,11 +1,10 @@
-use delegate::delegate;
 use derive_new::new;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use satrs_core::events::{EventU32TypedSev, SeverityInfo};
 use satrs_core::objects::ObjectId;
-use satrs_core::spacepackets::ecss::tc::{GenericPusTcSecondaryHeader, IsPusTelecommand, PusTc};
+use satrs_core::spacepackets::ecss::tc::IsPusTelecommand;
 use satrs_core::spacepackets::ecss::PusPacket;
-use satrs_core::spacepackets::{ByteConversionError, CcsdsPacket, SizeMissmatch};
+use satrs_core::spacepackets::{ByteConversionError, CcsdsPacket};
 use satrs_core::tmtc::TargetId;
 use std::fmt;
 use std::net::Ipv4Addr;
@@ -13,9 +12,6 @@ use thiserror::Error;
 
 use satrs_mib::res_code::{ResultU16, ResultU16Info};
 use satrs_mib::resultcode;
-
-//pub mod can;
-//mod can_ids;
 mod logger;
 
 pub type Apid = u16;
@@ -55,13 +51,12 @@ impl TargetIdWithApid {
         tc: &(impl CcsdsPacket + PusPacket + IsPusTelecommand),
     ) -> Result<Self, TargetIdCreationError> {
         if tc.user_data().len() < 4 {
-            return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
+            return Err(ByteConversionError::FromSliceTooSmall {
                 found: tc.user_data().len(),
                 expected: 8,
-            })
+            }
             .into());
         }
-        let target_id = u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap());
         Ok(Self {
             apid: tc.apid(),
             target: u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap()),

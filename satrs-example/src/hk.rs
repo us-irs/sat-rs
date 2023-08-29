@@ -1,6 +1,6 @@
 use derive_new::new;
-use zerocopy::AsBytes;
 use satrs_example::TargetIdWithApid;
+use zerocopy::AsBytes;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum AcsHkIds {
@@ -33,7 +33,11 @@ impl HkUniqueId {
         Ok(())
     }
 
-    pub fn bytes_from_target_id_with_apid(&self, buf: &mut [u8], target_id: TargetIdWithApid) -> Result<(), ()> {
+    pub fn bytes_from_target_id_with_apid(
+        &self,
+        buf: &mut [u8],
+        target_id: TargetIdWithApid,
+    ) -> Result<(), ()> {
         self.bytes_from_target_id(buf, target_id.target)
     }
 }
