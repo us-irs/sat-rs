@@ -2,7 +2,7 @@ use crate::tmtc::TargetId;
 use core::mem::size_of;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use spacepackets::{ByteConversionError, SizeMissmatch};
+use spacepackets::ByteConversionError;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -26,10 +26,10 @@ impl ModeAndSubmode {
 
     pub fn from_be_bytes(buf: &[u8]) -> Result<Self, ByteConversionError> {
         if buf.len() < 6 {
-            return Err(ByteConversionError::FromSliceTooSmall(SizeMissmatch {
+            return Err(ByteConversionError::FromSliceTooSmall {
                 expected: 6,
                 found: buf.len(),
-            }));
+            });
         }
         Ok(Self {
             mode: u32::from_be_bytes(buf[0..4].try_into().unwrap()),

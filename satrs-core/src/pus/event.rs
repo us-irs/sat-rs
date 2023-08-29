@@ -425,12 +425,12 @@ mod tests {
         let err = reporter.event_info(sender, &time_stamp_empty, event, None);
         assert!(err.is_err());
         let err = err.unwrap_err();
-        if let EcssTmtcError::Pus(PusError::ByteConversion(ByteConversionError::ToSliceTooSmall(
-            missmatch,
-        ))) = err
+        if let EcssTmtcError::Pus(PusError::ByteConversion(
+            ByteConversionError::ToSliceTooSmall { found, expected },
+        )) = err
         {
-            assert_eq!(missmatch.expected, 4);
-            assert_eq!(missmatch.found, expected_found_len);
+            assert_eq!(expected, 4);
+            assert_eq!(found, expected_found_len);
         } else {
             panic!("Unexpected error {:?}", err);
         }

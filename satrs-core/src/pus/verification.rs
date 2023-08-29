@@ -1584,12 +1584,12 @@ mod tests {
         assert_eq!(err_with_token.1, tok);
         match err_with_token.0 {
             EcssTmtcError::Pus(PusError::ByteConversion(e)) => match e {
-                ByteConversionError::ToSliceTooSmall(missmatch) => {
+                ByteConversionError::ToSliceTooSmall { found, expected } => {
                     assert_eq!(
-                        missmatch.expected,
+                        expected,
                         fail_data.len() + RequestId::SIZE_AS_BYTES + fail_code.size()
                     );
-                    assert_eq!(missmatch.found, b.rep().allowed_source_data_len());
+                    assert_eq!(found, b.rep().allowed_source_data_len());
                 }
                 _ => {
                     panic!("{}", format!("Unexpected error {:?}", e))
