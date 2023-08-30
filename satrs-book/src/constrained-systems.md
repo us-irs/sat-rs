@@ -41,3 +41,16 @@ behaviour which at least reduced heap allocations:
    [`ArrayString`](https://docs.rs/arrayvec/latest/arrayvec/struct.ArrayString.html) helper type.
 3. [`tinyvec`](https://docs.rs/tinyvec/latest/tinyvec/).
 
+# Using a fixed amount of threads
+
+On host systems, it is a common practice to dynamically spawn new threads to handle workloads.
+On space systems this is generally considered an anti-pattern as this is considered undeterministic
+and might lead to similar issues like when dynamically using the heap. For example, spawning a new
+thread might use up the remaining heap of a system, leading to undeterministic errors.
+
+The most common way to avoid this is to simply spawn all required threads at program initialization
+time. If a thread is done with its task, it can go back to sleeping regularly, only occasionally
+checking for new jobs. If a system still needs to handle burst concurrent loads, another possible
+way commonly used for host systems as well would be to use a threadpool, for example by using the
+[`threadpool`](https://crates.io/crates/threadpool) crate.
+
