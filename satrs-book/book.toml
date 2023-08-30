@@ -3,4 +3,4 @@ authors = ["Robin Mueller"]
 language = "en"
 multilingual = false
 src = "src"
-title = "satrs-book"
+title = "The sat-rs book"
