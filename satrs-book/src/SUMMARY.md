@@ -1,3 +1,5 @@
 # Summary
 
-- [Chapter 1](./chapter_1.md)
+- [The sat-rs book](./title-page.md)
+- [Introduction](./introduction.md)
+
