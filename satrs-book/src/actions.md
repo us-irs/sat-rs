@@ -29,7 +29,7 @@ There are 3 requirements for the PUS 8 telecommand:
 2. Bytes 0 to 4 of application data must contain the target ID in `u32` big endian format.
 3. Bytes 4 to 8 of application data must contain the action ID in `u32` big endian format.
 4. The rest of the application data are assumed to be command specific additional parameters. They
-   will be added to an IPC store, the the corresponding store address will be sent as part of the
+   will be added to an IPC store and the corresponding store address will be sent as part of the
    `ActionRequest`.
 
 ## Sending back telemetry
