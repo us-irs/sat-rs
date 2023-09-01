@@ -732,5 +732,7 @@ mod tests {
         if let Err(e) = result {
             panic!("destination handler packet insertion error: {e}");
         }
+
+        // TODO: Send EOF PDU and verify completion of transaction
     }
 }
