@@ -1,16 +1,16 @@
 # Communication with sat-rs based software
 
-Communication is a huge topic for satellites. These systems are usually not (directly) connected
+Communication is a huge topic for space systems. They are usually not (directly) connected
 to the internet and only have 1-2 communication links during nominal operation. However, most
-satellites have internet access during development cycle. There are various standards provided by
-CCSDS and ECSS which can be useful to determine how to communicate with the satellite and the
-primary On-Board Software.
+of these systems have internet access during development cycle. There are various standards
+provided by CCSDS and ECSS which can be useful to determine how to communicate with the satellite
+and the primary On-Board Software.
 
 # Application layer
 
-Current communication with satellite systems is usually packet based. For example, the CCSDS space
+Most communication with space systems is usually packet based. For example, the CCSDS space
 packet standard only specifies a 6 byte header with at least 1 byte payload. The PUS packet
-standard is a subset of the space packet standard which adds some fields and a 16 bit CRC, but
+standard is a subset of the space packet standard, which adds some fields and a 16 bit CRC, but
 it is still centered around small packets. `sat-rs` provides support for these ECSS and CCSDS
 standards to also attempts to fill the gap to the internet protocol by providing the following
 components.
