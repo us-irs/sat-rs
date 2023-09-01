@@ -5,6 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::cfdp::user::TransactionFinishedParams;
+
 use super::{
     user::{CfdpUser, MetadataReceivedParams},
     PacketInfo, PacketTarget, State, TransactionId, TransactionStep, CRC_32,
@@ -30,9 +32,8 @@ pub struct DestinationHandler {
     id: UnsignedByteField,
     step: TransactionStep,
     state: State,
-    transaction_params: TransactionParams,
+    tparams: TransactionParams,
     packets_to_send_ctx: PacketsToSendContext,
-    //cfdp_user: Box<dyn CfdpUser>,
 }
 
 #[derive(Debug, Default)]
@@ -51,14 +52,32 @@ struct FileProperties {
 }
 
 #[derive(Debug)]
-struct TransactionParams {
+struct TransferState {
     transaction_id: Option<TransactionId>,
-    metadata_params: MetadataGenericParams,
-    pdu_conf: CommonPduConfig,
-    file_properties: FileProperties,
+    progress: usize,
     condition_code: ConditionCode,
     delivery_code: DeliveryCode,
     file_status: FileStatus,
+    metadata_params: MetadataGenericParams,
+}
+
+impl Default for TransferState {
+    fn default() -> Self {
+        Self {
+            transaction_id: None,
+            progress: Default::default(),
+            condition_code: ConditionCode::NoError,
+            delivery_code: DeliveryCode::Incomplete,
+            file_status: FileStatus::Unreported,
+            metadata_params: Default::default(),
+        }
+    }
+}
+#[derive(Debug)]
+struct TransactionParams {
+    tstate: TransferState,
+    pdu_conf: CommonPduConfig,
+    file_properties: FileProperties,
     cksum_buf: [u8; 1024],
     msgs_to_user_size: usize,
     msgs_to_user_buf: [u8; 1024],
@@ -76,27 +95,33 @@ impl Default for FileProperties {
     }
 }
 
+impl TransactionParams {
+    fn file_size(&self) -> usize {
+        self.tstate.metadata_params.file_size as usize
+    }
+
+    fn metadata_params(&self) -> &MetadataGenericParams {
+        &self.tstate.metadata_params
+    }
+}
+
 impl Default for TransactionParams {
     fn default() -> Self {
         Self {
-            transaction_id: None,
-            metadata_params: Default::default(),
             pdu_conf: Default::default(),
-            file_properties: Default::default(),
-            condition_code: ConditionCode::NoError,
-            delivery_code: DeliveryCode::Incomplete,
-            file_status: FileStatus::Unreported,
             cksum_buf: [0; 1024],
             msgs_to_user_size: 0,
             msgs_to_user_buf: [0; 1024],
+            tstate: Default::default(),
+            file_properties: Default::default(),
         }
     }
 }
 
 impl TransactionParams {
     fn reset(&mut self) {
-        self.condition_code = ConditionCode::NoError;
-        self.delivery_code = DeliveryCode::Incomplete;
+        self.tstate.condition_code = ConditionCode::NoError;
+        self.tstate.delivery_code = DeliveryCode::Incomplete;
     }
 }
 
@@ -132,7 +157,7 @@ impl DestinationHandler {
             id: id.into(),
             step: TransactionStep::Idle,
             state: State::Idle,
-            transaction_params: Default::default(),
+            tparams: Default::default(),
             packets_to_send_ctx: Default::default(),
             //cfdp_user,
         }
@@ -182,25 +207,23 @@ impl DestinationHandler {
         let directive = self.packets_to_send_ctx.directive.unwrap();
         let written_size = match directive {
             FileDirectiveType::FinishedPdu => {
-                let pdu_header = PduHeader::new_no_file_data(self.transaction_params.pdu_conf, 0);
-                let finished_pdu = if self.transaction_params.condition_code
-                    == ConditionCode::NoError
-                    || self.transaction_params.condition_code
-                        == ConditionCode::UnsupportedChecksumType
+                let pdu_header = PduHeader::new_no_file_data(self.tparams.pdu_conf, 0);
+                let finished_pdu = if self.tparams.tstate.condition_code == ConditionCode::NoError
+                    || self.tparams.tstate.condition_code == ConditionCode::UnsupportedChecksumType
                 {
                     FinishedPdu::new_default(
                         pdu_header,
-                        self.transaction_params.delivery_code,
-                        self.transaction_params.file_status,
+                        self.tparams.tstate.delivery_code,
+                        self.tparams.tstate.file_status,
                     )
                 } else {
                     // TODO: Are there cases where this ID is actually the source entity ID?
                     let entity_id = EntityIdTlv::new(self.id);
                     FinishedPdu::new_with_error(
                         pdu_header,
-                        self.transaction_params.condition_code,
-                        self.transaction_params.delivery_code,
-                        self.transaction_params.file_status,
+                        self.tparams.tstate.condition_code,
+                        self.tparams.tstate.delivery_code,
+                        self.tparams.tstate.file_status,
                         entity_id,
                     )
                 };
@@ -245,43 +268,42 @@ impl DestinationHandler {
             return Err(DestError::RecvdMetadataButIsBusy);
         }
         let metadata_pdu = MetadataPdu::from_bytes(raw_packet)?;
-        self.transaction_params.reset();
-        self.transaction_params.metadata_params = *metadata_pdu.metadata_params();
+        self.tparams.reset();
+        self.tparams.tstate.metadata_params = *metadata_pdu.metadata_params();
         let src_name = metadata_pdu.src_file_name();
         if src_name.is_empty() {
             return Err(DestError::EmptySrcFileField);
         }
-        self.transaction_params.file_properties.src_file_name[..src_name.len_value()]
+        self.tparams.file_properties.src_file_name[..src_name.len_value()]
             .copy_from_slice(src_name.value());
-        self.transaction_params.file_properties.src_file_name_len = src_name.len_value();
+        self.tparams.file_properties.src_file_name_len = src_name.len_value();
         let dest_name = metadata_pdu.dest_file_name();
         if dest_name.is_empty() {
             return Err(DestError::EmptyDestFileField);
         }
-        self.transaction_params.file_properties.dest_file_name[..dest_name.len_value()]
+        self.tparams.file_properties.dest_file_name[..dest_name.len_value()]
             .copy_from_slice(dest_name.value());
-        self.transaction_params.file_properties.dest_file_name_len = dest_name.len_value();
-        self.transaction_params.pdu_conf = *metadata_pdu.pdu_header().common_pdu_conf();
-        self.transaction_params.msgs_to_user_size = 0;
-        if metadata_pdu.pdu_header().common_pdu_conf().trans_mode
-            == TransmissionMode::Unacknowledged
-        {
-            self.state = State::BusyClass1Nacked;
-        } else {
-            self.state = State::BusyClass2Acked;
-        }
+        self.tparams.file_properties.dest_file_name_len = dest_name.len_value();
+        self.tparams.pdu_conf = *metadata_pdu.pdu_header().common_pdu_conf();
+        self.tparams.msgs_to_user_size = 0;
         if metadata_pdu.options().is_some() {
             for option_tlv in metadata_pdu.options_iter().unwrap() {
                 if option_tlv.is_standard_tlv()
                     && option_tlv.tlv_type().unwrap() == TlvType::MsgToUser
                 {
-                    self.transaction_params
+                    self.tparams
                         .msgs_to_user_buf
                         .copy_from_slice(option_tlv.raw_data().unwrap());
-                    self.transaction_params.msgs_to_user_size += option_tlv.len_full();
+                    self.tparams.msgs_to_user_size += option_tlv.len_full();
                 }
             }
         }
+        if self.tparams.pdu_conf.trans_mode == TransmissionMode::Unacknowledged {
+            self.state = State::BusyClass1Nacked;
+        } else {
+            self.state = State::BusyClass2Acked;
+        }
+        self.step = TransactionStep::TransactionStart;
         Ok(())
     }
 
@@ -292,7 +314,7 @@ impl DestinationHandler {
         let fd_pdu = FileDataPdu::from_bytes(raw_packet)?;
         let mut dest_file = File::options()
             .write(true)
-            .open(&self.transaction_params.file_properties.dest_path_buf)?;
+            .open(&self.tparams.file_properties.dest_path_buf)?;
         dest_file.seek(SeekFrom::Start(fd_pdu.offset()))?;
         dest_file.write_all(fd_pdu.file_data())?;
         Ok(())
@@ -306,12 +328,12 @@ impl DestinationHandler {
         let checksum = eof_pdu.file_checksum();
         // For a standard disk based file system, which is assumed to be used for now, the file
         // will always be retained. This might change in the future.
-        self.transaction_params.file_status = FileStatus::Retained;
+        self.tparams.tstate.file_status = FileStatus::Retained;
         if self.checksum_check(checksum)? {
-            self.transaction_params.condition_code = ConditionCode::NoError;
-            self.transaction_params.delivery_code = DeliveryCode::Complete;
+            self.tparams.tstate.condition_code = ConditionCode::NoError;
+            self.tparams.tstate.delivery_code = DeliveryCode::Complete;
         } else {
-            self.transaction_params.condition_code = ConditionCode::FileChecksumFailure;
+            self.tparams.tstate.condition_code = ConditionCode::FileChecksumFailure;
         }
         if self.state == State::BusyClass1Nacked {
             self.step = TransactionStep::TransferCompletion;
@@ -327,14 +349,14 @@ impl DestinationHandler {
 
     fn checksum_check(&mut self, expected_checksum: u32) -> Result<bool, DestError> {
         let mut digest = CRC_32.digest();
-        let file_to_check = File::open(&self.transaction_params.file_properties.dest_path_buf)?;
+        let file_to_check = File::open(&self.tparams.file_properties.dest_path_buf)?;
         let mut buf_reader = BufReader::new(file_to_check);
         loop {
-            let bytes_read = buf_reader.read(&mut self.transaction_params.cksum_buf)?;
+            let bytes_read = buf_reader.read(&mut self.tparams.cksum_buf)?;
             if bytes_read == 0 {
                 break;
             }
-            digest.update(&self.transaction_params.cksum_buf[0..bytes_read]);
+            digest.update(&self.tparams.cksum_buf[0..bytes_read]);
         }
         if digest.finalize() == expected_checksum {
             return Ok(true);
@@ -347,14 +369,16 @@ impl DestinationHandler {
         if self.step == TransactionStep::TransactionStart {
             self.transaction_start(cfdp_user)?;
         }
-        if self.step == TransactionStep::ReceivingFileDataPdus {
-            todo!("advance the fsm if everything is finished")
+        if self.step == TransactionStep::ReceivingFileDataPdus
+            && self.tparams.tstate.progress == self.tparams.file_size()
+        {
+            self.step = TransactionStep::TransferCompletion;
         }
         if self.step == TransactionStep::TransferCompletion {
-            self.transfer_completion()?;
+            self.transfer_completion(cfdp_user)?;
         }
         if self.step == TransactionStep::SendingAckPdu {
-            todo!();
+            todo!("no support for acknowledged mode yet");
         }
         if self.step == TransactionStep::SendingFinishedPdu {
             self.reset();
@@ -376,28 +400,25 @@ impl DestinationHandler {
 
     fn transaction_start(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
         let dest_name = from_utf8(
-            &self.transaction_params.file_properties.dest_file_name
-                [..self.transaction_params.file_properties.dest_file_name_len],
+            &self.tparams.file_properties.dest_file_name
+                [..self.tparams.file_properties.dest_file_name_len],
         )?;
         let dest_path = Path::new(dest_name);
-        self.transaction_params.file_properties.dest_path_buf = dest_path.to_path_buf();
-        let source_id = self.transaction_params.pdu_conf.source_id();
-        let id = TransactionId::new(
-            source_id,
-            self.transaction_params.pdu_conf.transaction_seq_num,
-        );
+        self.tparams.file_properties.dest_path_buf = dest_path.to_path_buf();
+        let source_id = self.tparams.pdu_conf.source_id();
+        let id = TransactionId::new(source_id, self.tparams.pdu_conf.transaction_seq_num);
         let src_name = from_utf8(
-            &self.transaction_params.file_properties.src_file_name
-                [0..self.transaction_params.file_properties.src_file_name_len],
+            &self.tparams.file_properties.src_file_name
+                [0..self.tparams.file_properties.src_file_name_len],
         )?;
         let mut msgs_to_user = SmallVec::<[MsgToUserTlv<'_>; 16]>::new();
         let mut num_msgs_to_user = 0;
-        if self.transaction_params.msgs_to_user_size > 0 {
+        if self.tparams.msgs_to_user_size > 0 {
             let mut index = 0;
-            while index < self.transaction_params.msgs_to_user_size {
+            while index < self.tparams.msgs_to_user_size {
                 // This should never panic as the validity of the options was checked beforehand.
                 let msgs_to_user_tlv =
-                    MsgToUserTlv::from_bytes(&self.transaction_params.msgs_to_user_buf[index..])
+                    MsgToUserTlv::from_bytes(&self.tparams.msgs_to_user_buf[index..])
                         .expect("message to user creation failed unexpectedly");
                 msgs_to_user.push(msgs_to_user_tlv);
                 index += msgs_to_user_tlv.len_full();
@@ -407,54 +428,64 @@ impl DestinationHandler {
         let metadata_recvd_params = MetadataReceivedParams {
             id,
             source_id,
-            file_size: self.transaction_params.metadata_params.file_size,
+            file_size: self.tparams.tstate.metadata_params.file_size,
             src_file_name: src_name,
             dest_file_name: dest_name,
             msgs_to_user: &msgs_to_user[..num_msgs_to_user],
         };
-        self.transaction_params.transaction_id = Some(id);
+        self.tparams.tstate.transaction_id = Some(id);
         cfdp_user.metadata_recvd_indication(&metadata_recvd_params);
 
-        let metadata = metadata(dest_path)?;
-        if metadata.is_dir() {
-            // Create new destination path by concatenating the last part of the source source
-            // name and the destination folder. For example, for a source file of /tmp/hello.txt
-            // and a destination name of /home/test, the resulting file name should be
-            // /home/test/hello.txt
-            let source_path = Path::new(from_utf8(
-                &self.transaction_params.file_properties.src_file_name
-                    [..self.transaction_params.file_properties.src_file_name_len],
-            )?);
+        if dest_path.exists() {
+            let dest_metadata = metadata(dest_path)?;
+            if dest_metadata.is_dir() {
+                // Create new destination path by concatenating the last part of the source source
+                // name and the destination folder. For example, for a source file of /tmp/hello.txt
+                // and a destination name of /home/test, the resulting file name should be
+                // /home/test/hello.txt
+                let source_path = Path::new(from_utf8(
+                    &self.tparams.file_properties.src_file_name
+                        [..self.tparams.file_properties.src_file_name_len],
+                )?);
 
-            let source_name = source_path.file_name();
-            if source_name.is_none() {
-                return Err(DestError::PathConcatError);
+                let source_name = source_path.file_name();
+                if source_name.is_none() {
+                    return Err(DestError::PathConcatError);
+                }
+                let source_name = source_name.unwrap();
+                self.tparams.file_properties.dest_path_buf.push(source_name);
             }
-            let source_name = source_name.unwrap();
-            self.transaction_params
-                .file_properties
-                .dest_path_buf
-                .push(source_name);
         }
         // This function does exactly what we require: Create a new file if it does not exist yet
         // and trucate an existing one.
-        File::create(&self.transaction_params.file_properties.dest_path_buf)?;
+        File::create(&self.tparams.file_properties.dest_path_buf)?;
+        self.step = TransactionStep::ReceivingFileDataPdus;
         Ok(())
     }
 
-    fn transfer_completion(&mut self) -> Result<(), DestError> {
+    fn transfer_completion(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
         // This function should never be called with metadata parameters not set
-        if self.transaction_params.metadata_params.closure_requested {
+        if self.tparams.metadata_params().closure_requested {
             self.prepare_finished_pdu()?;
+            self.step = TransactionStep::SendingFinishedPdu;
+        } else {
+            self.step = TransactionStep::Idle;
         }
-        todo!("user indication");
+        let transaction_finished_params = TransactionFinishedParams {
+            id: self.tparams.tstate.transaction_id.unwrap(),
+            condition_code: self.tparams.tstate.condition_code,
+            delivery_code: self.tparams.tstate.delivery_code,
+            file_status: self.tparams.tstate.file_status,
+        };
+        cfdp_user.transaction_finished_indication(&transaction_finished_params);
+        Ok(())
     }
 
     fn reset(&mut self) {
         self.step = TransactionStep::Idle;
         self.state = State::Idle;
         self.packets_to_send_ctx.packet_available = false;
-        self.transaction_params.reset();
+        self.tparams.reset();
     }
 
     fn prepare_finished_pdu(&mut self) -> Result<(), DestError> {
@@ -467,6 +498,7 @@ impl DestinationHandler {
 
 #[cfg(test)]
 mod tests {
+    use std::env::temp_dir;
     #[allow(unused_imports)]
     use std::println;
 
@@ -558,34 +590,50 @@ mod tests {
         assert_eq!(handler.step(), TransactionStep::Idle);
     }
 
+    fn init_full_filenames() -> (PathBuf, PathBuf) {
+        let mut file_path = temp_dir();
+        let mut src_path = file_path.clone();
+        src_path.push(SRC_NAME);
+        file_path.push(DEST_NAME);
+        (src_path, file_path)
+    }
+
     #[test]
     fn test_basic() {
         let dest_handler = DestinationHandler::new(LOCAL_ID);
         init_check(&dest_handler);
     }
 
-    #[test]
-    fn test_empty_file_transfer() {
-        let mut buf: [u8; 512] = [0; 512];
-        let mut test_user = TestCfdpUser::default();
-        let mut dest_handler = DestinationHandler::new(LOCAL_ID);
-        init_check(&dest_handler);
-
-        let seq_num = UbfU16::new(0);
+    fn create_pdu_header(seq_num: impl Into<UnsignedByteField>) -> PduHeader {
         let mut pdu_conf =
             CommonPduConfig::new_with_byte_fields(REMOTE_ID, LOCAL_ID, seq_num).unwrap();
         pdu_conf.trans_mode = TransmissionMode::Unacknowledged;
-        let pdu_header = PduHeader::new_no_file_data(pdu_conf, 0);
-        let metadata_params = MetadataGenericParams::new(false, ChecksumType::Crc32, 0);
-        let metadata_pdu = MetadataPdu::new(
-            pdu_header,
+        PduHeader::new_no_file_data(pdu_conf, 0)
+    }
+
+    fn create_metadata_pdu<'filename>(
+        pdu_header: &PduHeader,
+        src_name: &'filename Path,
+        dest_name: &'filename Path,
+        file_size: u64,
+    ) -> MetadataPdu<'filename, 'filename, 'static> {
+        let metadata_params = MetadataGenericParams::new(false, ChecksumType::Crc32, file_size);
+        MetadataPdu::new(
+            *pdu_header,
             metadata_params,
-            Lv::new_from_str(SRC_NAME).unwrap(),
-            Lv::new_from_str(DEST_NAME).unwrap(),
+            Lv::new_from_str(src_name.as_os_str().to_str().unwrap()).unwrap(),
+            Lv::new_from_str(dest_name.as_os_str().to_str().unwrap()).unwrap(),
             None,
-        );
+        )
+    }
+
+    fn insert_metadata_pdu(
+        metadata_pdu: &MetadataPdu,
+        buf: &mut [u8],
+        dest_handler: &mut DestinationHandler,
+    ) {
         let written_len = metadata_pdu
-            .write_to_bytes(&mut buf)
+            .write_to_bytes(buf)
             .expect("writing metadata PDU failed");
         let packet_info =
             PacketInfo::new(&buf[..written_len]).expect("generating packet info failed");
@@ -593,7 +641,64 @@ mod tests {
         if let Err(e) = insert_result {
             panic!("insert result error: {e}");
         }
+    }
+
+    #[test]
+    fn test_empty_file_transfer() {
+        let (src_name, dest_name) = init_full_filenames();
+        println!("src name: {src_name:?}, dest name: {dest_name:?}");
+        let mut buf: [u8; 512] = [0; 512];
+        let mut test_user = TestCfdpUser::default();
+        let mut dest_handler = DestinationHandler::new(LOCAL_ID);
+        init_check(&dest_handler);
+
+        let seq_num = UbfU16::new(0);
+        let pdu_header = create_pdu_header(seq_num);
+        let metadata_pdu =
+            create_metadata_pdu(&pdu_header, src_name.as_path(), dest_name.as_path(), 0);
+        insert_metadata_pdu(&metadata_pdu, &mut buf, &mut dest_handler);
         let result = dest_handler.state_machine(&mut test_user);
-        assert!(result.is_ok());
+        if let Err(e) = result {
+            panic!("dest handler fsm error: {e}");
+        }
+        assert_ne!(dest_handler.state(), State::Idle);
+        assert_eq!(dest_handler.step(), TransactionStep::Idle);
+    }
+
+    #[test]
+    fn test_small_file_transfer() {
+        let (src_name, dest_name) = init_full_filenames();
+        let file_data = "Hello World!".as_bytes();
+        let mut buf: [u8; 512] = [0; 512];
+        let mut test_user = TestCfdpUser::default();
+        let mut dest_handler = DestinationHandler::new(LOCAL_ID);
+        init_check(&dest_handler);
+
+        let seq_num = UbfU16::new(0);
+        let pdu_header = create_pdu_header(seq_num);
+        let metadata_pdu = create_metadata_pdu(
+            &pdu_header,
+            src_name.as_path(),
+            dest_name.as_path(),
+            file_data.len() as u64,
+        );
+        insert_metadata_pdu(&metadata_pdu, &mut buf, &mut dest_handler);
+        let result = dest_handler.state_machine(&mut test_user);
+        if let Err(e) = result {
+            panic!("dest handler fsm error: {e}");
+        }
+        assert_ne!(dest_handler.state(), State::Idle);
+        assert_eq!(dest_handler.step(), TransactionStep::ReceivingFileDataPdus);
+
+        let offset = 0;
+        let filedata_pdu = FileDataPdu::new_no_seg_metadata(pdu_header, offset, file_data);
+        filedata_pdu
+            .write_to_bytes(&mut buf)
+            .expect("writing file data PDU failed");
+        let packet_info = PacketInfo::new(&buf).expect("creating packet info failed");
+        let result = dest_handler.insert_packet(&packet_info);
+        if let Err(e) = result {
+            panic!("destination handler packet insertion error: {e}");
+        }
     }
 }
