@@ -502,6 +502,7 @@ mod tests {
     #[allow(unused_imports)]
     use std::println;
 
+    use alloc::string::String;
     use spacepackets::{
         cfdp::{lv::Lv, ChecksumType},
         util::{UbfU16, UnsignedByteFieldU16},
@@ -518,11 +519,14 @@ mod tests {
     #[derive(Default)]
     struct TestCfdpUser {
         next_expected_seq_num: u64,
+        expected_full_src_name: String,
+        expected_full_dest_name: String,
+        expected_file_size: usize,
     }
 
     impl TestCfdpUser {
         fn generic_id_check(&self, id: &crate::cfdp::TransactionId) {
-            assert_eq!(id.source_id, REMOTE_ID.into());
+            assert_eq!(id.source_id, LOCAL_ID.into());
             assert_eq!(id.seq_num().value(), self.next_expected_seq_num);
         }
     }
@@ -545,8 +549,20 @@ mod tests {
 
         fn metadata_recvd_indication(
             &mut self,
-            _md_recvd_params: &crate::cfdp::user::MetadataReceivedParams,
+            md_recvd_params: &crate::cfdp::user::MetadataReceivedParams,
         ) {
+            self.generic_id_check(&md_recvd_params.id);
+            assert_eq!(
+                String::from(md_recvd_params.src_file_name),
+                self.expected_full_src_name
+            );
+            assert_eq!(
+                String::from(md_recvd_params.dest_file_name),
+                self.expected_full_dest_name
+            );
+            assert_eq!(md_recvd_params.msgs_to_user.len(), 0);
+            assert_eq!(md_recvd_params.source_id, LOCAL_ID.into());
+            assert_eq!(md_recvd_params.file_size as usize, self.expected_file_size);
         }
 
         fn file_segment_recvd_indication(
@@ -562,6 +578,7 @@ mod tests {
             _id: &crate::cfdp::TransactionId,
             _condition_code: ConditionCode,
         ) {
+            panic!("unexpected suspended indication");
         }
 
         fn resumed_indication(&mut self, _id: &crate::cfdp::TransactionId, _progresss: u64) {}
@@ -572,6 +589,7 @@ mod tests {
             _condition_code: ConditionCode,
             _progress: u64,
         ) {
+            panic!("unexpected fault indication");
         }
 
         fn abandoned_indication(
@@ -580,9 +598,12 @@ mod tests {
             _condition_code: ConditionCode,
             _progress: u64,
         ) {
+            panic!("unexpected abandoned indication");
         }
 
-        fn eof_recvd_indication(&mut self, _id: &crate::cfdp::TransactionId) {}
+        fn eof_recvd_indication(&mut self, id: &crate::cfdp::TransactionId) {
+            self.generic_id_check(id);
+        }
     }
 
     fn init_check(handler: &DestinationHandler) {
@@ -600,13 +621,13 @@ mod tests {
 
     #[test]
     fn test_basic() {
-        let dest_handler = DestinationHandler::new(LOCAL_ID);
+        let dest_handler = DestinationHandler::new(REMOTE_ID);
         init_check(&dest_handler);
     }
 
     fn create_pdu_header(seq_num: impl Into<UnsignedByteField>) -> PduHeader {
         let mut pdu_conf =
-            CommonPduConfig::new_with_byte_fields(REMOTE_ID, LOCAL_ID, seq_num).unwrap();
+            CommonPduConfig::new_with_byte_fields(LOCAL_ID, REMOTE_ID, seq_num).unwrap();
         pdu_conf.trans_mode = TransmissionMode::Unacknowledged;
         PduHeader::new_no_file_data(pdu_conf, 0)
     }
@@ -646,10 +667,15 @@ mod tests {
     #[test]
     fn test_empty_file_transfer() {
         let (src_name, dest_name) = init_full_filenames();
-        println!("src name: {src_name:?}, dest name: {dest_name:?}");
         let mut buf: [u8; 512] = [0; 512];
-        let mut test_user = TestCfdpUser::default();
-        let mut dest_handler = DestinationHandler::new(LOCAL_ID);
+        let mut test_user = TestCfdpUser {
+            next_expected_seq_num: 0,
+            expected_full_src_name: src_name.to_string_lossy().into(),
+            expected_full_dest_name: dest_name.to_string_lossy().into(),
+            expected_file_size: 0,
+        };
+        // We treat the destination handler like it is a remote entity.
+        let mut dest_handler = DestinationHandler::new(REMOTE_ID);
         init_check(&dest_handler);
 
         let seq_num = UbfU16::new(0);
@@ -670,8 +696,14 @@ mod tests {
         let (src_name, dest_name) = init_full_filenames();
         let file_data = "Hello World!".as_bytes();
         let mut buf: [u8; 512] = [0; 512];
-        let mut test_user = TestCfdpUser::default();
-        let mut dest_handler = DestinationHandler::new(LOCAL_ID);
+        let mut test_user = TestCfdpUser {
+            next_expected_seq_num: 0,
+            expected_full_src_name: src_name.to_string_lossy().into(),
+            expected_full_dest_name: dest_name.to_string_lossy().into(),
+            expected_file_size: file_data.len(),
+        };
+        // We treat the destination handler like it is a remote entity.
+        let mut dest_handler = DestinationHandler::new(REMOTE_ID);
         init_check(&dest_handler);
 
         let seq_num = UbfU16::new(0);
