@@ -733,6 +733,14 @@ mod tests {
             panic!("destination handler packet insertion error: {e}");
         }
 
-        // TODO: Send EOF PDU and verify completion of transaction
+        let mut digest = CRC_32.digest();
+        digest.update(file_data);
+        let crc32 = digest.finalize();
+        let eof_pdu = EofPdu::new_no_error(pdu_header, crc32, file_data.len() as u64);
+        let result = eof_pdu.write_to_bytes(&mut buf);
+        assert!(result.is_ok());
+        let packet_info = PacketInfo::new(&buf).expect("generating packet info failed");
+        let result = dest_handler.insert_packet(&packet_info);
+        assert!(result.is_ok());
     }
 }
