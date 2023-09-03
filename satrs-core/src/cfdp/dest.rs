@@ -497,11 +497,12 @@ impl DestinationHandler {
 
 #[cfg(test)]
 mod tests {
+    use core::sync::atomic::{AtomicU8, Ordering};
     #[allow(unused_imports)]
     use std::println;
     use std::{env::temp_dir, fs};
 
-    use alloc::string::String;
+    use alloc::{string::String, format};
     use spacepackets::{
         cfdp::{lv::Lv, ChecksumType},
         util::{UbfU16, UnsignedByteFieldU16},
@@ -512,8 +513,10 @@ mod tests {
     const LOCAL_ID: UnsignedByteFieldU16 = UnsignedByteFieldU16::new(1);
     const REMOTE_ID: UnsignedByteFieldU16 = UnsignedByteFieldU16::new(2);
 
-    const SRC_NAME: &str = "__cfdp__source-file.txt";
-    const DEST_NAME: &str = "__cfdp__dest-file.txt";
+    const SRC_NAME: &str = "__cfdp__source-file";
+    const DEST_NAME: &str = "__cfdp__dest-file";
+
+    static ATOMIC_COUNTER: AtomicU8 = AtomicU8::new(0);
 
     #[derive(Default)]
     struct TestCfdpUser {
@@ -613,8 +616,13 @@ mod tests {
     fn init_full_filenames() -> (PathBuf, PathBuf) {
         let mut file_path = temp_dir();
         let mut src_path = file_path.clone();
-        src_path.push(SRC_NAME);
-        file_path.push(DEST_NAME);
+        // Atomic counter used to allow concurrent tests.
+        let unique_counter = ATOMIC_COUNTER.fetch_add(1, Ordering::Relaxed);
+        // Create unique test filenames.
+        let src_name_unique = format!("{SRC_NAME}{}.txt", unique_counter);
+        let dest_name_unique = format!("{DEST_NAME}{}.txt", unique_counter);
+        src_path.push(src_name_unique);
+        file_path.push(dest_name_unique);
         (src_path, file_path)
     }
 
