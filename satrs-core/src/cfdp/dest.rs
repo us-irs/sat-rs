@@ -335,6 +335,9 @@ impl DestinationHandler {
         } else {
             self.tparams.tstate.condition_code = ConditionCode::FileChecksumFailure;
         }
+        // TODO: Check progress, and implement transfer completion timer as specified in the
+        // standard. This timer protects against out of order arrival of packets.
+        if self.tparams.tstate.progress != self.tparams.file_size() {}
         if self.state == State::BusyClass1Nacked {
             self.step = TransactionStep::TransferCompletion;
         } else {
@@ -369,11 +372,6 @@ impl DestinationHandler {
         if self.step == TransactionStep::TransactionStart {
             self.transaction_start(cfdp_user)?;
         }
-        if self.step == TransactionStep::ReceivingFileDataPdus
-            && self.tparams.tstate.progress == self.tparams.file_size()
-        {
-            self.step = TransactionStep::TransferCompletion;
-        }
         if self.step == TransactionStep::TransferCompletion {
             self.transfer_completion(cfdp_user)?;
         }
@@ -382,7 +380,6 @@ impl DestinationHandler {
         }
         if self.step == TransactionStep::SendingFinishedPdu {
             self.reset();
-            return Ok(());
         }
         Ok(())
     }
@@ -464,13 +461,6 @@ impl DestinationHandler {
     }
 
     fn transfer_completion(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
-        // This function should never be called with metadata parameters not set
-        if self.tparams.metadata_params().closure_requested {
-            self.prepare_finished_pdu()?;
-            self.step = TransactionStep::SendingFinishedPdu;
-        } else {
-            self.step = TransactionStep::Idle;
-        }
         let transaction_finished_params = TransactionFinishedParams {
             id: self.tparams.tstate.transaction_id.unwrap(),
             condition_code: self.tparams.tstate.condition_code,
@@ -478,6 +468,15 @@ impl DestinationHandler {
             file_status: self.tparams.tstate.file_status,
         };
         cfdp_user.transaction_finished_indication(&transaction_finished_params);
+        // This function should never be called with metadata parameters not set
+        if self.tparams.metadata_params().closure_requested {
+            self.prepare_finished_pdu()?;
+            self.step = TransactionStep::SendingFinishedPdu;
+        } else {
+            self.reset();
+            self.state = State::Idle;
+            self.step = TransactionStep::Idle;
+        }
         Ok(())
     }
 
@@ -732,6 +731,8 @@ mod tests {
         if let Err(e) = result {
             panic!("destination handler packet insertion error: {e}");
         }
+        let result = dest_handler.state_machine(&mut test_user);
+        assert!(result.is_ok());
 
         let mut digest = CRC_32.digest();
         digest.update(file_data);
@@ -742,5 +743,10 @@ mod tests {
         let packet_info = PacketInfo::new(&buf).expect("generating packet info failed");
         let result = dest_handler.insert_packet(&packet_info);
         assert!(result.is_ok());
+
+        let result = dest_handler.state_machine(&mut test_user);
+        assert!(result.is_ok());
+        assert_eq!(dest_handler.state(), State::Idle);
+        assert_eq!(dest_handler.step(), TransactionStep::Idle);
     }
 }
