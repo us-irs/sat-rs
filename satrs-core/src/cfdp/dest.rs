@@ -497,9 +497,9 @@ impl DestinationHandler {
 
 #[cfg(test)]
 mod tests {
-    use std::env::temp_dir;
     #[allow(unused_imports)]
     use std::println;
+    use std::{env::temp_dir, fs};
 
     use alloc::string::String;
     use spacepackets::{
@@ -663,9 +663,27 @@ mod tests {
         }
     }
 
+    fn insert_eof_pdu(
+        file_data: &[u8],
+        pdu_header: &PduHeader,
+        buf: &mut [u8],
+        dest_handler: &mut DestinationHandler,
+    ) {
+        let mut digest = CRC_32.digest();
+        digest.update(file_data);
+        let crc32 = digest.finalize();
+        let eof_pdu = EofPdu::new_no_error(*pdu_header, crc32, file_data.len() as u64);
+        let result = eof_pdu.write_to_bytes(buf);
+        assert!(result.is_ok());
+        let packet_info = PacketInfo::new(&buf).expect("generating packet info failed");
+        let result = dest_handler.insert_packet(&packet_info);
+        assert!(result.is_ok());
+    }
+
     #[test]
     fn test_empty_file_transfer() {
         let (src_name, dest_name) = init_full_filenames();
+        assert!(!Path::exists(&dest_name));
         let mut buf: [u8; 512] = [0; 512];
         let mut test_user = TestCfdpUser {
             next_expected_seq_num: 0,
@@ -687,13 +705,25 @@ mod tests {
             panic!("dest handler fsm error: {e}");
         }
         assert_ne!(dest_handler.state(), State::Idle);
+        assert_eq!(dest_handler.step(), TransactionStep::ReceivingFileDataPdus);
+
+        insert_eof_pdu(&[], &pdu_header, &mut buf, &mut dest_handler);
+        let result = dest_handler.state_machine(&mut test_user);
+        assert!(result.is_ok());
+        assert_eq!(dest_handler.state(), State::Idle);
         assert_eq!(dest_handler.step(), TransactionStep::Idle);
+        assert!(Path::exists(&dest_name));
+        let read_content = fs::read(&dest_name).expect("reading back string failed");
+        assert_eq!(read_content.len(), 0);
+        assert!(fs::remove_file(dest_name).is_ok());
     }
 
     #[test]
     fn test_small_file_transfer() {
         let (src_name, dest_name) = init_full_filenames();
-        let file_data = "Hello World!".as_bytes();
+        assert!(!Path::exists(&dest_name));
+        let file_data_str = "Hello World!";
+        let file_data = file_data_str.as_bytes();
         let mut buf: [u8; 512] = [0; 512];
         let mut test_user = TestCfdpUser {
             next_expected_seq_num: 0,
@@ -734,19 +764,18 @@ mod tests {
         let result = dest_handler.state_machine(&mut test_user);
         assert!(result.is_ok());
 
-        let mut digest = CRC_32.digest();
-        digest.update(file_data);
-        let crc32 = digest.finalize();
-        let eof_pdu = EofPdu::new_no_error(pdu_header, crc32, file_data.len() as u64);
-        let result = eof_pdu.write_to_bytes(&mut buf);
-        assert!(result.is_ok());
-        let packet_info = PacketInfo::new(&buf).expect("generating packet info failed");
-        let result = dest_handler.insert_packet(&packet_info);
-        assert!(result.is_ok());
-
+        insert_eof_pdu(file_data, &pdu_header, &mut buf, &mut dest_handler);
         let result = dest_handler.state_machine(&mut test_user);
         assert!(result.is_ok());
         assert_eq!(dest_handler.state(), State::Idle);
         assert_eq!(dest_handler.step(), TransactionStep::Idle);
+
+        assert!(Path::exists(&dest_name));
+        let read_content = fs::read_to_string(&dest_name).expect("reading back string failed");
+        assert_eq!(read_content, file_data_str);
+        assert!(fs::remove_file(dest_name).is_ok());
     }
+
+    #[test]
+    fn test_segmented_file_transfer() {}
 }
