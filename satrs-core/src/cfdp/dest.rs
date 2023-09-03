@@ -512,8 +512,8 @@ mod tests {
     const LOCAL_ID: UnsignedByteFieldU16 = UnsignedByteFieldU16::new(1);
     const REMOTE_ID: UnsignedByteFieldU16 = UnsignedByteFieldU16::new(2);
 
-    const SRC_NAME: &str = "source-file.txt";
-    const DEST_NAME: &str = "dest-file.txt";
+    const SRC_NAME: &str = "__cfdp__source-file.txt";
+    const DEST_NAME: &str = "__cfdp__dest-file.txt";
 
     #[derive(Default)]
     struct TestCfdpUser {
