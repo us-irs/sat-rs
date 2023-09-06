@@ -1,3 +1,5 @@
+<p align="center"> <img src="misc/satrs-logo.png" width="40%"> </p>
+
 sat-rs
 =========
 
