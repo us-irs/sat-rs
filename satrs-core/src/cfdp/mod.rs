@@ -15,7 +15,7 @@ pub mod dest;
 pub mod user;
 
 #[derive(Debug)]
-pub struct RemoteConfig {
+pub struct RemoteEntityConfig {
     pub entity_id: UnsignedByteField,
     pub max_file_segment_len: usize,
     pub closure_requeted_by_default: bool,
