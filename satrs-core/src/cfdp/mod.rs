@@ -2,7 +2,7 @@ use crc::{Crc, CRC_32_CKSUM};
 use spacepackets::{
     cfdp::{
         pdu::{FileDirectiveType, PduError, PduHeader},
-        PduType,
+        ChecksumType, PduType, TransmissionMode,
     },
     util::UnsignedByteField,
 };
@@ -13,6 +13,16 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "std")]
 pub mod dest;
 pub mod user;
+
+#[derive(Debug)]
+pub struct RemoteConfig {
+    pub entity_id: UnsignedByteField,
+    pub max_file_segment_len: usize,
+    pub closure_requeted_by_default: bool,
+    pub crc_on_transmission_by_default: bool,
+    pub default_transmission_mode: TransmissionMode,
+    pub default_crc_type: ChecksumType,
+}
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -157,6 +167,78 @@ impl<'raw> PacketInfo<'raw> {
 
 #[cfg(test)]
 mod tests {
+    use spacepackets::cfdp::{
+        lv::Lv,
+        pdu::{
+            eof::EofPdu,
+            file_data::FileDataPdu,
+            metadata::{MetadataGenericParams, MetadataPdu},
+            CommonPduConfig, FileDirectiveType, PduHeader,
+        },
+        PduType,
+    };
+
+    use crate::cfdp::PacketTarget;
+
+    use super::PacketInfo;
+
+    fn generic_pdu_header() -> PduHeader {
+        let pdu_conf = CommonPduConfig::default();
+        PduHeader::new_no_file_data(pdu_conf, 0)
+    }
+
     #[test]
-    fn basic_test() {}
+    fn test_metadata_pdu_info() {
+        let mut buf: [u8; 128] = [0; 128];
+        let pdu_header = generic_pdu_header();
+        let metadata_params = MetadataGenericParams::default();
+        let src_file_name = "hello.txt";
+        let dest_file_name = "hello-dest.txt";
+        let src_lv = Lv::new_from_str(src_file_name).unwrap();
+        let dest_lv = Lv::new_from_str(dest_file_name).unwrap();
+        let metadata_pdu = MetadataPdu::new(pdu_header, metadata_params, src_lv, dest_lv, None);
+        metadata_pdu
+            .write_to_bytes(&mut buf)
+            .expect("writing metadata PDU failed");
+
+        let packet_info = PacketInfo::new(&buf).expect("creating packet info failed");
+        assert_eq!(packet_info.pdu_type(), PduType::FileDirective);
+        assert!(packet_info.pdu_directive().is_some());
+        assert_eq!(
+            packet_info.pdu_directive().unwrap(),
+            FileDirectiveType::MetadataPdu
+        );
+        assert_eq!(packet_info.target(), PacketTarget::DestEntity);
+    }
+
+    #[test]
+    fn test_filedata_pdu_info() {
+        let mut buf: [u8; 128] = [0; 128];
+        let pdu_header = generic_pdu_header();
+        let file_data_pdu = FileDataPdu::new_no_seg_metadata(pdu_header, 0, &[]);
+        file_data_pdu
+            .write_to_bytes(&mut buf)
+            .expect("writing file data PDU failed");
+        let packet_info = PacketInfo::new(&buf).expect("creating packet info failed");
+        assert_eq!(packet_info.pdu_type(), PduType::FileData);
+        assert!(packet_info.pdu_directive().is_none());
+        assert_eq!(packet_info.target(), PacketTarget::DestEntity);
+    }
+
+    #[test]
+    fn test_eof_pdu_info() {
+        let mut buf: [u8; 128] = [0; 128];
+        let pdu_header = generic_pdu_header();
+        let eof_pdu = EofPdu::new_no_error(pdu_header, 0, 0);
+        eof_pdu
+            .write_to_bytes(&mut buf)
+            .expect("writing file data PDU failed");
+        let packet_info = PacketInfo::new(&buf).expect("creating packet info failed");
+        assert_eq!(packet_info.pdu_type(), PduType::FileDirective);
+        assert!(packet_info.pdu_directive().is_some());
+        assert_eq!(
+            packet_info.pdu_directive().unwrap(),
+            FileDirectiveType::EofPdu
+        );
+    }
 }

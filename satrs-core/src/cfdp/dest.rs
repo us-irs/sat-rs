@@ -159,7 +159,6 @@ impl DestinationHandler {
             state: State::Idle,
             tparams: Default::default(),
             packets_to_send_ctx: Default::default(),
-            //cfdp_user,
         }
     }
 
