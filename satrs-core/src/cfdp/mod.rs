@@ -37,15 +37,25 @@ pub trait CheckTimerProvider {
     fn has_expired(&self) -> bool;
 }
 
+/// A generic trait which allows CFDP entities to create check timers which are required to
+/// implement special procedures in unacknowledged transmission mode, as specified in 4.6.3.2
+/// and 4.6.3.3. The [CheckTimerProvider] provides more information about the purpose of the
+/// check timer.
+///
+/// This trait also allows the creation of different check timers depending on
+/// the ID of the local entity, the ID of the remote entity for a given transaction, and the
+/// type of entity.
 #[cfg(feature = "alloc")]
 pub trait CheckTimerCreator {
-    fn get_check_limit_provider(
+    fn get_check_timer_provider(
         local_id: &UnsignedByteField,
         remote_id: &UnsignedByteField,
         entity_type: EntityType,
     ) -> Box<dyn CheckTimerProvider>;
 }
 
+/// Simple implementation of the [CheckTimerProvider] trait assuming a standard runtime.
+/// It also assumes that a second accuracy of the check timer period is sufficient.
 #[cfg(feature = "std")]
 pub struct StdCheckTimer {
     expiry_time_seconds: u64,
