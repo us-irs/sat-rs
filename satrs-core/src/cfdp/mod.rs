@@ -27,12 +27,12 @@ pub enum EntityType {
 /// transmission mode.
 ///
 /// For the sending entity, this timer determines the expiry period for declaring a check limit
-/// fault after sending an EOF PDU with requested closure. This allows a timeout of the
-/// transfer.
+/// fault after sending an EOF PDU with requested closure. This allows a timeout of the transfer.
+/// Also see 4.6.3.2 of the CFDP standard.
 ///
 /// For the receiving entity, this timer determines the expiry period for incrementing a check
 /// counter after an EOF PDU is received for an incomplete file transfer. This allows out-of-order
-/// reception of file data PDUs and EOF PDUs.
+/// reception of file data PDUs and EOF PDUs. Also see 4.6.3.3 of the CFDP standard.
 pub trait CheckTimerProvider {
     fn has_expired(&self) -> bool;
 }
