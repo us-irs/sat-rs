@@ -7,12 +7,72 @@ use spacepackets::{
     util::UnsignedByteField,
 };
 
+#[cfg(feature = "alloc")]
+use alloc::boxed::Box;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "std")]
 pub mod dest;
 pub mod user;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityType {
+    Sending,
+    Receiving,
+}
+
+/// Generic abstraction for a check timer which has different functionality depending on whether
+/// the using entity is the sending entity or the receiving entity for the unacknowledged
+/// transmission mode.
+///
+/// For the sending entity, this timer determines the expiry period for declaring a check limit
+/// fault after sending an EOF PDU with requested closure. This allows a timeout of the
+/// transfer.
+///
+/// For the receiving entity, this timer determines the expiry period for incrementing a check
+/// counter after an EOF PDU is received for an incomplete file transfer. This allows out-of-order
+/// reception of file data PDUs and EOF PDUs.
+pub trait CheckTimerProvider {
+    fn has_expired(&self) -> bool;
+}
+
+#[cfg(feature = "alloc")]
+pub trait CheckTimerCreator {
+    fn get_check_limit_provider(
+        local_id: &UnsignedByteField,
+        remote_id: &UnsignedByteField,
+        entity_type: EntityType,
+    ) -> Box<dyn CheckTimerProvider>;
+}
+
+#[cfg(feature = "std")]
+pub struct StdCheckTimer {
+    expiry_time_seconds: u64,
+    start_time: std::time::Instant
+}
+
+
+#[cfg(feature = "std")]
+impl StdCheckTimer {
+    pub fn new(expiry_time_seconds: u64) -> Self {
+        Self {
+            expiry_time_seconds,
+            start_time: std::time::Instant::now()
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl CheckTimerProvider for StdCheckTimer {
+    fn has_expired(&self) -> bool {
+        let elapsed_time = self.start_time.elapsed();
+        if elapsed_time.as_secs() > self.expiry_time_seconds {
+            return true;
+        }
+        false
+    }
+}
 
 #[derive(Debug)]
 pub struct RemoteEntityConfig {
@@ -22,6 +82,11 @@ pub struct RemoteEntityConfig {
     pub crc_on_transmission_by_default: bool,
     pub default_transmission_mode: TransmissionMode,
     pub default_crc_type: ChecksumType,
+    pub check_limit: u32,
+}
+
+pub trait RemoteEntityConfigProvider {
+    fn get_remote_config(&self, remote_id: &UnsignedByteField) -> Option<&RemoteEntityConfig>;
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
