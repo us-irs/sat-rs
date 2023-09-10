@@ -502,7 +502,8 @@ mod tests {
     use std::println;
     use std::{env::temp_dir, fs};
 
-    use alloc::{string::String, format};
+    use alloc::{format, string::String};
+    use rand::Rng;
     use spacepackets::{
         cfdp::{lv::Lv, ChecksumType},
         util::{UbfU16, UnsignedByteFieldU16},
@@ -785,5 +786,87 @@ mod tests {
     }
 
     #[test]
-    fn test_segmented_file_transfer() {}
+    fn test_segmented_file_transfer() {
+        let (src_name, dest_name) = init_full_filenames();
+        assert!(!Path::exists(&dest_name));
+        let mut rng = rand::thread_rng();
+        let mut random_data = [0u8; 512];
+        rng.fill(&mut random_data);
+        let mut buf: [u8; 512] = [0; 512];
+        let mut test_user = TestCfdpUser {
+            next_expected_seq_num: 0,
+            expected_full_src_name: src_name.to_string_lossy().into(),
+            expected_full_dest_name: dest_name.to_string_lossy().into(),
+            expected_file_size: random_data.len(),
+        };
+
+        // We treat the destination handler like it is a remote entity.
+        let mut dest_handler = DestinationHandler::new(REMOTE_ID);
+        init_check(&dest_handler);
+
+        let seq_num = UbfU16::new(0);
+        let pdu_header = create_pdu_header(seq_num);
+        let metadata_pdu = create_metadata_pdu(
+            &pdu_header,
+            src_name.as_path(),
+            dest_name.as_path(),
+            random_data.len() as u64,
+        );
+        insert_metadata_pdu(&metadata_pdu, &mut buf, &mut dest_handler);
+        let result = dest_handler.state_machine(&mut test_user);
+        if let Err(e) = result {
+            panic!("dest handler fsm error: {e}");
+        }
+        assert_ne!(dest_handler.state(), State::Idle);
+        assert_eq!(dest_handler.step(), TransactionStep::ReceivingFileDataPdus);
+
+        // First file data PDU
+        let mut offset: usize = 0;
+        let segment_len = 256;
+        let filedata_pdu = FileDataPdu::new_no_seg_metadata(
+            pdu_header,
+            offset as u64,
+            &random_data[0..segment_len],
+        );
+        filedata_pdu
+            .write_to_bytes(&mut buf)
+            .expect("writing file data PDU failed");
+        let packet_info = PacketInfo::new(&buf).expect("creating packet info failed");
+        let result = dest_handler.insert_packet(&packet_info);
+        if let Err(e) = result {
+            panic!("destination handler packet insertion error: {e}");
+        }
+        let result = dest_handler.state_machine(&mut test_user);
+        assert!(result.is_ok());
+
+        // Second file data PDU
+        offset += segment_len;
+        let filedata_pdu = FileDataPdu::new_no_seg_metadata(
+            pdu_header,
+            offset as u64,
+            &random_data[segment_len..],
+        );
+        filedata_pdu
+            .write_to_bytes(&mut buf)
+            .expect("writing file data PDU failed");
+        let packet_info = PacketInfo::new(&buf).expect("creating packet info failed");
+        let result = dest_handler.insert_packet(&packet_info);
+        if let Err(e) = result {
+            panic!("destination handler packet insertion error: {e}");
+        }
+        let result = dest_handler.state_machine(&mut test_user);
+        assert!(result.is_ok());
+
+        insert_eof_pdu(&random_data, &pdu_header, &mut buf, &mut dest_handler);
+        let result = dest_handler.state_machine(&mut test_user);
+        assert!(result.is_ok());
+        assert_eq!(dest_handler.state(), State::Idle);
+        assert_eq!(dest_handler.step(), TransactionStep::Idle);
+
+        // Clean up
+        assert!(Path::exists(&dest_name));
+        let read_content = fs::read(&dest_name).expect("reading back string failed");
+        assert_eq!(read_content, random_data);
+        assert!(fs::remove_file(dest_name).is_ok());
+    }
 }
