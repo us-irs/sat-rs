@@ -7,18 +7,19 @@ For these systems, the computation power and the available heap are the most imp
 which are constrained. This might make completeley heap based memory management schemes which
 are oftentimes used on host and server based systems unfeasable. Still, completely forbidding
 heap allocations might make software development unnecessarilly difficult, especially in a
-time where the OBSW might be running on Linux based systems with 500 MB RAM.
+time where the OBSW might be running on Linux based systems with hundreds of MBs of RAM.
 
 A useful pattern used commonly in space systems is to limit heap allocations to program
 initialization time and avoid frequent run-time allocations. This prevents issues like
-running out of memory (something event Rust can not protect from) or heap fragmentation.
+running out of memory (something even Rust can not protect from) or heap fragmentation.
 
 # Using pre-allocated pool structures
 
 A huge candidate for heap allocations is the TMTC and  handling. TC, TMs and IPC data are all
 candidates where the data size might vary greatly. The regular solution for host systems
 might be to send around this data as a `Vec<u8>` until it is dropped. `sat-rs` provides
-another solution to avoid run-time allocations by pre-allocated static pools.
+another solution to avoid run-time allocations by offering and recommendng pre-allocated static
+pools.
 
 These pools are split into subpools where each subpool can have different page sizes.
 For example, a very small TC pool might look like this:
@@ -34,7 +35,7 @@ Another common way to use the heap on host systems is using containers like `Str
 to work with data where the size is not known beforehand. The most common solution for embedded
 systems is to determine the maximum expected size and then use a pre-allocated `u8` buffer and a
 size variable. Alternatively, you can use the following crates for more convenience or a smart
-behaviour which at least reduced heap allocations:
+behaviour which at the very least reduce heap allocations:
 
 1. [`smallvec`](https://docs.rs/smallvec/latest/smallvec/).
 2. [`arrayvec`](https://docs.rs/arrayvec/latest/arrayvec/index.html) which also contains an
@@ -50,7 +51,7 @@ thread might use up the remaining heap of a system, leading to undeterministic e
 
 The most common way to avoid this is to simply spawn all required threads at program initialization
 time. If a thread is done with its task, it can go back to sleeping regularly, only occasionally
-checking for new jobs. If a system still needs to handle burst concurrent loads, another possible
+checking for new jobs. If a system still needs to handle bursty concurrent loads, another possible
 way commonly used for host systems as well would be to use a threadpool, for example by using the
 [`threadpool`](https://crates.io/crates/threadpool) crate.
 

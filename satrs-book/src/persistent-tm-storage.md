@@ -1,1 +1,1 @@
-# Persistent TM storage
+# Persistent Telemetry (TM) Storage

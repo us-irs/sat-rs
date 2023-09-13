@@ -1,8 +1,8 @@
 # Communication with sat-rs based software
 
-Communication is a huge topic for space systems. They are usually not (directly) connected
-to the internet and only have 1-2 communication links during nominal operation. However, most
-of these systems have internet access during development cycle. There are various standards
+Communication is a huge topic for space systems. Remote systems are usually not (directly)
+connected to the internet and only have 1-2 communication links during nominal operation. However,
+most of these systems have internet access during development cycle. There are various standards
 provided by CCSDS and ECSS which can be useful to determine how to communicate with the satellite
 and the primary On-Board Software.
 
@@ -12,7 +12,7 @@ Most communication with space systems is usually packet based. For example, the 
 packet standard only specifies a 6 byte header with at least 1 byte payload. The PUS packet
 standard is a subset of the space packet standard, which adds some fields and a 16 bit CRC, but
 it is still centered around small packets. `sat-rs` provides support for these ECSS and CCSDS
-standards to also attempts to fill the gap to the internet protocol by providing the following
+standards and also attempts to fill the gap to the internet protocol by providing the following
 components.
 
 1. UDP TMTC Server. UDP is already packet based which makes it an excellent fit for exchanging
@@ -41,6 +41,6 @@ layer covered by the PUS standard or the CCSDS space packets standard. This ofte
 special hardware like dedicated FPGAs to handle forward error correction fast enough. `sat-rs`
 might provide components to handle standard like the Unified Space Data Link Standard (USLP) in
 software but most of the time the handling of communication is performed through custom
-software and hardware. Still, connecting this custom software and hardware can mostly be done
-by using the concept of TC sources and TM sinks mentioned previously.
+software and hardware. Still, connecting this custom software and hardware to `sat-rs` can mostly
+be done by using the concept of TC sources and TM sinks mentioned previously.
 

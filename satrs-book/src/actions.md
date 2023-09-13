@@ -1,7 +1,7 @@
 # Working with Actions
 
 Space systems generally need to be commanded regularly. This can include commands periodically
-required to ensure a health system, or commands to reach the mission goals.
+required to ensure a healthy system, or commands to reach the mission goals.
 
 These commands can be modelled using the concept of Actions. the ECSS PUS standard also provides
 the PUS service 8 for actions, but provides few concrete subservices and specification on how

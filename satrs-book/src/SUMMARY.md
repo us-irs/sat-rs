@@ -15,5 +15,5 @@
 - [Serialization of Data](./serialization.md)
 - [Logging](./logging.md)
 - [Modelling space systems](./modelling-space-systems.md)
-- [Ground Systems](./ground.md)
+- [Ground Segments](./ground-segments.md)
 
