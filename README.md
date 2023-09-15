@@ -1,3 +1,5 @@
+<p align="center"> <img src="misc/satrs-logo.png" width="40%"> </p>
+
 sat-rs
 =========
 
@@ -21,7 +23,7 @@ This project currently contains following crates:
    on a host computer or on any system with a standard runtime like a Raspberry Pi.
 * [`satrs-mib`](https://egit.irs.uni-stuttgart.de/rust/satrs-launchpad/src/branch/main/satrs-mib):
    Components to build a mission information base from the on-board software directly.
-* [`satrs-example-stm32f3-disco`](https://egit.irs.uni-stuttgart.de/rust/satrs-example-stm32f3-disco):
+* [`satrs-example-stm32f3-disco`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example-stm32f3-disco):
    Example of a simple example on-board software using sat-rs components on a bare-metal system
    with constrained resources.
 
