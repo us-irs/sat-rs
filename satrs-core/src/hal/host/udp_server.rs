@@ -6,7 +6,8 @@ use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::vec;
 use std::vec::Vec;
 
-/// This TC server helper can be used to receive raw PUS telecommands thorough a UDP interface.
+/// This UDP server can be used to receive CCSDS space packet telecommands or any other telecommand
+/// format.
 ///
 /// It caches all received telecomands into a vector. The maximum expected telecommand size should
 /// be declared upfront. This avoids dynamic allocation during run-time. The user can specify a TC
