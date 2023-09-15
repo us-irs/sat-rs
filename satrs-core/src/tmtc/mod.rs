@@ -92,3 +92,10 @@ pub trait ReceivesCcsdsTc {
     type Error;
     fn pass_ccsds(&mut self, header: &SpHeader, tc_raw: &[u8]) -> Result<(), Self::Error>;
 }
+
+/// Generic trait for a TM packet source, with no restrictions on the type of TM.
+/// Implementors write the telemetry into the provided buffer and return the size of the telemetry.
+pub trait TmPacketSource {
+    type Error;
+    fn retrieve_packet(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error>;
+}
