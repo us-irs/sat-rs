@@ -9,9 +9,9 @@ use std::io::Write;
 use std::net::ToSocketAddrs;
 use std::vec::Vec;
 
+use crate::hal::host::tcp_server::TcpTmtcServerBase;
 use crate::tmtc::ReceivesTc;
 use crate::tmtc::TmPacketSource;
-use crate::hal::host::tcp_server::TcpTmtcServerBase;
 
 use super::tcp_server::ConnectionResult;
 use super::tcp_server::TcpTmtcError;
@@ -22,6 +22,9 @@ use super::tcp_server::TcpTmtcError;
 /// Using a framing protocol like COBS imposes minimal restrictions on the type of TMTC data
 /// exchanged while also allowing packets with flexible size and a reliable way to reconstruct full
 /// packets even from a data stream which is split up.
+///
+/// The server wil use the [parse_buffer_for_cobs_encoded_packets] function to parse for packets
+/// and pass them to a generic TC receiver.
 pub struct TcpTmtcInCobsServer<TcError, TmError> {
     base: TcpTmtcServerBase<TcError, TmError>,
     tm_encoding_buffer: Vec<u8>,
@@ -112,6 +115,16 @@ impl<TcError: 'static + Display, TmError: 'static + Display> TcpTmtcInCobsServer
     }
 }
 
+/// This function parses a given buffer for COBS encoded packets. The packet structure is
+/// expected to be like this, assuming a sentinel value of 0 as the packet delimiter.
+///
+/// 0 | ... Packet Data ... | 0 | 0 | ... Packet Data ... | 0
+///
+/// This function is also able to deal with broken tail packets at the end. If broken tail
+/// packets are detected, they are moved to the front of the buffer, and the write index for
+/// future write operations will be written to the `next_write_idx` argument.
+///
+/// The parser will write all packets which were decoded successfully to the given `tc_receiver`.
 pub fn parse_buffer_for_cobs_encoded_packets<E>(
     buf: &mut [u8],
     tc_receiver: &mut dyn ReceivesTc<Error = E>,

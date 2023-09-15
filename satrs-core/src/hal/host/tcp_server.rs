@@ -8,7 +8,9 @@ use core::fmt::Display;
 use thiserror::Error;
 
 // Re-export the TMTC in COBS server.
-pub use crate::hal::host::tcp_with_cobs_server::TcpTmtcInCobsServer;
+pub use crate::hal::host::tcp_with_cobs_server::{
+    parse_buffer_for_cobs_encoded_packets, TcpTmtcInCobsServer,
+};
 
 #[derive(Error, Debug)]
 pub enum TcpTmtcError<TmError: Display, TcError: Display> {
@@ -30,11 +32,11 @@ pub struct ConnectionResult {
 }
 
 pub(crate) struct TcpTmtcServerBase<TcError, TmError> {
-    pub (crate) listener: TcpListener,
-    pub (crate) tm_source: Box<dyn TmPacketSource<Error = TmError>>,
-    pub (crate) tm_buffer: Vec<u8>,
-    pub (crate) tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
-    pub (crate) tc_buffer: Vec<u8>,
+    pub(crate) listener: TcpListener,
+    pub(crate) tm_source: Box<dyn TmPacketSource<Error = TmError>>,
+    pub(crate) tm_buffer: Vec<u8>,
+    pub(crate) tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
+    pub(crate) tc_buffer: Vec<u8>,
 }
 
 impl<TcError, TmError> TcpTmtcServerBase<TcError, TmError> {
