@@ -3,9 +3,9 @@ use alloc::vec;
 use cobs::decode_in_place;
 use cobs::encode;
 use cobs::max_encoding_length;
-use std::net::SocketAddr;
 use std::io::Read;
 use std::io::Write;
+use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 use std::vec::Vec;
 
@@ -147,7 +147,7 @@ impl<TcError: 'static, TmError: 'static> TcpTmtcInCobsServer<TcError, TmError> {
             current_idx += 1;
             current_idx += encode(
                 &self.base.tm_buffer[..read_tm_len],
-                &mut self.tm_encoding_buffer,
+                &mut self.tm_encoding_buffer[current_idx..],
             );
             self.tm_encoding_buffer[current_idx] = 0;
             current_idx += 1;
@@ -275,7 +275,7 @@ mod tests {
         type Error = ();
 
         fn retrieve_packet(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
-            let tm_queue = self.tm_queue.lock().expect("locking tm queue failed");
+            let mut tm_queue = self.tm_queue.lock().expect("locking tm queue failed");
             if !tm_queue.is_empty() {
                 let next_vec = tm_queue.front().unwrap();
                 if buffer.len() < next_vec.len() {
@@ -284,7 +284,8 @@ mod tests {
                         next_vec.len()
                     );
                 }
-                buffer[0..next_vec.len()].copy_from_slice(next_vec);
+                let next_vec = tm_queue.pop_front().unwrap();
+                buffer[0..next_vec.len()].copy_from_slice(&next_vec);
                 return Ok(next_vec.len());
             }
             Ok(0)
@@ -478,7 +479,9 @@ mod tests {
         let tm_source = SyncTmSource::default();
         let mut tcp_server =
             generic_tmtc_server(&auto_port_addr, tc_receiver.clone(), tm_source.clone());
-        let dest_addr = tcp_server.local_addr().expect("retrieving dest addr failed");
+        let dest_addr = tcp_server
+            .local_addr()
+            .expect("retrieving dest addr failed");
         let conn_handled: Arc<AtomicBool> = Default::default();
         let set_if_done = conn_handled.clone();
         // Call the connection handler in separate thread, does block.
@@ -531,7 +534,9 @@ mod tests {
         tm_source.add_tm(&INVERTED_PACKET);
         let mut tcp_server =
             generic_tmtc_server(&auto_port_addr, tc_receiver.clone(), tm_source.clone());
-        let dest_addr = tcp_server.local_addr().expect("retrieving dest addr failed");
+        let dest_addr = tcp_server
+            .local_addr()
+            .expect("retrieving dest addr failed");
         let conn_handled: Arc<AtomicBool> = Default::default();
         let set_if_done = conn_handled.clone();
         // Call the connection handler in separate thread, does block.
@@ -553,6 +558,10 @@ mod tests {
         stream
             .write_all(&encoded_buf[..current_idx])
             .expect("writing to TCP server failed");
+        // Done with writing.
+        stream
+            .shutdown(std::net::Shutdown::Write)
+            .expect("shutting down write failed");
         let mut read_buf: [u8; 16] = [0; 16];
         let read_len = stream.read(&mut read_buf).expect("read failed");
         // 1 byte encoding overhead, 2 sentinel bytes.
@@ -562,7 +571,8 @@ mod tests {
         let decoded_len =
             cobs::decode_in_place(&mut read_buf[1..read_len]).expect("COBS decoding failed");
         assert_eq!(decoded_len, 5);
-        assert_eq!(&read_buf[..INVERTED_PACKET.len()], &INVERTED_PACKET);
+        // Skip first sentinel byte.
+        assert_eq!(&read_buf[1..1 + INVERTED_PACKET.len()], &INVERTED_PACKET);
 
         drop(stream);
         // A certain amount of time is allowed for the transaction to complete.

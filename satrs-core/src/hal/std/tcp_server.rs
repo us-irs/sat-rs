@@ -55,8 +55,8 @@ impl<TcError, TmError> TcpTmtcServerBase<TcError, TmError> {
             tc_buffer: vec![0; tc_buffer_size],
         })
     }
-    
-    pub (crate) fn local_addr(&self) -> std::io::Result<SocketAddr> {
+
+    pub(crate) fn local_addr(&self) -> std::io::Result<SocketAddr> {
         self.listener.local_addr()
     }
 }
