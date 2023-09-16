@@ -3,6 +3,7 @@ use alloc::vec;
 use cobs::decode_in_place;
 use cobs::encode;
 use cobs::max_encoding_length;
+use std::net::SocketAddr;
 use std::io::Read;
 use std::io::Write;
 use std::net::ToSocketAddrs;
@@ -74,6 +75,12 @@ impl<TcError: 'static, TmError: 'static> TcpTmtcInCobsServer<TcError, TmError> {
             )?,
             tm_encoding_buffer: vec![0; max_encoding_length(tc_buffer_size)],
         })
+    }
+
+    /// Can be used to retrieve the local assigned address of the TCP server. This is especially
+    /// useful if using the port number 0 for OS auto-assignment.
+    pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        self.base.local_addr()
     }
 
     /// This call is used to handle the next connection to a client. Right now, it performs
@@ -466,11 +473,12 @@ mod tests {
 
     #[test]
     fn test_server_basic_no_tm() {
-        let dest_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
+        let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
         let tc_receiver = SyncTcCacher::default();
         let tm_source = SyncTmSource::default();
         let mut tcp_server =
-            generic_tmtc_server(&dest_addr, tc_receiver.clone(), tm_source.clone());
+            generic_tmtc_server(&auto_port_addr, tc_receiver.clone(), tm_source.clone());
+        let dest_addr = tcp_server.local_addr().expect("retrieving dest addr failed");
         let conn_handled: Arc<AtomicBool> = Default::default();
         let set_if_done = conn_handled.clone();
         // Call the connection handler in separate thread, does block.
@@ -517,12 +525,13 @@ mod tests {
 
     #[test]
     fn test_server_basic_with_tm() {
-        let dest_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
+        let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
         let tc_receiver = SyncTcCacher::default();
         let mut tm_source = SyncTmSource::default();
         tm_source.add_tm(&INVERTED_PACKET);
         let mut tcp_server =
-            generic_tmtc_server(&dest_addr, tc_receiver.clone(), tm_source.clone());
+            generic_tmtc_server(&auto_port_addr, tc_receiver.clone(), tm_source.clone());
+        let dest_addr = tcp_server.local_addr().expect("retrieving dest addr failed");
         let conn_handled: Arc<AtomicBool> = Default::default();
         let set_if_done = conn_handled.clone();
         // Call the connection handler in separate thread, does block.
