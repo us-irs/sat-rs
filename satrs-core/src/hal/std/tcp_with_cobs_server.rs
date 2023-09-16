@@ -6,7 +6,7 @@ use cobs::max_encoding_length;
 use std::io::Read;
 use std::io::Write;
 use std::net::SocketAddr;
-use std::net::ToSocketAddrs;
+use std::net::TcpListener;
 use std::vec::Vec;
 
 use crate::hal::std::tcp_server::TcpTmtcServerBase;
@@ -44,6 +44,10 @@ impl<TcError: 'static, TmError: 'static> TcpTmtcInCobsServer<TcError, TmError> {
     /// ## Parameter
     ///
     /// * `addr` - Address of the TCP server.
+    /// * `reuse_addr` - Can be used to set the `SO_REUSEADDR` option on the raw socket. This is
+    ///     especially useful if the address and port are static for the server.
+    /// * `reuse_port` - Can be used to set the `SO_REUSEPORT` option on the raw socket. This is
+    ///     especially useful if the address and port are static for the server.
     /// * `tm_buffer_size` - Size of the TM buffer used to read TM from the [TmPacketSource] and
     ///     encoding of that data. This buffer should at large enough to hold the maximum expected
     ///     TM size in addition to the COBS encoding overhead. You can use
@@ -58,8 +62,10 @@ impl<TcError: 'static, TmError: 'static> TcpTmtcInCobsServer<TcError, TmError> {
     ///     calculate this size.
     /// * `tc_receiver` - Any received telecommand which was decoded successfully will be forwarded
     ///     to this TC receiver.
-    pub fn new<A: ToSocketAddrs>(
-        addr: A,
+    pub fn new(
+        addr: &SocketAddr,
+        reuse_addr: bool,
+        reuse_port: bool,
         tm_buffer_size: usize,
         tm_source: Box<dyn TmPacketSource<Error = TmError> + Send>,
         tc_buffer_size: usize,
@@ -68,6 +74,8 @@ impl<TcError: 'static, TmError: 'static> TcpTmtcInCobsServer<TcError, TmError> {
         Ok(Self {
             base: TcpTmtcServerBase::new(
                 addr,
+                reuse_addr,
+                reuse_port,
                 tm_buffer_size,
                 tm_source,
                 tc_buffer_size,
@@ -75,6 +83,11 @@ impl<TcError: 'static, TmError: 'static> TcpTmtcInCobsServer<TcError, TmError> {
             )?,
             tm_encoding_buffer: vec![0; max_encoding_length(tc_buffer_size)],
         })
+    }
+
+    /// Retrieve the internal [TcpListener] class.
+    pub fn listener(&mut self) -> &mut TcpListener {
+        self.base.listener()
     }
 
     /// Can be used to retrieve the local assigned address of the TCP server. This is especially
@@ -464,6 +477,8 @@ mod tests {
     ) -> TcpTmtcInCobsServer<(), ()> {
         TcpTmtcInCobsServer::new(
             addr,
+            false,
+            false,
             1024,
             Box::new(tm_source),
             1024,

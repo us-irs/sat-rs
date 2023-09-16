@@ -60,6 +60,11 @@ version = "1"
 default-features = false
 optional = true
 
+[dependencies.socket2]
+version = "0.5.4"
+features = ["all"]
+optional = true
+
 [dependencies.spacepackets]
 version = "0.7.0-beta.1"
 # path = "../../spacepackets"
@@ -93,7 +98,8 @@ std = [
 	"serde/std",
 	"spacepackets/std",
 	"num_enum/std",
-	"thiserror"
+	"thiserror",
+  "socket2"
 ]
 alloc = [
 	"serde/alloc",

@@ -1,8 +1,9 @@
 //! Generic TCP TMTC servers with different TMTC format flavours.
 use alloc::vec;
 use alloc::{boxed::Box, vec::Vec};
+use socket2::{Domain, Socket, Type};
 use std::net::SocketAddr;
-use std::net::{TcpListener, ToSocketAddrs};
+use std::net::TcpListener;
 
 use crate::tmtc::{ReceivesTc, TmPacketSource};
 use thiserror::Error;
@@ -40,20 +41,33 @@ pub(crate) struct TcpTmtcServerBase<TcError, TmError> {
 }
 
 impl<TcError, TmError> TcpTmtcServerBase<TcError, TmError> {
-    pub(crate) fn new<A: ToSocketAddrs>(
-        addr: A,
+    pub(crate) fn new(
+        addr: &SocketAddr,
+        reuse_addr: bool,
+        reuse_port: bool,
         tm_buffer_size: usize,
         tm_source: Box<dyn TmPacketSource<Error = TmError> + Send>,
         tc_buffer_size: usize,
         tc_receiver: Box<dyn ReceivesTc<Error = TcError> + Send>,
     ) -> Result<Self, std::io::Error> {
+        // Create a TCP listener bound to two addresses.
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
+        socket.set_reuse_address(reuse_addr)?;
+        socket.set_reuse_port(reuse_port)?;
+        let addr = (*addr).into();
+        socket.bind(&addr)?;
+        socket.listen(128)?;
         Ok(Self {
-            listener: TcpListener::bind(addr)?,
+            listener: socket.into(),
             tm_source,
             tm_buffer: vec![0; tm_buffer_size],
             tc_receiver,
             tc_buffer: vec![0; tc_buffer_size],
         })
+    }
+
+    pub(crate) fn listener(&mut self) -> &mut TcpListener {
+        &mut self.listener
     }
 
     pub(crate) fn local_addr(&self) -> std::io::Result<SocketAddr> {
