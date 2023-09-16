@@ -4,7 +4,6 @@ use std::net::SocketAddr;
 use std::net::{TcpListener, ToSocketAddrs};
 
 use crate::tmtc::{ReceivesTc, TmPacketSource};
-use core::fmt::Display;
 use thiserror::Error;
 
 // Re-export the TMTC in COBS server.
@@ -13,7 +12,7 @@ pub use crate::hal::host::tcp_with_cobs_server::{
 };
 
 #[derive(Error, Debug)]
-pub enum TcpTmtcError<TmError: Display, TcError: Display> {
+pub enum TcpTmtcError<TmError, TcError> {
     #[error("TM retrieval error: {0}")]
     TmError(TmError),
     #[error("TC retrieval error: {0}")]
@@ -33,9 +32,9 @@ pub struct ConnectionResult {
 
 pub(crate) struct TcpTmtcServerBase<TcError, TmError> {
     pub(crate) listener: TcpListener,
-    pub(crate) tm_source: Box<dyn TmPacketSource<Error = TmError>>,
+    pub(crate) tm_source: Box<dyn TmPacketSource<Error = TmError> + Send>,
     pub(crate) tm_buffer: Vec<u8>,
-    pub(crate) tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
+    pub(crate) tc_receiver: Box<dyn ReceivesTc<Error = TcError> + Send>,
     pub(crate) tc_buffer: Vec<u8>,
 }
 
@@ -43,9 +42,9 @@ impl<TcError, TmError> TcpTmtcServerBase<TcError, TmError> {
     pub(crate) fn new<A: ToSocketAddrs>(
         addr: A,
         tm_buffer_size: usize,
-        tm_source: Box<dyn TmPacketSource<Error = TmError>>,
+        tm_source: Box<dyn TmPacketSource<Error = TmError> + Send>,
         tc_buffer_size: usize,
-        tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
+        tc_receiver: Box<dyn ReceivesTc<Error = TcError> + Send>,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
             listener: TcpListener::bind(addr)?,
