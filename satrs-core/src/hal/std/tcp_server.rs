@@ -1,3 +1,4 @@
+//! Generic TCP TMTC servers with different TMTC format flavours.
 use alloc::vec;
 use alloc::{boxed::Box, vec::Vec};
 use std::net::SocketAddr;
@@ -7,7 +8,7 @@ use crate::tmtc::{ReceivesTc, TmPacketSource};
 use thiserror::Error;
 
 // Re-export the TMTC in COBS server.
-pub use crate::hal::host::tcp_with_cobs_server::{
+pub use crate::hal::std::tcp_with_cobs_server::{
     parse_buffer_for_cobs_encoded_packets, TcpTmtcInCobsServer,
 };
 

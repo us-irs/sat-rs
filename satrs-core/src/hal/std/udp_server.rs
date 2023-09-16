@@ -1,4 +1,4 @@
-//! UDP server helper components
+//! Generic UDP TC server.
 use crate::tmtc::{ReceivesTc, ReceivesTcCore};
 use std::boxed::Box;
 use std::io::{Error, ErrorKind};

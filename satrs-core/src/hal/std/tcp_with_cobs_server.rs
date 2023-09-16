@@ -8,7 +8,7 @@ use std::io::Write;
 use std::net::ToSocketAddrs;
 use std::vec::Vec;
 
-use crate::hal::host::tcp_server::TcpTmtcServerBase;
+use crate::hal::std::tcp_server::TcpTmtcServerBase;
 use crate::tmtc::ReceivesTc;
 use crate::tmtc::TmPacketSource;
 
