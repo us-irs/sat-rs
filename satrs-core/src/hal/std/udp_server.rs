@@ -52,9 +52,9 @@ use std::vec::Vec;
 ///     .expect("Error sending PUS TC via UDP");
 /// ```
 ///
-/// The [fsrc-example crate](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-example)
+/// The [satrs-example crate](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/satrs-example)
 /// server code also includes
-/// [example code](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-example/src/bin/obsw/tmtc.rs)
+/// [example code](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example/src/tmtc.rs#L67)
 /// on how to use this TC server. It uses the server to receive PUS telecommands on a specific port
 /// and then forwards them to a generic CCSDS packet receiver.
 pub struct UdpTcServer<E> {
@@ -141,7 +141,7 @@ impl<E: 'static> UdpTcServer<E> {
 
 #[cfg(test)]
 mod tests {
-    use crate::hal::host::udp_server::{ReceiveResult, UdpTcServer};
+    use crate::hal::std::udp_server::{ReceiveResult, UdpTcServer};
     use crate::tmtc::ReceivesTcCore;
     use spacepackets::ecss::tc::PusTcCreator;
     use spacepackets::ecss::SerializablePusPacket;
