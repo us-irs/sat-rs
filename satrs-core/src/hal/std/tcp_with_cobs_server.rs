@@ -3,7 +3,6 @@ use alloc::vec;
 use cobs::decode_in_place;
 use cobs::encode;
 use cobs::max_encoding_length;
-use core::time::Duration;
 use std::io::Read;
 use std::io::Write;
 use std::net::SocketAddr;
@@ -13,64 +12,12 @@ use std::println;
 use std::thread;
 use std::vec::Vec;
 
-use crate::hal::std::tcp_server::TcpTmtcServerBase;
+use crate::hal::std::tcp_server::{TcpTmtcServerBase, ServerConfig};
 use crate::tmtc::ReceivesTc;
 use crate::tmtc::TmPacketSource;
 
 use super::tcp_server::ConnectionResult;
 use super::tcp_server::TcpTmtcError;
-
-/// TCP configuration struct.
-///
-/// ## Parameters
-///
-/// * `addr` - Address of the TCP server.
-/// * `inner_loop_delay` - If a client connects for a longer period, but no TC is received or
-///     no TM needs to be sent, the TCP server will delay for the specified amount of time
-///     to reduce CPU load.
-/// * `tm_buffer_size` - Size of the TM buffer used to read TM from the [TmPacketSource] and
-///     encoding of that data. This buffer should at large enough to hold the maximum expected
-///     TM size in addition to the COBS encoding overhead. You can use
-///     [cobs::max_encoding_length] to calculate this size.
-/// * `tc_buffer_size` - Size of the TC buffer used to read encoded telecommands sent from
-///     the client. It is recommended to make this buffer larger to allow reading multiple
-///     consecutive packets as well, for example by using 4096 or 8192 byte. The buffer should
-///     at the very least be large enough to hold the maximum expected telecommand size in
-///     addition to its COBS encoding overhead. You can use [cobs::max_encoding_length] to
-///     calculate this size.
-/// * `reuse_addr` - Can be used to set the `SO_REUSEADDR` option on the raw socket. This is
-///     especially useful if the address and port are static for the server. Set to false by
-///     default.
-/// * `reuse_port` - Can be used to set the `SO_REUSEPORT` option on the raw socket. This is
-///     especially useful if the address and port are static for the server. Set to false by
-///     default.
-#[derive(Debug, Copy, Clone)]
-pub struct ServerConfig {
-    pub addr: SocketAddr,
-    pub inner_loop_delay: Duration,
-    pub tm_buffer_size: usize,
-    pub tc_buffer_size: usize,
-    pub reuse_addr: bool,
-    pub reuse_port: bool,
-}
-
-impl ServerConfig {
-    pub fn new(
-        addr: SocketAddr,
-        inner_loop_delay: Duration,
-        tm_buffer_size: usize,
-        tc_buffer_size: usize,
-    ) -> Self {
-        Self {
-            addr,
-            inner_loop_delay,
-            tm_buffer_size,
-            tc_buffer_size,
-            reuse_addr: false,
-            reuse_port: false,
-        }
-    }
-}
 
 /// TCP TMTC server implementation for exchange of generic TMTC packets which are framed with the
 /// [COBS protocol](https://en.wikipedia.org/wiki/Consistent_Overhead_Byte_Stuffing).
@@ -99,6 +46,7 @@ impl<TcError: 'static, TmError: 'static> TcpTmtcInCobsServer<TcError, TmError> {
     ///
     /// ## Parameter
     ///
+    /// * `cfg` - Configuration of the server.
     /// * `tm_source` - Generic TM source used by the server to pull telemetry packets which are
     ///     then sent back to the client.
     /// * `tc_receiver` - Any received telecommand which was decoded successfully will be forwarded
