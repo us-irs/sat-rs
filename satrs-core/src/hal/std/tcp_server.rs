@@ -1,6 +1,7 @@
 //! Generic TCP TMTC servers with different TMTC format flavours.
 use alloc::vec;
 use alloc::{boxed::Box, vec::Vec};
+use core::time::Duration;
 use socket2::{Domain, Socket, Type};
 use std::net::SocketAddr;
 use std::net::TcpListener;
@@ -34,6 +35,7 @@ pub struct ConnectionResult {
 
 pub(crate) struct TcpTmtcServerBase<TcError, TmError> {
     pub(crate) listener: TcpListener,
+    pub(crate) inner_loop_delay: Duration,
     pub(crate) tm_source: Box<dyn TmPacketSource<Error = TmError> + Send>,
     pub(crate) tm_buffer: Vec<u8>,
     pub(crate) tc_receiver: Box<dyn ReceivesTc<Error = TcError> + Send>,
@@ -43,6 +45,7 @@ pub(crate) struct TcpTmtcServerBase<TcError, TmError> {
 impl<TcError, TmError> TcpTmtcServerBase<TcError, TmError> {
     pub(crate) fn new(
         addr: &SocketAddr,
+        inner_loop_delay: Duration,
         reuse_addr: bool,
         reuse_port: bool,
         tm_buffer_size: usize,
@@ -59,6 +62,7 @@ impl<TcError, TmError> TcpTmtcServerBase<TcError, TmError> {
         socket.listen(128)?;
         Ok(Self {
             listener: socket.into(),
+            inner_loop_delay,
             tm_source,
             tm_buffer: vec![0; tm_buffer_size],
             tc_receiver,
