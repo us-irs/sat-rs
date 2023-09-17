@@ -152,7 +152,7 @@ impl<
         Ok(Self {
             base: TcpTmtcServerBase::new(cfg, tm_source, tc_receiver)?,
             tc_handler,
-            tm_handler, // tmtc_handler: CobsTmtcParser::new(cfg.tm_buffer_size),
+            tm_handler,
         })
     }
 
@@ -221,7 +221,6 @@ impl<
                     // As per [TcpStream::set_read_timeout] documentation, this should work for
                     // both UNIX and Windows.
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-                        println!("should be here..");
                         self.tc_handler.handle_tc_parsing(
                             &mut self.base.tc_buffer,
                             self.base.tc_receiver.as_mut(),
