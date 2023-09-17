@@ -16,6 +16,7 @@ use crate::hal::std::tcp_server::{
     ConnectionResult, ServerConfig, TcpTcParser, TcpTmSender, TcpTmtcError, TcpTmtcGenericServer,
 };
 
+/// Concrete [TcpTcParser] implementation for the [TcpTmtcInCobsServer].
 #[derive(Default)]
 pub struct CobsTcParser {}
 
@@ -39,6 +40,7 @@ impl<TmError, TcError> TcpTcParser<TmError, TcError> for CobsTcParser {
     }
 }
 
+/// Concrete [TcpTmSender] implementation for the [TcpTmtcInCobsServer].
 pub struct CobsTmSender {
     tm_encoding_buffer: Vec<u8>,
 }
@@ -116,8 +118,8 @@ impl<TmError: 'static, TcError: 'static> TcpTmtcInCobsServer<TmError, TcError> {
     /// * `cfg` - Configuration of the server.
     /// * `tm_source` - Generic TM source used by the server to pull telemetry packets which are
     ///     then sent back to the client.
-    /// * `tc_receiver` - Any received telecommand which was decoded successfully will be forwarded
-    ///     to this TC receiver.
+    /// * `tc_receiver` - Any received telecommands which were decoded successfully will be
+    ///     forwarded to this TC receiver.
     pub fn new(
         cfg: ServerConfig,
         tm_source: Box<dyn TmPacketSource<Error = TmError> + Send>,
@@ -151,7 +153,7 @@ impl<TmError: 'static, TcError: 'static> TcpTmtcInCobsServer<TmError, TcError> {
 }
 
 /// This function parses a given buffer for COBS encoded packets. The packet structure is
-/// expected to be like this, assuming a sentinel value of 0 as the packet delimiter.
+/// expected to be like this, assuming a sentinel value of 0 as the packet delimiter:
 ///
 /// 0 | ... Packet Data ... | 0 | 0 | ... Packet Data ... | 0
 ///

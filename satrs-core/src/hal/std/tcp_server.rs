@@ -16,7 +16,7 @@ pub use crate::hal::std::tcp_with_cobs_server::{
     parse_buffer_for_cobs_encoded_packets, CobsTcParser, CobsTmSender, TcpTmtcInCobsServer,
 };
 
-/// TCP configuration struct.
+/// Configuration struct for the generic TCP TMTC server
 ///
 /// ## Parameters
 ///
@@ -26,14 +26,12 @@ pub use crate::hal::std::tcp_with_cobs_server::{
 ///     to reduce CPU load.
 /// * `tm_buffer_size` - Size of the TM buffer used to read TM from the [TmPacketSource] and
 ///     encoding of that data. This buffer should at large enough to hold the maximum expected
-///     TM size in addition to the COBS encoding overhead. You can use
-///     [cobs::max_encoding_length] to calculate this size.
+///     TM size read from the packet source.
 /// * `tc_buffer_size` - Size of the TC buffer used to read encoded telecommands sent from
 ///     the client. It is recommended to make this buffer larger to allow reading multiple
-///     consecutive packets as well, for example by using 4096 or 8192 byte. The buffer should
-///     at the very least be large enough to hold the maximum expected telecommand size in
-///     addition to its COBS encoding overhead. You can use [cobs::max_encoding_length] to
-///     calculate this size.
+///     consecutive packets as well, for example by using common buffer sizes like 4096 or 8192
+///     byte. The buffer should at the very least be large enough to hold the maximum expected
+///     telecommand size.
 /// * `reuse_addr` - Can be used to set the `SO_REUSEADDR` option on the raw socket. This is
 ///     especially useful if the address and port are static for the server. Set to false by
 ///     default.
