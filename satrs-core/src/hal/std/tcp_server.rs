@@ -85,7 +85,7 @@ pub struct ConnectionResult {
     pub num_sent_tms: u32,
 }
 
-pub(crate) struct TcpTmtcServerBase<TcError, TmError> {
+pub(crate) struct TcpTmtcServerBase<TmError, TcError> {
     pub(crate) listener: TcpListener,
     pub(crate) inner_loop_delay: Duration,
     pub(crate) tm_source: Box<dyn TmPacketSource<Error = TmError> + Send>,
@@ -94,31 +94,26 @@ pub(crate) struct TcpTmtcServerBase<TcError, TmError> {
     pub(crate) tc_buffer: Vec<u8>,
 }
 
-impl<TcError, TmError> TcpTmtcServerBase<TcError, TmError> {
+impl<TmError, TcError> TcpTmtcServerBase<TmError, TcError> {
     pub(crate) fn new(
-        addr: &SocketAddr,
-        inner_loop_delay: Duration,
-        reuse_addr: bool,
-        reuse_port: bool,
-        tm_buffer_size: usize,
+        cfg: ServerConfig,
         tm_source: Box<dyn TmPacketSource<Error = TmError> + Send>,
-        tc_buffer_size: usize,
         tc_receiver: Box<dyn ReceivesTc<Error = TcError> + Send>,
     ) -> Result<Self, std::io::Error> {
         // Create a TCP listener bound to two addresses.
         let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
-        socket.set_reuse_address(reuse_addr)?;
-        socket.set_reuse_port(reuse_port)?;
-        let addr = (*addr).into();
+        socket.set_reuse_address(cfg.reuse_addr)?;
+        socket.set_reuse_port(cfg.reuse_port)?;
+        let addr = (cfg.addr).into();
         socket.bind(&addr)?;
         socket.listen(128)?;
         Ok(Self {
             listener: socket.into(),
-            inner_loop_delay,
+            inner_loop_delay: cfg.inner_loop_delay,
             tm_source,
-            tm_buffer: vec![0; tm_buffer_size],
+            tm_buffer: vec![0; cfg.tm_buffer_size],
             tc_receiver,
-            tc_buffer: vec![0; tc_buffer_size],
+            tc_buffer: vec![0; cfg.tc_buffer_size],
         })
     }
 
