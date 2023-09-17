@@ -13,13 +13,13 @@ use crate::tmtc::ReceivesTc;
 use crate::tmtc::TmPacketSource;
 
 use crate::hal::std::tcp_server::{
-    ConnectionResult, ServerConfig, TcpTcHandler, TcpTmHandler, TcpTmtcError, TcpTmtcGenericServer,
+    ConnectionResult, ServerConfig, TcpTcParser, TcpTmSender, TcpTmtcError, TcpTmtcGenericServer,
 };
 
 #[derive(Default)]
-struct CobsTcParser {}
+pub struct CobsTcParser {}
 
-impl<TmError, TcError> TcpTcHandler<TmError, TcError> for CobsTcParser {
+impl<TmError, TcError> TcpTcParser<TmError, TcError> for CobsTcParser {
     fn handle_tc_parsing(
         &mut self,
         tc_buffer: &mut [u8],
@@ -39,11 +39,11 @@ impl<TmError, TcError> TcpTcHandler<TmError, TcError> for CobsTcParser {
     }
 }
 
-struct CobsTmParser {
+pub struct CobsTmSender {
     tm_encoding_buffer: Vec<u8>,
 }
 
-impl CobsTmParser {
+impl CobsTmSender {
     fn new(tm_buffer_size: usize) -> Self {
         Self {
             // The buffer should be large enough to hold the maximum expected TM size encoded with
@@ -53,7 +53,7 @@ impl CobsTmParser {
     }
 }
 
-impl<TmError, TcError> TcpTmHandler<TmError, TcError> for CobsTmParser {
+impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
     fn handle_tm_sending(
         &mut self,
         tm_buffer: &mut [u8],
@@ -93,13 +93,10 @@ impl<TmError, TcError> TcpTmHandler<TmError, TcError> for CobsTmParser {
 /// TCP TMTC server implementation for exchange of generic TMTC packets which are framed with the
 /// [COBS protocol](https://en.wikipedia.org/wiki/Consistent_Overhead_Byte_Stuffing).
 ///
-/// TCP is stream oriented, so a client can read available telemetry using [std::io::Read] as well.
-/// To allow flexibly specifying the telemetry sent back to clients, a generic TM abstraction
-/// in form of the [TmPacketSource] trait is used. Telemetry will be encoded with the COBS
-/// protocol using [cobs::encode] in addition to being wrapped with the sentinel value 0 as the
-/// packet delimiter as well before being sent back to the client. Please note that the server
-/// will send as much data as it can retrieve from the [TmPacketSource] in its current
-/// implementation.
+/// Telemetry will be encoded with the COBS  protocol using [cobs::encode] in addition to being
+/// wrapped with the sentinel value 0 as the packet delimiter as well before being sent back to
+/// the client. Please note that the server will send as much data as it can retrieve from the
+/// [TmPacketSource] in its current implementation.
 ///
 /// Using a framing protocol like COBS imposes minimal restrictions on the type of TMTC data
 /// exchanged while also allowing packets with flexible size and a reliable way to reconstruct full
@@ -107,10 +104,20 @@ impl<TmError, TcError> TcpTmHandler<TmError, TcError> for CobsTmParser {
 /// [parse_buffer_for_cobs_encoded_packets] function to parse for packets and pass them to a
 /// generic TC receiver.
 pub struct TcpTmtcInCobsServer<TmError, TcError> {
-    generic_server: TcpTmtcGenericServer<TmError, TcError, CobsTmParser, CobsTcParser>,
+    generic_server: TcpTmtcGenericServer<TmError, TcError, CobsTmSender, CobsTcParser>,
 }
 
 impl<TmError: 'static, TcError: 'static> TcpTmtcInCobsServer<TmError, TcError> {
+    /// Create a new TCP TMTC server which exchanges TMTC packets encoded with
+    /// [COBS protocol](https://en.wikipedia.org/wiki/Consistent_Overhead_Byte_Stuffing).
+    ///
+    /// ## Parameter
+    ///
+    /// * `cfg` - Configuration of the server.
+    /// * `tm_source` - Generic TM source used by the server to pull telemetry packets which are
+    ///     then sent back to the client.
+    /// * `tc_receiver` - Any received telecommand which was decoded successfully will be forwarded
+    ///     to this TC receiver.
     pub fn new(
         cfg: ServerConfig,
         tm_source: Box<dyn TmPacketSource<Error = TmError> + Send>,
@@ -120,7 +127,7 @@ impl<TmError: 'static, TcError: 'static> TcpTmtcInCobsServer<TmError, TcError> {
             generic_server: TcpTmtcGenericServer::new(
                 cfg,
                 CobsTcParser::default(),
-                CobsTmParser::new(cfg.tm_buffer_size),
+                CobsTmSender::new(cfg.tm_buffer_size),
                 tm_source,
                 tc_receiver,
             )?,
@@ -135,15 +142,7 @@ impl<TmError: 'static, TcError: 'static> TcpTmtcInCobsServer<TmError, TcError> {
             /// useful if using the port number 0 for OS auto-assignment.
             pub fn local_addr(&self) -> std::io::Result<SocketAddr>;
 
-            /// This call is used to handle the next connection to a client. Right now, it performs
-            /// the following steps:
-            ///
-            /// 1. It calls the [std::net::TcpListener::accept] method internally using the blocking API
-            ///    until a client connects.
-            /// 2. It reads all the telecommands from the client, which are expected to be COBS
-            ///    encoded packets.
-            /// 3. After reading and parsing all telecommands, it sends back all telemetry it can retrieve
-            ///    from the user specified [TmPacketSource] back to the client.
+            /// Delegation to the [TcpTmtcGenericServer::handle_next_connection] call.
             pub fn handle_next_connection(
                 &mut self,
             ) -> Result<ConnectionResult, TcpTmtcError<TmError, TcError>>;
