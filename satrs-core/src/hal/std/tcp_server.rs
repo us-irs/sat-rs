@@ -162,8 +162,8 @@ impl<
         cfg: ServerConfig,
         tc_parser: TcParser,
         tm_sender: TmSender,
-        tm_source: Box<dyn TmPacketSource<Error = TmError> + Send>,
-        tc_receiver: Box<dyn ReceivesTc<Error = TcError> + Send>,
+        tm_source: Box<dyn TmPacketSource<Error = TmError>>,
+        tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
     ) -> Result<TcpTmtcGenericServer<TmError, TcError, TmSender, TcParser>, std::io::Error> {
         Ok(Self {
             base: TcpTmtcServerBase::new(cfg, tm_source, tc_receiver)?,
@@ -280,17 +280,17 @@ impl<
 pub(crate) struct TcpTmtcServerBase<TmError, TcError> {
     pub(crate) listener: TcpListener,
     pub(crate) inner_loop_delay: Duration,
-    pub(crate) tm_source: Box<dyn TmPacketSource<Error = TmError> + Send>,
+    pub(crate) tm_source: Box<dyn TmPacketSource<Error = TmError>>,
     pub(crate) tm_buffer: Vec<u8>,
-    pub(crate) tc_receiver: Box<dyn ReceivesTc<Error = TcError> + Send>,
+    pub(crate) tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
     pub(crate) tc_buffer: Vec<u8>,
 }
 
 impl<TmError, TcError> TcpTmtcServerBase<TmError, TcError> {
     pub(crate) fn new(
         cfg: ServerConfig,
-        tm_source: Box<dyn TmPacketSource<Error = TmError> + Send>,
-        tc_receiver: Box<dyn ReceivesTc<Error = TcError> + Send>,
+        tm_source: Box<dyn TmPacketSource<Error = TmError>>,
+        tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
     ) -> Result<Self, std::io::Error> {
         // Create a TCP listener bound to two addresses.
         let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;

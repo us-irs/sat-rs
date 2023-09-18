@@ -20,7 +20,7 @@ use crate::hal::std::tcp_server::{
 #[derive(Default)]
 pub struct CobsTcParser {}
 
-impl<TmError, TcError> TcpTcParser<TmError, TcError> for CobsTcParser {
+impl<TmError, TcError: 'static> TcpTcParser<TmError, TcError> for CobsTcParser {
     fn handle_tc_parsing(
         &mut self,
         tc_buffer: &mut [u8],
@@ -32,7 +32,7 @@ impl<TmError, TcError> TcpTcParser<TmError, TcError> for CobsTcParser {
         // Reader vec full, need to parse for packets.
         conn_result.num_received_tcs += parse_buffer_for_cobs_encoded_packets(
             &mut tc_buffer[..current_write_idx],
-            tc_receiver,
+            tc_receiver.upcast_mut(),
             next_write_idx,
         )
         .map_err(|e| TcpTmtcError::TcError(e))?;
@@ -105,7 +105,7 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
 /// packets even from a data stream which is split up. The server wil use the
 /// [parse_buffer_for_cobs_encoded_packets] function to parse for packets and pass them to a
 /// generic TC receiver.
-pub struct TcpTmtcInCobsServer<TmError, TcError> {
+pub struct TcpTmtcInCobsServer<TmError, TcError: 'static> {
     generic_server: TcpTmtcGenericServer<TmError, TcError, CobsTmSender, CobsTcParser>,
 }
 
@@ -122,8 +122,8 @@ impl<TmError: 'static, TcError: 'static> TcpTmtcInCobsServer<TmError, TcError> {
     ///     forwarded to this TC receiver.
     pub fn new(
         cfg: ServerConfig,
-        tm_source: Box<dyn TmPacketSource<Error = TmError> + Send>,
-        tc_receiver: Box<dyn ReceivesTc<Error = TcError> + Send>,
+        tm_source: Box<dyn TmPacketSource<Error = TmError>>,
+        tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
     ) -> Result<Self, TcpTmtcError<TmError, TcError>> {
         Ok(Self {
             generic_server: TcpTmtcGenericServer::new(
@@ -168,7 +168,7 @@ mod tests {
     use crate::{
         hal::std::tcp_server::ServerConfig,
         parsers::tests::{INVERTED_PACKET, SIMPLE_PACKET},
-        tmtc::{ReceivesTcCore, TmPacketSource},
+        tmtc::{ReceivesTcCore, TmPacketSourceCore},
     };
     use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
     use cobs::encode;
@@ -201,7 +201,7 @@ mod tests {
         }
     }
 
-    impl TmPacketSource for SyncTmSource {
+    impl TmPacketSourceCore for SyncTmSource {
         type Error = ();
 
         fn retrieve_packet(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {

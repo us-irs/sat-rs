@@ -1,4 +1,4 @@
-use crate::tmtc::ReceivesTc;
+use crate::tmtc::ReceivesTcCore;
 use cobs::decode_in_place;
 
 /// This function parses a given buffer for COBS encoded packets. The packet structure is
@@ -13,7 +13,7 @@ use cobs::decode_in_place;
 /// The parser will write all packets which were decoded successfully to the given `tc_receiver`.
 pub fn parse_buffer_for_cobs_encoded_packets<E>(
     buf: &mut [u8],
-    tc_receiver: &mut dyn ReceivesTc<Error = E>,
+    tc_receiver: &mut dyn ReceivesTcCore<Error = E>,
     next_write_idx: &mut usize,
 ) -> Result<u32, E> {
     let mut start_index_packet = 0;

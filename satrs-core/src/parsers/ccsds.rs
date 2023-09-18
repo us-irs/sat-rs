@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use hashbrown::HashSet;
 use spacepackets::PacketId;
 
-use crate::tmtc::ReceivesTc;
+use crate::tmtc::ReceivesTcCore;
 
 pub trait PacketIdLookup {
     fn validate(&self, packet_id: u16) -> bool;
@@ -68,7 +68,7 @@ impl PacketIdLookup for &[PacketId] {
 pub fn parse_buffer_for_ccsds_space_packets<E>(
     buf: &mut [u8],
     packet_id_lookup: &dyn PacketIdLookup,
-    tc_receiver: &mut dyn ReceivesTc<Error = E>,
+    tc_receiver: &mut dyn ReceivesTcCore<Error = E>,
     next_write_idx: &mut usize,
 ) -> Result<u32, E> {
     let packets_found = 0;
