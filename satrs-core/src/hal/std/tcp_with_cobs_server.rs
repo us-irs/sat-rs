@@ -1,6 +1,5 @@
 use alloc::boxed::Box;
 use alloc::vec;
-use cobs::decode_in_place;
 use cobs::encode;
 use delegate::delegate;
 use std::io::Write;
@@ -9,6 +8,7 @@ use std::net::TcpListener;
 use std::net::TcpStream;
 use std::vec::Vec;
 
+use crate::parsers::parse_buffer_for_cobs_encoded_packets;
 use crate::tmtc::ReceivesTc;
 use crate::tmtc::TmPacketSource;
 
@@ -150,58 +150,6 @@ impl<TmError: 'static, TcError: 'static> TcpTmtcInCobsServer<TmError, TcError> {
             ) -> Result<ConnectionResult, TcpTmtcError<TmError, TcError>>;
         }
     }
-}
-
-/// This function parses a given buffer for COBS encoded packets. The packet structure is
-/// expected to be like this, assuming a sentinel value of 0 as the packet delimiter:
-///
-/// 0 | ... Packet Data ... | 0 | 0 | ... Packet Data ... | 0
-///
-/// This function is also able to deal with broken tail packets at the end. If broken tail
-/// packets are detected, they are moved to the front of the buffer, and the write index for
-/// future write operations will be written to the `next_write_idx` argument.
-///
-/// The parser will write all packets which were decoded successfully to the given `tc_receiver`.
-pub fn parse_buffer_for_cobs_encoded_packets<E>(
-    buf: &mut [u8],
-    tc_receiver: &mut dyn ReceivesTc<Error = E>,
-    next_write_idx: &mut usize,
-) -> Result<u32, E> {
-    let mut start_index_packet = 0;
-    let mut start_found = false;
-    let mut last_byte = false;
-    let mut packets_found = 0;
-    for i in 0..buf.len() {
-        if i == buf.len() - 1 {
-            last_byte = true;
-        }
-        if buf[i] == 0 {
-            if !start_found && !last_byte && buf[i + 1] == 0 {
-                // Special case: Consecutive sentinel values or all zeroes.
-                // Skip.
-                continue;
-            }
-            if start_found {
-                let decode_result = decode_in_place(&mut buf[start_index_packet..i]);
-                if let Ok(packet_len) = decode_result {
-                    packets_found += 1;
-                    tc_receiver
-                        .pass_tc(&buf[start_index_packet..start_index_packet + packet_len])?;
-                }
-                start_found = false;
-            } else {
-                start_index_packet = i + 1;
-                start_found = true;
-            }
-        }
-    }
-    // Split frame at the end for a multi-packet frame. Move it to the front of the buffer.
-    if start_index_packet > 0 && start_found && packets_found > 0 {
-        let (first_seg, last_seg) = buf.split_at_mut(start_index_packet - 1);
-        first_seg[..last_seg.len()].copy_from_slice(last_seg);
-        *next_write_idx = last_seg.len();
-    }
-    Ok(packets_found)
 }
 
 #[cfg(test)]

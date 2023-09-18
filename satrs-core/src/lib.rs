@@ -33,6 +33,7 @@ pub mod hk;
 pub mod mode;
 pub mod objects;
 pub mod params;
+pub mod parsers;
 pub mod pool;
 pub mod power;
 pub mod pus;
