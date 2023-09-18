@@ -2,36 +2,59 @@
 use alloc::vec::Vec;
 #[cfg(feature = "alloc")]
 use hashbrown::HashSet;
+use spacepackets::PacketId;
 
 use crate::tmtc::ReceivesTc;
 
 pub trait PacketIdLookup {
-    fn validate(&self, apid: u16) -> bool;
+    fn validate(&self, packet_id: u16) -> bool;
 }
 
 #[cfg(feature = "alloc")]
 impl PacketIdLookup for Vec<u16> {
-    fn validate(&self, apid: u16) -> bool {
-        self.contains(&apid)
+    fn validate(&self, packet_id: u16) -> bool {
+        self.contains(&packet_id)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl PacketIdLookup for Vec<PacketId> {
+    fn validate(&self, packet_id: u16) -> bool {
+        self.contains(&PacketId::from(packet_id))
     }
 }
 
 #[cfg(feature = "alloc")]
 impl PacketIdLookup for HashSet<u16> {
-    fn validate(&self, apid: u16) -> bool {
-        self.contains(&apid)
+    fn validate(&self, packet_id: u16) -> bool {
+        self.contains(&packet_id)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl PacketIdLookup for HashSet<PacketId> {
+    fn validate(&self, packet_id: u16) -> bool {
+        self.contains(&PacketId::from(packet_id))
     }
 }
 
 impl PacketIdLookup for &[u16] {
-    fn validate(&self, apid: u16) -> bool {
-        if self.binary_search(&apid).is_ok() {
+    fn validate(&self, packet_id: u16) -> bool {
+        if self.binary_search(&packet_id).is_ok() {
             return true;
         }
         false
     }
 }
 
+impl PacketIdLookup for &[PacketId] {
+    fn validate(&self, packet_id: u16) -> bool {
+        if self.binary_search(&PacketId::from(packet_id)).is_ok() {
+            return true;
+        }
+        false
+    }
+}
 /// This function parses a given buffer for tightly packed CCSDS space packets. It uses the
 /// [PacketId] field of the CCSDS packets to detect the start of a CCSDS space packet and then
 /// uses the length field of the packet to extract CCSDS packets.
