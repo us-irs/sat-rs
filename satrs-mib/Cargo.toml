@@ -24,7 +24,7 @@ optional = true
 
 [dependencies.satrs-core]
 # version = "0.1.0-alpha.0"
-git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
+git = "https://egit.irs.uni-stuttgart.de/rust/sat-rs.git"
 rev = "35e1f7a983f6535c5571186e361fe101d4306b89"
 
 [dependencies.satrs-mib-codegen]
