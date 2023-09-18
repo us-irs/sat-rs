@@ -165,12 +165,15 @@ mod tests {
         thread,
     };
 
-    use crate::{tmtc::{ReceivesTcCore, TmPacketSource}, hal::std::tcp_server::ServerConfig, parsers::tests::{SIMPLE_PACKET, INVERTED_PACKET}};
-    use alloc::{collections::VecDeque, sync::Arc, vec::Vec, boxed::Box};
+    use crate::{
+        hal::std::tcp_server::ServerConfig,
+        parsers::tests::{INVERTED_PACKET, SIMPLE_PACKET},
+        tmtc::{ReceivesTcCore, TmPacketSource},
+    };
+    use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
     use cobs::encode;
 
     use super::TcpTmtcInCobsServer;
-
 
     #[derive(Default, Clone)]
     struct SyncTcCacher {

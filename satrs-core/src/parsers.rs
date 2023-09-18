@@ -156,7 +156,7 @@ pub(crate) mod tests {
         }
     }
 
-    pub (crate) fn encode_simple_packet(encoded_buf: &mut [u8], current_idx: &mut usize) {
+    pub(crate) fn encode_simple_packet(encoded_buf: &mut [u8], current_idx: &mut usize) {
         encoded_buf[*current_idx] = 0;
         *current_idx += 1;
         *current_idx += encode(&SIMPLE_PACKET, &mut encoded_buf[*current_idx..]);
