@@ -90,23 +90,23 @@ version = "1"
 [features]
 default = ["std"]
 std = [
-	"downcast-rs/std",
-	"alloc",
-	"bus",
-	"postcard/use-std",
-	"crossbeam-channel/std",
-	"serde/std",
-	"spacepackets/std",
-	"num_enum/std",
-	"thiserror",
-  "socket2"
+    "downcast-rs/std",
+    "alloc",
+    "bus",
+    "postcard/use-std",
+    "crossbeam-channel/std",
+    "serde/std",
+    "spacepackets/std",
+    "num_enum/std",
+    "thiserror",
+    "socket2"
 ]
 alloc = [
-	"serde/alloc",
-	"spacepackets/alloc",
-	"hashbrown",
-	"dyn-clone",
-	"downcast-rs"
+    "serde/alloc",
+    "spacepackets/alloc",
+    "hashbrown",
+    "dyn-clone",
+    "downcast-rs"
 ]
 serde = ["dep:serde", "spacepackets/serde"]
 crossbeam = ["crossbeam-channel"]
