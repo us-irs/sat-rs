@@ -23,8 +23,8 @@ version = "1"
 optional = true
 
 [dependencies.satrs-core]
-version = "0.1.0-alpha.0"
-# path = "../satrs-core"
+# version = "0.1.0-alpha.0"
+path = "../satrs-core"
 
 [dependencies.satrs-mib-codegen]
 path = "codegen"
