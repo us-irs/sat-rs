@@ -2,7 +2,7 @@ pub mod ccsds;
 pub mod cobs;
 
 pub use crate::encoding::ccsds::parse_buffer_for_ccsds_space_packets;
-pub use crate::encoding::cobs::parse_buffer_for_cobs_encoded_packets;
+pub use crate::encoding::cobs::{encode_packet_with_cobs, parse_buffer_for_cobs_encoded_packets};
 
 #[cfg(test)]
 pub(crate) mod tests {

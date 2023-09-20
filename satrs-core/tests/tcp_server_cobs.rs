@@ -21,8 +21,8 @@ use std::{
     thread,
 };
 
-use cobs::encode;
 use satrs_core::{
+    encoding::cobs::encode_packet_with_cobs,
     hal::std::tcp_server::{ServerConfig, TcpTmtcInCobsServer},
     tmtc::{ReceivesTcCore, TmPacketSourceCore},
 };
@@ -77,15 +77,6 @@ impl TmPacketSourceCore for SyncTmSource {
     }
 }
 
-// Simple COBS encoder which also inserts the sentinel bytes.
-fn encode_simple_packet(encoded_buf: &mut [u8], current_idx: &mut usize) {
-    encoded_buf[*current_idx] = 0;
-    *current_idx += 1;
-    *current_idx += encode(&SIMPLE_PACKET, &mut encoded_buf[*current_idx..]);
-    encoded_buf[*current_idx] = 0;
-    *current_idx += 1;
-}
-
 const SIMPLE_PACKET: [u8; 5] = [1, 2, 3, 4, 5];
 const INVERTED_PACKET: [u8; 5] = [5, 4, 3, 4, 1];
 
@@ -123,7 +114,7 @@ fn main() {
     // Send TC to server now.
     let mut encoded_buf: [u8; 16] = [0; 16];
     let mut current_idx = 0;
-    encode_simple_packet(&mut encoded_buf, &mut current_idx);
+    encode_packet_with_cobs(&SIMPLE_PACKET, &mut encoded_buf, &mut current_idx);
     let mut stream = TcpStream::connect(dest_addr).expect("connecting to TCP server failed");
     stream
         .write_all(&encoded_buf[..current_idx])
