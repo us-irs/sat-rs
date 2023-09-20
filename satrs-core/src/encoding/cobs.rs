@@ -1,16 +1,48 @@
 use crate::tmtc::ReceivesTcCore;
-use cobs::{decode_in_place, encode};
+use cobs::{decode_in_place, encode, max_encoding_length};
 
 /// This function encodes the given packet with COBS and also wraps the encoded packet with
 /// the sentinel value 0. It can be used repeatedly on the same encoded buffer by expecting
 /// and incrementing the mutable reference of the current packet index. This is also used
 /// to retrieve the total encoded size.
-pub fn encode_packet_with_cobs(packet: &[u8], encoded_buf: &mut [u8], current_idx: &mut usize) {
+///
+/// This function will return [false] if the given encoding buffer is not large enough to hold
+/// the encoded buffer and the two sentinel bytes and [true] if the encoding was successfull.
+///
+/// ## Example
+///
+/// ```
+/// use cobs::decode_in_place_report;
+/// use satrs_core::encoding::{encode_packet_with_cobs};
+//
+/// const SIMPLE_PACKET: [u8; 5] = [1, 2, 3, 4, 5];
+/// const INVERTED_PACKET: [u8; 5] = [5, 4, 3, 2, 1];
+///
+/// let mut encoding_buf: [u8; 32] = [0; 32];
+/// let mut current_idx = 0;
+/// assert!(encode_packet_with_cobs(&SIMPLE_PACKET, &mut encoding_buf, &mut current_idx));
+/// assert!(encode_packet_with_cobs(&INVERTED_PACKET, &mut encoding_buf, &mut current_idx));
+/// assert_eq!(encoding_buf[0], 0);
+/// let dec_report = decode_in_place_report(&mut encoding_buf[1..]).expect("decoding failed");
+/// assert_eq!(encoding_buf[1 + dec_report.src_used], 0);
+/// assert_eq!(dec_report.dst_used, 5);
+/// assert_eq!(current_idx, 16);
+/// ```
+pub fn encode_packet_with_cobs(
+    packet: &[u8],
+    encoded_buf: &mut [u8],
+    current_idx: &mut usize,
+) -> bool {
+    let max_encoding_len = max_encoding_length(packet.len());
+    if *current_idx + max_encoding_len + 2 > encoded_buf.len() {
+        return false;
+    }
     encoded_buf[*current_idx] = 0;
     *current_idx += 1;
     *current_idx += encode(packet, &mut encoded_buf[*current_idx..]);
     encoded_buf[*current_idx] = 0;
     *current_idx += 1;
+    true
 }
 
 /// This function parses a given buffer for COBS encoded packets. The packet structure is
