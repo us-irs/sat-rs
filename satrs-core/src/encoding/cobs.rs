@@ -48,7 +48,7 @@ pub fn encode_packet_with_cobs(
 /// This function parses a given buffer for COBS encoded packets. The packet structure is
 /// expected to be like this, assuming a sentinel value of 0 as the packet delimiter:
 ///
-/// 0 | ... Packet Data ... | 0 | 0 | ... Packet Data ... | 0
+/// 0 | ... Encoded Packet Data ... | 0 | 0 | ... Encoded Packet Data ... | 0
 ///
 /// This function is also able to deal with broken tail packets at the end. If broken tail
 /// packets are detected, they are moved to the front of the buffer, and the write index for
