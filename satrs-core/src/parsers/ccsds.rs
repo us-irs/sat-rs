@@ -99,3 +99,6 @@ pub fn parse_buffer_for_ccsds_space_packets<E>(
     }
     Ok(packets_found)
 }
+
+#[cfg(test)]
+mod tests {}
