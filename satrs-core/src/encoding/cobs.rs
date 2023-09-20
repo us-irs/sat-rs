@@ -1,5 +1,17 @@
 use crate::tmtc::ReceivesTcCore;
-use cobs::decode_in_place;
+use cobs::{decode_in_place, encode};
+
+/// This function encodes the given packet with COBS and also wraps the encoded packet with
+/// the sentinel value 0. It can be used repeatedly on the same encoded buffer by expecting
+/// and incrementing the mutable reference of the current packet index. This is also used
+/// to retrieve the total encoded size.
+pub fn encode_packet_with_cobs(packet: &[u8], encoded_buf: &mut [u8], current_idx: &mut usize) {
+    encoded_buf[*current_idx] = 0;
+    *current_idx += 1;
+    *current_idx += encode(packet, &mut encoded_buf[*current_idx..]);
+    encoded_buf[*current_idx] = 0;
+    *current_idx += 1;
+}
 
 /// This function parses a given buffer for COBS encoded packets. The packet structure is
 /// expected to be like this, assuming a sentinel value of 0 as the packet delimiter:
@@ -58,7 +70,7 @@ pub(crate) mod tests {
     use cobs::encode;
 
     use crate::{
-        parsers::tests::{encode_simple_packet, INVERTED_PACKET, SIMPLE_PACKET},
+        encoding::tests::{encode_simple_packet, INVERTED_PACKET, SIMPLE_PACKET},
         tmtc::ReceivesTcCore,
     };
 

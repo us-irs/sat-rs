@@ -8,7 +8,7 @@ use std::net::TcpListener;
 use std::net::TcpStream;
 use std::vec::Vec;
 
-use crate::parsers::parse_buffer_for_cobs_encoded_packets;
+use crate::encoding::parse_buffer_for_cobs_encoded_packets;
 use crate::tmtc::ReceivesTc;
 use crate::tmtc::TmPacketSource;
 
@@ -171,8 +171,8 @@ mod tests {
     };
 
     use crate::{
+        encoding::tests::{INVERTED_PACKET, SIMPLE_PACKET},
         hal::std::tcp_server::ServerConfig,
-        parsers::tests::{INVERTED_PACKET, SIMPLE_PACKET},
         tmtc::{ReceivesTcCore, TmPacketSourceCore},
     };
     use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
