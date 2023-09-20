@@ -44,11 +44,10 @@ pub fn parse_buffer_for_cobs_encoded_packets<E>(
             }
         }
     }
-    // Split frame at the end for a multi-packet frame. Move it to the front of the buffer.
+    // Move split frame at the end to the front of the buffer.
     if start_index_packet > 0 && start_found && packets_found > 0 {
-        let (first_seg, last_seg) = buf.split_at_mut(start_index_packet - 1);
-        first_seg[..last_seg.len()].copy_from_slice(last_seg);
-        *next_write_idx = last_seg.len();
+        buf.copy_within(start_index_packet - 1.., 0);
+        *next_write_idx = buf.len() - start_index_packet + 1;
     }
     Ok(packets_found)
 }
