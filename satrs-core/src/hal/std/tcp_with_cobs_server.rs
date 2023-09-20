@@ -108,6 +108,18 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
 ///
 /// ## Example
 ///
+/// This is a more elaborate example. It showcases all major features of the TCP server by
+/// performing following steps:
+///
+/// 1. It defines both a TC receiver and a TM source which are [Sync].
+/// 2. A telemetry packet is inserted into the TM source. The packet will be handled by the
+///    TCP server after handling all TCs.
+/// 3. It instantiates the TCP server on localhost with automatic port assignment and assigns
+///    the TC receiver and TM source created previously.
+/// 4. It moves the TCP server to a different thread and calls the
+///    [TcpTmtcInCobsServer::handle_next_connection] call inside that thread
+/// 5. The main threads connects to the server, sends a test telecommand and then reads back
+///    the test telemetry insertd in to the TM source previously.
 /// ```
 /// use core::{
 ///     sync::atomic::{AtomicBool, Ordering},
@@ -174,6 +186,7 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
 ///     }
 /// }
 ///
+/// // Simple COBS encoder which also inserts the sentinel bytes.
 /// fn encode_simple_packet(encoded_buf: &mut [u8], current_idx: &mut usize) {
 ///     encoded_buf[*current_idx] = 0;
 ///     *current_idx += 1;
@@ -187,7 +200,9 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
 ///
 /// let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
 /// let tc_receiver = SyncTcCacher::default();
-/// let tm_source = SyncTmSource::default();
+/// let mut tm_source = SyncTmSource::default();
+/// // Insert a telemetry packet which will be read back by the client at a later stage.
+/// tm_source.add_tm(&INVERTED_PACKET);
 /// let mut tcp_server = TcpTmtcInCobsServer::new(
 ///     ServerConfig::new(auto_port_addr, Duration::from_millis(2), 1024, 1024),
 ///     Box::new(tm_source),
@@ -204,8 +219,9 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
 ///         panic!("handling connection failed: {:?}", result.unwrap_err());
 ///     }
 ///     let conn_result = result.unwrap();
-///     assert_eq!(conn_result.num_received_tcs, 1);
-///     assert_eq!(conn_result.num_sent_tms, 1);
+///     assert_eq!(conn_result.num_received_tcs, 1, "No TC received");
+///     assert_eq!(conn_result.num_sent_tms, 1, "No TM received");
+///     // Signal the main thread we are done.
 ///     set_if_done.store(true, Ordering::Relaxed);
 /// });
 ///
