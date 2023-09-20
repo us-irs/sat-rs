@@ -104,7 +104,8 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
 /// exchanged while also allowing packets with flexible size and a reliable way to reconstruct full
 /// packets even from a data stream which is split up. The server wil use the
 /// [parse_buffer_for_cobs_encoded_packets] function to parse for packets and pass them to a
-/// generic TC receiver.
+/// generic TC receiver. The user can use [crate::encoding::encode_packet_with_cobs] to encode
+/// telecommands sent to the server.
 ///
 /// ## Example
 ///
