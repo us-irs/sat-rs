@@ -1,5 +1,5 @@
 use log::{info, warn};
-use satrs_core::hal::host::udp_server::{ReceiveResult, UdpTcServer};
+use satrs_core::hal::std::udp_server::{ReceiveResult, UdpTcServer};
 use std::net::SocketAddr;
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
 use std::thread;

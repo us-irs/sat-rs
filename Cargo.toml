@@ -1,5 +1,5 @@
 [workspace]
-
+resolver = "2"
 members = [
     "satrs-core",
     "satrs-mib",
@@ -9,3 +9,4 @@ members = [
 exclude = [
     "satrs-example-stm32f3-disco",
 ]
+
