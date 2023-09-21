@@ -55,6 +55,7 @@ impl PacketIdLookup for &[PacketId] {
         false
     }
 }
+
 /// This function parses a given buffer for tightly packed CCSDS space packets. It uses the
 /// [PacketId] field of the CCSDS packets to detect the start of a CCSDS space packet and then
 /// uses the length field of the packet to extract CCSDS packets.
@@ -101,4 +102,12 @@ pub fn parse_buffer_for_ccsds_space_packets<E>(
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use spacepackets::{ecss::tc::PusTcCreator, SpHeader};
+
+    #[test]
+    fn test_basic() {
+        let sph = SpHeader::tc_unseg(0x02, 0, 0);
+        let ping_tc = PusTcCreator::new_simple(sph, service, subservice, app_data, set_ccsds_len)
+    }
+}
