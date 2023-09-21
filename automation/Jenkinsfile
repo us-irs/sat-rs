@@ -58,8 +58,8 @@ pipeline {
     stage('Deploy satrs-book') {
       when {
         anyOf {
-          branch 'main'
-          branch pattern: "mdbook-deployment*"
+          branch 'main';
+          branch pattern: 'mdbook-deployment*'
         }
       }
       steps {
