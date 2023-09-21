@@ -59,7 +59,7 @@ pipeline {
       when {
         anyOf {
           branch 'main'
-          branch 'prep-book-release'
+          branch pattern: "mdbook-deployment*"
         }
       }
       steps {
