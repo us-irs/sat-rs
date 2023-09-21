@@ -29,7 +29,7 @@ pub trait Executable: Send {
     fn periodic_op(&mut self, op_code: i32) -> Result<OpResult, Self::Error>;
 }
 
-/// This function allows executing one task which implements the [Executable][Executable] trait
+/// This function allows executing one task which implements the [Executable] trait
 ///
 /// # Arguments
 ///
@@ -78,7 +78,7 @@ pub fn exec_sched_single<
 }
 
 /// This function allows executing multiple tasks as long as the tasks implement the
-/// [Executable][Executable] trait
+/// [Executable] trait
 ///
 /// # Arguments
 ///
