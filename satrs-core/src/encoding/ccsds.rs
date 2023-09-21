@@ -64,7 +64,7 @@ impl PacketIdLookup for [PacketId] {
 pub fn parse_buffer_for_ccsds_space_packets<E>(
     buf: &mut [u8],
     packet_id_lookup: &(impl PacketIdLookup + ?Sized),
-    tc_receiver: &mut impl ReceivesTcCore<Error = E>,
+    tc_receiver: &mut (impl ReceivesTcCore<Error = E> + ?Sized),
     next_write_idx: &mut usize,
 ) -> Result<u32, E> {
     *next_write_idx = 0;
