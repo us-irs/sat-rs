@@ -60,12 +60,22 @@ version = "1"
 default-features = false
 optional = true
 
+[dependencies.socket2]
+version = "0.5.4"
+features = ["all"]
+optional = true
+
 [dependencies.spacepackets]
-version = "0.7.0-beta.1"
+# version = "0.7.0-beta.1"
 # path = "../../spacepackets"
-# git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
-# rev = ""
+git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
+rev = "79d26e1a6"
 # branch = ""
+default-features = false
+
+[dependencies.cobs]
+git = "https://github.com/robamu/cobs.rs.git"
+branch = "all_features"
 default-features = false
 
 [dev-dependencies]
@@ -80,22 +90,23 @@ version = "1"
 [features]
 default = ["std"]
 std = [
-	"downcast-rs/std",
-	"alloc",
-	"bus",
-	"postcard/use-std",
-	"crossbeam-channel/std",
-	"serde/std",
-	"spacepackets/std",
-	"num_enum/std",
-	"thiserror"
+    "downcast-rs/std",
+    "alloc",
+    "bus",
+    "postcard/use-std",
+    "crossbeam-channel/std",
+    "serde/std",
+    "spacepackets/std",
+    "num_enum/std",
+    "thiserror",
+    "socket2"
 ]
 alloc = [
-	"serde/alloc",
-	"spacepackets/alloc",
-	"hashbrown",
-	"dyn-clone",
-	"downcast-rs"
+    "serde/alloc",
+    "spacepackets/alloc",
+    "hashbrown",
+    "dyn-clone",
+    "downcast-rs"
 ]
 serde = ["dep:serde", "spacepackets/serde"]
 crossbeam = ["crossbeam-channel"]

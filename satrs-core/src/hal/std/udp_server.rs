@@ -1,4 +1,4 @@
-//! UDP server helper components
+//! Generic UDP TC server.
 use crate::tmtc::{ReceivesTc, ReceivesTcCore};
 use std::boxed::Box;
 use std::io::{Error, ErrorKind};
@@ -6,7 +6,8 @@ use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::vec;
 use std::vec::Vec;
 
-/// This TC server helper can be used to receive raw PUS telecommands thorough a UDP interface.
+/// This UDP server can be used to receive CCSDS space packet telecommands or any other telecommand
+/// format.
 ///
 /// It caches all received telecomands into a vector. The maximum expected telecommand size should
 /// be declared upfront. This avoids dynamic allocation during run-time. The user can specify a TC
@@ -19,7 +20,7 @@ use std::vec::Vec;
 /// ```
 /// use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 /// use spacepackets::ecss::SerializablePusPacket;
-/// use satrs_core::hal::host::udp_server::UdpTcServer;
+/// use satrs_core::hal::std::udp_server::UdpTcServer;
 /// use satrs_core::tmtc::{ReceivesTc, ReceivesTcCore};
 /// use spacepackets::SpHeader;
 /// use spacepackets::ecss::tc::PusTcCreator;
@@ -51,7 +52,7 @@ use std::vec::Vec;
 ///     .expect("Error sending PUS TC via UDP");
 /// ```
 ///
-/// The [satrs-example crate](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/-example)
+/// The [satrs-example crate](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/satrs-example)
 /// server code also includes
 /// [example code](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example/src/tmtc.rs#L67)
 /// on how to use this TC server. It uses the server to receive PUS telecommands on a specific port
@@ -140,7 +141,7 @@ impl<E: 'static> UdpTcServer<E> {
 
 #[cfg(test)]
 mod tests {
-    use crate::hal::host::udp_server::{ReceiveResult, UdpTcServer};
+    use crate::hal::std::udp_server::{ReceiveResult, UdpTcServer};
     use crate::tmtc::ReceivesTcCore;
     use spacepackets::ecss::tc::PusTcCreator;
     use spacepackets::ecss::SerializablePusPacket;
