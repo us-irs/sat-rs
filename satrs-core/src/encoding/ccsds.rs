@@ -18,19 +18,24 @@ impl PacketIdLookup for Vec<u16> {
 }
 
 #[cfg(feature = "alloc")]
-impl PacketIdLookup for Vec<PacketId> {
-    fn validate(&self, packet_id: u16) -> bool {
-        self.contains(&PacketId::from(packet_id))
-    }
-}
-
-#[cfg(feature = "alloc")]
 impl PacketIdLookup for HashSet<u16> {
     fn validate(&self, packet_id: u16) -> bool {
         self.contains(&packet_id)
     }
 }
 
+impl PacketIdLookup for [u16] {
+    fn validate(&self, packet_id: u16) -> bool {
+        self.binary_search(&packet_id).is_ok()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl PacketIdLookup for Vec<PacketId> {
+    fn validate(&self, packet_id: u16) -> bool {
+        self.contains(&PacketId::from(packet_id))
+    }
+}
 #[cfg(feature = "alloc")]
 impl PacketIdLookup for HashSet<PacketId> {
     fn validate(&self, packet_id: u16) -> bool {
@@ -38,21 +43,9 @@ impl PacketIdLookup for HashSet<PacketId> {
     }
 }
 
-impl PacketIdLookup for &[u16] {
+impl PacketIdLookup for [PacketId] {
     fn validate(&self, packet_id: u16) -> bool {
-        if self.binary_search(&packet_id).is_ok() {
-            return true;
-        }
-        false
-    }
-}
-
-impl PacketIdLookup for &[PacketId] {
-    fn validate(&self, packet_id: u16) -> bool {
-        if self.binary_search(&PacketId::from(packet_id)).is_ok() {
-            return true;
-        }
-        false
+        self.binary_search(&PacketId::from(packet_id)).is_ok()
     }
 }
 
@@ -65,14 +58,16 @@ impl PacketIdLookup for &[PacketId] {
 /// detected, they are moved to the front of the buffer, and the write index for future write
 /// operations will be written to the `next_write_idx` argument.
 ///
-/// The parser will write all packets which were decoded successfully to the given `tc_receiver`.
+/// The parser will write all packets which were decoded successfully to the given `tc_receiver`
+/// and return the number of packets found. If the [ReceivesTcCore::pass_tc] calls fails, the
+/// error will be returned.
 pub fn parse_buffer_for_ccsds_space_packets<E>(
     buf: &mut [u8],
-    packet_id_lookup: &dyn PacketIdLookup,
-    tc_receiver: &mut dyn ReceivesTcCore<Error = E>,
+    packet_id_lookup: &(impl PacketIdLookup + ?Sized),
+    tc_receiver: &mut impl ReceivesTcCore<Error = E>,
     next_write_idx: &mut usize,
 ) -> Result<u32, E> {
-    let packets_found = 0;
+    let mut packets_found = 0;
     let mut current_idx = 0;
     let buf_len = buf.len();
     loop {
@@ -86,6 +81,7 @@ pub fn parse_buffer_for_ccsds_space_packets<E>(
             let packet_size = length_field + 7;
             if (current_idx + packet_size as usize) < buf_len {
                 tc_receiver.pass_tc(&buf[current_idx..current_idx + packet_size as usize])?;
+                packets_found += 1;
             } else {
                 // Move packet to start of buffer if applicable.
                 if current_idx > 0 {
@@ -103,11 +99,76 @@ pub fn parse_buffer_for_ccsds_space_packets<E>(
 
 #[cfg(test)]
 mod tests {
-    use spacepackets::{ecss::tc::PusTcCreator, SpHeader};
+    use spacepackets::{
+        ecss::{tc::PusTcCreator, SerializablePusPacket},
+        PacketId, SpHeader,
+    };
+
+    use crate::encoding::tests::TcCacher;
+
+    use super::parse_buffer_for_ccsds_space_packets;
+
+    const TEST_APID: u16 = 0x02;
 
     #[test]
     fn test_basic() {
-        let sph = SpHeader::tc_unseg(0x02, 0, 0);
-        let ping_tc = PusTcCreator::new_simple(sph, service, subservice, app_data, set_ccsds_len)
+        let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        let mut buffer: [u8; 32] = [0; 32];
+        let packet_len = ping_tc
+            .write_to_bytes(&mut buffer)
+            .expect("writing packet failed");
+        let valid_packet_ids = [PacketId::const_tc(true, TEST_APID)];
+        let mut tc_cacher = TcCacher::default();
+        let mut next_write_idx = 0;
+        let parse_result = parse_buffer_for_ccsds_space_packets(
+            &mut buffer,
+            valid_packet_ids.as_slice(),
+            &mut tc_cacher,
+            &mut next_write_idx,
+        );
+        assert!(parse_result.is_ok());
+        let parsed_packets = parse_result.unwrap();
+        assert_eq!(parsed_packets, 1);
+        assert_eq!(tc_cacher.tc_queue.len(), 1);
+        assert_eq!(
+            tc_cacher.tc_queue.pop_front().unwrap(),
+            buffer[..packet_len]
+        );
+    }
+
+    #[test]
+    fn test_multi_pakcet() {
+        let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        let action_tc = PusTcCreator::new_simple(&mut sph, 8, 0, None, true);
+        let mut buffer: [u8; 32] = [0; 32];
+        let packet_len_ping = ping_tc
+            .write_to_bytes(&mut buffer)
+            .expect("writing packet failed");
+        let _packet_len_action = action_tc
+            .write_to_bytes(&mut buffer[packet_len_ping..])
+            .expect("writing packet failed");
+        let valid_packet_ids = [PacketId::const_tc(true, TEST_APID)];
+        let mut tc_cacher = TcCacher::default();
+        let mut next_write_idx = 0;
+        let parse_result = parse_buffer_for_ccsds_space_packets(
+            &mut buffer,
+            valid_packet_ids.as_slice(),
+            &mut tc_cacher,
+            &mut next_write_idx,
+        );
+        assert!(parse_result.is_ok());
+        let parsed_packets = parse_result.unwrap();
+        assert_eq!(parsed_packets, 1);
+        assert_eq!(tc_cacher.tc_queue.len(), 2);
+        assert_eq!(
+            tc_cacher.tc_queue.pop_front().unwrap(),
+            buffer[..packet_len_ping]
+        );
+        assert_eq!(
+            tc_cacher.tc_queue.pop_front().unwrap(),
+            buffer[packet_len_ping..]
+        );
     }
 }

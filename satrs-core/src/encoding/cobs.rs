@@ -98,29 +98,11 @@ pub fn parse_buffer_for_cobs_encoded_packets<E>(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use alloc::{collections::VecDeque, vec::Vec};
     use cobs::encode;
 
-    use crate::{
-        encoding::tests::{encode_simple_packet, INVERTED_PACKET, SIMPLE_PACKET},
-        tmtc::ReceivesTcCore,
-    };
+    use crate::encoding::tests::{encode_simple_packet, TcCacher, INVERTED_PACKET, SIMPLE_PACKET};
 
     use super::parse_buffer_for_cobs_encoded_packets;
-
-    #[derive(Default)]
-    struct TcCacher {
-        tc_queue: VecDeque<Vec<u8>>,
-    }
-
-    impl ReceivesTcCore for TcCacher {
-        type Error = ();
-
-        fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
-            self.tc_queue.push_back(tc_raw.to_vec());
-            Ok(())
-        }
-    }
 
     #[test]
     fn test_parsing_simple_packet() {
