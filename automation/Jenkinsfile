@@ -3,6 +3,7 @@ pipeline {
     dockerfile {
       dir 'automation'
       reuseNode true
+      args '--network host'
     }
   }
 
