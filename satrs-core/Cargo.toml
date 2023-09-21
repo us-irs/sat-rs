@@ -17,9 +17,15 @@ delegate = ">0.7, <=0.10"
 paste = "1"
 embed-doc-image = "0.1"
 
+[dependencies.smallvec]
+version = "1"
+
 [dependencies.num_enum]
 version = ">0.5, <=0.7"
 default-features = false
+
+[dependencies.crc]
+version = "3"
 
 [dependencies.dyn-clone]
 version = "1"
@@ -83,6 +89,7 @@ serde = "1"
 zerocopy = "0.7"
 once_cell = "1.13"
 serde_json = "1"
+rand = "0.8"
 
 [dev-dependencies.postcard]
 version = "1"
