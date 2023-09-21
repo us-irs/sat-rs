@@ -55,6 +55,9 @@ pipeline {
       }
     }
     stage('Deploy satrs-book') {
+      when {
+        branch 'main'
+      }
       steps {
         dir('satrs-book') {
           mdbook build

@@ -4,7 +4,7 @@
 FROM rust:latest
 RUN apt-get update
 RUN apt-get --yes upgrade
-RUN apt-get --yes install openssh-client
+RUN apt-get --yes install rsync openssh-client
 # tzdata is a dependency, won't install otherwise
 ARG DEBIAN_FRONTEND=noninteractive
 
