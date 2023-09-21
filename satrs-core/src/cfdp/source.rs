@@ -6,11 +6,9 @@ pub struct SourceHandler {
 
 impl SourceHandler {
     pub fn new(id: impl Into<UnsignedByteField>) -> Self {
-        Self { id }
+        Self { id: id.into() }
     }
 }
 
 #[cfg(test)]
-mod tests {
-
-}
+mod tests {}

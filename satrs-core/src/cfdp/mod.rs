@@ -61,16 +61,15 @@ pub trait CheckTimerCreator {
 #[cfg(feature = "std")]
 pub struct StdCheckTimer {
     expiry_time_seconds: u64,
-    start_time: std::time::Instant
+    start_time: std::time::Instant,
 }
-
 
 #[cfg(feature = "std")]
 impl StdCheckTimer {
     pub fn new(expiry_time_seconds: u64) -> Self {
         Self {
             expiry_time_seconds,
-            start_time: std::time::Instant::now()
+            start_time: std::time::Instant::now(),
         }
     }
 }
