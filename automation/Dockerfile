@@ -2,11 +2,10 @@
 # docker build -f automation/Dockerfile -t <NAME> .
 # docker run -it <NAME>
 FROM rust:latest
-RUN apt-get update
-RUN apt-get --yes upgrade
+RUN apt-get update && apt-get --yes upgrade
 # tzdata is a dependency, won't install otherwise
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get --yes install rsync openssh-client
+# RUN apt-get --yes install rsync openssh-client
 
 # set CROSS_CONTAINER_IN_CONTAINER to inform `cross` that it is executed from within a container
 ENV CROSS_CONTAINER_IN_CONTAINER=true
@@ -14,7 +13,7 @@ ENV CROSS_CONTAINER_IN_CONTAINER=true
 RUN rustup install nightly && \
     rustup target add thumbv7em-none-eabihf armv7-unknown-linux-gnueabihf && \
     rustup component add rustfmt clippy
-RUN cargo install mdbook --no-default-features --features search --vers "^0.4" --locked
+# RUN cargo install mdbook --no-default-features --features search --vers "^0.4" --locked
 
 # SSH stuff to allow deployment to doc server
 RUN adduser --uid 114 jenkins
