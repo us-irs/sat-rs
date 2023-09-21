@@ -13,7 +13,9 @@ ENV CROSS_CONTAINER_IN_CONTAINER=true
 RUN rustup install nightly && \
     rustup target add thumbv7em-none-eabihf armv7-unknown-linux-gnueabihf && \
     rustup component add rustfmt clippy
+
 # RUN cargo install mdbook --no-default-features --features search --vers "^0.4" --locked
+curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.34/mdbook-v0.4.34-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory /usr/local/bin
 
 # SSH stuff to allow deployment to doc server
 RUN adduser --uid 114 jenkins
