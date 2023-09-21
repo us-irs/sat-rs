@@ -319,6 +319,7 @@ impl DestinationHandler {
         Ok(())
     }
 
+    #[allow(clippy::needless_if)]
     pub fn handle_eof_pdu(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
         if self.state == State::Idle || self.step != TransactionStep::ReceivingFileDataPdus {
             return Err(DestError::WrongStateForFileDataAndEof);
@@ -367,7 +368,6 @@ impl DestinationHandler {
     }
 
     fn fsm_nacked(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
-        if self.step == TransactionStep::Idle {}
         if self.step == TransactionStep::TransactionStart {
             self.transaction_start(cfdp_user)?;
         }

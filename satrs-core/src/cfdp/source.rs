@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use spacepackets::util::UnsignedByteField;
 
 pub struct SourceHandler {
