@@ -58,6 +58,7 @@ pipeline {
     stage('Deploy satrs-book') {
       when {
         branch 'main'
+        branch 'prep-book-release'
       }
       steps {
         dir('satrs-book') {
