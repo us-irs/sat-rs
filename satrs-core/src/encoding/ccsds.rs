@@ -54,9 +54,9 @@ impl PacketIdLookup for [PacketId] {
 /// uses the length field of the packet to extract CCSDS packets.
 ///
 /// This function is also able to deal with broken tail packets at the end as long a the parser
-/// can read the full 6 bytes which constitue a space packet header. If broken tail packets are
-/// detected, they are moved to the front of the buffer, and the write index for future write
-/// operations will be written to the `next_write_idx` argument.
+/// can read the full 7 bytes which constitue a space packet header plus one byte minimal size.
+/// If broken tail packets are detected, they are moved to the front of the buffer, and the write
+/// index for future write operations will be written to the `next_write_idx` argument.
 ///
 /// The parser will write all packets which were decoded successfully to the given `tc_receiver`
 /// and return the number of packets found. If the [ReceivesTcCore::pass_tc] calls fails, the
@@ -67,6 +67,7 @@ pub fn parse_buffer_for_ccsds_space_packets<E>(
     tc_receiver: &mut impl ReceivesTcCore<Error = E>,
     next_write_idx: &mut usize,
 ) -> Result<u32, E> {
+    *next_write_idx = 0;
     let mut packets_found = 0;
     let mut current_idx = 0;
     let buf_len = buf.len();
@@ -86,7 +87,7 @@ pub fn parse_buffer_for_ccsds_space_packets<E>(
                 // Move packet to start of buffer if applicable.
                 if current_idx > 0 {
                     buf.copy_within(current_idx.., 0);
-                    *next_write_idx = current_idx;
+                    *next_write_idx = buf.len() - current_idx;
                 }
             }
             current_idx += packet_size as usize;
@@ -212,6 +213,57 @@ mod tests {
     }
 
     #[test]
-    fn test_split_packet() {
+    fn test_split_packet_multi() {
+        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
+        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        sph = SpHeader::tc_unseg(TEST_APID_1, 0, 0).unwrap();
+        let action_tc = PusTcCreator::new_simple(&mut sph, 8, 0, None, true);
+        let mut buffer: [u8; 32] = [0; 32];
+        let packet_len_ping = ping_tc
+            .write_to_bytes(&mut buffer)
+            .expect("writing packet failed");
+        let packet_len_action = action_tc
+            .write_to_bytes(&mut buffer[packet_len_ping..])
+            .expect("writing packet failed");
+        let valid_packet_ids = [TEST_PACKET_ID_0, TEST_PACKET_ID_1];
+        let mut tc_cacher = TcCacher::default();
+        let mut next_write_idx = 0;
+        let parse_result = parse_buffer_for_ccsds_space_packets(
+            &mut buffer[..packet_len_ping + packet_len_action - 4],
+            valid_packet_ids.as_slice(),
+            &mut tc_cacher,
+            &mut next_write_idx,
+        );
+        assert!(parse_result.is_ok());
+        let parsed_packets = parse_result.unwrap();
+        assert_eq!(parsed_packets, 1);
+        assert_eq!(tc_cacher.tc_queue.len(), 1);
+        // The broken packet was moved to the start, so the next write index should be after the
+        // last segment missing 4 bytes.
+        assert_eq!(next_write_idx, packet_len_action - 4);
+    }
+
+    #[test]
+    fn test_one_split_packet() {
+        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
+        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        let mut buffer: [u8; 32] = [0; 32];
+        let packet_len_ping = ping_tc
+            .write_to_bytes(&mut buffer)
+            .expect("writing packet failed");
+        let valid_packet_ids = [TEST_PACKET_ID_0, TEST_PACKET_ID_1];
+        let mut tc_cacher = TcCacher::default();
+        let mut next_write_idx = 0;
+        let parse_result = parse_buffer_for_ccsds_space_packets(
+            &mut buffer[..packet_len_ping - 4],
+            valid_packet_ids.as_slice(),
+            &mut tc_cacher,
+            &mut next_write_idx,
+        );
+        assert_eq!(next_write_idx, 0);
+        assert!(parse_result.is_ok());
+        let parsed_packets = parse_result.unwrap();
+        assert_eq!(parsed_packets, 0);
+        assert_eq!(tc_cacher.tc_queue.len(), 0);
     }
 }
