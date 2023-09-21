@@ -18,7 +18,7 @@ impl<TmError, TcError: 'static> TcpTcParser<TmError, TcError> for CcsdsTcParser 
     fn handle_tc_parsing(
         &mut self,
         tc_buffer: &mut [u8],
-        tc_receiver: &mut dyn ReceivesTc<Error = TcError>,
+        tc_receiver: &mut (impl ReceivesTc<Error = TcError> + ?Sized),
         conn_result: &mut ConnectionResult,
         current_write_idx: usize,
         next_write_idx: &mut usize,
@@ -43,7 +43,7 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CcsdsTmSender {
     fn handle_tm_sending(
         &mut self,
         tm_buffer: &mut [u8],
-        tm_source: &mut dyn TmPacketSource<Error = TmError>,
+        tm_source: &mut (impl TmPacketSource<Error = TmError> + ?Sized),
         conn_result: &mut ConnectionResult,
         stream: &mut TcpStream,
     ) -> Result<bool, TcpTmtcError<TmError, TcError>> {
