@@ -1,6 +1,6 @@
 # Communication with sat-rs based software
 
-Communication is a huge topic for space systems. Remote systems are usually not (directly)
+Communication is a vital topic for remote system which are usually not (directly)
 connected to the internet and only have 1-2 communication links during nominal operation. However,
 most of these systems have internet access during development cycle. There are various standards
 provided by CCSDS and ECSS which can be useful to determine how to communicate with the satellite

@@ -2,10 +2,10 @@
 # docker build -f automation/Dockerfile -t <NAME> .
 # docker run -it <NAME>
 FROM rust:latest
-RUN apt-get update
-RUN apt-get --yes upgrade
+RUN apt-get update && apt-get --yes upgrade
 # tzdata is a dependency, won't install otherwise
 ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get --yes install rsync curl
 
 # set CROSS_CONTAINER_IN_CONTAINER to inform `cross` that it is executed from within a container
 ENV CROSS_CONTAINER_IN_CONTAINER=true
@@ -13,3 +13,13 @@ ENV CROSS_CONTAINER_IN_CONTAINER=true
 RUN rustup install nightly && \
     rustup target add thumbv7em-none-eabihf armv7-unknown-linux-gnueabihf && \
     rustup component add rustfmt clippy
+
+# RUN cargo install mdbook --no-default-features --features search --vers "^0.4" --locked
+RUN curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.34/mdbook-v0.4.34-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory /usr/local/bin
+
+# SSH stuff to allow deployment to doc server
+RUN adduser --uid 114 jenkins
+
+# Add documentation server to known hosts
+RUN echo "|1|/LzCV4BuTmTb2wKnD146l9fTKgQ=|NJJtVjvWbtRt8OYqFgcYRnMQyVw= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBNL8ssTonYtgiR/6RRlSIK9WU1ywOcJmxFTLcEblAwH7oifZzmYq3XRfwXrgfMpylEfMFYfCU8JRqtmi19xc21A=" >> /etc/ssh/ssh_known_hosts
+RUN echo "|1|CcBvBc3EG03G+XM5rqRHs6gK/Gg=|oGeJQ+1I8NGI2THIkJsW92DpTzs= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBNL8ssTonYtgiR/6RRlSIK9WU1ywOcJmxFTLcEblAwH7oifZzmYq3XRfwXrgfMpylEfMFYfCU8JRqtmi19xc21A=" >> /etc/ssh/ssh_known_hosts
