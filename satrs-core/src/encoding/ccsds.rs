@@ -108,17 +108,20 @@ mod tests {
 
     use super::parse_buffer_for_ccsds_space_packets;
 
-    const TEST_APID: u16 = 0x02;
+    const TEST_APID_0: u16 = 0x02;
+    const TEST_APID_1: u16 = 0x10;
+    const TEST_PACKET_ID_0: PacketId = PacketId::const_tc(true, TEST_APID_0);
+    const TEST_PACKET_ID_1: PacketId = PacketId::const_tc(true, TEST_APID_1);
 
     #[test]
     fn test_basic() {
-        let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
         let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len = ping_tc
             .write_to_bytes(&mut buffer)
             .expect("writing packet failed");
-        let valid_packet_ids = [PacketId::const_tc(true, TEST_APID)];
+        let valid_packet_ids = [TEST_PACKET_ID_0];
         let mut tc_cacher = TcCacher::default();
         let mut next_write_idx = 0;
         let parse_result = parse_buffer_for_ccsds_space_packets(
@@ -138,18 +141,18 @@ mod tests {
     }
 
     #[test]
-    fn test_multi_pakcet() {
-        let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+    fn test_multi_packet() {
+        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
         let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
         let action_tc = PusTcCreator::new_simple(&mut sph, 8, 0, None, true);
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len_ping = ping_tc
             .write_to_bytes(&mut buffer)
             .expect("writing packet failed");
-        let _packet_len_action = action_tc
+        let packet_len_action = action_tc
             .write_to_bytes(&mut buffer[packet_len_ping..])
             .expect("writing packet failed");
-        let valid_packet_ids = [PacketId::const_tc(true, TEST_APID)];
+        let valid_packet_ids = [TEST_PACKET_ID_0];
         let mut tc_cacher = TcCacher::default();
         let mut next_write_idx = 0;
         let parse_result = parse_buffer_for_ccsds_space_packets(
@@ -160,7 +163,7 @@ mod tests {
         );
         assert!(parse_result.is_ok());
         let parsed_packets = parse_result.unwrap();
-        assert_eq!(parsed_packets, 1);
+        assert_eq!(parsed_packets, 2);
         assert_eq!(tc_cacher.tc_queue.len(), 2);
         assert_eq!(
             tc_cacher.tc_queue.pop_front().unwrap(),
@@ -168,7 +171,47 @@ mod tests {
         );
         assert_eq!(
             tc_cacher.tc_queue.pop_front().unwrap(),
-            buffer[packet_len_ping..]
+            buffer[packet_len_ping..packet_len_ping + packet_len_action]
         );
+    }
+
+    #[test]
+    fn test_multi_apid() {
+        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
+        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        sph = SpHeader::tc_unseg(TEST_APID_1, 0, 0).unwrap();
+        let action_tc = PusTcCreator::new_simple(&mut sph, 8, 0, None, true);
+        let mut buffer: [u8; 32] = [0; 32];
+        let packet_len_ping = ping_tc
+            .write_to_bytes(&mut buffer)
+            .expect("writing packet failed");
+        let packet_len_action = action_tc
+            .write_to_bytes(&mut buffer[packet_len_ping..])
+            .expect("writing packet failed");
+        let valid_packet_ids = [TEST_PACKET_ID_0, TEST_PACKET_ID_1];
+        let mut tc_cacher = TcCacher::default();
+        let mut next_write_idx = 0;
+        let parse_result = parse_buffer_for_ccsds_space_packets(
+            &mut buffer,
+            valid_packet_ids.as_slice(),
+            &mut tc_cacher,
+            &mut next_write_idx,
+        );
+        assert!(parse_result.is_ok());
+        let parsed_packets = parse_result.unwrap();
+        assert_eq!(parsed_packets, 2);
+        assert_eq!(tc_cacher.tc_queue.len(), 2);
+        assert_eq!(
+            tc_cacher.tc_queue.pop_front().unwrap(),
+            buffer[..packet_len_ping]
+        );
+        assert_eq!(
+            tc_cacher.tc_queue.pop_front().unwrap(),
+            buffer[packet_len_ping..packet_len_ping + packet_len_action]
+        );
+    }
+
+    #[test]
+    fn test_split_packet() {
     }
 }
