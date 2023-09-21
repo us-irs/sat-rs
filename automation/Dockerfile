@@ -5,7 +5,7 @@ FROM rust:latest
 RUN apt-get update && apt-get --yes upgrade
 # tzdata is a dependency, won't install otherwise
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get --yes install rsync
+RUN apt-get --yes install rsync curl
 
 # set CROSS_CONTAINER_IN_CONTAINER to inform `cross` that it is executed from within a container
 ENV CROSS_CONTAINER_IN_CONTAINER=true
