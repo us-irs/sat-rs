@@ -187,8 +187,12 @@ mod tests {
         let tm_source = SyncTmSource::default();
         let mut packet_id_lookup = HashSet::new();
         packet_id_lookup.insert(TEST_PACKET_ID_0);
-        let mut tcp_server =
-            generic_tmtc_server(&auto_port_addr, tc_receiver.clone(), tm_source, packet_id_lookup);
+        let mut tcp_server = generic_tmtc_server(
+            &auto_port_addr,
+            tc_receiver.clone(),
+            tm_source,
+            packet_id_lookup,
+        );
         let dest_addr = tcp_server
             .local_addr()
             .expect("retrieving dest addr failed");

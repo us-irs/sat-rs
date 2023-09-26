@@ -172,7 +172,10 @@ mod tests {
 
     use crate::{
         encoding::tests::{INVERTED_PACKET, SIMPLE_PACKET},
-        hal::std::tcp_server::{ServerConfig, tests::{SyncTcCacher, SyncTmSource}},
+        hal::std::tcp_server::{
+            tests::{SyncTcCacher, SyncTmSource},
+            ServerConfig,
+        },
     };
     use alloc::{boxed::Box, sync::Arc};
     use cobs::encode;
