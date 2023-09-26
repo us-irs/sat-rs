@@ -173,60 +173,12 @@ mod tests {
 
     use crate::{
         encoding::tests::{INVERTED_PACKET, SIMPLE_PACKET},
-        hal::std::tcp_server::ServerConfig,
-        tmtc::{ReceivesTcCore, TmPacketSourceCore},
+        hal::std::tcp_server::{ServerConfig, tests::{SyncTcCacher, SyncTmSource}},
     };
-    use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
+    use alloc::{boxed::Box, sync::Arc};
     use cobs::encode;
 
     use super::TcpTmtcInCobsServer;
-
-    #[derive(Default, Clone)]
-    struct SyncTcCacher {
-        tc_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
-    }
-    impl ReceivesTcCore for SyncTcCacher {
-        type Error = ();
-
-        fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
-            let mut tc_queue = self.tc_queue.lock().expect("tc forwarder failed");
-            tc_queue.push_back(tc_raw.to_vec());
-            Ok(())
-        }
-    }
-
-    #[derive(Default, Clone)]
-    struct SyncTmSource {
-        tm_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
-    }
-
-    impl SyncTmSource {
-        pub(crate) fn add_tm(&mut self, tm: &[u8]) {
-            let mut tm_queue = self.tm_queue.lock().expect("locking tm queue failec");
-            tm_queue.push_back(tm.to_vec());
-        }
-    }
-
-    impl TmPacketSourceCore for SyncTmSource {
-        type Error = ();
-
-        fn retrieve_packet(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
-            let mut tm_queue = self.tm_queue.lock().expect("locking tm queue failed");
-            if !tm_queue.is_empty() {
-                let next_vec = tm_queue.front().unwrap();
-                if buffer.len() < next_vec.len() {
-                    panic!(
-                        "provided buffer too small, must be at least {} bytes",
-                        next_vec.len()
-                    );
-                }
-                let next_vec = tm_queue.pop_front().unwrap();
-                buffer[0..next_vec.len()].copy_from_slice(&next_vec);
-                return Ok(next_vec.len());
-            }
-            Ok(0)
-        }
-    }
 
     fn encode_simple_packet(encoded_buf: &mut [u8], current_idx: &mut usize) {
         encode_packet(&SIMPLE_PACKET, encoded_buf, current_idx)
