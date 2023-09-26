@@ -12,10 +12,10 @@ use crate::tmtc::{ReceivesTc, TmPacketSource};
 use thiserror::Error;
 
 // Re-export the TMTC in COBS server.
+pub use crate::hal::std::tcp_cobs_server::{CobsTcParser, CobsTmSender, TcpTmtcInCobsServer};
 pub use crate::hal::std::tcp_spacepackets_server::{
-    CcsdsTcParser, CcsdsTmSender, TcpSpacepacketsServer,
+    SpacepacketsTcParser, SpacepacketsTmSender, TcpSpacepacketsServer,
 };
-pub use crate::hal::std::tcp_with_cobs_server::{CobsTcParser, CobsTmSender, TcpTmtcInCobsServer};
 
 /// Configuration struct for the generic TCP TMTC server
 ///
