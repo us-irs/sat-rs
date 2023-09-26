@@ -81,6 +81,7 @@ default-features = false
 
 [dependencies.cobs]
 git = "https://github.com/robamu/cobs.rs.git"
+version = "0.2.3"
 branch = "all_features"
 default-features = false
 
