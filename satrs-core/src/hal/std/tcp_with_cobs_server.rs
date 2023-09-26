@@ -167,7 +167,6 @@ mod tests {
     use std::{
         io::{Read, Write},
         net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
-        sync::Mutex,
         thread,
     };
 

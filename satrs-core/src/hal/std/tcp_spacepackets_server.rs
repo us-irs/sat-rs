@@ -136,12 +136,57 @@ impl<TmError: 'static, TcError: 'static> TcpSpacepacketsServer<TmError, TcError>
 
 #[cfg(test)]
 mod tests {
+    use core::time::Duration;
+    use std::net::{SocketAddr, IpAddr, Ipv4Addr};
+
+    use alloc::boxed::Box;
+    use hashbrown::HashSet;
+    use spacepackets::PacketId;
+
+    use crate::hal::std::tcp_server::{tests::{SyncTmSource, SyncTcCacher}, ServerConfig};
+
     use super::TcpSpacepacketsServer;
 
+    const APID_0: u16 = 0x02;
+    const PACKET_ID_0: PacketId= PacketId::const_tc(true, APID_0);
+
+    fn generic_tmtc_server(
+        addr: &SocketAddr,
+        tc_receiver: SyncTcCacher,
+        tm_source: SyncTmSource,
+        packet_id_lookup: HashSet<PacketId>
+    ) -> TcpSpacepacketsServer<(), ()> {
+        TcpSpacepacketsServer::new(
+            ServerConfig::new(*addr, Duration::from_millis(2), 1024, 1024),
+            Box::new(tm_source),
+            Box::new(tc_receiver),
+            Box::new(packet_id_lookup)
+        )
+        .expect("TCP server generation failed")
+    }
     #[test]
     fn test_basic() {
-        let
-        let server = TcpSpacepacketsServer::new(cfg, tm_source, tc_receiver, packet_id_lookup)
-        
+        let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
+        let tc_receiver = SyncTcCacher::default();
+        let tm_source = SyncTmSource::default();
+        let mut packet_id_lookup = HashSet::new();
+        packet_id_lookup.insert(PACKET_ID_0);
+        let server = generic_tmtc_server(&auto_port_addr, tc_receiver, tm_source, packet_id_lookup); 
+        let dest_addr = tcp_server
+            .local_addr()
+            .expect("retrieving dest addr failed");
+        let conn_handled: Arc<AtomicBool> = Default::default();
+        let set_if_done = conn_handled.clone();
+        // Call the connection handler in separate thread, does block.
+        thread::spawn(move || {
+            let result = tcp_server.handle_next_connection();
+            if result.is_err() {
+                panic!("handling connection failed: {:?}", result.unwrap_err());
+            }
+            let conn_result = result.unwrap();
+            assert_eq!(conn_result.num_received_tcs, 1);
+            assert_eq!(conn_result.num_sent_tms, 0);
+            set_if_done.store(true, Ordering::Relaxed);
+        });
     }
 }
