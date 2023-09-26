@@ -282,10 +282,10 @@ fn main() {
         tm_store: tm_args.tm_store.clone_backing_pool(),
     };
 
-    info!("Starting TMTC task");
+    info!("Starting TMTC and UDP task");
     let jh0 = thread::Builder::new()
-        .name("TMTC".to_string())
-        .spawn(move || {
+        .name("TMTC_UDP".to_string())
+        .spawn(move || loop {
             udp_tmtc_server.periodic_operation();
             tmtc_task.periodic_operation();
             thread::sleep(Duration::from_millis(400));
@@ -400,7 +400,7 @@ fn main() {
             let mut timestamp: [u8; 7] = [0; 7];
             let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
             loop {
-                // TODO: Move this into a separate thread..
+                // TODO: Move this into a separate function/task/module..
                 match acs_thread_rx.try_recv() {
                     Ok(request) => {
                         info!(
