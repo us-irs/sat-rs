@@ -166,16 +166,12 @@ const TEST_PACKET_ID_0: PacketId = PacketId::const_tc(true, TEST_APID_0);
 
 #[test]
 fn test_ccsds_server() {
-    let mut buffer: [u8; 32] = [0; 32];
     let tc_receiver = SyncTcCacher::default();
     let mut tm_source = SyncTmSource::default();
     let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
     let verif_tm = PusTcCreator::new_simple(&mut sph, 1, 1, None, true);
-    let tm_packet_len = verif_tm
-        .write_to_bytes(&mut buffer)
-        .expect("writing packet failed");
-    tm_source.add_tm(&buffer[..tm_packet_len]);
-    let tm_vec = buffer[..tm_packet_len].to_vec();
+    let tm_0 = verif_tm.to_vec().expect("tm generation failed");
+    tm_source.add_tm(&tm_0);
     let mut packet_id_lookup = HashSet::new();
     packet_id_lookup.insert(TEST_PACKET_ID_0);
     let mut tcp_server = TcpSpacepacketsServer::new(
@@ -202,29 +198,30 @@ fn test_ccsds_server() {
         set_if_done.store(true, Ordering::Relaxed);
     });
     let mut stream = TcpStream::connect(dest_addr).expect("connecting to TCP server failed");
-    let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
-    let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
     stream
         .set_read_timeout(Some(Duration::from_millis(10)))
         .expect("setting reas timeout failed");
-    let packet_len = ping_tc
-        .write_to_bytes(&mut buffer)
-        .expect("writing packet failed");
-    stream
-        .write_all(&buffer[..packet_len])
-        .expect("writing to TCP server failed");
 
+    // Send ping telecommand.
+    let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
+    let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+    let tc_0 = ping_tc.to_vec().expect("packet creation failed");
+    stream
+        .write_all(&tc_0)
+        .expect("writing to TCP server failed");
     // Done with writing.
     stream
         .shutdown(std::net::Shutdown::Write)
         .expect("shutting down write failed");
+
+    // Now read all the telemetry from the server.
     let mut read_buf: [u8; 16] = [0; 16];
     let mut read_len_total = 0;
     // Timeout ensures this does not block forever.
-    while read_len_total < tm_packet_len {
+    while read_len_total < tm_0.len() {
         let read_len = stream.read(&mut read_buf).expect("read failed");
         read_len_total += read_len;
-        assert_eq!(read_buf[..read_len], tm_vec);
+        assert_eq!(read_buf[..read_len], tm_0);
     }
     drop(stream);
 
@@ -240,5 +237,5 @@ fn test_ccsds_server() {
     // Check that TC has arrived.
     let mut tc_queue = tc_receiver.tc_queue.lock().unwrap();
     assert_eq!(tc_queue.len(), 1);
-    assert_eq!(tc_queue.pop_front().unwrap(), buffer[..packet_len]);
+    assert_eq!(tc_queue.pop_front().unwrap(), tc_0);
 }

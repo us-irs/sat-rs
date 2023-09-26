@@ -220,13 +220,10 @@ mod tests {
         });
         let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
         let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
-        let mut buffer: [u8; 32] = [0; 32];
-        let packet_len_ping = ping_tc
-            .write_to_bytes(&mut buffer)
-            .expect("writing packet failed");
+        let tc_0 = ping_tc.to_vec().expect("packet generation failed");
         let mut stream = TcpStream::connect(dest_addr).expect("connecting to TCP server failed");
         stream
-            .write_all(&buffer[..packet_len_ping])
+            .write_all(&tc_0)
             .expect("writing to TCP server failed");
         drop(stream);
 
@@ -242,12 +239,11 @@ mod tests {
         // Check that TC has arrived.
         let mut tc_queue = tc_receiver.tc_queue.lock().unwrap();
         assert_eq!(tc_queue.len(), 1);
-        assert_eq!(tc_queue.pop_front().unwrap(), buffer[..packet_len_ping]);
+        assert_eq!(tc_queue.pop_front().unwrap(), tc_0);
     }
 
     #[test]
     fn test_multi_tc_multi_tm() {
-        let mut buffer: [u8; 32] = [0; 32];
         let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
         let tc_receiver = SyncTcCacher::default();
         let mut tm_source = SyncTmSource::default();
@@ -256,19 +252,13 @@ mod tests {
         let mut total_tm_len = 0;
         let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
         let verif_tm = PusTcCreator::new_simple(&mut sph, 1, 1, None, true);
-        let tm_packet_len = verif_tm
-            .write_to_bytes(&mut buffer)
-            .expect("writing packet failed");
-        total_tm_len += tm_packet_len;
-        let tm_0 = buffer[..tm_packet_len].to_vec();
+        let tm_0 = verif_tm.to_vec().expect("writing packet failed");
+        total_tm_len += tm_0.len();
         tm_source.add_tm(&tm_0);
         let mut sph = SpHeader::tc_unseg(TEST_APID_1, 0, 0).unwrap();
         let verif_tm = PusTcCreator::new_simple(&mut sph, 1, 3, None, true);
-        let tm_packet_len = verif_tm
-            .write_to_bytes(&mut buffer)
-            .expect("writing packet failed");
-        total_tm_len += tm_packet_len;
-        let tm_1 = buffer[..tm_packet_len].to_vec();
+        let tm_1 = verif_tm.to_vec().expect("writing packet failed");
+        total_tm_len += tm_1.len();
         tm_source.add_tm(&tm_1);
 
         // Set up server
@@ -309,19 +299,13 @@ mod tests {
         // Send telecommands
         let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
         let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
-        let packet_len = ping_tc
-            .write_to_bytes(&mut buffer)
-            .expect("writing packet failed");
-        let tc_0 = buffer[..packet_len].to_vec();
+        let tc_0 = ping_tc.to_vec().expect("ping tc creation failed");
         stream
             .write_all(&tc_0)
             .expect("writing to TCP server failed");
         let mut sph = SpHeader::tc_unseg(TEST_APID_1, 0, 0).unwrap();
         let action_tc = PusTcCreator::new_simple(&mut sph, 8, 0, None, true);
-        let packet_len = action_tc
-            .write_to_bytes(&mut buffer)
-            .expect("writing packet failed");
-        let tc_1 = buffer[..packet_len].to_vec();
+        let tc_1 = action_tc.to_vec().expect("action tc creation failed");
         stream
             .write_all(&tc_1)
             .expect("writing to TCP server failed");
