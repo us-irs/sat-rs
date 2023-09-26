@@ -6,7 +6,9 @@ mod requests;
 mod tmtc;
 
 use log::{info, warn};
+use satrs_core::hal::std::udp_server::UdpTcServer;
 
+use crate::ccsds::CcsdsReceiver;
 use crate::hk::AcsHkIds;
 use crate::logging::setup_logger;
 use crate::pus::action::{Pus8Wrapper, PusService8ActionHandler};
@@ -14,9 +16,9 @@ use crate::pus::event::Pus5Wrapper;
 use crate::pus::hk::{Pus3Wrapper, PusService3HkHandler};
 use crate::pus::scheduler::Pus11Wrapper;
 use crate::pus::test::Service17CustomWrapper;
-use crate::pus::PusTcMpscRouter;
+use crate::pus::{PusReceiver, PusTcMpscRouter};
 use crate::requests::{Request, RequestWithToken};
-use crate::tmtc::{core_tmtc_task, PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel};
+use crate::tmtc::{PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, TmtcTask, UdpTmtcServer};
 use satrs_core::event_man::{
     EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
 };
@@ -43,7 +45,7 @@ use satrs_core::spacepackets::{
     SpHeader,
 };
 use satrs_core::tmtc::tm_helper::SharedTmStore;
-use satrs_core::tmtc::{AddressableId, TargetId};
+use satrs_core::tmtc::{AddressableId, CcsdsDistributor, TargetId};
 use satrs_core::ChannelId;
 use satrs_example::{
     RequestTargetId, TcReceiverId, TmSenderId, OBSW_SERVER_ADDR, PUS_APID, SERVER_PORT,
@@ -266,11 +268,27 @@ fn main() {
     );
     let mut pus_3_wrapper = Pus3Wrapper { pus_3_handler };
 
+    let ccsds_receiver = CcsdsReceiver {
+        tc_source: tc_args.tc_source.clone(),
+    };
+    let mut tmtc_task = TmtcTask::new(tc_args, PusReceiver::new(verif_reporter, pus_router));
+
+    let ccsds_distributor = CcsdsDistributor::new(Box::new(ccsds_receiver));
+    let udp_tc_server = UdpTcServer::new(sock_addr, 2048, Box::new(ccsds_distributor))
+        .expect("creating UDP TMTC server failed");
+    let mut udp_tmtc_server = UdpTmtcServer {
+        udp_tc_server,
+        tm_rx: tm_args.tm_server_rx,
+        tm_store: tm_args.tm_store.clone_backing_pool(),
+    };
+
     info!("Starting TMTC task");
     let jh0 = thread::Builder::new()
         .name("TMTC".to_string())
         .spawn(move || {
-            core_tmtc_task(sock_addr, tc_args, tm_args, verif_reporter, pus_router);
+            udp_tmtc_server.periodic_operation();
+            tmtc_task.periodic_operation();
+            thread::sleep(Duration::from_millis(400));
         })
         .unwrap();
 
@@ -382,6 +400,7 @@ fn main() {
             let mut timestamp: [u8; 7] = [0; 7];
             let mut time_provider = TimeProvider::new_with_u16_days(0, 0);
             loop {
+                // TODO: Move this into a separate thread..
                 match acs_thread_rx.try_recv() {
                     Ok(request) => {
                         info!(
