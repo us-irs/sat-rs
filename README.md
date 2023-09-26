@@ -6,10 +6,8 @@ sat-rs
 This is the repository of the sat-rs framework. Its primary goal is to provide re-usable components
 to write on-board software for remote systems like rovers or satellites. It is specifically written
 for the special requirements for these systems. You can find an overview of the project and the
-link to the [sat-rs book](https://documentation.irs.uni-stuttgart.de/projects/sat-rs/)
+link to the [more high-level sat-rs book](https://documentation.irs.uni-stuttgart.de/projects/sat-rs/)
 at the [IRS documentation website](https://documentation.irs.uni-stuttgart.de/sat-rs.html).
-It is recommended to read the book first before delving into the example application and the
-API documentation.
 
 A lot of the architecture and general design considerations are based on the
 [FSFW](https://egit.irs.uni-stuttgart.de/fsfw/fsfw) C++ framework which has flight heritage
@@ -21,7 +19,8 @@ and [EIVE](https://www.irs.uni-stuttgart.de/en/research/satellitetechnology-and-
 This project currently contains following crates:
 
 * [`satrs-book`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-book):
-   Primary information resource in addition to the API documentation. It is recommended to read
+   Primary information resource in addition to the API documentation, hosted
+   [here](https://documentation.irs.uni-stuttgart.de/projects/sat-rs/). It can be useful to read
    this first before delving into the example application and the API documentation.
 * [`satrs-core`](https://egit.irs.uni-stuttgart.de/rust/satrs-launchpad/src/branch/main/satrs-core):
    Core components of sat-rs.
