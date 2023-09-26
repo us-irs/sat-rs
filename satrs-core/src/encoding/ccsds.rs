@@ -64,7 +64,7 @@ impl PacketIdLookup for [PacketId] {
 pub fn parse_buffer_for_ccsds_space_packets<E>(
     buf: &mut [u8],
     packet_id_lookup: &(impl PacketIdLookup + ?Sized),
-    tc_receiver: &mut impl ReceivesTcCore<Error = E>,
+    tc_receiver: &mut (impl ReceivesTcCore<Error = E> + ?Sized),
     next_write_idx: &mut usize,
 ) -> Result<u32, E> {
     *next_write_idx = 0;
@@ -80,7 +80,7 @@ pub fn parse_buffer_for_ccsds_space_packets<E>(
             let length_field =
                 u16::from_be_bytes(buf[current_idx + 4..current_idx + 6].try_into().unwrap());
             let packet_size = length_field + 7;
-            if (current_idx + packet_size as usize) < buf_len {
+            if (current_idx + packet_size as usize) <= buf_len {
                 tc_receiver.pass_tc(&buf[current_idx..current_idx + packet_size as usize])?;
                 packets_found += 1;
             } else {

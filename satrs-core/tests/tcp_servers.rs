@@ -21,10 +21,15 @@ use std::{
     thread,
 };
 
+use hashbrown::HashSet;
 use satrs_core::{
     encoding::cobs::encode_packet_with_cobs,
-    hal::std::tcp_server::{ServerConfig, TcpTmtcInCobsServer},
+    hal::std::tcp_server::{ServerConfig, TcpSpacepacketsServer, TcpTmtcInCobsServer},
     tmtc::{ReceivesTcCore, TmPacketSourceCore},
+};
+use spacepackets::{
+    ecss::{tc::PusTcCreator, SerializablePusPacket},
+    PacketId, SpHeader,
 };
 use std::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
 
@@ -79,15 +84,16 @@ impl TmPacketSourceCore for SyncTmSource {
 
 const SIMPLE_PACKET: [u8; 5] = [1, 2, 3, 4, 5];
 const INVERTED_PACKET: [u8; 5] = [5, 4, 3, 4, 1];
+const AUTO_PORT_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
 
-fn main() {
-    let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
+#[test]
+fn test_cobs_server() {
     let tc_receiver = SyncTcCacher::default();
     let mut tm_source = SyncTmSource::default();
     // Insert a telemetry packet which will be read back by the client at a later stage.
     tm_source.add_tm(&INVERTED_PACKET);
     let mut tcp_server = TcpTmtcInCobsServer::new(
-        ServerConfig::new(auto_port_addr, Duration::from_millis(2), 1024, 1024),
+        ServerConfig::new(AUTO_PORT_ADDR, Duration::from_millis(2), 1024, 1024),
         Box::new(tm_source),
         Box::new(tc_receiver.clone()),
     )
@@ -153,4 +159,86 @@ fn main() {
     assert_eq!(tc_queue.len(), 1);
     assert_eq!(tc_queue.pop_front().unwrap(), &SIMPLE_PACKET);
     drop(tc_queue);
+}
+
+const TEST_APID_0: u16 = 0x02;
+const TEST_PACKET_ID_0: PacketId = PacketId::const_tc(true, TEST_APID_0);
+
+#[test]
+fn test_ccsds_server() {
+    let mut buffer: [u8; 32] = [0; 32];
+    let tc_receiver = SyncTcCacher::default();
+    let mut tm_source = SyncTmSource::default();
+    let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
+    let verif_tm = PusTcCreator::new_simple(&mut sph, 1, 1, None, true);
+    let tm_packet_len = verif_tm
+        .write_to_bytes(&mut buffer)
+        .expect("writing packet failed");
+    tm_source.add_tm(&buffer[..tm_packet_len]);
+    let tm_vec = buffer[..tm_packet_len].to_vec();
+    let mut packet_id_lookup = HashSet::new();
+    packet_id_lookup.insert(TEST_PACKET_ID_0);
+    let mut tcp_server = TcpSpacepacketsServer::new(
+        ServerConfig::new(AUTO_PORT_ADDR, Duration::from_millis(2), 1024, 1024),
+        Box::new(tm_source),
+        Box::new(tc_receiver.clone()),
+        Box::new(packet_id_lookup),
+    )
+    .expect("TCP server generation failed");
+    let dest_addr = tcp_server
+        .local_addr()
+        .expect("retrieving dest addr failed");
+    let conn_handled: Arc<AtomicBool> = Default::default();
+    let set_if_done = conn_handled.clone();
+    // Call the connection handler in separate thread, does block.
+    thread::spawn(move || {
+        let result = tcp_server.handle_next_connection();
+        if result.is_err() {
+            panic!("handling connection failed: {:?}", result.unwrap_err());
+        }
+        let conn_result = result.unwrap();
+        assert_eq!(conn_result.num_received_tcs, 1);
+        assert_eq!(conn_result.num_sent_tms, 1);
+        set_if_done.store(true, Ordering::Relaxed);
+    });
+    let mut stream = TcpStream::connect(dest_addr).expect("connecting to TCP server failed");
+    let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
+    let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+    stream
+        .set_read_timeout(Some(Duration::from_millis(10)))
+        .expect("setting reas timeout failed");
+    let packet_len = ping_tc
+        .write_to_bytes(&mut buffer)
+        .expect("writing packet failed");
+    stream
+        .write_all(&buffer[..packet_len])
+        .expect("writing to TCP server failed");
+
+    // Done with writing.
+    stream
+        .shutdown(std::net::Shutdown::Write)
+        .expect("shutting down write failed");
+    let mut read_buf: [u8; 16] = [0; 16];
+    let mut read_len_total = 0;
+    // Timeout ensures this does not block forever.
+    while read_len_total < tm_packet_len {
+        let read_len = stream.read(&mut read_buf).expect("read failed");
+        read_len_total += read_len;
+        assert_eq!(read_buf[..read_len], tm_vec);
+    }
+    drop(stream);
+
+    // A certain amount of time is allowed for the transaction to complete.
+    for _ in 0..3 {
+        if !conn_handled.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+    if !conn_handled.load(Ordering::Relaxed) {
+        panic!("connection was not handled properly");
+    }
+    // Check that TC has arrived.
+    let mut tc_queue = tc_receiver.tc_queue.lock().unwrap();
+    assert_eq!(tc_queue.len(), 1);
+    assert_eq!(tc_queue.pop_front().unwrap(), buffer[..packet_len]);
 }

@@ -12,7 +12,10 @@ use crate::tmtc::{ReceivesTc, TmPacketSource};
 use thiserror::Error;
 
 // Re-export the TMTC in COBS server.
-pub use crate::hal::std::tcp_with_cobs_server::{CobsTcParser, CobsTmSender, TcpTmtcInCobsServer};
+pub use crate::hal::std::tcp_cobs_server::{CobsTcParser, CobsTmSender, TcpTmtcInCobsServer};
+pub use crate::hal::std::tcp_spacepackets_server::{
+    SpacepacketsTcParser, SpacepacketsTmSender, TcpSpacepacketsServer,
+};
 
 /// Configuration struct for the generic TCP TMTC server
 ///
@@ -90,7 +93,7 @@ pub trait TcpTcParser<TmError, TcError> {
     fn handle_tc_parsing(
         &mut self,
         tc_buffer: &mut [u8],
-        tc_receiver: &mut dyn ReceivesTc<Error = TcError>,
+        tc_receiver: &mut (impl ReceivesTc<Error = TcError> + ?Sized),
         conn_result: &mut ConnectionResult,
         current_write_idx: usize,
         next_write_idx: &mut usize,
@@ -105,7 +108,7 @@ pub trait TcpTmSender<TmError, TcError> {
     fn handle_tm_sending(
         &mut self,
         tm_buffer: &mut [u8],
-        tm_source: &mut dyn TmPacketSource<Error = TmError>,
+        tm_source: &mut (impl TmPacketSource<Error = TmError> + ?Sized),
         conn_result: &mut ConnectionResult,
         stream: &mut TcpStream,
     ) -> Result<bool, TcpTmtcError<TmError, TcError>>;
@@ -315,5 +318,61 @@ impl<TmError, TcError> TcpTmtcServerBase<TmError, TcError> {
 
     pub(crate) fn local_addr(&self) -> std::io::Result<SocketAddr> {
         self.listener.local_addr()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use std::sync::Mutex;
+
+    use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
+
+    use crate::tmtc::{ReceivesTcCore, TmPacketSourceCore};
+
+    #[derive(Default, Clone)]
+    pub(crate) struct SyncTcCacher {
+        pub(crate) tc_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
+    }
+    impl ReceivesTcCore for SyncTcCacher {
+        type Error = ();
+
+        fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
+            let mut tc_queue = self.tc_queue.lock().expect("tc forwarder failed");
+            tc_queue.push_back(tc_raw.to_vec());
+            Ok(())
+        }
+    }
+
+    #[derive(Default, Clone)]
+    pub(crate) struct SyncTmSource {
+        tm_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
+    }
+
+    impl SyncTmSource {
+        pub(crate) fn add_tm(&mut self, tm: &[u8]) {
+            let mut tm_queue = self.tm_queue.lock().expect("locking tm queue failec");
+            tm_queue.push_back(tm.to_vec());
+        }
+    }
+
+    impl TmPacketSourceCore for SyncTmSource {
+        type Error = ();
+
+        fn retrieve_packet(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+            let mut tm_queue = self.tm_queue.lock().expect("locking tm queue failed");
+            if !tm_queue.is_empty() {
+                let next_vec = tm_queue.front().unwrap();
+                if buffer.len() < next_vec.len() {
+                    panic!(
+                        "provided buffer too small, must be at least {} bytes",
+                        next_vec.len()
+                    );
+                }
+                let next_vec = tm_queue.pop_front().unwrap();
+                buffer[0..next_vec.len()].copy_from_slice(&next_vec);
+                return Ok(next_vec.len());
+            }
+            Ok(0)
+        }
     }
 }

@@ -24,7 +24,7 @@ impl<TmError, TcError: 'static> TcpTcParser<TmError, TcError> for CobsTcParser {
     fn handle_tc_parsing(
         &mut self,
         tc_buffer: &mut [u8],
-        tc_receiver: &mut dyn ReceivesTc<Error = TcError>,
+        tc_receiver: &mut (impl ReceivesTc<Error = TcError> + ?Sized),
         conn_result: &mut ConnectionResult,
         current_write_idx: usize,
         next_write_idx: &mut usize,
@@ -59,7 +59,7 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
     fn handle_tm_sending(
         &mut self,
         tm_buffer: &mut [u8],
-        tm_source: &mut dyn TmPacketSource<Error = TmError>,
+        tm_source: &mut (impl TmPacketSource<Error = TmError> + ?Sized),
         conn_result: &mut ConnectionResult,
         stream: &mut TcpStream,
     ) -> Result<bool, TcpTmtcError<TmError, TcError>> {
@@ -109,7 +109,7 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
 ///
 /// ## Example
 ///
-/// The [TCP COBS integration](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-core/tests/tcp_server_cobs.rs)
+/// The [TCP integration tests](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-core/tests/tcp_servers.rs)
 /// test also serves as the example application for this module.
 pub struct TcpTmtcInCobsServer<TmError, TcError: 'static> {
     generic_server: TcpTmtcGenericServer<TmError, TcError, CobsTmSender, CobsTcParser>,
@@ -167,66 +167,20 @@ mod tests {
     use std::{
         io::{Read, Write},
         net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
-        sync::Mutex,
         thread,
     };
 
     use crate::{
         encoding::tests::{INVERTED_PACKET, SIMPLE_PACKET},
-        hal::std::tcp_server::ServerConfig,
-        tmtc::{ReceivesTcCore, TmPacketSourceCore},
+        hal::std::tcp_server::{
+            tests::{SyncTcCacher, SyncTmSource},
+            ServerConfig,
+        },
     };
-    use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
+    use alloc::{boxed::Box, sync::Arc};
     use cobs::encode;
 
     use super::TcpTmtcInCobsServer;
-
-    #[derive(Default, Clone)]
-    struct SyncTcCacher {
-        tc_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
-    }
-    impl ReceivesTcCore for SyncTcCacher {
-        type Error = ();
-
-        fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
-            let mut tc_queue = self.tc_queue.lock().expect("tc forwarder failed");
-            tc_queue.push_back(tc_raw.to_vec());
-            Ok(())
-        }
-    }
-
-    #[derive(Default, Clone)]
-    struct SyncTmSource {
-        tm_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
-    }
-
-    impl SyncTmSource {
-        pub(crate) fn add_tm(&mut self, tm: &[u8]) {
-            let mut tm_queue = self.tm_queue.lock().expect("locking tm queue failec");
-            tm_queue.push_back(tm.to_vec());
-        }
-    }
-
-    impl TmPacketSourceCore for SyncTmSource {
-        type Error = ();
-
-        fn retrieve_packet(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
-            let mut tm_queue = self.tm_queue.lock().expect("locking tm queue failed");
-            if !tm_queue.is_empty() {
-                let next_vec = tm_queue.front().unwrap();
-                if buffer.len() < next_vec.len() {
-                    panic!(
-                        "provided buffer too small, must be at least {} bytes",
-                        next_vec.len()
-                    );
-                }
-                let next_vec = tm_queue.pop_front().unwrap();
-                buffer[0..next_vec.len()].copy_from_slice(&next_vec);
-                return Ok(next_vec.len());
-            }
-            Ok(0)
-        }
-    }
 
     fn encode_simple_packet(encoded_buf: &mut [u8], current_idx: &mut usize) {
         encode_packet(&SIMPLE_PACKET, encoded_buf, current_idx)
