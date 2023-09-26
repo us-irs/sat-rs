@@ -1,5 +1,8 @@
 use delegate::delegate;
-use std::{io::Write, net::{TcpStream, TcpListener, SocketAddr}};
+use std::{
+    io::Write,
+    net::{SocketAddr, TcpListener, TcpStream},
+};
 
 use alloc::boxed::Box;
 
@@ -105,7 +108,7 @@ impl<TmError: 'static, TcError: 'static> TcpSpacepacketsServer<TmError, TcError>
         cfg: ServerConfig,
         tm_source: Box<dyn TmPacketSource<Error = TmError>>,
         tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
-        packet_id_lookup: Box<dyn PacketIdLookup + Send>
+        packet_id_lookup: Box<dyn PacketIdLookup + Send>,
     ) -> Result<Self, TcpTmtcError<TmError, TcError>> {
         Ok(Self {
             generic_server: TcpTmtcGenericServer::new(
@@ -136,42 +139,56 @@ impl<TmError: 'static, TcError: 'static> TcpSpacepacketsServer<TmError, TcError>
 
 #[cfg(test)]
 mod tests {
-    use core::time::Duration;
-    use std::net::{SocketAddr, IpAddr, Ipv4Addr};
+    use core::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::Duration,
+    };
+    use std::{
+        io::Write,
+        net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
+        thread,
+    };
 
-    use alloc::boxed::Box;
+    use alloc::{boxed::Box, sync::Arc};
     use hashbrown::HashSet;
-    use spacepackets::PacketId;
+    use spacepackets::{
+        ecss::{tc::PusTcCreator, SerializablePusPacket},
+        PacketId, SpHeader,
+    };
 
-    use crate::hal::std::tcp_server::{tests::{SyncTmSource, SyncTcCacher}, ServerConfig};
+    use crate::hal::std::tcp_server::{
+        tests::{SyncTcCacher, SyncTmSource},
+        ServerConfig,
+    };
 
     use super::TcpSpacepacketsServer;
 
-    const APID_0: u16 = 0x02;
-    const PACKET_ID_0: PacketId= PacketId::const_tc(true, APID_0);
+    const TEST_APID_0: u16 = 0x02;
+    const TEST_PACKET_ID_0: PacketId = PacketId::const_tc(true, TEST_APID_0);
 
     fn generic_tmtc_server(
         addr: &SocketAddr,
         tc_receiver: SyncTcCacher,
         tm_source: SyncTmSource,
-        packet_id_lookup: HashSet<PacketId>
+        packet_id_lookup: HashSet<PacketId>,
     ) -> TcpSpacepacketsServer<(), ()> {
         TcpSpacepacketsServer::new(
             ServerConfig::new(*addr, Duration::from_millis(2), 1024, 1024),
             Box::new(tm_source),
             Box::new(tc_receiver),
-            Box::new(packet_id_lookup)
+            Box::new(packet_id_lookup),
         )
         .expect("TCP server generation failed")
     }
     #[test]
-    fn test_basic() {
+    fn test_basic_tc_only() {
         let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
         let tc_receiver = SyncTcCacher::default();
         let tm_source = SyncTmSource::default();
         let mut packet_id_lookup = HashSet::new();
-        packet_id_lookup.insert(PACKET_ID_0);
-        let server = generic_tmtc_server(&auto_port_addr, tc_receiver, tm_source, packet_id_lookup); 
+        packet_id_lookup.insert(TEST_PACKET_ID_0);
+        let mut tcp_server =
+            generic_tmtc_server(&auto_port_addr, tc_receiver.clone(), tm_source, packet_id_lookup);
         let dest_addr = tcp_server
             .local_addr()
             .expect("retrieving dest addr failed");
@@ -188,5 +205,29 @@ mod tests {
             assert_eq!(conn_result.num_sent_tms, 0);
             set_if_done.store(true, Ordering::Relaxed);
         });
+        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
+        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        let mut buffer: [u8; 32] = [0; 32];
+        let packet_len_ping = ping_tc
+            .write_to_bytes(&mut buffer)
+            .expect("writing packet failed");
+        let mut stream = TcpStream::connect(dest_addr).expect("connecting to TCP server failed");
+        stream
+            .write_all(&buffer[..packet_len_ping])
+            .expect("writing to TCP server failed");
+        drop(stream);
+
+        // A certain amount of time is allowed for the transaction to complete.
+        for _ in 0..3 {
+            if !conn_handled.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
+        if !conn_handled.load(Ordering::Relaxed) {
+            panic!("connection was not handled properly");
+        }
+        // Check that TC has arrived.
+        let tc_queue = tc_receiver.tc_queue.lock().unwrap();
+        assert_eq!(tc_queue.len(), 1);
     }
 }
