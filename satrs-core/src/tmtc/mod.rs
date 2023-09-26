@@ -36,12 +36,33 @@ pub trait ReceivesTcCore {
 /// Extension trait of [ReceivesTcCore] which allows downcasting by implementing [Downcast] and
 /// is also sendable.
 #[cfg(feature = "alloc")]
-pub trait ReceivesTc: ReceivesTcCore + Downcast + Send {}
+pub trait ReceivesTc: ReceivesTcCore + Downcast + Send {
+    // Remove this once trait upcasting coercion has been implemented.
+    // Tracking issue: https://github.com/rust-lang/rust/issues/65991
+    fn upcast(&self) -> &dyn ReceivesTcCore<Error = Self::Error>;
+    // Remove this once trait upcasting coercion has been implemented.
+    // Tracking issue: https://github.com/rust-lang/rust/issues/65991
+    fn upcast_mut(&mut self) -> &mut dyn ReceivesTcCore<Error = Self::Error>;
+}
 
 /// Blanket implementation to automatically implement [ReceivesTc] when the [alloc] feature
 /// is enabled.
 #[cfg(feature = "alloc")]
-impl<T> ReceivesTc for T where T: ReceivesTcCore + Send + 'static {}
+impl<T> ReceivesTc for T
+where
+    T: ReceivesTcCore + Send + 'static,
+{
+    // Remove this once trait upcasting coercion has been implemented.
+    // Tracking issue: https://github.com/rust-lang/rust/issues/65991
+    fn upcast(&self) -> &dyn ReceivesTcCore<Error = Self::Error> {
+        self
+    }
+    // Remove this once trait upcasting coercion has been implemented.
+    // Tracking issue: https://github.com/rust-lang/rust/issues/65991
+    fn upcast_mut(&mut self) -> &mut dyn ReceivesTcCore<Error = Self::Error> {
+        self
+    }
+}
 
 #[cfg(feature = "alloc")]
 impl_downcast!(ReceivesTc assoc Error);
@@ -55,4 +76,42 @@ impl_downcast!(ReceivesTc assoc Error);
 pub trait ReceivesCcsdsTc {
     type Error;
     fn pass_ccsds(&mut self, header: &SpHeader, tc_raw: &[u8]) -> Result<(), Self::Error>;
+}
+
+/// Generic trait for a TM packet source, with no restrictions on the type of TM.
+/// Implementors write the telemetry into the provided buffer and return the size of the telemetry.
+pub trait TmPacketSourceCore {
+    type Error;
+    fn retrieve_packet(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error>;
+}
+
+/// Extension trait of [TmPacketSourceCore] which allows downcasting by implementing [Downcast] and
+/// is also sendable.
+#[cfg(feature = "alloc")]
+pub trait TmPacketSource: TmPacketSourceCore + Downcast + Send {
+    // Remove this once trait upcasting coercion has been implemented.
+    // Tracking issue: https://github.com/rust-lang/rust/issues/65991
+    fn upcast(&self) -> &dyn TmPacketSourceCore<Error = Self::Error>;
+    // Remove this once trait upcasting coercion has been implemented.
+    // Tracking issue: https://github.com/rust-lang/rust/issues/65991
+    fn upcast_mut(&mut self) -> &mut dyn TmPacketSourceCore<Error = Self::Error>;
+}
+
+/// Blanket implementation to automatically implement [ReceivesTc] when the [alloc] feature
+/// is enabled.
+#[cfg(feature = "alloc")]
+impl<T> TmPacketSource for T
+where
+    T: TmPacketSourceCore + Send + 'static,
+{
+    // Remove this once trait upcasting coercion has been implemented.
+    // Tracking issue: https://github.com/rust-lang/rust/issues/65991
+    fn upcast(&self) -> &dyn TmPacketSourceCore<Error = Self::Error> {
+        self
+    }
+    // Remove this once trait upcasting coercion has been implemented.
+    // Tracking issue: https://github.com/rust-lang/rust/issues/65991
+    fn upcast_mut(&mut self) -> &mut dyn TmPacketSourceCore<Error = Self::Error> {
+        self
+    }
 }
