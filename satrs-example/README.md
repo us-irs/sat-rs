@@ -17,7 +17,7 @@ cargo run --bin simpleclient
 This repository also contains a more complex client using the
 [Python tmtccmd](https://github.com/robamu-org/tmtccmd) module.
 
-# Using the tmtccmd Python client
+# <a id="tmtccmd"></a> Using the tmtccmd Python client
 
 The python client requires a valid installation of the
 [tmtccmd package](https://github.com/robamu-org/tmtccmd).
@@ -51,3 +51,24 @@ the `simpleclient`:
 
 You can also simply call the script without any arguments to view a list of services (`-s` flag)
 and corresponding op codes (`-o` flag) for each service.
+
+# Structure of the example project
+
+The example project contains components which could also be expected to be part of a production
+On-Board Software.
+
+1. A UDP server to receive telecommands and poll telemetry from. This might be an optional
+   component for an OBSW which is only used during the development phase on ground.
+2. A PUS service stack which exposes some functionality conformant with the ECSS PUS service. This
+   currently includes the following services:
+   - Service 1 for telecommand verification.
+   - Service 3 for housekeeping telemetry handling.
+   - Service 5 for management and downlink of on-board events.
+   - Service 8 for handling on-board actions.
+   - Service 17 for test purposes (pings)
+3. An event manager component which handles the event IPC mechanism.
+4. A TC source component which demultiplexes and routes telecommands based on parameters like
+   packet APID or PUS service and subservice type.
+5. A TM sink sink component which is the target of all sent telemetry and sends it to downlink
+   handlers like the UDP and TCP server.
+6. An AOCS example task which can also process some PUS commands.
