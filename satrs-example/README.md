@@ -65,6 +65,7 @@ On-Board Software.
    - Service 3 for housekeeping telemetry handling.
    - Service 5 for management and downlink of on-board events.
    - Service 8 for handling on-board actions.
+   - Service 11 for scheduling telecommands to be released at a specific time.
    - Service 17 for test purposes (pings)
 3. An event manager component which handles the event IPC mechanism.
 4. A TC source component which demultiplexes and routes telecommands based on parameters like
