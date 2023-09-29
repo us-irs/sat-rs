@@ -21,3 +21,9 @@ A lot of the architecture and general design considerations are based on the
 through the 2 missions [FLP](https://www.irs.uni-stuttgart.de/en/research/satellitetechnology-and-instruments/smallsatelliteprogram/flying-laptop/)
 and [EIVE](https://www.irs.uni-stuttgart.de/en/research/satellitetechnology-and-instruments/smallsatelliteprogram/EIVE/).
 
+# Getting started with the example
+
+The [`satrs-example`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example)
+provides various practical usage examples of the `sat-rs` framework. If you are more interested in
+the practical application of `sat-rs` inside an application, it is recommended to have a look at
+the example application.
