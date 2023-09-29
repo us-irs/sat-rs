@@ -4,6 +4,7 @@ mod logging;
 mod pus;
 mod requests;
 mod tmtc;
+mod udp;
 
 use log::{info, warn};
 use satrs_core::hal::std::udp_server::UdpTcServer;
@@ -18,7 +19,8 @@ use crate::pus::scheduler::Pus11Wrapper;
 use crate::pus::test::Service17CustomWrapper;
 use crate::pus::{PusReceiver, PusTcMpscRouter};
 use crate::requests::{Request, RequestWithToken};
-use crate::tmtc::{PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, TmtcTask, UdpTmtcServer};
+use crate::tmtc::{PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, TmtcTask};
+use crate::udp::UdpTmtcServer;
 use satrs_core::event_man::{
     EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider, SendEventProvider,
 };
