@@ -45,7 +45,7 @@ from tmtccmd.util.obj_id import ObjectIdDictT
 
 import pus_tc
 import tc_definitions
-from common import EXAMPLE_PUS_APID, EventU32
+from common import EXAMPLE_PUS_APID, TM_PACKET_IDS, EventU32
 
 _LOGGER = logging.getLogger()
 
@@ -63,7 +63,7 @@ class SatRsConfigHook(HookBase):
         cfg = create_com_interface_cfg_default(
             com_if_key=com_if_key,
             json_cfg_path=self.cfg_path,
-            space_packet_ids=None,
+            space_packet_ids=TM_PACKET_IDS,
         )
         return create_com_interface_default(cfg)
 

@@ -113,7 +113,7 @@ impl<TmError: 'static, TcError: 'static> TcpSpacepacketsServer<TmError, TcError>
         tm_source: Box<dyn TmPacketSource<Error = TmError>>,
         tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
         packet_id_lookup: Box<dyn PacketIdLookup + Send>,
-    ) -> Result<Self, TcpTmtcError<TmError, TcError>> {
+    ) -> Result<Self, std::io::Error> {
         Ok(Self {
             generic_server: TcpTmtcGenericServer::new(
                 cfg,

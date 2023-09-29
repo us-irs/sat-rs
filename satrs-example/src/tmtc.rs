@@ -1,26 +1,21 @@
-use log::{info, warn};
-use satrs_core::hal::std::udp_server::{ReceiveResult, UdpTcServer};
-use std::net::SocketAddr;
+use log::warn;
+use satrs_core::pus::ReceivesEcssPusTc;
+use satrs_core::spacepackets::SpHeader;
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
-use std::thread;
-use std::time::Duration;
 use thiserror::Error;
 
-use crate::ccsds::CcsdsReceiver;
-use crate::pus::{PusReceiver, PusTcMpscRouter};
+use crate::pus::PusReceiver;
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
-use satrs_core::pus::verification::StdVerifReporterWithSender;
-use satrs_core::pus::{ReceivesEcssPusTc, TcAddrWithToken};
+use satrs_core::pus::TcAddrWithToken;
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
-use satrs_core::spacepackets::SpHeader;
 use satrs_core::tmtc::tm_helper::SharedTmStore;
-use satrs_core::tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc};
+use satrs_core::tmtc::ReceivesCcsdsTc;
 
 pub struct TmArgs {
     pub tm_store: SharedTmStore,
     pub tm_sink_sender: Sender<StoreAddr>,
-    pub tm_server_rx: Receiver<StoreAddr>,
+    pub tm_udp_server_rx: Receiver<StoreAddr>,
 }
 
 pub struct TcArgs {
@@ -64,12 +59,6 @@ pub struct TmFunnel {
     pub tm_server_tx: Sender<StoreAddr>,
 }
 
-pub struct UdpTmtcServer {
-    udp_tc_server: UdpTcServer<CcsdsError<MpscStoreAndSendError>>,
-    tm_rx: Receiver<StoreAddr>,
-    tm_store: SharedPool,
-}
-
 #[derive(Clone)]
 pub struct PusTcSource {
     pub tc_source: Sender<StoreAddr>,
@@ -98,131 +87,60 @@ impl ReceivesCcsdsTc for PusTcSource {
     }
 }
 
-pub fn core_tmtc_task(
-    socket_addr: SocketAddr,
-    mut tc_args: TcArgs,
-    tm_args: TmArgs,
-    verif_reporter: StdVerifReporterWithSender,
-    pus_router: PusTcMpscRouter,
-) {
-    let mut pus_receiver = PusReceiver::new(verif_reporter, pus_router);
-
-    let ccsds_receiver = CcsdsReceiver {
-        tc_source: tc_args.tc_source.clone(),
-    };
-
-    let ccsds_distributor = CcsdsDistributor::new(Box::new(ccsds_receiver));
-
-    let udp_tc_server = UdpTcServer::new(socket_addr, 2048, Box::new(ccsds_distributor))
-        .expect("creating UDP TMTC server failed");
-
-    let mut udp_tmtc_server = UdpTmtcServer {
-        udp_tc_server,
-        tm_rx: tm_args.tm_server_rx,
-        tm_store: tm_args.tm_store.clone_backing_pool(),
-    };
-
-    let mut tc_buf: [u8; 4096] = [0; 4096];
-    loop {
-        core_tmtc_loop(
-            &mut udp_tmtc_server,
-            &mut tc_args,
-            &mut tc_buf,
-            &mut pus_receiver,
-        );
-        thread::sleep(Duration::from_millis(400));
-    }
+pub struct TmtcTask {
+    tc_args: TcArgs,
+    tc_buf: [u8; 4096],
+    pus_receiver: PusReceiver,
 }
 
-fn core_tmtc_loop(
-    udp_tmtc_server: &mut UdpTmtcServer,
-    tc_args: &mut TcArgs,
-    tc_buf: &mut [u8],
-    pus_receiver: &mut PusReceiver,
-) {
-    while poll_tc_server(udp_tmtc_server) {}
-    match tc_args.tc_receiver.try_recv() {
-        Ok(addr) => {
-            let pool = tc_args
-                .tc_source
-                .tc_store
-                .pool
-                .read()
-                .expect("locking tc pool failed");
-            let data = pool.read(&addr).expect("reading pool failed");
-            tc_buf[0..data.len()].copy_from_slice(data);
-            drop(pool);
-            match PusTcReader::new(tc_buf) {
-                Ok((pus_tc, _)) => {
-                    pus_receiver
-                        .handle_tc_packet(addr, pus_tc.service(), &pus_tc)
-                        .ok();
-                }
-                Err(e) => {
-                    warn!("error creating PUS TC from raw data: {e}");
-                    warn!("raw data: {tc_buf:x?}");
-                }
-            }
-        }
-        Err(e) => {
-            if let TryRecvError::Disconnected = e {
-                warn!("tmtc thread: sender disconnected")
-            }
+impl TmtcTask {
+    pub fn new(tc_args: TcArgs, pus_receiver: PusReceiver) -> Self {
+        Self {
+            tc_args,
+            tc_buf: [0; 4096],
+            pus_receiver,
         }
     }
-    if let Some(recv_addr) = udp_tmtc_server.udp_tc_server.last_sender() {
-        core_tm_handling(udp_tmtc_server, &recv_addr);
-    }
-}
 
-fn poll_tc_server(udp_tmtc_server: &mut UdpTmtcServer) -> bool {
-    match udp_tmtc_server.udp_tc_server.try_recv_tc() {
-        Ok(_) => true,
-        Err(e) => match e {
-            ReceiveResult::ReceiverError(e) => match e {
-                CcsdsError::ByteConversionError(e) => {
-                    warn!("packet error: {e:?}");
-                    true
+    pub fn periodic_operation(&mut self) {
+        //while self.poll_tc() {}
+        self.poll_tc();
+    }
+
+    pub fn poll_tc(&mut self) -> bool {
+        match self.tc_args.tc_receiver.try_recv() {
+            Ok(addr) => {
+                let pool = self
+                    .tc_args
+                    .tc_source
+                    .tc_store
+                    .pool
+                    .read()
+                    .expect("locking tc pool failed");
+                let data = pool.read(&addr).expect("reading pool failed");
+                self.tc_buf[0..data.len()].copy_from_slice(data);
+                drop(pool);
+                match PusTcReader::new(&self.tc_buf) {
+                    Ok((pus_tc, _)) => {
+                        self.pus_receiver
+                            .handle_tc_packet(addr, pus_tc.service(), &pus_tc)
+                            .ok();
+                        true
+                    }
+                    Err(e) => {
+                        warn!("error creating PUS TC from raw data: {e}");
+                        warn!("raw data: {:x?}", self.tc_buf);
+                        true
+                    }
                 }
-                CcsdsError::CustomError(e) => {
-                    warn!("mpsc store and send error {e:?}");
-                    true
+            }
+            Err(e) => match e {
+                TryRecvError::Empty => false,
+                TryRecvError::Disconnected => {
+                    warn!("tmtc thread: sender disconnected");
+                    false
                 }
             },
-            ReceiveResult::IoError(e) => {
-                warn!("IO error {e}");
-                false
-            }
-            ReceiveResult::NothingReceived => false,
-        },
-    }
-}
-
-fn core_tm_handling(udp_tmtc_server: &mut UdpTmtcServer, recv_addr: &SocketAddr) {
-    while let Ok(addr) = udp_tmtc_server.tm_rx.try_recv() {
-        let store_lock = udp_tmtc_server.tm_store.write();
-        if store_lock.is_err() {
-            warn!("Locking TM store failed");
-            continue;
-        }
-        let mut store_lock = store_lock.unwrap();
-        let pg = store_lock.read_with_guard(addr);
-        let read_res = pg.read();
-        if read_res.is_err() {
-            warn!("Error reading TM pool data");
-            continue;
-        }
-        let buf = read_res.unwrap();
-        if buf.len() > 9 {
-            let service = buf[7];
-            let subservice = buf[8];
-            info!("Sending PUS TM[{service},{subservice}]")
-        } else {
-            info!("Sending PUS TM");
-        }
-        let result = udp_tmtc_server.udp_tc_server.socket.send_to(buf, recv_addr);
-        if let Err(e) = result {
-            warn!("Sending TM with UDP socket failed: {e}")
         }
     }
 }
