@@ -3,10 +3,12 @@ mod hk;
 mod logging;
 mod pus;
 mod requests;
+mod tcp;
 mod tmtc;
 mod udp;
 
 use log::{info, warn};
+use satrs_core::hal::std::tcp_server::ServerConfig;
 use satrs_core::hal::std::udp_server::UdpTcServer;
 
 use crate::ccsds::CcsdsReceiver;
@@ -19,6 +21,7 @@ use crate::pus::scheduler::Pus11Wrapper;
 use crate::pus::test::Service17CustomWrapper;
 use crate::pus::{PusReceiver, PusTcMpscRouter};
 use crate::requests::{Request, RequestWithToken};
+use crate::tcp::{SyncTcpTmSource, TcpTask};
 use crate::tmtc::{PusTcSource, TcArgs, TcStore, TmArgs, TmFunnel, TmtcTask};
 use crate::udp::UdpTmtcServer;
 use satrs_core::event_man::{
@@ -143,7 +146,7 @@ fn main() {
     let tm_args = TmArgs {
         tm_store: shared_tm_store.clone(),
         tm_sink_sender: tm_funnel_tx.clone(),
-        tm_server_rx,
+        tm_udp_server_rx: tm_server_rx,
     };
 
     let aocs_tm_funnel = tm_funnel_tx.clone();
@@ -275,22 +278,45 @@ fn main() {
     };
     let mut tmtc_task = TmtcTask::new(tc_args, PusReceiver::new(verif_reporter, pus_router));
 
-    let ccsds_distributor = CcsdsDistributor::new(Box::new(ccsds_receiver));
-    let udp_tc_server = UdpTcServer::new(sock_addr, 2048, Box::new(ccsds_distributor))
+    let udp_ccsds_distributor = CcsdsDistributor::new(Box::new(ccsds_receiver.clone()));
+    let udp_tc_server = UdpTcServer::new(sock_addr, 2048, Box::new(udp_ccsds_distributor))
         .expect("creating UDP TMTC server failed");
     let mut udp_tmtc_server = UdpTmtcServer {
         udp_tc_server,
-        tm_rx: tm_args.tm_server_rx,
+        tm_rx: tm_args.tm_udp_server_rx,
         tm_store: tm_args.tm_store.clone_backing_pool(),
     };
 
     info!("Starting TMTC and UDP task");
-    let jh0 = thread::Builder::new()
-        .name("TMTC_UDP".to_string())
-        .spawn(move || loop {
-            udp_tmtc_server.periodic_operation();
-            tmtc_task.periodic_operation();
-            thread::sleep(Duration::from_millis(400));
+    let jh_udp_tmtc = thread::Builder::new()
+        .name("TMTC and UDP".to_string())
+        .spawn(move || {
+            info!("Running UDP server on port {SERVER_PORT}");
+            loop {
+                udp_tmtc_server.periodic_operation();
+                tmtc_task.periodic_operation();
+                thread::sleep(Duration::from_millis(400));
+            }
+        })
+        .unwrap();
+
+    let tcp_ccsds_distributor = CcsdsDistributor::new(Box::new(ccsds_receiver));
+    let tcp_server_cfg = ServerConfig::new(sock_addr, Duration::from_millis(400), 4096, 8192);
+    let mut sync_tm_tcp_source = SyncTcpTmSource::new(200);
+    let mut tcp_server = TcpTask::new(
+        tcp_server_cfg,
+        sync_tm_tcp_source.clone(),
+        tcp_ccsds_distributor,
+    )
+    .expect("tcp server creation failed");
+    info!("Starting TCP task");
+    let jh_tcp = thread::Builder::new()
+        .name("TCP".to_string())
+        .spawn(move || {
+            info!("Running TCP server on port {SERVER_PORT}");
+            loop {
+                tcp_server.periodic_operation();
+            }
         })
         .unwrap();
 
@@ -331,6 +357,7 @@ fn main() {
                         .tm_server_tx
                         .send(addr)
                         .expect("Sending TM to server failed");
+                    sync_tm_tcp_source.add_tm(tm_raw);
                 }
             }
         })
@@ -502,7 +529,12 @@ fn main() {
             thread::sleep(Duration::from_millis(200));
         })
         .unwrap();
-    jh0.join().expect("Joining UDP TMTC server thread failed");
+    jh_udp_tmtc
+        .join()
+        .expect("Joining UDP TMTC server thread failed");
+    jh_tcp
+        .join()
+        .expect("Joining TCP TMTC server thread failed");
     jh1.join().expect("Joining TM Funnel thread failed");
     jh2.join().expect("Joining Event Manager thread failed");
     jh3.join().expect("Joining AOCS thread failed");

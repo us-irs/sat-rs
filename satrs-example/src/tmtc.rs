@@ -1,8 +1,6 @@
-use log::{info, warn};
-use satrs_core::hal::std::udp_server::{ReceiveResult, UdpTcServer};
+use log::warn;
 use satrs_core::pus::ReceivesEcssPusTc;
 use satrs_core::spacepackets::SpHeader;
-use std::net::SocketAddr;
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
 use thiserror::Error;
 
@@ -12,12 +10,12 @@ use satrs_core::pus::TcAddrWithToken;
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::tmtc::tm_helper::SharedTmStore;
-use satrs_core::tmtc::{CcsdsError, ReceivesCcsdsTc};
+use satrs_core::tmtc::ReceivesCcsdsTc;
 
 pub struct TmArgs {
     pub tm_store: SharedTmStore,
     pub tm_sink_sender: Sender<StoreAddr>,
-    pub tm_server_rx: Receiver<StoreAddr>,
+    pub tm_udp_server_rx: Receiver<StoreAddr>,
 }
 
 pub struct TcArgs {
@@ -60,7 +58,6 @@ pub struct TmFunnel {
     pub tm_funnel_rx: Receiver<StoreAddr>,
     pub tm_server_tx: Sender<StoreAddr>,
 }
-
 
 #[derive(Clone)]
 pub struct PusTcSource {

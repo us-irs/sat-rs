@@ -30,6 +30,12 @@ impl PacketIdLookup for [u16] {
     }
 }
 
+impl PacketIdLookup for &[u16] {
+    fn validate(&self, packet_id: u16) -> bool {
+        self.binary_search(&packet_id).is_ok()
+    }
+}
+
 #[cfg(feature = "alloc")]
 impl PacketIdLookup for Vec<PacketId> {
     fn validate(&self, packet_id: u16) -> bool {
@@ -44,6 +50,12 @@ impl PacketIdLookup for HashSet<PacketId> {
 }
 
 impl PacketIdLookup for [PacketId] {
+    fn validate(&self, packet_id: u16) -> bool {
+        self.binary_search(&PacketId::from(packet_id)).is_ok()
+    }
+}
+
+impl PacketIdLookup for &[PacketId] {
     fn validate(&self, packet_id: u16) -> bool {
         self.binary_search(&PacketId::from(packet_id)).is_ok()
     }

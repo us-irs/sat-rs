@@ -19,8 +19,8 @@ num_enum = "0.7"
 thiserror = "1"
 
 [dependencies.satrs-core]
-version = "0.1.0-alpha.1"
-# path = "../satrs-core"
+# version = "0.1.0-alpha.1"
+path = "../satrs-core"
 
 [dependencies.satrs-mib]
 version = "0.1.0-alpha.1"
