@@ -57,8 +57,9 @@ and corresponding op codes (`-o` flag) for each service.
 The example project contains components which could also be expected to be part of a production
 On-Board Software.
 
-1. A UDP server to receive telecommands and poll telemetry from. This might be an optional
-   component for an OBSW which is only used during the development phase on ground.
+1. A UDP and TCP server to receive telecommands and poll telemetry from. This might be an optional
+   component for an OBSW which is only used during the development phase on ground. The TCP
+   server parses space packets by using the CCSDS space packet ID as the packet start delimiter.
 2. A PUS service stack which exposes some functionality conformant with the ECSS PUS service. This
    currently includes the following services:
    - Service 1 for telecommand verification.
