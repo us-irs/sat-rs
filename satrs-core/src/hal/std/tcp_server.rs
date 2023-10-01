@@ -139,7 +139,6 @@ pub struct TcpTmtcGenericServer<
     TmSender: TcpTmSender<TmError, TcError>,
     TcParser: TcpTcParser<TmError, TcError>,
 > {
-    // base: TcpTmtcServerBase<TmError, TcError>,
     pub(crate) listener: TcpListener,
     pub(crate) inner_loop_delay: Duration,
     pub(crate) tm_source: TmSource,

@@ -28,7 +28,6 @@ impl<TmError, TcError: 'static> TcpTcParser<TmError, TcError> for CobsTcParser {
         current_write_idx: usize,
         next_write_idx: &mut usize,
     ) -> Result<(), TcpTmtcError<TmError, TcError>> {
-        // Reader vec full, need to parse for packets.
         conn_result.num_received_tcs += parse_buffer_for_cobs_encoded_packets(
             &mut tc_buffer[..current_write_idx],
             tc_receiver.upcast_mut(),
