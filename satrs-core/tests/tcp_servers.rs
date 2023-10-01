@@ -94,8 +94,8 @@ fn test_cobs_server() {
     tm_source.add_tm(&INVERTED_PACKET);
     let mut tcp_server = TcpTmtcInCobsServer::new(
         ServerConfig::new(AUTO_PORT_ADDR, Duration::from_millis(2), 1024, 1024),
-        Box::new(tm_source),
-        Box::new(tc_receiver.clone()),
+        tm_source,
+        tc_receiver.clone(),
     )
     .expect("TCP server generation failed");
     let dest_addr = tcp_server
@@ -176,8 +176,8 @@ fn test_ccsds_server() {
     packet_id_lookup.insert(TEST_PACKET_ID_0);
     let mut tcp_server = TcpSpacepacketsServer::new(
         ServerConfig::new(AUTO_PORT_ADDR, Duration::from_millis(2), 1024, 1024),
-        Box::new(tm_source),
-        Box::new(tc_receiver.clone()),
+        tm_source,
+        tc_receiver.clone(),
         Box::new(packet_id_lookup),
     )
     .expect("TCP server generation failed");

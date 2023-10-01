@@ -72,7 +72,12 @@ impl TmPacketSourceCore for SyncTcpTmSource {
 }
 
 pub struct TcpTask {
-    server: TcpSpacepacketsServer<(), CcsdsError<MpscStoreAndSendError>>,
+    server: TcpSpacepacketsServer<
+        (),
+        CcsdsError<MpscStoreAndSendError>,
+        SyncTcpTmSource,
+        CcsdsDistributor<MpscStoreAndSendError>,
+    >,
 }
 
 impl TcpTask {
@@ -84,8 +89,8 @@ impl TcpTask {
         Ok(Self {
             server: TcpSpacepacketsServer::new(
                 cfg,
-                Box::new(tm_source),
-                Box::new(tc_receiver),
+                tm_source,
+                tc_receiver,
                 Box::new(PACKET_ID_LOOKUP),
             )?,
         })

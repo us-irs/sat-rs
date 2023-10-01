@@ -88,16 +88,31 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for SpacepacketsTmSender {
 /// [spacepackets::PacketId]s as part of the server configuration for that purpose.
 ///
 /// ## Example
-///
 /// The [TCP server integration tests](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-core/tests/tcp_servers.rs)
 /// also serves as the example application for this module.
-pub struct TcpSpacepacketsServer<TmError, TcError: 'static> {
-    generic_server:
-        TcpTmtcGenericServer<TmError, TcError, SpacepacketsTmSender, SpacepacketsTcParser>,
+pub struct TcpSpacepacketsServer<
+    TmError,
+    TcError: 'static,
+    TmSource: TmPacketSource<Error = TmError>,
+    TcReceiver: ReceivesTc<Error = TcError>,
+> {
+    generic_server: TcpTmtcGenericServer<
+        TmError,
+        TcError,
+        TmSource,
+        TcReceiver,
+        SpacepacketsTmSender,
+        SpacepacketsTcParser,
+    >,
 }
 
-impl<TmError: 'static, TcError: 'static> TcpSpacepacketsServer<TmError, TcError> {
-    /// Create a new TCP TMTC server which exchanges CCSDS space packets.
+impl<
+        TmError: 'static,
+        TcError: 'static,
+        TmSource: TmPacketSource<Error = TmError>,
+        TcReceiver: ReceivesTc<Error = TcError>,
+    > TcpSpacepacketsServer<TmError, TcError, TmSource, TcReceiver>
+{
     ///
     /// ## Parameter
     ///
@@ -110,8 +125,8 @@ impl<TmError: 'static, TcError: 'static> TcpSpacepacketsServer<TmError, TcError>
     ///     parsing. This mechanism is used to have a start marker for finding CCSDS packets.
     pub fn new(
         cfg: ServerConfig,
-        tm_source: Box<dyn TmPacketSource<Error = TmError>>,
-        tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
+        tm_source: TmSource,
+        tc_receiver: TcReceiver,
         packet_id_lookup: Box<dyn PacketIdLookup + Send>,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
@@ -179,11 +194,11 @@ mod tests {
         tc_receiver: SyncTcCacher,
         tm_source: SyncTmSource,
         packet_id_lookup: HashSet<PacketId>,
-    ) -> TcpSpacepacketsServer<(), ()> {
+    ) -> TcpSpacepacketsServer<(), (), SyncTmSource, SyncTcCacher> {
         TcpSpacepacketsServer::new(
             ServerConfig::new(*addr, Duration::from_millis(2), 1024, 1024),
-            Box::new(tm_source),
-            Box::new(tc_receiver),
+            tm_source,
+            tc_receiver,
             Box::new(packet_id_lookup),
         )
         .expect("TCP server generation failed")
