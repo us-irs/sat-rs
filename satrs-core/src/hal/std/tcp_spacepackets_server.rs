@@ -128,7 +128,7 @@ impl<
         tm_source: TmSource,
         tc_receiver: TcReceiver,
         packet_id_lookup: Box<dyn PacketIdLookup + Send>,
-    ) -> Result<Self, TcpTmtcError<TmError, TcError>> {
+    ) -> Result<Self, std::io::Error> {
         Ok(Self {
             generic_server: TcpTmtcGenericServer::new(
                 cfg,

@@ -3,6 +3,7 @@ use satrs_core::spacepackets::{CcsdsPacket, SpHeader};
 use satrs_core::tmtc::{CcsdsPacketHandler, ReceivesCcsdsTc};
 use satrs_example::PUS_APID;
 
+#[derive(Clone)]
 pub struct CcsdsReceiver {
     pub tc_source: PusTcSource,
 }

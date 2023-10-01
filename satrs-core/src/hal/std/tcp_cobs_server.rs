@@ -140,7 +140,7 @@ impl<
         cfg: ServerConfig,
         tm_source: TmSource,
         tc_receiver: TcReceiver,
-    ) -> Result<Self, TcpTmtcError<TmError, TcError>> {
+    ) -> Result<Self, std::io::Error> {
         Ok(Self {
             generic_server: TcpTmtcGenericServer::new(
                 cfg,
