@@ -1,6 +1,6 @@
 //! Generic TCP TMTC servers with different TMTC format flavours.
 use alloc::vec;
-use alloc::{boxed::Box, vec::Vec};
+use alloc::vec::Vec;
 use core::time::Duration;
 use socket2::{Domain, Socket, Type};
 use std::io::Read;
@@ -134,26 +134,30 @@ pub trait TcpTmSender<TmError, TcError> {
 pub struct TcpTmtcGenericServer<
     TmError,
     TcError,
-    TmHandler: TcpTmSender<TmError, TcError>,
-    TcHandler: TcpTcParser<TmError, TcError>,
+    TmSource: TmPacketSource<Error = TmError>,
+    TcReceiver: ReceivesTc<Error = TcError>,
+    TmSender: TcpTmSender<TmError, TcError>,
+    TcParser: TcpTcParser<TmError, TcError>,
 > {
     // base: TcpTmtcServerBase<TmError, TcError>,
     pub(crate) listener: TcpListener,
     pub(crate) inner_loop_delay: Duration,
-    pub(crate) tm_source: Box<dyn TmPacketSource<Error = TmError>>,
+    pub(crate) tm_source: TmSource,
     pub(crate) tm_buffer: Vec<u8>,
-    pub(crate) tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
+    pub(crate) tc_receiver: TcReceiver,
     pub(crate) tc_buffer: Vec<u8>,
-    tc_handler: TcHandler,
-    tm_handler: TmHandler,
+    tc_handler: TcParser,
+    tm_handler: TmSender,
 }
 
 impl<
         TmError: 'static,
         TcError: 'static,
+        TmSource: TmPacketSource<Error = TmError>,
+        TcReceiver: ReceivesTc<Error = TcError>,
         TmSender: TcpTmSender<TmError, TcError>,
         TcParser: TcpTcParser<TmError, TcError>,
-    > TcpTmtcGenericServer<TmError, TcError, TmSender, TcParser>
+    > TcpTmtcGenericServer<TmError, TcError, TmSource, TcReceiver, TmSender, TcParser>
 {
     /// Create a new generic TMTC server instance.
     ///
@@ -171,9 +175,9 @@ impl<
         cfg: ServerConfig,
         tc_parser: TcParser,
         tm_sender: TmSender,
-        tm_source: Box<dyn TmPacketSource<Error = TmError>>,
-        tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
-    ) -> Result<TcpTmtcGenericServer<TmError, TcError, TmSender, TcParser>, std::io::Error> {
+        tm_source: TmSource,
+        tc_receiver: TcReceiver,
+    ) -> Result<Self, std::io::Error> {
         // Create a TCP listener bound to two addresses.
         let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
         socket.set_reuse_address(cfg.reuse_addr)?;
@@ -236,7 +240,7 @@ impl<
                     if current_write_idx > 0 {
                         self.tc_handler.handle_tc_parsing(
                             &mut self.tc_buffer,
-                            self.tc_receiver.as_mut(),
+                            &mut self.tc_receiver,
                             &mut connection_result,
                             current_write_idx,
                             &mut next_write_idx,
@@ -250,7 +254,7 @@ impl<
                     if current_write_idx == self.tc_buffer.capacity() {
                         self.tc_handler.handle_tc_parsing(
                             &mut self.tc_buffer,
-                            self.tc_receiver.as_mut(),
+                            &mut self.tc_receiver,
                             &mut connection_result,
                             current_write_idx,
                             &mut next_write_idx,
@@ -264,7 +268,7 @@ impl<
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
                         self.tc_handler.handle_tc_parsing(
                             &mut self.tc_buffer,
-                            self.tc_receiver.as_mut(),
+                            &mut self.tc_receiver,
                             &mut connection_result,
                             current_write_idx,
                             &mut next_write_idx,
@@ -273,7 +277,7 @@ impl<
 
                         if !self.tm_handler.handle_tm_sending(
                             &mut self.tm_buffer,
-                            self.tm_source.as_mut(),
+                            &mut self.tm_source,
                             &mut connection_result,
                             &mut stream,
                         )? {
@@ -290,7 +294,7 @@ impl<
         }
         self.tm_handler.handle_tm_sending(
             &mut self.tm_buffer,
-            self.tm_source.as_mut(),
+            &mut self.tm_source,
             &mut connection_result,
             &mut stream,
         )?;
