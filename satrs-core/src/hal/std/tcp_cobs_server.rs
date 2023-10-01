@@ -130,7 +130,7 @@ impl<TmError: 'static, TcError: 'static> TcpTmtcInCobsServer<TmError, TcError> {
         cfg: ServerConfig,
         tm_source: Box<dyn TmPacketSource<Error = TmError>>,
         tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
-    ) -> Result<Self, TcpTmtcError<TmError, TcError>> {
+    ) -> Result<Self, std::io::Error> {
         Ok(Self {
             generic_server: TcpTmtcGenericServer::new(
                 cfg,
