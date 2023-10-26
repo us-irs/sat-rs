@@ -180,6 +180,7 @@ impl<
         // Create a TCP listener bound to two addresses.
         let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
         socket.set_reuse_address(cfg.reuse_addr)?;
+        #[cfg(unix)]
         socket.set_reuse_port(cfg.reuse_port)?;
         let addr = (cfg.addr).into();
         socket.bind(&addr)?;
