@@ -128,6 +128,7 @@ class PusHandler(SpecificApidHandlerBase):
                 if len(pus_tm.source_data) < 8:
                     raise ValueError("No addressable ID in HK packet")
                 json_str = pus_tm.source_data[8:]
+                _LOGGER.info(json_str)
             dedicated_handler = True
         if service == 5:
             tm_packet = PusTelemetry.unpack(
