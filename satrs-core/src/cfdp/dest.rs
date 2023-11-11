@@ -9,8 +9,10 @@ use crate::cfdp::user::TransactionFinishedParams;
 
 use super::{
     user::{CfdpUser, MetadataReceivedParams},
-    PacketInfo, PacketTarget, State, TransactionId, TransactionStep, CRC_32,
+    CheckTimerCreator, PacketInfo, PacketTarget, RemoteEntityConfigProvider, State, TransactionId,
+    TransactionStep, CRC_32,
 };
+use alloc::boxed::Box;
 use smallvec::SmallVec;
 use spacepackets::{
     cfdp::{
@@ -19,10 +21,10 @@ use spacepackets::{
             file_data::FileDataPdu,
             finished::{DeliveryCode, FileStatus, FinishedPdu},
             metadata::{MetadataGenericParams, MetadataPdu},
-            CommonPduConfig, FileDirectiveType, PduError, PduHeader,
+            CommonPduConfig, FileDirectiveType, PduError, PduHeader, WritablePduPacket,
         },
         tlv::{msg_to_user::MsgToUserTlv, EntityIdTlv, TlvType},
-        ConditionCode, PduType, TransmissionMode,
+        ConditionCode, PduType,
     },
     util::UnsignedByteField,
 };
@@ -34,6 +36,8 @@ pub struct DestinationHandler {
     state: State,
     tparams: TransactionParams,
     packets_to_send_ctx: PacketsToSendContext,
+    remote_cfg_table: Box<dyn RemoteEntityConfigProvider>,
+    check_timer_creator: Box<dyn CheckTimerCreator>,
 }
 
 #[derive(Debug, Default)]
@@ -152,25 +156,38 @@ pub enum DestError {
 }
 
 impl DestinationHandler {
-    pub fn new(id: impl Into<UnsignedByteField>) -> Self {
+    pub fn new(
+        entity_id: impl Into<UnsignedByteField>,
+        remote_cfg_table: Box<dyn RemoteEntityConfigProvider>,
+        check_timer_creator: Box<dyn CheckTimerCreator>,
+    ) -> Self {
         Self {
-            id: id.into(),
+            id: entity_id.into(),
             step: TransactionStep::Idle,
             state: State::Idle,
             tparams: Default::default(),
             packets_to_send_ctx: Default::default(),
+            remote_cfg_table,
+            check_timer_creator,
         }
     }
 
-    pub fn state_machine(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
+    pub fn state_machine(
+        &mut self,
+        cfdp_user: &mut impl CfdpUser,
+        packet_to_insert: Option<&PacketInfo>,
+    ) -> Result<(), DestError> {
+        if let Some(packet) = packet_to_insert {
+            self.insert_packet(packet)?;
+        }
         match self.state {
             State::Idle => todo!(),
-            State::BusyClass1Nacked => self.fsm_nacked(cfdp_user),
-            State::BusyClass2Acked => todo!("acknowledged mode not implemented yet"),
+            State::Busy => self.fsm_busy(cfdp_user),
+            State::Suspended => todo!(),
         }
     }
 
-    pub fn insert_packet(&mut self, packet_info: &PacketInfo) -> Result<(), DestError> {
+    fn insert_packet(&mut self, packet_info: &PacketInfo) -> Result<(), DestError> {
         if packet_info.target() != PacketTarget::DestEntity {
             // Unwrap is okay here, a PacketInfo for a file data PDU should always have the
             // destination as the target.
@@ -297,11 +314,7 @@ impl DestinationHandler {
                 }
             }
         }
-        if self.tparams.pdu_conf.trans_mode == TransmissionMode::Unacknowledged {
-            self.state = State::BusyClass1Nacked;
-        } else {
-            self.state = State::BusyClass2Acked;
-        }
+        self.state = State::Busy;
         self.step = TransactionStep::TransactionStart;
         Ok(())
     }
@@ -338,7 +351,7 @@ impl DestinationHandler {
         // TODO: Check progress, and implement transfer completion timer as specified in the
         // standard. This timer protects against out of order arrival of packets.
         if self.tparams.tstate.progress != self.tparams.file_size() {}
-        if self.state == State::BusyClass1Nacked {
+        if self.state == State::Busy {
             self.step = TransactionStep::TransferCompletion;
         } else {
             self.step = TransactionStep::SendingAckPdu;
@@ -367,7 +380,7 @@ impl DestinationHandler {
         Ok(false)
     }
 
-    fn fsm_nacked(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
+    fn fsm_busy(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
         if self.step == TransactionStep::TransactionStart {
             self.transaction_start(cfdp_user)?;
         }
@@ -496,7 +509,10 @@ impl DestinationHandler {
 
 #[cfg(test)]
 mod tests {
-    use core::sync::atomic::{AtomicU8, Ordering};
+    use core::{
+        cell::Cell,
+        sync::atomic::{AtomicU8, Ordering},
+    };
     #[allow(unused_imports)]
     use std::println;
     use std::{env::temp_dir, fs};
@@ -504,8 +520,12 @@ mod tests {
     use alloc::{format, string::String};
     use rand::Rng;
     use spacepackets::{
-        cfdp::{lv::Lv, ChecksumType},
+        cfdp::{lv::Lv, pdu::WritablePduPacket, ChecksumType, TransmissionMode},
         util::{UbfU16, UnsignedByteFieldU16},
+    };
+
+    use crate::cfdp::{
+        CheckTimer, CheckTimerCreator, RemoteEntityConfig, StdRemoteEntityConfigProvider,
     };
 
     use super::*;
@@ -608,6 +628,63 @@ mod tests {
         }
     }
 
+    struct TestCheckTimer {
+        counter: Cell<u32>,
+        expiry_count: u32,
+    }
+
+    impl CheckTimer for TestCheckTimer {
+        fn has_expired(&self) -> bool {
+            let current_counter = self.counter.get();
+            if self.expiry_count == current_counter {
+                return true;
+            }
+            self.counter.set(current_counter + 1);
+            false
+        }
+    }
+
+    impl TestCheckTimer {
+        pub fn new(expiry_after_x_calls: u32) -> Self {
+            Self {
+                counter: Cell::new(0),
+                expiry_count: expiry_after_x_calls,
+            }
+        }
+    }
+
+    struct TestCheckTimerCreator {
+        expiry_counter_for_source_entity: u32,
+        expiry_counter_for_dest_entity: u32,
+    }
+
+    impl TestCheckTimerCreator {
+        pub fn new(
+            expiry_counter_for_source_entity: u32,
+            expiry_counter_for_dest_entity: u32,
+        ) -> Self {
+            Self {
+                expiry_counter_for_source_entity,
+                expiry_counter_for_dest_entity,
+            }
+        }
+    }
+
+    impl CheckTimerCreator for TestCheckTimerCreator {
+        fn get_check_timer_provider(
+            &self,
+            _local_id: &UnsignedByteField,
+            _remote_id: &UnsignedByteField,
+            entity_type: crate::cfdp::EntityType,
+        ) -> Box<dyn CheckTimer> {
+            if entity_type == crate::cfdp::EntityType::Sending {
+                Box::new(TestCheckTimer::new(self.expiry_counter_for_source_entity))
+            } else {
+                Box::new(TestCheckTimer::new(self.expiry_counter_for_dest_entity))
+            }
+        }
+    }
+
     fn init_check(handler: &DestinationHandler) {
         assert_eq!(handler.state(), State::Idle);
         assert_eq!(handler.step(), TransactionStep::Idle);
@@ -626,9 +703,31 @@ mod tests {
         (src_path, file_path)
     }
 
+    fn basic_remote_cfg_table() -> StdRemoteEntityConfigProvider {
+        let mut table = StdRemoteEntityConfigProvider::default();
+        let remote_entity_cfg = RemoteEntityConfig::new_with_default_values(
+            UnsignedByteFieldU16::new(1).into(),
+            1024,
+            1024,
+            true,
+            true,
+            TransmissionMode::Unacknowledged,
+            ChecksumType::Crc32,
+        );
+        table.add_config(&remote_entity_cfg);
+        table
+    }
+
+    fn default_dest_handler() -> DestinationHandler {
+        DestinationHandler::new(
+            REMOTE_ID,
+            Box::new(basic_remote_cfg_table()),
+            Box::new(TestCheckTimerCreator::new(2, 2)),
+        )
+    }
     #[test]
     fn test_basic() {
-        let dest_handler = DestinationHandler::new(REMOTE_ID);
+        let dest_handler = default_dest_handler();
         init_check(&dest_handler);
     }
 
@@ -655,37 +754,20 @@ mod tests {
         )
     }
 
-    fn insert_metadata_pdu(
-        metadata_pdu: &MetadataPdu,
-        buf: &mut [u8],
-        dest_handler: &mut DestinationHandler,
-    ) {
-        let written_len = metadata_pdu
+    fn create_packet_info<'a>(
+        pdu: &'a impl WritablePduPacket,
+        buf: &'a mut [u8],
+    ) -> PacketInfo<'a> {
+        let written_len = pdu
             .write_to_bytes(buf)
             .expect("writing metadata PDU failed");
-        let packet_info =
-            PacketInfo::new(&buf[..written_len]).expect("generating packet info failed");
-        let insert_result = dest_handler.insert_packet(&packet_info);
-        if let Err(e) = insert_result {
-            panic!("insert result error: {e}");
-        }
+        PacketInfo::new(&buf[..written_len]).expect("generating packet info failed")
     }
-
-    fn insert_eof_pdu(
-        file_data: &[u8],
-        pdu_header: &PduHeader,
-        buf: &mut [u8],
-        dest_handler: &mut DestinationHandler,
-    ) {
+    fn create_no_error_eof(file_data: &[u8], pdu_header: &PduHeader, buf: &mut [u8]) -> EofPdu {
         let mut digest = CRC_32.digest();
         digest.update(file_data);
         let crc32 = digest.finalize();
-        let eof_pdu = EofPdu::new_no_error(*pdu_header, crc32, file_data.len() as u64);
-        let result = eof_pdu.write_to_bytes(buf);
-        assert!(result.is_ok());
-        let packet_info = PacketInfo::new(&buf).expect("generating packet info failed");
-        let result = dest_handler.insert_packet(&packet_info);
-        assert!(result.is_ok());
+        EofPdu::new_no_error(*pdu_header, crc32, file_data.len() as u64)
     }
 
     #[test]
@@ -700,23 +782,24 @@ mod tests {
             expected_file_size: 0,
         };
         // We treat the destination handler like it is a remote entity.
-        let mut dest_handler = DestinationHandler::new(REMOTE_ID);
+        let mut dest_handler = default_dest_handler();
         init_check(&dest_handler);
 
         let seq_num = UbfU16::new(0);
         let pdu_header = create_pdu_header(seq_num);
         let metadata_pdu =
             create_metadata_pdu(&pdu_header, src_name.as_path(), dest_name.as_path(), 0);
-        insert_metadata_pdu(&metadata_pdu, &mut buf, &mut dest_handler);
-        let result = dest_handler.state_machine(&mut test_user);
+        let packet_info = create_packet_info(&metadata_pdu, &mut buf);
+        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
         if let Err(e) = result {
             panic!("dest handler fsm error: {e}");
         }
         assert_ne!(dest_handler.state(), State::Idle);
         assert_eq!(dest_handler.step(), TransactionStep::ReceivingFileDataPdus);
 
-        insert_eof_pdu(&[], &pdu_header, &mut buf, &mut dest_handler);
-        let result = dest_handler.state_machine(&mut test_user);
+        let eof_pdu = create_no_error_eof(&[], &pdu_header, &mut buf);
+        let packet_info = create_packet_info(&eof_pdu, &mut buf);
+        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
         assert!(result.is_ok());
         assert_eq!(dest_handler.state(), State::Idle);
         assert_eq!(dest_handler.step(), TransactionStep::Idle);
@@ -740,7 +823,7 @@ mod tests {
             expected_file_size: file_data.len(),
         };
         // We treat the destination handler like it is a remote entity.
-        let mut dest_handler = DestinationHandler::new(REMOTE_ID);
+        let mut dest_handler = default_dest_handler();
         init_check(&dest_handler);
 
         let seq_num = UbfU16::new(0);
@@ -751,8 +834,8 @@ mod tests {
             dest_name.as_path(),
             file_data.len() as u64,
         );
-        insert_metadata_pdu(&metadata_pdu, &mut buf, &mut dest_handler);
-        let result = dest_handler.state_machine(&mut test_user);
+        let packet_info = create_packet_info(&metadata_pdu, &mut buf);
+        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
         if let Err(e) = result {
             panic!("dest handler fsm error: {e}");
         }
@@ -769,11 +852,12 @@ mod tests {
         if let Err(e) = result {
             panic!("destination handler packet insertion error: {e}");
         }
-        let result = dest_handler.state_machine(&mut test_user);
+        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
         assert!(result.is_ok());
 
-        insert_eof_pdu(file_data, &pdu_header, &mut buf, &mut dest_handler);
-        let result = dest_handler.state_machine(&mut test_user);
+        let eof_pdu = create_no_error_eof(&file_data, &pdu_header, &mut buf);
+        let packet_info = create_packet_info(&eof_pdu, &mut buf);
+        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
         assert!(result.is_ok());
         assert_eq!(dest_handler.state(), State::Idle);
         assert_eq!(dest_handler.step(), TransactionStep::Idle);
@@ -800,7 +884,7 @@ mod tests {
         };
 
         // We treat the destination handler like it is a remote entity.
-        let mut dest_handler = DestinationHandler::new(REMOTE_ID);
+        let mut dest_handler = default_dest_handler();
         init_check(&dest_handler);
 
         let seq_num = UbfU16::new(0);
@@ -811,8 +895,8 @@ mod tests {
             dest_name.as_path(),
             random_data.len() as u64,
         );
-        insert_metadata_pdu(&metadata_pdu, &mut buf, &mut dest_handler);
-        let result = dest_handler.state_machine(&mut test_user);
+        let packet_info = create_packet_info(&metadata_pdu, &mut buf);
+        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
         if let Err(e) = result {
             panic!("dest handler fsm error: {e}");
         }
@@ -835,7 +919,7 @@ mod tests {
         if let Err(e) = result {
             panic!("destination handler packet insertion error: {e}");
         }
-        let result = dest_handler.state_machine(&mut test_user);
+        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
         assert!(result.is_ok());
 
         // Second file data PDU
@@ -853,11 +937,12 @@ mod tests {
         if let Err(e) = result {
             panic!("destination handler packet insertion error: {e}");
         }
-        let result = dest_handler.state_machine(&mut test_user);
+        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
         assert!(result.is_ok());
 
-        insert_eof_pdu(&random_data, &pdu_header, &mut buf, &mut dest_handler);
-        let result = dest_handler.state_machine(&mut test_user);
+        let eof_pdu = create_no_error_eof(&random_data, &pdu_header, &mut buf);
+        let packet_info = create_packet_info(&eof_pdu, &mut buf);
+        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
         assert!(result.is_ok());
         assert_eq!(dest_handler.state(), State::Idle);
         assert_eq!(dest_handler.step(), TransactionStep::Idle);

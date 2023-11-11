@@ -1,4 +1,7 @@
+use core::hash::Hash;
+
 use crc::{Crc, CRC_32_CKSUM};
+use hashbrown::HashMap;
 use spacepackets::{
     cfdp::{
         pdu::{FileDirectiveType, PduError, PduHeader},
@@ -35,7 +38,7 @@ pub enum EntityType {
 /// For the receiving entity, this timer determines the expiry period for incrementing a check
 /// counter after an EOF PDU is received for an incomplete file transfer. This allows out-of-order
 /// reception of file data PDUs and EOF PDUs. Also see 4.6.3.3 of the CFDP standard.
-pub trait CheckTimerProvider {
+pub trait CheckTimer {
     fn has_expired(&self) -> bool;
 }
 
@@ -50,10 +53,11 @@ pub trait CheckTimerProvider {
 #[cfg(feature = "alloc")]
 pub trait CheckTimerCreator {
     fn get_check_timer_provider(
+        &self,
         local_id: &UnsignedByteField,
         remote_id: &UnsignedByteField,
         entity_type: EntityType,
-    ) -> Box<dyn CheckTimerProvider>;
+    ) -> Box<dyn CheckTimer>;
 }
 
 /// Simple implementation of the [CheckTimerProvider] trait assuming a standard runtime.
@@ -75,7 +79,7 @@ impl StdCheckTimer {
 }
 
 #[cfg(feature = "std")]
-impl CheckTimerProvider for StdCheckTimer {
+impl CheckTimer for StdCheckTimer {
     fn has_expired(&self) -> bool {
         let elapsed_time = self.start_time.elapsed();
         if elapsed_time.as_secs() > self.expiry_time_seconds {
@@ -85,22 +89,78 @@ impl CheckTimerProvider for StdCheckTimer {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct RemoteEntityConfig {
     pub entity_id: UnsignedByteField,
     pub max_file_segment_len: usize,
-    pub closure_requeted_by_default: bool,
+    pub max_packet_len: usize,
+    pub closure_requested_by_default: bool,
     pub crc_on_transmission_by_default: bool,
     pub default_transmission_mode: TransmissionMode,
     pub default_crc_type: ChecksumType,
     pub check_limit: u32,
 }
 
-pub trait RemoteEntityConfigProvider {
-    fn get_remote_config(&self, remote_id: &UnsignedByteField) -> Option<&RemoteEntityConfig>;
+impl RemoteEntityConfig {
+    pub fn new_with_default_values(
+        entity_id: UnsignedByteField,
+        max_file_segment_len: usize,
+        max_packet_len: usize,
+        closure_requested_by_default: bool,
+        crc_on_transmission_by_default: bool,
+        default_transmission_mode: TransmissionMode,
+        default_crc_type: ChecksumType,
+    ) -> Self {
+        Self {
+            entity_id,
+            max_file_segment_len,
+            max_packet_len,
+            closure_requested_by_default,
+            crc_on_transmission_by_default,
+            default_transmission_mode,
+            default_crc_type,
+            check_limit: 2,
+        }
+    }
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub trait RemoteEntityConfigProvider {
+    /// Retrieve the remote entity configuration for the given remote ID.
+    fn get_remote_config(&self, remote_id: u64) -> Option<&RemoteEntityConfig>;
+    fn get_remote_config_mut(&mut self, remote_id: u64) -> Option<&mut RemoteEntityConfig>;
+    /// Add a new remote configuration. Return [True] if the configuration was
+    /// inserted successfully, and [False] if a configuration already exists.
+    fn add_config(&mut self, cfg: &RemoteEntityConfig) -> bool;
+    /// Remote a configuration. Returns [True] if the configuration was removed successfully,
+    /// and [False] if no configuration exists for the given remote ID.
+    fn remove_config(&mut self, remote_id: u64) -> bool;
+}
+
+#[cfg(feature = "std")]
+#[derive(Default)]
+pub struct StdRemoteEntityConfigProvider {
+    remote_cfg_table: HashMap<u64, RemoteEntityConfig>,
+}
+
+#[cfg(feature = "std")]
+impl RemoteEntityConfigProvider for StdRemoteEntityConfigProvider {
+    fn get_remote_config(&self, remote_id: u64) -> Option<&RemoteEntityConfig> {
+        self.remote_cfg_table.get(&remote_id)
+    }
+    fn get_remote_config_mut(&mut self, remote_id: u64) -> Option<&mut RemoteEntityConfig> {
+        self.remote_cfg_table.get_mut(&remote_id)
+    }
+    fn add_config(&mut self, cfg: &RemoteEntityConfig) -> bool {
+        self.remote_cfg_table
+            .insert(cfg.entity_id.value(), *cfg)
+            .is_some()
+    }
+    fn remove_config(&mut self, remote_id: u64) -> bool {
+        self.remote_cfg_table.remove(&remote_id).is_some()
+    }
+}
+
+#[derive(Debug, Eq, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TransactionId {
     source_id: UnsignedByteField,
@@ -121,6 +181,20 @@ impl TransactionId {
     }
 }
 
+impl Hash for TransactionId {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.source_id.value().hash(state);
+        self.seq_num.value().hash(state);
+    }
+}
+
+impl PartialEq for TransactionId {
+    fn eq(&self, other: &Self) -> bool {
+        self.source_id.value() == other.source_id.value()
+            && self.seq_num.value() == other.seq_num.value()
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TransactionStep {
@@ -136,8 +210,8 @@ pub enum TransactionStep {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum State {
     Idle = 0,
-    BusyClass1Nacked = 2,
-    BusyClass2Acked = 3,
+    Busy = 1,
+    Suspended = 2,
 }
 
 pub const CRC_32: Crc<u32> = Crc::<u32>::new(&CRC_32_CKSUM);
@@ -249,7 +323,7 @@ mod tests {
             eof::EofPdu,
             file_data::FileDataPdu,
             metadata::{MetadataGenericParams, MetadataPdu},
-            CommonPduConfig, FileDirectiveType, PduHeader,
+            CommonPduConfig, FileDirectiveType, PduHeader, WritablePduPacket,
         },
         PduType,
     };
