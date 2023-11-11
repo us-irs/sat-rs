@@ -3,9 +3,9 @@ import datetime
 from spacepackets.ccsds import CdsShortTimestamp
 from spacepackets.ecss import PusTelecommand
 from tmtccmd.config import CoreServiceList
-from tmtccmd.tc import DefaultPusQueueHelper
-from tmtccmd.tc.pus_11_tc_sched import create_time_tagged_cmd
-from tmtccmd.tc.pus_3_fsfw_hk import create_request_one_hk_command
+from tmtccmd.tmtc import DefaultPusQueueHelper
+from tmtccmd.pus.s11_tc_sched import create_time_tagged_cmd
+from tmtccmd.pus.tc.s3_fsfw_hk import create_request_one_hk_command
 
 from common import (
     EXAMPLE_PUS_APID,

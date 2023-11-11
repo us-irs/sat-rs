@@ -14,7 +14,7 @@ from spacepackets.ccsds.time import CdsShortTimestamp
 from tmtccmd import CcsdsTmtcBackend, TcHandlerBase, ProcedureParamsWrapper
 from tmtccmd.core.base import BackendRequest
 from tmtccmd.pus import VerificationWrapper
-from tmtccmd.tm import CcsdsTmHandler, SpecificApidHandlerBase
+from tmtccmd.tmtc import CcsdsTmHandler, SpecificApidHandlerBase
 from tmtccmd.com import ComInterface
 from tmtccmd.config import (
     default_json_path,
@@ -30,7 +30,7 @@ from tmtccmd.logging.pus import (
     RawTmtcTimedLogWrapper,
     TimedLogWhen,
 )
-from tmtccmd.tc import (
+from tmtccmd.tmtc import (
     TcQueueEntryType,
     ProcedureWrapper,
     TcProcedureType,
