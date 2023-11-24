@@ -1,12 +1,16 @@
 use alloc::string::{String, ToString};
+use core::fmt::Display;
 use crc::{Crc, CRC_32_CKSUM};
 use spacepackets::cfdp::ChecksumType;
 use spacepackets::ByteConversionError;
+#[cfg(feature = "std")]
+use std::error::Error;
 #[cfg(feature = "std")]
 pub use stdmod::*;
 
 pub const CRC_32: Crc<u32> = Crc::<u32>::new(&CRC_32_CKSUM);
 
+#[derive(Debug, Clone)]
 pub enum FilestoreError {
     FileDoesNotExist,
     FileAlreadyExists,
@@ -25,6 +29,53 @@ pub enum FilestoreError {
 impl From<ByteConversionError> for FilestoreError {
     fn from(value: ByteConversionError) -> Self {
         Self::ByteConversion(value)
+    }
+}
+
+impl Display for FilestoreError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            FilestoreError::FileDoesNotExist => {
+                write!(f, "file does not exist")
+            }
+            FilestoreError::FileAlreadyExists => {
+                write!(f, "file already exists")
+            }
+            FilestoreError::DirDoesNotExist => {
+                write!(f, "directory does not exist")
+            }
+            FilestoreError::Permission => {
+                write!(f, "permission error")
+            }
+            FilestoreError::IsNotFile => {
+                write!(f, "is not a file")
+            }
+            FilestoreError::IsNotDirectory => {
+                write!(f, "is not a directory")
+            }
+            FilestoreError::ByteConversion(e) => {
+                write!(f, "filestore error: {e}")
+            }
+            FilestoreError::Io { raw_errno, string } => {
+                write!(
+                    f,
+                    "filestore generic IO error with raw errno {:?}: {}",
+                    raw_errno, string
+                )
+            }
+            FilestoreError::ChecksumTypeNotImplemented(checksum_type) => {
+                write!(f, "checksum {:?} not implemented", checksum_type)
+            }
+        }
+    }
+}
+
+impl Error for FilestoreError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            FilestoreError::ByteConversion(e) => Some(e),
+            _ => None,
+        }
     }
 }
 
@@ -174,7 +225,7 @@ pub mod stdmod {
             if !self.is_file(file) {
                 return Err(FilestoreError::IsNotFile);
             }
-            let mut file = File::open(file)?;
+            let mut file = OpenOptions::new().write(true).open(file)?;
             file.seek(SeekFrom::Start(offset))?;
             file.write_all(buf)?;
             Ok(())
@@ -242,16 +293,77 @@ pub mod stdmod {
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, path::Path, println};
+
     use super::*;
     use tempfile::tempdir;
 
+    const NATIVE_FS: NativeFilestore = NativeFilestore {};
+
     #[test]
-    fn test_basic_native_filestore() {
+    fn test_basic_native_filestore_create() {
         let tmpdir = tempdir().expect("creating tmpdir failed");
         let file_path = tmpdir.path().join("test.txt");
-        let native_filestore = NativeFilestore {};
         let result =
-            native_filestore.create_file(file_path.to_str().expect("getting str for file failed"));
+            NATIVE_FS.create_file(file_path.to_str().expect("getting str for file failed"));
         assert!(result.is_ok());
+        let path = Path::new(&file_path);
+        assert!(path.exists());
+        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()));
+        assert!(NATIVE_FS.is_file(file_path.to_str().unwrap()));
+        fs::remove_dir_all(tmpdir).expect("clearing tmpdir failed");
+    }
+
+    #[test]
+    fn test_basic_native_fs_exists() {
+        let tmpdir = tempdir().expect("creating tmpdir failed");
+        let file_path = tmpdir.path().join("test.txt");
+        assert!(!NATIVE_FS.exists(file_path.to_str().unwrap()));
+        NATIVE_FS
+            .create_file(file_path.to_str().expect("getting str for file failed"))
+            .unwrap();
+        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()));
+        assert!(NATIVE_FS.is_file(file_path.to_str().unwrap()));
+        fs::remove_dir_all(tmpdir).expect("clearing tmpdir failed");
+    }
+
+    #[test]
+    fn test_basic_native_fs_write() {
+        let tmpdir = tempdir().expect("creating tmpdir failed");
+        let file_path = tmpdir.path().join("test.txt");
+        assert!(!NATIVE_FS.exists(file_path.to_str().unwrap()));
+        NATIVE_FS
+            .create_file(file_path.to_str().expect("getting str for file failed"))
+            .unwrap();
+        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()));
+        assert!(NATIVE_FS.is_file(file_path.to_str().unwrap()));
+        println!("{}", file_path.to_str().unwrap());
+        let write_data = "hello world\n";
+        NATIVE_FS
+            .write_data(file_path.to_str().unwrap(), 0, write_data.as_bytes())
+            .expect("writing to file failed");
+        let read_back = fs::read_to_string(file_path).expect("reading back data failed");
+        assert_eq!(read_back, write_data);
+        fs::remove_dir_all(tmpdir).expect("clearing tmpdir failed");
+    }
+
+    #[test]
+    fn test_basic_native_fs_read() {
+        let tmpdir = tempdir().expect("creating tmpdir failed");
+        let file_path = tmpdir.path().join("test.txt");
+        assert!(!NATIVE_FS.exists(file_path.to_str().unwrap()));
+        NATIVE_FS
+            .create_file(file_path.to_str().expect("getting str for file failed"))
+            .unwrap();
+        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()));
+        assert!(NATIVE_FS.is_file(file_path.to_str().unwrap()));
+        println!("{}", file_path.to_str().unwrap());
+        let write_data = "hello world\n";
+        NATIVE_FS
+            .write_data(file_path.to_str().unwrap(), 0, write_data.as_bytes())
+            .expect("writing to file failed");
+        let read_back = fs::read_to_string(file_path).expect("reading back data failed");
+        assert_eq!(read_back, write_data);
+        fs::remove_dir_all(tmpdir).expect("clearing tmpdir failed");
     }
 }
