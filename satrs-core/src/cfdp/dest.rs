@@ -771,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_file_transfer() {
+    fn test_empty_file_transfer_not_acked() {
         let (src_name, dest_name) = init_full_filenames();
         assert!(!Path::exists(&dest_name));
         let mut buf: [u8; 512] = [0; 512];
@@ -810,7 +810,7 @@ mod tests {
     }
 
     #[test]
-    fn test_small_file_transfer() {
+    fn test_small_file_transfer_not_acked() {
         let (src_name, dest_name) = init_full_filenames();
         assert!(!Path::exists(&dest_name));
         let file_data_str = "Hello World!";
@@ -869,7 +869,7 @@ mod tests {
     }
 
     #[test]
-    fn test_segmented_file_transfer() {
+    fn test_segmented_file_transfer_not_acked() {
         let (src_name, dest_name) = init_full_filenames();
         assert!(!Path::exists(&dest_name));
         let mut rng = rand::thread_rng();

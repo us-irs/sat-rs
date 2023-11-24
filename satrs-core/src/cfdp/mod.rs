@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "std")]
 pub mod dest;
+pub mod filestore;
 #[cfg(feature = "std")]
 pub mod source;
 pub mod user;
