@@ -43,3 +43,16 @@ Each project has its own `CHANGELOG.md`.
    packet protocol implementations. This repository is re-exported in the
    [`satrs-core`](https://egit.irs.uni-stuttgart.de/rust/satrs-launchpad/src/branch/main/satrs-core)
    crate.
+
+# Coverage
+
+Coverage was generated using [`grcov`](https://github.com/mozilla/grcov). If you have not done so
+already, install the `llvm-tools-preview`:
+
+```sh
+rustup component add llvm-tools-preview
+cargo install grcov --locked
+```
+
+After that, you can simply run `coverage.py` to test the `satrs-core` crate with coverage. You can
+optionally supply the `--open` flag to open the coverage report in your webbrowser.
