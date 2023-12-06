@@ -87,7 +87,7 @@ use delegate::delegate;
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::tc::IsPusTelecommand;
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
-use spacepackets::ecss::{EcssEnumeration, PusError, SerializablePusPacket};
+use spacepackets::ecss::{EcssEnumeration, PusError, WritablePusPacket};
 use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
 use spacepackets::{SpHeader, MAX_APID};
 
@@ -353,7 +353,7 @@ impl<'src_data, State, SuccessOrFailure> VerificationSendable<'src_data, State, 
     }
 
     pub fn len_packed(&self) -> usize {
-        self.pus_tm.as_ref().unwrap().len_packed()
+        self.pus_tm.as_ref().unwrap().len_written()
     }
 
     pub fn pus_tm(&self) -> &PusTmCreator<'src_data> {
