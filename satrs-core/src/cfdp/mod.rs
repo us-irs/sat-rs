@@ -323,7 +323,7 @@ mod tests {
         pdu::{
             eof::EofPdu,
             file_data::FileDataPdu,
-            metadata::{MetadataGenericParams, MetadataPdu},
+            metadata::{MetadataGenericParams, MetadataPduCreator},
             CommonPduConfig, FileDirectiveType, PduHeader, WritablePduPacket,
         },
         PduType,
@@ -347,7 +347,7 @@ mod tests {
         let dest_file_name = "hello-dest.txt";
         let src_lv = Lv::new_from_str(src_file_name).unwrap();
         let dest_lv = Lv::new_from_str(dest_file_name).unwrap();
-        let metadata_pdu = MetadataPdu::new(pdu_header, metadata_params, src_lv, dest_lv, None);
+        let metadata_pdu = MetadataPduCreator::new_no_opts(pdu_header, metadata_params, src_lv, dest_lv);
         metadata_pdu
             .write_to_bytes(&mut buf)
             .expect("writing metadata PDU failed");

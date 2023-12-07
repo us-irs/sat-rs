@@ -19,7 +19,7 @@ use std::vec::Vec;
 ///
 /// ```
 /// use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
-/// use spacepackets::ecss::SerializablePusPacket;
+/// use spacepackets::ecss::WritablePusPacket;
 /// use satrs_core::hal::std::udp_server::UdpTcServer;
 /// use satrs_core::tmtc::{ReceivesTc, ReceivesTcCore};
 /// use spacepackets::SpHeader;
@@ -144,7 +144,7 @@ mod tests {
     use crate::hal::std::udp_server::{ReceiveResult, UdpTcServer};
     use crate::tmtc::ReceivesTcCore;
     use spacepackets::ecss::tc::PusTcCreator;
-    use spacepackets::ecss::SerializablePusPacket;
+    use spacepackets::ecss::WritablePusPacket;
     use spacepackets::SpHeader;
     use std::boxed::Box;
     use std::collections::VecDeque;

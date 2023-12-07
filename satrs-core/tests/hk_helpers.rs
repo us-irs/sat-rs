@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use core::mem::size_of;
 use serde::{Deserialize, Serialize};
-use spacepackets::ecss::{Ptc, RealPfc, UnsignedPfc};
+use spacepackets::ecss::{Ptc, PfcReal, PfcUnsigned};
 use spacepackets::time::cds::TimeProvider;
 use spacepackets::time::{CcsdsTimeProvider, TimeWriter};
 
@@ -64,7 +64,7 @@ impl TestMgmHkWithIndividualValidity {
         curr_idx += 1;
         buf[curr_idx] = Ptc::Real as u8;
         curr_idx += 1;
-        buf[curr_idx] = RealPfc::Float as u8;
+        buf[curr_idx] = PfcReal::Float as u8;
         curr_idx += 1;
         buf[curr_idx..curr_idx + size_of::<f32>()].copy_from_slice(&self.temp.val.to_be_bytes());
         curr_idx += size_of::<f32>();
@@ -75,7 +75,7 @@ impl TestMgmHkWithIndividualValidity {
         curr_idx += 1;
         buf[curr_idx] = Ptc::UnsignedInt as u8;
         curr_idx += 1;
-        buf[curr_idx] = UnsignedPfc::TwoBytes as u8;
+        buf[curr_idx] = PfcUnsigned::TwoBytes as u8;
         curr_idx += 1;
         buf[curr_idx] = 3;
         curr_idx += 1;
@@ -100,7 +100,7 @@ impl TestMgmHkWithGroupValidity {
         curr_idx += 1;
         buf[curr_idx] = Ptc::Real as u8;
         curr_idx += 1;
-        buf[curr_idx] = RealPfc::Float as u8;
+        buf[curr_idx] = PfcReal::Float as u8;
         curr_idx += 1;
         buf[curr_idx..curr_idx + size_of::<f32>()].copy_from_slice(&self.temp.to_be_bytes());
         curr_idx += size_of::<f32>();
@@ -109,7 +109,7 @@ impl TestMgmHkWithGroupValidity {
         curr_idx += 1;
         buf[curr_idx] = Ptc::UnsignedInt as u8;
         curr_idx += 1;
-        buf[curr_idx] = UnsignedPfc::TwoBytes as u8;
+        buf[curr_idx] = PfcUnsigned::TwoBytes as u8;
         curr_idx += 1;
         buf[curr_idx] = 3;
         for val in self.mgm_vals {

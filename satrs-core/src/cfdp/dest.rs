@@ -19,11 +19,11 @@ use spacepackets::{
         pdu::{
             eof::EofPdu,
             file_data::FileDataPdu,
-            finished::{DeliveryCode, FileStatus, FinishedPdu},
-            metadata::{MetadataGenericParams, MetadataPdu},
-            CommonPduConfig, FileDirectiveType, PduError, PduHeader, WritablePduPacket,
+            finished::{DeliveryCode, FileStatus, FinishedPduCreator},
+            metadata::{MetadataGenericParams, MetadataPduReader},
+            CommonPduConfig, FileDirectiveType, PduError, PduHeader, WritablePduPacket, CfdpPdu,
         },
-        tlv::{msg_to_user::MsgToUserTlv, EntityIdTlv, TlvType},
+        tlv::{msg_to_user::MsgToUserTlv, EntityIdTlv, TlvType, GenericTlv},
         ConditionCode, PduType,
     },
     util::UnsignedByteField,
@@ -227,7 +227,7 @@ impl DestinationHandler {
                 let finished_pdu = if self.tparams.tstate.condition_code == ConditionCode::NoError
                     || self.tparams.tstate.condition_code == ConditionCode::UnsupportedChecksumType
                 {
-                    FinishedPdu::new_default(
+                    FinishedPduCreator::new_default(
                         pdu_header,
                         self.tparams.tstate.delivery_code,
                         self.tparams.tstate.file_status,
@@ -235,7 +235,7 @@ impl DestinationHandler {
                 } else {
                     // TODO: Are there cases where this ID is actually the source entity ID?
                     let entity_id = EntityIdTlv::new(self.id);
-                    FinishedPdu::new_with_error(
+                    FinishedPduCreator::new_with_error(
                         pdu_header,
                         self.tparams.tstate.condition_code,
                         self.tparams.tstate.delivery_code,
@@ -283,7 +283,7 @@ impl DestinationHandler {
         if self.state != State::Idle {
             return Err(DestError::RecvdMetadataButIsBusy);
         }
-        let metadata_pdu = MetadataPdu::from_bytes(raw_packet)?;
+        let metadata_pdu = MetadataPduReader::from_bytes(raw_packet)?;
         self.tparams.reset();
         self.tparams.tstate.metadata_params = *metadata_pdu.metadata_params();
         let src_name = metadata_pdu.src_file_name();
@@ -302,7 +302,7 @@ impl DestinationHandler {
         self.tparams.file_properties.dest_file_name_len = dest_name.len_value();
         self.tparams.pdu_conf = *metadata_pdu.pdu_header().common_pdu_conf();
         self.tparams.msgs_to_user_size = 0;
-        if metadata_pdu.options().is_some() {
+        if !metadata_pdu.options().is_empty() {
             for option_tlv in metadata_pdu.options_iter().unwrap() {
                 if option_tlv.is_standard_tlv()
                     && option_tlv.tlv_type().unwrap() == TlvType::MsgToUser
@@ -520,7 +520,7 @@ mod tests {
     use alloc::{format, string::String};
     use rand::Rng;
     use spacepackets::{
-        cfdp::{lv::Lv, pdu::WritablePduPacket, ChecksumType, TransmissionMode},
+        cfdp::{lv::Lv, pdu::{WritablePduPacket, metadata::MetadataPduCreator}, ChecksumType, TransmissionMode},
         util::{UbfU16, UnsignedByteFieldU16},
     };
 
@@ -743,14 +743,13 @@ mod tests {
         src_name: &'filename Path,
         dest_name: &'filename Path,
         file_size: u64,
-    ) -> MetadataPdu<'filename, 'filename, 'static> {
+    ) -> MetadataPduCreator<'filename, 'filename, 'static> {
         let metadata_params = MetadataGenericParams::new(false, ChecksumType::Crc32, file_size);
-        MetadataPdu::new(
+        MetadataPduCreator::new_no_opts(
             *pdu_header,
             metadata_params,
             Lv::new_from_str(src_name.as_os_str().to_str().unwrap()).unwrap(),
             Lv::new_from_str(dest_name.as_os_str().to_str().unwrap()).unwrap(),
-            None,
         )
     }
 

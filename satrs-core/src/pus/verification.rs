@@ -877,7 +877,7 @@ impl VerificationReporterCore {
         PusTmCreator::new(
             sp_header,
             tm_sec_header,
-            Some(&src_data_buf[0..source_data_len]),
+            &src_data_buf[0..source_data_len],
             true,
         )
     }

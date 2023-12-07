@@ -626,7 +626,7 @@ mod tests {
     use crate::pool::{LocalPool, PoolCfg, PoolProvider, StoreAddr, StoreError};
     use alloc::collections::btree_map::Range;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
-    use spacepackets::ecss::SerializablePusPacket;
+    use spacepackets::ecss::WritablePusPacket;
     use spacepackets::time::{cds, TimeWriter, UnixTimestamp};
     use spacepackets::SpHeader;
     use std::time::Duration;
