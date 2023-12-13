@@ -141,6 +141,7 @@ pub mod stdmod {
         path::Path,
     };
 
+    #[derive(Default)]
     pub struct NativeFilestore {}
 
     impl VirtualFilestore for NativeFilestore {

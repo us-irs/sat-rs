@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use core::mem::size_of;
 use serde::{Deserialize, Serialize};
-use spacepackets::ecss::{Ptc, PfcReal, PfcUnsigned};
+use spacepackets::ecss::{PfcReal, PfcUnsigned, Ptc};
 use spacepackets::time::cds::TimeProvider;
 use spacepackets::time::{CcsdsTimeProvider, TimeWriter};
 

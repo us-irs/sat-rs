@@ -8,9 +8,10 @@ use std::{
 use crate::cfdp::user::TransactionFinishedParams;
 
 use super::{
+    filestore::{NativeFilestore, VirtualFilestore},
     user::{CfdpUser, MetadataReceivedParams},
-    CheckTimerCreator, PacketInfo, PacketTarget, RemoteEntityConfigProvider, State, TransactionId,
-    TransactionStep, CRC_32,
+    CheckTimerCreator, DefaultFaultHandler, PacketInfo, PacketTarget, RemoteEntityConfig,
+    RemoteEntityConfigProvider, State, TransactionId, TransactionStep, CRC_32,
 };
 use alloc::boxed::Box;
 use smallvec::SmallVec;
@@ -21,10 +22,10 @@ use spacepackets::{
             file_data::FileDataPdu,
             finished::{DeliveryCode, FileStatus, FinishedPduCreator},
             metadata::{MetadataGenericParams, MetadataPduReader},
-            CommonPduConfig, FileDirectiveType, PduError, PduHeader, WritablePduPacket, CfdpPdu,
+            CfdpPdu, CommonPduConfig, FileDirectiveType, PduError, PduHeader, WritablePduPacket,
         },
-        tlv::{msg_to_user::MsgToUserTlv, EntityIdTlv, TlvType, GenericTlv},
-        ConditionCode, PduType,
+        tlv::{msg_to_user::MsgToUserTlv, EntityIdTlv, GenericTlv, TlvType},
+        ConditionCode, FaultHandlerCode, PduType, TransmissionMode,
     },
     util::UnsignedByteField,
 };
@@ -36,6 +37,8 @@ pub struct DestinationHandler {
     state: State,
     tparams: TransactionParams,
     packets_to_send_ctx: PacketsToSendContext,
+    vfs: Box<dyn VirtualFilestore>,
+    default_fault_handler: DefaultFaultHandler,
     remote_cfg_table: Box<dyn RemoteEntityConfigProvider>,
     check_timer_creator: Box<dyn CheckTimerCreator>,
 }
@@ -77,6 +80,7 @@ impl Default for TransferState {
         }
     }
 }
+
 #[derive(Debug)]
 struct TransactionParams {
     tstate: TransferState,
@@ -85,6 +89,13 @@ struct TransactionParams {
     cksum_buf: [u8; 1024],
     msgs_to_user_size: usize,
     msgs_to_user_buf: [u8; 1024],
+    remote_cfg: Option<RemoteEntityConfig>,
+}
+
+impl TransactionParams {
+    fn transmission_mode(&self) -> TransmissionMode {
+        self.pdu_conf.trans_mode
+    }
 }
 
 impl Default for FileProperties {
@@ -118,6 +129,7 @@ impl Default for TransactionParams {
             msgs_to_user_buf: [0; 1024],
             tstate: Default::default(),
             file_properties: Default::default(),
+            remote_cfg: None,
         }
     }
 }
@@ -153,11 +165,15 @@ pub enum DestError {
     PathConversion(#[from] Utf8Error),
     #[error("error building dest path from source file name and dest folder")]
     PathConcatError,
+    #[error("no remote entity configuration found for {0:?}")]
+    NoRemoteCfgFound(UnsignedByteField),
 }
 
 impl DestinationHandler {
     pub fn new(
         entity_id: impl Into<UnsignedByteField>,
+        vfs: Box<dyn VirtualFilestore>,
+        default_fault_handler: DefaultFaultHandler,
         remote_cfg_table: Box<dyn RemoteEntityConfigProvider>,
         check_timer_creator: Box<dyn CheckTimerCreator>,
     ) -> Self {
@@ -167,6 +183,8 @@ impl DestinationHandler {
             state: State::Idle,
             tparams: Default::default(),
             packets_to_send_ctx: Default::default(),
+            vfs,
+            default_fault_handler,
             remote_cfg_table,
             check_timer_creator,
         }
@@ -286,6 +304,15 @@ impl DestinationHandler {
         let metadata_pdu = MetadataPduReader::from_bytes(raw_packet)?;
         self.tparams.reset();
         self.tparams.tstate.metadata_params = *metadata_pdu.metadata_params();
+        let remote_cfg = self
+            .remote_cfg_table
+            .get_remote_config(metadata_pdu.dest_id().value());
+        if remote_cfg.is_none() {
+            return Err(DestError::NoRemoteCfgFound(metadata_pdu.dest_id()));
+        }
+        self.tparams.remote_cfg = Some(*remote_cfg.unwrap());
+
+        // TODO: Support for metadata only PDUs.
         let src_name = metadata_pdu.src_file_name();
         if src_name.is_empty() {
             return Err(DestError::EmptySrcFileField);
@@ -332,17 +359,24 @@ impl DestinationHandler {
         Ok(())
     }
 
-    #[allow(clippy::needless_if)]
     pub fn handle_eof_pdu(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
         if self.state == State::Idle || self.step != TransactionStep::ReceivingFileDataPdus {
             return Err(DestError::WrongStateForFileDataAndEof);
         }
         let eof_pdu = EofPdu::from_bytes(raw_packet)?;
-        let checksum = eof_pdu.file_checksum();
+        if eof_pdu.condition_code() == ConditionCode::NoError {
+            self.handle_no_error_eof_pdu(&eof_pdu)?;
+        } else {
+            todo!("implement cancel request handling");
+        }
+        Ok(())
+    }
+
+    fn handle_no_error_eof_pdu(&mut self, eof_pdu: &EofPdu) -> Result<(), DestError> {
         // For a standard disk based file system, which is assumed to be used for now, the file
         // will always be retained. This might change in the future.
         self.tparams.tstate.file_status = FileStatus::Retained;
-        if self.checksum_check(checksum)? {
+        if self.checksum_check(eof_pdu.file_checksum())? {
             self.tparams.tstate.condition_code = ConditionCode::NoError;
             self.tparams.tstate.delivery_code = DeliveryCode::Complete;
         } else {
@@ -351,7 +385,7 @@ impl DestinationHandler {
         // TODO: Check progress, and implement transfer completion timer as specified in the
         // standard. This timer protects against out of order arrival of packets.
         if self.tparams.tstate.progress != self.tparams.file_size() {}
-        if self.state == State::Busy {
+        if self.tparams.transmission_mode() == TransmissionMode::Unacknowledged {
             self.step = TransactionStep::TransferCompletion;
         } else {
             self.step = TransactionStep::SendingAckPdu;
@@ -364,6 +398,7 @@ impl DestinationHandler {
     }
 
     fn checksum_check(&mut self, expected_checksum: u32) -> Result<bool, DestError> {
+        // TODO: Implement this using the new virtual filestore abstraction.
         let mut digest = CRC_32.digest();
         let file_to_check = File::open(&self.tparams.file_properties.dest_path_buf)?;
         let mut buf_reader = BufReader::new(file_to_check);
@@ -492,6 +527,11 @@ impl DestinationHandler {
         Ok(())
     }
 
+    fn declare_fault(&mut self, condition_code: ConditionCode) -> FaultHandlerCode {
+        todo!("implement this. requires cached fault handler abstraction");
+        FaultHandlerCode::IgnoreError
+    }
+
     fn reset(&mut self) {
         self.step = TransactionStep::Idle;
         self.state = State::Idle;
@@ -520,12 +560,17 @@ mod tests {
     use alloc::{format, string::String};
     use rand::Rng;
     use spacepackets::{
-        cfdp::{lv::Lv, pdu::{WritablePduPacket, metadata::MetadataPduCreator}, ChecksumType, TransmissionMode},
+        cfdp::{
+            lv::Lv,
+            pdu::{metadata::MetadataPduCreator, WritablePduPacket},
+            ChecksumType, TransmissionMode,
+        },
         util::{UbfU16, UnsignedByteFieldU16},
     };
 
     use crate::cfdp::{
         CheckTimer, CheckTimerCreator, RemoteEntityConfig, StdRemoteEntityConfigProvider,
+        UserFaultHandler,
     };
 
     use super::*;
@@ -550,6 +595,47 @@ mod tests {
         fn generic_id_check(&self, id: &crate::cfdp::TransactionId) {
             assert_eq!(id.source_id, LOCAL_ID.into());
             assert_eq!(id.seq_num().value(), self.next_expected_seq_num);
+        }
+    }
+
+    #[derive(Default)]
+    struct TestFaultHandler {
+        notice_of_suspension_count: u32,
+        notice_of_cancellation_count: u32,
+        abandoned_count: u32,
+        ignored_count: u32,
+    }
+
+    impl UserFaultHandler for TestFaultHandler {
+        fn notice_of_suspension_cb(
+            &mut self,
+            transaction_id: TransactionId,
+            cond: ConditionCode,
+            progress: u64,
+        ) {
+            self.notice_of_suspension_count += 1;
+        }
+
+        fn notice_of_cancellation_cb(
+            &mut self,
+            transaction_id: TransactionId,
+            cond: ConditionCode,
+            progress: u64,
+        ) {
+            self.notice_of_cancellation_count += 1;
+        }
+
+        fn abandoned_cb(
+            &mut self,
+            transaction_id: TransactionId,
+            cond: ConditionCode,
+            progress: u64,
+        ) {
+            self.abandoned_count += 1;
+        }
+
+        fn ignore_cb(&mut self, transaction_id: TransactionId, cond: ConditionCode, progress: u64) {
+            self.ignored_count += 1;
         }
     }
 
@@ -719,8 +805,11 @@ mod tests {
     }
 
     fn default_dest_handler() -> DestinationHandler {
+        let test_fault_handler = TestFaultHandler::default();
         DestinationHandler::new(
             REMOTE_ID,
+            Box::new(NativeFilestore::default()),
+            DefaultFaultHandler::new(Box::new(test_fault_handler)),
             Box::new(basic_remote_cfg_table()),
             Box::new(TestCheckTimerCreator::new(2, 2)),
         )

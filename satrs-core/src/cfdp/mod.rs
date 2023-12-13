@@ -5,7 +5,7 @@ use hashbrown::HashMap;
 use spacepackets::{
     cfdp::{
         pdu::{FileDirectiveType, PduError, PduHeader},
-        ChecksumType, PduType, TransmissionMode,
+        ChecksumType, ConditionCode, FaultHandlerCode, PduType, TransmissionMode,
     },
     util::UnsignedByteField,
 };
@@ -158,6 +158,103 @@ impl RemoteEntityConfigProvider for StdRemoteEntityConfigProvider {
     }
     fn remove_config(&mut self, remote_id: u64) -> bool {
         self.remote_cfg_table.remove(&remote_id).is_some()
+    }
+}
+
+/// This trait introduces some callbacks which will be called when a particular CFDP fault
+/// handler is called. This allows to implement some CFDP features like fault handler logging,
+/// which would not be possible generically otherwise.
+pub trait UserFaultHandler {
+    fn notice_of_suspension_cb(
+        &mut self,
+        transaction_id: TransactionId,
+        cond: ConditionCode,
+        progress: u64,
+    );
+
+    fn notice_of_cancellation_cb(
+        &mut self,
+        transaction_id: TransactionId,
+        cond: ConditionCode,
+        progress: u64,
+    );
+
+    fn abandoned_cb(&mut self, transaction_id: TransactionId, cond: ConditionCode, progress: u64);
+
+    fn ignore_cb(&mut self, transaction_id: TransactionId, cond: ConditionCode, progress: u64);
+}
+
+pub struct DefaultFaultHandler {
+    handler_array: [FaultHandlerCode; 10],
+    user_fault_handler: Box<dyn UserFaultHandler + Send>,
+}
+
+impl DefaultFaultHandler {
+    fn condition_code_to_array_index(conditon_code: ConditionCode) -> Option<usize> {
+        Some(match conditon_code {
+            ConditionCode::PositiveAckLimitReached => 0,
+            ConditionCode::KeepAliveLimitReached => 1,
+            ConditionCode::InvalidTransmissionMode => 2,
+            ConditionCode::FilestoreRejection => 3,
+            ConditionCode::FileChecksumFailure => 4,
+            ConditionCode::FileSizeError => 5,
+            ConditionCode::NakLimitReached => 6,
+            ConditionCode::InactivityDetected => 7,
+            ConditionCode::CheckLimitReached => 8,
+            ConditionCode::UnsupportedChecksumType => 9,
+            _ => return None,
+        })
+    }
+
+    pub fn new(user_fault_handler: Box<dyn UserFaultHandler + Send>) -> Self {
+        let mut init_array = [FaultHandlerCode::NoticeOfCancellation; 10];
+        init_array
+            [Self::condition_code_to_array_index(ConditionCode::FileChecksumFailure).unwrap()] =
+            FaultHandlerCode::IgnoreError;
+        init_array[Self::condition_code_to_array_index(ConditionCode::UnsupportedChecksumType)
+            .unwrap()] = FaultHandlerCode::IgnoreError;
+        Self {
+            handler_array: init_array,
+            user_fault_handler,
+        }
+    }
+
+    fn report_fault(
+        &mut self,
+        transaction_id: TransactionId,
+        condition: ConditionCode,
+        progress: u64,
+    ) -> FaultHandlerCode {
+        let array_idx = Self::condition_code_to_array_index(condition);
+        if array_idx.is_none() {
+            return FaultHandlerCode::IgnoreError;
+        }
+        let fh_code = self.handler_array[array_idx.unwrap()];
+        match fh_code {
+            FaultHandlerCode::NoticeOfCancellation => {
+                self.user_fault_handler.notice_of_cancellation_cb(
+                    transaction_id,
+                    condition,
+                    progress,
+                );
+            }
+            FaultHandlerCode::NoticeOfSuspension => {
+                self.user_fault_handler.notice_of_suspension_cb(
+                    transaction_id,
+                    condition,
+                    progress,
+                );
+            }
+            FaultHandlerCode::IgnoreError => {
+                self.user_fault_handler
+                    .ignore_cb(transaction_id, condition, progress);
+            }
+            FaultHandlerCode::AbandonTransaction => {
+                self.user_fault_handler
+                    .abandoned_cb(transaction_id, condition, progress);
+            }
+        }
+        fh_code
     }
 }
 
@@ -347,7 +444,8 @@ mod tests {
         let dest_file_name = "hello-dest.txt";
         let src_lv = Lv::new_from_str(src_file_name).unwrap();
         let dest_lv = Lv::new_from_str(dest_file_name).unwrap();
-        let metadata_pdu = MetadataPduCreator::new_no_opts(pdu_header, metadata_params, src_lv, dest_lv);
+        let metadata_pdu =
+            MetadataPduCreator::new_no_opts(pdu_header, metadata_params, src_lv, dest_lv);
         metadata_pdu
             .write_to_bytes(&mut buf)
             .expect("writing metadata PDU failed");
