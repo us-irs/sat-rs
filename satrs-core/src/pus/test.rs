@@ -154,7 +154,7 @@ mod tests {
         // Create a ping TC, verify acceptance.
         let mut sp_header = SpHeader::tc(TEST_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
         let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
-        let ping_tc = PusTcCreator::new(&mut sp_header, sec_header, None, true);
+        let ping_tc = PusTcCreator::new_no_app_data(&mut sp_header, sec_header, true);
         let token = verification_handler.add_tc(&ping_tc);
         let token = verification_handler
             .acceptance_success(token, None)
