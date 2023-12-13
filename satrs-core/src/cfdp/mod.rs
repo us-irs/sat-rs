@@ -206,6 +206,18 @@ impl DefaultFaultHandler {
         })
     }
 
+    pub fn set_fault_handler(
+        &mut self,
+        condition_code: ConditionCode,
+        fault_handler: FaultHandlerCode,
+    ) {
+        let array_idx = Self::condition_code_to_array_index(condition_code);
+        if array_idx.is_none() {
+            return;
+        }
+        self.handler_array[array_idx.unwrap()] = fault_handler;
+    }
+
     pub fn new(user_fault_handler: Box<dyn UserFaultHandler + Send>) -> Self {
         let mut init_array = [FaultHandlerCode::NoticeOfCancellation; 10];
         init_array
@@ -219,7 +231,15 @@ impl DefaultFaultHandler {
         }
     }
 
-    fn report_fault(
+    pub fn get_fault_handler(&self, condition_code: ConditionCode) -> FaultHandlerCode {
+        let array_idx = Self::condition_code_to_array_index(condition_code);
+        if array_idx.is_none() {
+            return FaultHandlerCode::IgnoreError;
+        }
+        self.handler_array[array_idx.unwrap()]
+    }
+
+    pub fn report_fault(
         &mut self,
         transaction_id: TransactionId,
         condition: ConditionCode,
@@ -256,6 +276,34 @@ impl DefaultFaultHandler {
         }
         fh_code
     }
+}
+
+pub struct IndicationConfig {
+    pub eof_sent: bool,
+    pub eof_recv: bool,
+    pub file_segment_recv: bool,
+    pub transaction_finished: bool,
+    pub suspended: bool,
+    pub resumed: bool,
+}
+
+impl Default for IndicationConfig {
+    fn default() -> Self {
+        Self {
+            eof_sent: true,
+            eof_recv: true,
+            file_segment_recv: true,
+            transaction_finished: true,
+            suspended: true,
+            resumed: true,
+        }
+    }
+}
+
+pub struct LocalEntityConfig {
+    pub id: UnsignedByteField,
+    pub indication_cfg: IndicationConfig,
+    pub default_fault_handler: DefaultFaultHandler,
 }
 
 #[derive(Debug, Eq, Copy, Clone)]
