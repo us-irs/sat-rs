@@ -309,7 +309,7 @@ impl DestinationHandler {
         self.tparams.tstate.metadata_params = *metadata_pdu.metadata_params();
         let remote_cfg = self
             .remote_cfg_table
-            .get_remote_config(metadata_pdu.dest_id().value());
+            .get_remote_config(metadata_pdu.source_id().value());
         if remote_cfg.is_none() {
             return Err(DestError::NoRemoteCfgFound(metadata_pdu.dest_id()));
         }
@@ -632,11 +632,6 @@ mod tests {
     const LOCAL_ID: UnsignedByteFieldU16 = UnsignedByteFieldU16::new(1);
     const REMOTE_ID: UnsignedByteFieldU16 = UnsignedByteFieldU16::new(2);
 
-    const SRC_NAME: &str = "__cfdp__source-file";
-    const DEST_NAME: &str = "__cfdp__dest-file";
-
-    static ATOMIC_COUNTER: AtomicU8 = AtomicU8::new(0);
-
     #[derive(Default)]
     struct TestCfdpUser {
         next_expected_seq_num: u64,
@@ -831,16 +826,13 @@ mod tests {
     }
 
     fn init_full_filenames() -> (PathBuf, PathBuf) {
-        let mut file_path = temp_dir();
-        let mut src_path = file_path.clone();
-        // Atomic counter used to allow concurrent tests.
-        let unique_counter = ATOMIC_COUNTER.fetch_add(1, Ordering::Relaxed);
-        // Create unique test filenames.
-        let src_name_unique = format!("{SRC_NAME}{}.txt", unique_counter);
-        let dest_name_unique = format!("{DEST_NAME}{}.txt", unique_counter);
-        src_path.push(src_name_unique);
-        file_path.push(dest_name_unique);
-        (src_path, file_path)
+        (
+            tempfile::TempPath::from_path("/tmp/test.txt").to_path_buf(),
+            tempfile::NamedTempFile::new()
+                .unwrap()
+                .into_temp_path()
+                .to_path_buf(),
+        )
     }
 
     fn basic_remote_cfg_table() -> StdRemoteEntityConfigProvider {
@@ -867,7 +859,7 @@ mod tests {
         };
         DestinationHandler::new(
             local_entity_cfg,
-            Box::new(NativeFilestore::default()),
+            Box::<NativeFilestore>::default(),
             Box::new(basic_remote_cfg_table()),
             Box::new(TestCheckTimerCreator::new(2, 2)),
         )
