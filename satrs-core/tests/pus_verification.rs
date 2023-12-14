@@ -9,7 +9,7 @@ pub mod crossbeam_test {
     use satrs_core::tmtc::tm_helper::SharedTmStore;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTmReader;
-    use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket, SerializablePusPacket};
+    use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket, WritablePusPacket};
     use spacepackets::SpHeader;
     use std::sync::{Arc, RwLock};
     use std::thread;
@@ -54,16 +54,16 @@ pub mod crossbeam_test {
             let mut tc_guard = shared_tc_pool_0.write().unwrap();
             let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
             let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-            let pus_tc_0 = PusTcCreator::new(&mut sph, tc_header, None, true);
+            let pus_tc_0 = PusTcCreator::new_no_app_data(&mut sph, tc_header, true);
             req_id_0 = RequestId::new(&pus_tc_0);
-            let (addr, mut buf) = tc_guard.free_element(pus_tc_0.len_packed()).unwrap();
+            let (addr, mut buf) = tc_guard.free_element(pus_tc_0.len_written()).unwrap();
             pus_tc_0.write_to_bytes(&mut buf).unwrap();
             tx_tc_0.send(addr).unwrap();
             let mut sph = SpHeader::tc_unseg(TEST_APID, 1, 0).unwrap();
             let tc_header = PusTcSecondaryHeader::new_simple(5, 1);
-            let pus_tc_1 = PusTcCreator::new(&mut sph, tc_header, None, true);
+            let pus_tc_1 = PusTcCreator::new_no_app_data(&mut sph, tc_header, true);
             req_id_1 = RequestId::new(&pus_tc_1);
-            let (addr, mut buf) = tc_guard.free_element(pus_tc_0.len_packed()).unwrap();
+            let (addr, mut buf) = tc_guard.free_element(pus_tc_0.len_written()).unwrap();
             pus_tc_1.write_to_bytes(&mut buf).unwrap();
             tx_tc_1.send(addr).unwrap();
         }

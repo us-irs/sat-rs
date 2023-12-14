@@ -39,7 +39,7 @@
 //!
 //! let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
 //! let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-//! let pus_tc_0 = PusTcCreator::new(&mut sph, tc_header, None, true);
+//! let pus_tc_0 = PusTcCreator::new_no_app_data(&mut sph, tc_header, true);
 //! let init_token = reporter.add_tc(&pus_tc_0);
 //!
 //! // Complete success sequence for a telecommand
