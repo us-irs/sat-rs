@@ -156,7 +156,7 @@ pub mod crossbeam_test {
                     RequestId::from_bytes(&pus_tm.source_data()[0..RequestId::SIZE_AS_BYTES])
                         .expect("reading request ID from PUS TM source data failed");
                 if !verif_map.contains_key(&req_id) {
-                    let content =vec![pus_tm.subservice()];
+                    let content = vec![pus_tm.subservice()];
                     verif_map.insert(req_id, content);
                 } else {
                     let content = verif_map.get_mut(&req_id).unwrap();
