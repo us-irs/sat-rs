@@ -1,4 +1,4 @@
-use core::hash::Hash;
+use core::{cell::RefCell, fmt::Debug, hash::Hash};
 
 use crc::{Crc, CRC_32_CKSUM};
 use hashbrown::HashMap;
@@ -39,8 +39,9 @@ pub enum EntityType {
 /// For the receiving entity, this timer determines the expiry period for incrementing a check
 /// counter after an EOF PDU is received for an incomplete file transfer. This allows out-of-order
 /// reception of file data PDUs and EOF PDUs. Also see 4.6.3.3 of the CFDP standard.
-pub trait CheckTimer {
+pub trait CheckTimer: Debug {
     fn has_expired(&self) -> bool;
+    fn reset(&mut self);
 }
 
 /// A generic trait which allows CFDP entities to create check timers which are required to
@@ -64,6 +65,7 @@ pub trait CheckTimerCreator {
 /// Simple implementation of the [CheckTimerProvider] trait assuming a standard runtime.
 /// It also assumes that a second accuracy of the check timer period is sufficient.
 #[cfg(feature = "std")]
+#[derive(Debug)]
 pub struct StdCheckTimer {
     expiry_time_seconds: u64,
     start_time: std::time::Instant,
@@ -87,6 +89,10 @@ impl CheckTimer for StdCheckTimer {
             return true;
         }
         false
+    }
+
+    fn reset(&mut self) {
+        self.start_time = std::time::Instant::now();
     }
 }
 
@@ -186,7 +192,9 @@ pub trait UserFaultHandler {
 
 pub struct DefaultFaultHandler {
     handler_array: [FaultHandlerCode; 10],
-    user_fault_handler: Box<dyn UserFaultHandler + Send>,
+    // Could also change the user fault handler trait to have non mutable methods, but that limits
+    // flexbility on the user side..
+    user_fault_handler: RefCell<Box<dyn UserFaultHandler + Send>>,
 }
 
 impl DefaultFaultHandler {
@@ -227,7 +235,7 @@ impl DefaultFaultHandler {
             .unwrap()] = FaultHandlerCode::IgnoreError;
         Self {
             handler_array: init_array,
-            user_fault_handler,
+            user_fault_handler: RefCell::new(user_fault_handler),
         }
     }
 
@@ -240,7 +248,7 @@ impl DefaultFaultHandler {
     }
 
     pub fn report_fault(
-        &mut self,
+        &self,
         transaction_id: TransactionId,
         condition: ConditionCode,
         progress: u64,
@@ -250,28 +258,19 @@ impl DefaultFaultHandler {
             return FaultHandlerCode::IgnoreError;
         }
         let fh_code = self.handler_array[array_idx.unwrap()];
+        let mut handler_mut = self.user_fault_handler.borrow_mut();
         match fh_code {
             FaultHandlerCode::NoticeOfCancellation => {
-                self.user_fault_handler.notice_of_cancellation_cb(
-                    transaction_id,
-                    condition,
-                    progress,
-                );
+                handler_mut.notice_of_cancellation_cb(transaction_id, condition, progress);
             }
             FaultHandlerCode::NoticeOfSuspension => {
-                self.user_fault_handler.notice_of_suspension_cb(
-                    transaction_id,
-                    condition,
-                    progress,
-                );
+                handler_mut.notice_of_suspension_cb(transaction_id, condition, progress);
             }
             FaultHandlerCode::IgnoreError => {
-                self.user_fault_handler
-                    .ignore_cb(transaction_id, condition, progress);
+                handler_mut.ignore_cb(transaction_id, condition, progress);
             }
             FaultHandlerCode::AbandonTransaction => {
-                self.user_fault_handler
-                    .abandoned_cb(transaction_id, condition, progress);
+                handler_mut.abandoned_cb(transaction_id, condition, progress);
             }
         }
         fh_code
@@ -347,9 +346,10 @@ pub enum TransactionStep {
     Idle = 0,
     TransactionStart = 1,
     ReceivingFileDataPdus = 2,
-    SendingAckPdu = 3,
-    TransferCompletion = 4,
-    SendingFinishedPdu = 5,
+    ReceivingFileDataPdusWithCheckLimitHandling = 3,
+    SendingAckPdu = 4,
+    TransferCompletion = 5,
+    SendingFinishedPdu = 6,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
