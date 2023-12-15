@@ -621,6 +621,9 @@ impl DestinationHandler {
     }
 
     fn declare_fault(&mut self, condition_code: ConditionCode) -> FaultHandlerCode {
+        // Cache those, because they might be reset when abandoning the transaction.
+        let transaction_id = self.tstate().transaction_id.unwrap();
+        let progress = self.tstate().progress;
         let fh_code = self
             .local_cfg
             .default_fault_handler
@@ -630,19 +633,19 @@ impl DestinationHandler {
                 self.notice_of_cancellation();
             }
             FaultHandlerCode::NoticeOfSuspension => self.notice_of_suspension(),
-            FaultHandlerCode::IgnoreError => todo!(),
-            FaultHandlerCode::AbandonTransaction => todo!(),
+            FaultHandlerCode::IgnoreError => (),
+            FaultHandlerCode::AbandonTransaction => self.abandon_transaction(),
         }
-        let tstate = self.tstate();
-        self.local_cfg.default_fault_handler.report_fault(
-            tstate.transaction_id.unwrap(),
-            condition_code,
-            tstate.progress,
-        )
+        self.local_cfg
+            .default_fault_handler
+            .report_fault(transaction_id, condition_code, progress)
     }
 
     fn notice_of_cancellation(&mut self) {}
     fn notice_of_suspension(&mut self) {}
+    fn abandon_transaction(&mut self) {
+        self.reset();
+    }
 
     fn reset(&mut self) {
         self.step = TransactionStep::Idle;
@@ -670,7 +673,7 @@ mod tests {
     #[allow(unused_imports)]
     use std::println;
 
-    use alloc::{collections::VecDeque, string::String};
+    use alloc::{collections::VecDeque, string::String, vec::Vec};
     use rand::Rng;
     use spacepackets::{
         cfdp::{
@@ -697,7 +700,7 @@ mod tests {
         next_expected_seq_num: u64,
         expected_full_src_name: String,
         expected_full_dest_name: String,
-        expected_file_size: usize,
+        expected_file_size: u64,
     }
 
     impl TestCfdpUser {
@@ -783,7 +786,7 @@ mod tests {
             );
             assert_eq!(md_recvd_params.msgs_to_user.len(), 0);
             assert_eq!(md_recvd_params.source_id, LOCAL_ID.into());
-            assert_eq!(md_recvd_params.file_size as usize, self.expected_file_size);
+            assert_eq!(md_recvd_params.file_size, self.expected_file_size);
         }
 
         fn file_segment_recvd_indication(
@@ -888,6 +891,110 @@ mod tests {
         }
     }
 
+    struct TestClass {
+        handler: DestinationHandler,
+        src_path: PathBuf,
+        dest_path: PathBuf,
+        check_dest_file: bool,
+        check_handler_idle_at_drop: bool,
+        expected_file_size: u64,
+        pdu_header: PduHeader,
+        expected_full_data: Vec<u8>,
+        buf: [u8; 512],
+    }
+
+    impl TestClass {
+        fn new() -> Self {
+            let dest_handler = default_dest_handler();
+            let (src_path, dest_path) = init_full_filenames();
+            assert!(!Path::exists(&dest_path));
+            let handler = Self {
+                handler: dest_handler,
+                src_path,
+                dest_path,
+                check_dest_file: true,
+                check_handler_idle_at_drop: true,
+                expected_file_size: 0,
+                pdu_header: create_pdu_header(UbfU16::new(0)),
+                expected_full_data: Vec::new(),
+                buf: [0; 512],
+            };
+            handler.state_check(State::Idle, TransactionStep::Idle);
+            handler
+        }
+
+        fn test_user_from_cached_paths(&self, expected_file_size: u64) -> TestCfdpUser {
+            TestCfdpUser {
+                next_expected_seq_num: 0,
+                expected_full_src_name: self.src_path.to_string_lossy().into(),
+                expected_full_dest_name: self.dest_path.to_string_lossy().into(),
+                expected_file_size,
+            }
+        }
+
+        fn generic_transfer_init(
+            &mut self,
+            user: &mut impl CfdpUser,
+            file_size: u64,
+        ) -> Result<(), DestError> {
+            self.expected_file_size = file_size;
+            let metadata_pdu = create_metadata_pdu(
+                &self.pdu_header,
+                self.src_path.as_path(),
+                self.dest_path.as_path(),
+                file_size,
+            );
+            let packet_info = create_packet_info(&metadata_pdu, &mut self.buf);
+            self.handler.state_machine(user, Some(&packet_info))
+        }
+
+        fn generic_file_data_insert(
+            &mut self,
+            user: &mut impl CfdpUser,
+            offset: u64,
+            file_data_chunk: &[u8],
+        ) -> Result<(), DestError> {
+            let filedata_pdu =
+                FileDataPdu::new_no_seg_metadata(self.pdu_header, offset, file_data_chunk);
+            filedata_pdu
+                .write_to_bytes(&mut self.buf)
+                .expect("writing file data PDU failed");
+            let packet_info = PacketInfo::new(&self.buf).expect("creating packet info failed");
+            self.handler.state_machine(user, Some(&packet_info))
+        }
+
+        fn generic_eof_no_error(
+            &mut self,
+            user: &mut impl CfdpUser,
+            expected_full_data: Vec<u8>,
+        ) -> Result<(), DestError> {
+            self.expected_full_data = expected_full_data;
+            let eof_pdu = create_no_error_eof(&self.expected_full_data, &self.pdu_header);
+            let packet_info = create_packet_info(&eof_pdu, &mut self.buf);
+            self.handler.state_machine(user, Some(&packet_info))
+        }
+
+        fn state_check(&self, state: State, step: TransactionStep) {
+            assert_eq!(self.handler.state(), state);
+            assert_eq!(self.handler.step(), step);
+        }
+    }
+
+    impl Drop for TestClass {
+        fn drop(&mut self) {
+            if self.check_handler_idle_at_drop {
+                self.state_check(State::Idle, TransactionStep::Idle);
+            }
+            if self.check_dest_file {
+                assert!(Path::exists(&self.dest_path));
+                let read_content = fs::read(&self.dest_path).expect("reading back string failed");
+                assert_eq!(read_content.len() as u64, self.expected_file_size);
+                assert_eq!(read_content, self.expected_full_data);
+                assert!(fs::remove_file(self.dest_path.as_path()).is_ok());
+            }
+        }
+    }
+
     fn init_check(handler: &DestinationHandler) {
         assert_eq!(handler.state(), State::Idle);
         assert_eq!(handler.step(), TransactionStep::Idle);
@@ -932,11 +1039,6 @@ mod tests {
             Box::new(TestCheckTimerCreator::new(2, 2)),
         )
     }
-    #[test]
-    fn test_basic() {
-        let dest_handler = default_dest_handler();
-        init_check(&dest_handler);
-    }
 
     fn create_pdu_header(seq_num: impl Into<UnsignedByteField>) -> PduHeader {
         let mut pdu_conf =
@@ -971,181 +1073,83 @@ mod tests {
     }
 
     fn create_no_error_eof(file_data: &[u8], pdu_header: &PduHeader) -> EofPdu {
-        let mut digest = CRC_32.digest();
-        digest.update(file_data);
-        let crc32 = digest.finalize();
+        let crc32 = if !file_data.is_empty() {
+            let mut digest = CRC_32.digest();
+            digest.update(file_data);
+            digest.finalize()
+        } else {
+            0
+        };
         EofPdu::new_no_error(*pdu_header, crc32, file_data.len() as u64)
     }
 
     #[test]
+    fn test_basic() {
+        default_dest_handler();
+    }
+
+    #[test]
     fn test_empty_file_transfer_not_acked() {
-        let (src_name, dest_name) = init_full_filenames();
-        assert!(!Path::exists(&dest_name));
-        let mut buf: [u8; 512] = [0; 512];
-        let mut test_user = TestCfdpUser {
-            next_expected_seq_num: 0,
-            expected_full_src_name: src_name.to_string_lossy().into(),
-            expected_full_dest_name: dest_name.to_string_lossy().into(),
-            expected_file_size: 0,
-        };
-        // We treat the destination handler like it is a remote entity.
-        let mut dest_handler = default_dest_handler();
-        init_check(&dest_handler);
-
-        let seq_num = UbfU16::new(0);
-        let pdu_header = create_pdu_header(seq_num);
-        let metadata_pdu =
-            create_metadata_pdu(&pdu_header, src_name.as_path(), dest_name.as_path(), 0);
-        let packet_info = create_packet_info(&metadata_pdu, &mut buf);
-        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
-        if let Err(e) = result {
-            panic!("dest handler fsm error: {e}");
-        }
-        assert_ne!(dest_handler.state(), State::Idle);
-        assert_eq!(dest_handler.step(), TransactionStep::ReceivingFileDataPdus);
-
-        let eof_pdu = create_no_error_eof(&[], &pdu_header);
-        let packet_info = create_packet_info(&eof_pdu, &mut buf);
-        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
-        assert!(result.is_ok());
-        assert_eq!(dest_handler.state(), State::Idle);
-        assert_eq!(dest_handler.step(), TransactionStep::Idle);
-        assert!(Path::exists(&dest_name));
-        let read_content = fs::read(&dest_name).expect("reading back string failed");
-        assert_eq!(read_content.len(), 0);
-        assert!(fs::remove_file(dest_name).is_ok());
+        let mut test_obj = TestClass::new();
+        let mut test_user = test_obj.test_user_from_cached_paths(0);
+        test_obj
+            .generic_transfer_init(&mut test_user, 0)
+            .expect("transfer init failed");
+        test_obj.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
+        test_obj
+            .generic_eof_no_error(&mut test_user, Vec::new())
+            .expect("EOF no error insertion failed");
     }
 
     #[test]
     fn test_small_file_transfer_not_acked() {
-        let (src_name, dest_name) = init_full_filenames();
-        assert!(!Path::exists(&dest_name));
         let file_data_str = "Hello World!";
         let file_data = file_data_str.as_bytes();
-        let mut buf: [u8; 512] = [0; 512];
-        let mut test_user = TestCfdpUser {
-            next_expected_seq_num: 0,
-            expected_full_src_name: src_name.to_string_lossy().into(),
-            expected_full_dest_name: dest_name.to_string_lossy().into(),
-            expected_file_size: file_data.len(),
-        };
-        // We treat the destination handler like it is a remote entity.
-        let mut dest_handler = default_dest_handler();
-        init_check(&dest_handler);
+        let file_size = file_data.len() as u64;
 
-        let seq_num = UbfU16::new(0);
-        let pdu_header = create_pdu_header(seq_num);
-        let metadata_pdu = create_metadata_pdu(
-            &pdu_header,
-            src_name.as_path(),
-            dest_name.as_path(),
-            file_data.len() as u64,
-        );
-        let packet_info = create_packet_info(&metadata_pdu, &mut buf);
-        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
-        if let Err(e) = result {
-            panic!("dest handler fsm error: {e}");
-        }
-        assert_ne!(dest_handler.state(), State::Idle);
-        assert_eq!(dest_handler.step(), TransactionStep::ReceivingFileDataPdus);
-
-        let offset = 0;
-        let filedata_pdu = FileDataPdu::new_no_seg_metadata(pdu_header, offset, file_data);
-        filedata_pdu
-            .write_to_bytes(&mut buf)
-            .expect("writing file data PDU failed");
-        let packet_info = PacketInfo::new(&buf).expect("creating packet info failed");
-        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
-        assert!(result.is_ok());
-
-        let eof_pdu = create_no_error_eof(file_data, &pdu_header);
-        let packet_info = create_packet_info(&eof_pdu, &mut buf);
-        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
-        assert!(result.is_ok());
-        assert_eq!(dest_handler.state(), State::Idle);
-        assert_eq!(dest_handler.step(), TransactionStep::Idle);
-
-        assert!(Path::exists(&dest_name));
-        let read_content = fs::read_to_string(&dest_name).expect("reading back string failed");
-        assert_eq!(read_content, file_data_str);
-        assert!(fs::remove_file(dest_name).is_ok());
+        let mut test_obj = TestClass::new();
+        let mut test_user = test_obj.test_user_from_cached_paths(file_size);
+        test_obj
+            .generic_transfer_init(&mut test_user, file_size)
+            .expect("transfer init failed");
+        test_obj.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
+        test_obj
+            .generic_file_data_insert(&mut test_user, 0, file_data)
+            .expect("file data insertion failed");
+        test_obj
+            .generic_eof_no_error(&mut test_user, file_data.to_vec())
+            .expect("EOF no error insertion failed");
     }
 
     #[test]
     fn test_segmented_file_transfer_not_acked() {
-        let (src_name, dest_name) = init_full_filenames();
-        assert!(!Path::exists(&dest_name));
         let mut rng = rand::thread_rng();
         let mut random_data = [0u8; 512];
         rng.fill(&mut random_data);
-        let mut buf: [u8; 512] = [0; 512];
-        let mut test_user = TestCfdpUser {
-            next_expected_seq_num: 0,
-            expected_full_src_name: src_name.to_string_lossy().into(),
-            expected_full_dest_name: dest_name.to_string_lossy().into(),
-            expected_file_size: random_data.len(),
-        };
-
-        // We treat the destination handler like it is a remote entity.
-        let mut dest_handler = default_dest_handler();
-        init_check(&dest_handler);
-
-        let seq_num = UbfU16::new(0);
-        let pdu_header = create_pdu_header(seq_num);
-        let metadata_pdu = create_metadata_pdu(
-            &pdu_header,
-            src_name.as_path(),
-            dest_name.as_path(),
-            random_data.len() as u64,
-        );
-        let packet_info = create_packet_info(&metadata_pdu, &mut buf);
-        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
-        if let Err(e) = result {
-            panic!("dest handler fsm error: {e}");
-        }
-        assert_ne!(dest_handler.state(), State::Idle);
-        assert_eq!(dest_handler.step(), TransactionStep::ReceivingFileDataPdus);
-
-        // First file data PDU
-        let mut offset: usize = 0;
+        let file_size = random_data.len() as u64;
         let segment_len = 256;
-        let filedata_pdu = FileDataPdu::new_no_seg_metadata(
-            pdu_header,
-            offset as u64,
-            &random_data[0..segment_len],
-        );
-        filedata_pdu
-            .write_to_bytes(&mut buf)
-            .expect("writing file data PDU failed");
-        let packet_info = PacketInfo::new(&buf).expect("creating packet info failed");
-        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
-        assert!(result.is_ok());
 
-        // Second file data PDU
-        offset += segment_len;
-        let filedata_pdu = FileDataPdu::new_no_seg_metadata(
-            pdu_header,
-            offset as u64,
-            &random_data[segment_len..],
-        );
-        filedata_pdu
-            .write_to_bytes(&mut buf)
-            .expect("writing file data PDU failed");
-        let packet_info = PacketInfo::new(&buf).expect("creating packet info failed");
-        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
-        assert!(result.is_ok());
-
-        let eof_pdu = create_no_error_eof(&random_data, &pdu_header);
-        let packet_info = create_packet_info(&eof_pdu, &mut buf);
-        let result = dest_handler.state_machine(&mut test_user, Some(&packet_info));
-        assert!(result.is_ok());
-        assert_eq!(dest_handler.state(), State::Idle);
-        assert_eq!(dest_handler.step(), TransactionStep::Idle);
-
-        // Clean up
-        assert!(Path::exists(&dest_name));
-        let read_content = fs::read(&dest_name).expect("reading back string failed");
-        assert_eq!(read_content, random_data);
-        assert!(fs::remove_file(dest_name).is_ok());
+        let mut test_obj = TestClass::new();
+        let mut test_user = test_obj.test_user_from_cached_paths(file_size);
+        test_obj
+            .generic_transfer_init(&mut test_user, file_size)
+            .expect("transfer init failed");
+        test_obj.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
+        test_obj
+            .generic_file_data_insert(&mut test_user, 0, &random_data[0..segment_len])
+            .expect("file data insertion failed");
+        test_obj
+            .generic_file_data_insert(
+                &mut test_user,
+                segment_len as u64,
+                &random_data[segment_len..],
+            )
+            .expect("file data insertion failed");
+        test_obj
+            .generic_eof_no_error(&mut test_user, random_data.to_vec())
+            .expect("EOF no error insertion failed");
     }
+
+    #[test]
+    fn test_check_limit_handling() {}
 }
