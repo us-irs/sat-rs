@@ -423,6 +423,7 @@ impl DestinationHandler {
                 return Ok(false);
             }
             self.start_check_limit_handling();
+            return Ok(false);
         }
         Ok(true)
     }
@@ -668,12 +669,12 @@ impl DestinationHandler {
 
 #[cfg(test)]
 mod tests {
-    use core::cell::Cell;
+    use core::{cell::Cell, sync::atomic::AtomicBool};
     use std::fs;
     #[allow(unused_imports)]
     use std::println;
 
-    use alloc::{collections::VecDeque, string::String, vec::Vec};
+    use alloc::{collections::VecDeque, string::String, sync::Arc, vec::Vec};
     use rand::Rng;
     use spacepackets::{
         cfdp::{
@@ -833,17 +834,12 @@ mod tests {
     #[derive(Debug)]
     struct TestCheckTimer {
         counter: Cell<u32>,
-        expiry_count: u32,
+        expired: Arc<AtomicBool>,
     }
 
     impl CheckTimer for TestCheckTimer {
         fn has_expired(&self) -> bool {
-            let current_counter = self.counter.get();
-            if self.expiry_count == current_counter {
-                return true;
-            }
-            self.counter.set(current_counter + 1);
-            false
+            self.expired.load(core::sync::atomic::Ordering::Relaxed)
         }
         fn reset(&mut self) {
             self.counter.set(0);
@@ -851,28 +847,26 @@ mod tests {
     }
 
     impl TestCheckTimer {
-        pub fn new(expiry_after_x_calls: u32) -> Self {
+        pub fn new(expired_flag: Arc<AtomicBool>) -> Self {
             Self {
                 counter: Cell::new(0),
-                expiry_count: expiry_after_x_calls,
+                expired: expired_flag,
             }
+        }
+
+        fn set_expired(&mut self) {
+            self.expired
+                .store(true, core::sync::atomic::Ordering::Relaxed);
         }
     }
 
     struct TestCheckTimerCreator {
-        expiry_counter_for_source_entity: u32,
-        expiry_counter_for_dest_entity: u32,
+        expired_flag: Arc<AtomicBool>,
     }
 
     impl TestCheckTimerCreator {
-        pub fn new(
-            expiry_counter_for_source_entity: u32,
-            expiry_counter_for_dest_entity: u32,
-        ) -> Self {
-            Self {
-                expiry_counter_for_source_entity,
-                expiry_counter_for_dest_entity,
-            }
+        pub fn new(expired_flag: Arc<AtomicBool>) -> Self {
+            Self { expired_flag }
         }
     }
 
@@ -881,17 +875,14 @@ mod tests {
             &self,
             _local_id: &UnsignedByteField,
             _remote_id: &UnsignedByteField,
-            entity_type: crate::cfdp::EntityType,
+            _entity_type: crate::cfdp::EntityType,
         ) -> Box<dyn CheckTimer> {
-            if entity_type == crate::cfdp::EntityType::Sending {
-                Box::new(TestCheckTimer::new(self.expiry_counter_for_source_entity))
-            } else {
-                Box::new(TestCheckTimer::new(self.expiry_counter_for_dest_entity))
-            }
+            Box::new(TestCheckTimer::new(self.expired_flag.clone()))
         }
     }
 
     struct TestClass {
+        check_timer_expired: Arc<AtomicBool>,
         handler: DestinationHandler,
         src_path: PathBuf,
         dest_path: PathBuf,
@@ -905,10 +896,12 @@ mod tests {
 
     impl TestClass {
         fn new() -> Self {
-            let dest_handler = default_dest_handler();
+            let check_timer_expired = Arc::new(AtomicBool::new(false));
+            let dest_handler = default_dest_handler(check_timer_expired.clone());
             let (src_path, dest_path) = init_full_filenames();
             assert!(!Path::exists(&dest_path));
             let handler = Self {
+                check_timer_expired,
                 handler: dest_handler,
                 src_path,
                 dest_path,
@@ -921,6 +914,11 @@ mod tests {
             };
             handler.state_check(State::Idle, TransactionStep::Idle);
             handler
+        }
+
+        fn set_check_timer_expired(&mut self) {
+            self.check_timer_expired
+                .store(true, core::sync::atomic::Ordering::Relaxed);
         }
 
         fn test_user_from_cached_paths(&self, expected_file_size: u64) -> TestCfdpUser {
@@ -995,11 +993,6 @@ mod tests {
         }
     }
 
-    fn init_check(handler: &DestinationHandler) {
-        assert_eq!(handler.state(), State::Idle);
-        assert_eq!(handler.step(), TransactionStep::Idle);
-    }
-
     fn init_full_filenames() -> (PathBuf, PathBuf) {
         (
             tempfile::TempPath::from_path("/tmp/test.txt").to_path_buf(),
@@ -1025,7 +1018,7 @@ mod tests {
         table
     }
 
-    fn default_dest_handler() -> DestinationHandler {
+    fn default_dest_handler(check_timer_expired: Arc<AtomicBool>) -> DestinationHandler {
         let test_fault_handler = TestFaultHandler::default();
         let local_entity_cfg = LocalEntityConfig {
             id: REMOTE_ID.into(),
@@ -1036,7 +1029,7 @@ mod tests {
             local_entity_cfg,
             Box::<NativeFilestore>::default(),
             Box::new(basic_remote_cfg_table()),
-            Box::new(TestCheckTimerCreator::new(2, 2)),
+            Box::new(TestCheckTimerCreator::new(check_timer_expired)),
         )
     }
 
@@ -1053,7 +1046,12 @@ mod tests {
         dest_name: &'filename Path,
         file_size: u64,
     ) -> MetadataPduCreator<'filename, 'filename, 'static> {
-        let metadata_params = MetadataGenericParams::new(false, ChecksumType::Crc32, file_size);
+        let checksum_type = if file_size == 0 {
+            ChecksumType::NullChecksum
+        } else {
+            ChecksumType::Crc32
+        };
+        let metadata_params = MetadataGenericParams::new(false, checksum_type, file_size);
         MetadataPduCreator::new_no_opts(
             *pdu_header,
             metadata_params,
@@ -1085,7 +1083,7 @@ mod tests {
 
     #[test]
     fn test_basic() {
-        default_dest_handler();
+        default_dest_handler(Arc::default());
     }
 
     #[test]
@@ -1151,5 +1149,28 @@ mod tests {
     }
 
     #[test]
-    fn test_check_limit_handling() {}
+    fn test_check_limit_handling() {
+        let mut rng = rand::thread_rng();
+        let mut random_data = [0u8; 512];
+        rng.fill(&mut random_data);
+        let file_size = random_data.len() as u64;
+        let segment_len = 256;
+
+        let mut test_obj = TestClass::new();
+        let mut test_user = test_obj.test_user_from_cached_paths(file_size);
+        test_obj
+            .generic_transfer_init(&mut test_user, file_size)
+            .expect("transfer init failed");
+        test_obj.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
+        test_obj
+            .generic_file_data_insert(&mut test_user, 0, &random_data[0..segment_len])
+            .expect("file data insertion failed");
+        test_obj
+            .generic_eof_no_error(&mut test_user, random_data.to_vec())
+            .expect("EOF no error insertion failed");
+        test_obj.state_check(
+            State::Busy,
+            TransactionStep::ReceivingFileDataPdusWithCheckLimitHandling,
+        );
+    }
 }
