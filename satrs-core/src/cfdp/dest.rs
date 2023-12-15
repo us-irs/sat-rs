@@ -355,7 +355,10 @@ impl DestinationHandler {
     }
 
     pub fn handle_file_data(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
-        if self.state == State::Idle || self.step != TransactionStep::ReceivingFileDataPdus {
+        if self.state == State::Idle
+            || (self.step != TransactionStep::ReceivingFileDataPdus
+                && self.step != TransactionStep::ReceivingFileDataPdusWithCheckLimitHandling)
+        {
             return Err(DestError::WrongStateForFileDataAndEof);
         }
         let fd_pdu = FileDataPdu::from_bytes(raw_packet)?;
@@ -506,11 +509,11 @@ impl DestinationHandler {
         if self.step == TransactionStep::TransactionStart {
             self.transaction_start(cfdp_user)?;
         }
-        if self.step == TransactionStep::TransferCompletion {
-            self.transfer_completion(cfdp_user)?;
-        }
         if self.step == TransactionStep::ReceivingFileDataPdusWithCheckLimitHandling {
             self.check_limit_handling();
+        }
+        if self.step == TransactionStep::TransferCompletion {
+            self.transfer_completion(cfdp_user)?;
         }
         if self.step == TransactionStep::SendingAckPdu {
             todo!("no support for acknowledged mode yet");
@@ -853,11 +856,6 @@ mod tests {
                 expired: expired_flag,
             }
         }
-
-        fn set_expired(&mut self) {
-            self.expired
-                .store(true, core::sync::atomic::Ordering::Relaxed);
-        }
     }
 
     struct TestCheckTimerCreator {
@@ -1164,7 +1162,7 @@ mod tests {
         test_obj.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
         test_obj
             .generic_file_data_insert(&mut test_user, 0, &random_data[0..segment_len])
-            .expect("file data insertion failed");
+            .expect("file data insertion 0 failed");
         test_obj
             .generic_eof_no_error(&mut test_user, random_data.to_vec())
             .expect("EOF no error insertion failed");
@@ -1172,5 +1170,17 @@ mod tests {
             State::Busy,
             TransactionStep::ReceivingFileDataPdusWithCheckLimitHandling,
         );
+        test_obj
+            .generic_file_data_insert(
+                &mut test_user,
+                segment_len as u64,
+                &random_data[segment_len..],
+            )
+            .expect("file data insertion 1 failed");
+        test_obj.set_check_timer_expired();
+        test_obj
+            .handler
+            .state_machine(&mut test_user, None)
+            .expect("fsm failure");
     }
 }
