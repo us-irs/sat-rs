@@ -20,6 +20,8 @@ extern crate downcast_rs;
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
+#[cfg(feature = "alloc")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub mod cfdp;
 pub mod encoding;
 pub mod error;
