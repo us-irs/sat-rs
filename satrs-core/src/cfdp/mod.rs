@@ -107,6 +107,7 @@ pub struct RemoteEntityConfig {
     pub default_transmission_mode: TransmissionMode,
     pub default_crc_type: ChecksumType,
     pub check_limit: u32,
+    pub disposition_on_cancellation: bool,
 }
 
 impl RemoteEntityConfig {
@@ -128,6 +129,7 @@ impl RemoteEntityConfig {
             default_transmission_mode,
             default_crc_type,
             check_limit: 2,
+            disposition_on_cancellation: false,
         }
     }
 }

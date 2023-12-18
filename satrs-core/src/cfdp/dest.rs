@@ -52,6 +52,12 @@ struct FileProperties {
     dest_path_buf: PathBuf,
 }
 
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+enum CompletionDisposition {
+    Completed = 0,
+    Cancelled = 1,
+}
+
 #[derive(Debug)]
 struct TransferState {
     transaction_id: Option<TransactionId>,
@@ -60,6 +66,7 @@ struct TransferState {
     condition_code: ConditionCode,
     delivery_code: DeliveryCode,
     file_status: FileStatus,
+    completion_disposition: CompletionDisposition,
     checksum: u32,
     current_check_count: u32,
     current_check_timer: Option<Box<dyn CheckTimer>>,
@@ -74,6 +81,7 @@ impl Default for TransferState {
             condition_code: ConditionCode::NoError,
             delivery_code: DeliveryCode::Incomplete,
             file_status: FileStatus::Unreported,
+            completion_disposition: CompletionDisposition::Completed,
             checksum: 0,
             current_check_count: 0,
             current_check_timer: None,
@@ -206,31 +214,13 @@ impl DestinationHandler {
         }
     }
 
-    fn insert_packet(
-        &mut self,
-        cfdp_user: &mut impl CfdpUser,
-        packet_info: &PacketInfo,
-    ) -> Result<(), DestError> {
-        if packet_info.target() != PacketTarget::DestEntity {
-            // Unwrap is okay here, a PacketInfo for a file data PDU should always have the
-            // destination as the target.
-            return Err(DestError::CantProcessPacketType(
-                packet_info.pdu_directive().unwrap(),
-            ));
+    /// Returns [None] if the state machine is IDLE, and the transmission mode of the current
+    /// request otherwise.
+    pub fn current_transmission_mode(&self) -> Option<TransmissionMode> {
+        if self.state == State::Idle {
+            return None;
         }
-        match packet_info.pdu_type {
-            PduType::FileDirective => {
-                if packet_info.pdu_directive.is_none() {
-                    return Err(DestError::DirectiveExpected);
-                }
-                self.handle_file_directive(
-                    cfdp_user,
-                    packet_info.pdu_directive.unwrap(),
-                    packet_info.raw_packet,
-                )
-            }
-            PduType::FileData => self.handle_file_data(cfdp_user, packet_info.raw_packet),
-        }
+        Some(self.tparams.transmission_mode())
     }
 
     pub fn packet_to_send_ready(&self) -> bool {
@@ -281,7 +271,34 @@ impl DestinationHandler {
         Ok(Some((directive, written_size)))
     }
 
-    pub fn handle_file_directive(
+    fn insert_packet(
+        &mut self,
+        cfdp_user: &mut impl CfdpUser,
+        packet_info: &PacketInfo,
+    ) -> Result<(), DestError> {
+        if packet_info.target() != PacketTarget::DestEntity {
+            // Unwrap is okay here, a PacketInfo for a file data PDU should always have the
+            // destination as the target.
+            return Err(DestError::CantProcessPacketType(
+                packet_info.pdu_directive().unwrap(),
+            ));
+        }
+        match packet_info.pdu_type {
+            PduType::FileDirective => {
+                if packet_info.pdu_directive.is_none() {
+                    return Err(DestError::DirectiveExpected);
+                }
+                self.handle_file_directive(
+                    cfdp_user,
+                    packet_info.pdu_directive.unwrap(),
+                    packet_info.raw_packet,
+                )
+            }
+            PduType::FileData => self.handle_file_data(cfdp_user, packet_info.raw_packet),
+        }
+    }
+
+    fn handle_file_directive(
         &mut self,
         cfdp_user: &mut impl CfdpUser,
         pdu_directive: FileDirectiveType,
@@ -305,7 +322,7 @@ impl DestinationHandler {
         Ok(())
     }
 
-    pub fn handle_metadata_pdu(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
+    fn handle_metadata_pdu(&mut self, raw_packet: &[u8]) -> Result<(), DestError> {
         if self.state != State::Idle {
             return Err(DestError::RecvdMetadataButIsBusy);
         }
@@ -354,7 +371,7 @@ impl DestinationHandler {
         Ok(())
     }
 
-    pub fn handle_file_data(
+    fn handle_file_data(
         &mut self,
         user: &mut impl CfdpUser,
         raw_packet: &[u8],
@@ -385,7 +402,7 @@ impl DestinationHandler {
         Ok(())
     }
 
-    pub fn handle_eof_pdu(
+    fn handle_eof_pdu(
         &mut self,
         cfdp_user: &mut impl CfdpUser,
         raw_packet: &[u8],
@@ -616,6 +633,33 @@ impl DestinationHandler {
     }
 
     fn transfer_completion(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
+        self.notice_of_completion(cfdp_user)?;
+        if self.tparams.transmission_mode() == TransmissionMode::Acknowledged
+            || self.tparams.metadata_params().closure_requested
+        {
+            self.prepare_finished_pdu()?;
+            self.step = TransactionStep::SendingFinishedPdu;
+        } else {
+            self.reset();
+        }
+        Ok(())
+    }
+
+    fn notice_of_completion(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
+        if self.tstate().completion_disposition == CompletionDisposition::Completed {
+            // TODO: Execute any filestore requests
+        } else if self
+            .tparams
+            .remote_cfg
+            .as_ref()
+            .unwrap()
+            .disposition_on_cancellation
+            && self.tstate().delivery_code == DeliveryCode::Incomplete
+        {
+            self.vfs
+                .remove_file(self.tparams.file_properties.dest_path_buf.to_str().unwrap())?;
+            self.tstate_mut().file_status = FileStatus::DiscardDeliberately;
+        }
         let tstate = self.tstate();
         let transaction_finished_params = TransactionFinishedParams {
             id: tstate.transaction_id.unwrap(),
@@ -624,15 +668,6 @@ impl DestinationHandler {
             file_status: tstate.file_status,
         };
         cfdp_user.transaction_finished_indication(&transaction_finished_params);
-        // This function should never be called with metadata parameters not set
-        if self.tparams.metadata_params().closure_requested {
-            self.prepare_finished_pdu()?;
-            self.step = TransactionStep::SendingFinishedPdu;
-        } else {
-            self.reset();
-            self.state = State::Idle;
-            self.step = TransactionStep::Idle;
-        }
         Ok(())
     }
 
@@ -646,7 +681,7 @@ impl DestinationHandler {
             .get_fault_handler(condition_code);
         match fh_code {
             FaultHandlerCode::NoticeOfCancellation => {
-                self.notice_of_cancellation();
+                self.notice_of_cancellation(condition_code);
             }
             FaultHandlerCode::NoticeOfSuspension => self.notice_of_suspension(),
             FaultHandlerCode::IgnoreError => (),
@@ -657,7 +692,12 @@ impl DestinationHandler {
             .report_fault(transaction_id, condition_code, progress)
     }
 
-    fn notice_of_cancellation(&mut self) {}
+    fn notice_of_cancellation(&mut self, condition_code: ConditionCode) {
+        self.step = TransactionStep::TransferCompletion;
+        self.tstate_mut().condition_code = condition_code;
+        self.tstate_mut().completion_disposition = CompletionDisposition::Cancelled;
+    }
+
     fn notice_of_suspension(&mut self) {}
     fn abandon_transaction(&mut self) {
         self.reset();
@@ -679,6 +719,10 @@ impl DestinationHandler {
 
     fn tstate(&self) -> &TransferState {
         &self.tparams.tstate
+    }
+
+    fn tstate_mut(&mut self) -> &mut TransferState {
+        &mut self.tparams.tstate
     }
 }
 
@@ -967,6 +1011,7 @@ mod tests {
             handler
         }
 
+        #[allow(dead_code)]
         fn indication_cfg_mut(&mut self) -> &mut IndicationConfig {
             &mut self.handler.local_cfg.indication_cfg
         }
@@ -1004,6 +1049,10 @@ mod tests {
             let packet_info = create_packet_info(&metadata_pdu, &mut self.buf);
             let result = self.handler.state_machine(user, Some(&packet_info));
             assert_eq!(user.metadata_recv_queue.len(), 1);
+            assert_eq!(
+                self.handler.current_transmission_mode().unwrap(),
+                TransmissionMode::Unacknowledged
+            );
             result
         }
 
@@ -1159,7 +1208,8 @@ mod tests {
 
     #[test]
     fn test_basic() {
-        default_dest_handler(Arc::default());
+        let dest_handler = default_dest_handler(Arc::default());
+        assert!(dest_handler.current_transmission_mode().is_none());
     }
 
     #[test]
@@ -1225,7 +1275,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_limit_handling() {
+    fn test_check_limit_handling_transfer_success() {
         let mut rng = rand::thread_rng();
         let mut random_data = [0u8; 512];
         rng.fill(&mut random_data);
@@ -1261,5 +1311,48 @@ mod tests {
             .handler
             .state_machine(&mut test_user, None)
             .expect("fsm failure");
+    }
+
+    #[test]
+    fn test_check_limit_handling_limit_reached() {
+        let mut rng = rand::thread_rng();
+        let mut random_data = [0u8; 512];
+        rng.fill(&mut random_data);
+        let file_size = random_data.len() as u64;
+        let segment_len = 256;
+
+        let mut test_obj = TestClass::new();
+        let mut test_user = test_obj.test_user_from_cached_paths(file_size);
+        test_obj
+            .generic_transfer_init(&mut test_user, file_size)
+            .expect("transfer init failed");
+
+        test_obj.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
+        test_obj
+            .generic_file_data_insert(&mut test_user, 0, &random_data[0..segment_len])
+            .expect("file data insertion 0 failed");
+        test_obj
+            .generic_eof_no_error(&mut test_user, random_data.to_vec())
+            .expect("EOF no error insertion failed");
+        test_obj.state_check(
+            State::Busy,
+            TransactionStep::ReceivingFileDataPdusWithCheckLimitHandling,
+        );
+        test_obj.set_check_timer_expired();
+        test_obj
+            .handler
+            .state_machine(&mut test_user, None)
+            .expect("fsm error");
+        test_obj.state_check(
+            State::Busy,
+            TransactionStep::ReceivingFileDataPdusWithCheckLimitHandling,
+        );
+        test_obj.set_check_timer_expired();
+        test_obj
+            .handler
+            .state_machine(&mut test_user, None)
+            .expect("fsm error");
+        test_obj.state_check(State::Idle, TransactionStep::Idle);
+        test_obj.check_dest_file = false;
     }
 }
