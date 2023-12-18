@@ -26,17 +26,6 @@ use spacepackets::{
 };
 use thiserror::Error;
 
-pub struct DestinationHandler {
-    local_cfg: LocalEntityConfig,
-    step: TransactionStep,
-    state: State,
-    tparams: TransactionParams,
-    packets_to_send_ctx: PacketsToSendContext,
-    vfs: Box<dyn VirtualFilestore>,
-    remote_cfg_table: Box<dyn RemoteEntityConfigProvider>,
-    check_timer_creator: Box<dyn CheckTimerCreator>,
-}
-
 #[derive(Debug, Default)]
 struct PacketsToSendContext {
     packet_available: bool,
@@ -180,6 +169,33 @@ pub enum DestError {
     NoRemoteCfgFound(UnsignedByteField),
 }
 
+/// This is the primary CFDP destination handler. It models the CFDP destination entity, which is
+/// primarily responsible for receiving files sent from another CFDP entity. It performs the
+/// reception side of File Copy Operations.
+
+/// The following core functions are the primary interface for interacting with the destination
+/// handler:
+
+/// 1. [DestinationHandler::state_machine]: Can be used to insert packets into the destination
+///    handler. Please note that the destination handler can also only process Metadata, EOF and
+///    Prompt PDUs in addition to ACK PDUs where the acknowledged PDU is the Finished PDU.
+/// 2. [DestinationHandler::get_next_packet]: Retrieve next packet to be sent back to the remote
+///    CFDP source entity ID.
+
+/// A new file transfer (Metadata PDU reception) is only be accepted if the handler is in the
+/// IDLE state. Furthermore, packet insertion is not allowed until all packets to send were
+/// retrieved after a state machine call.
+pub struct DestinationHandler {
+    local_cfg: LocalEntityConfig,
+    step: TransactionStep,
+    state: State,
+    tparams: TransactionParams,
+    packets_to_send_ctx: PacketsToSendContext,
+    vfs: Box<dyn VirtualFilestore>,
+    remote_cfg_table: Box<dyn RemoteEntityConfigProvider>,
+    check_timer_creator: Box<dyn CheckTimerCreator>,
+}
+
 impl DestinationHandler {
     pub fn new(
         local_cfg: LocalEntityConfig,
@@ -231,7 +247,7 @@ impl DestinationHandler {
         self.packets_to_send_ctx.packet_available
     }
 
-    pub fn get_next_packet_to_send(
+    pub fn get_next_packet(
         &self,
         buf: &mut [u8],
     ) -> Result<Option<(FileDirectiveType, usize)>, DestError> {
