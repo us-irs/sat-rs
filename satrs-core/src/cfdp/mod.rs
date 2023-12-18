@@ -1,3 +1,5 @@
+//! This module contains the implementation of the CFDP high level classes as specified in the
+//! CCSDS 727.0-B-5.
 use core::{cell::RefCell, fmt::Debug, hash::Hash};
 
 use crc::{Crc, CRC_32_CKSUM};
@@ -47,7 +49,7 @@ pub trait CheckTimer: Debug {
 
 /// A generic trait which allows CFDP entities to create check timers which are required to
 /// implement special procedures in unacknowledged transmission mode, as specified in 4.6.3.2
-/// and 4.6.3.3. The [CheckTimerProvider] provides more information about the purpose of the
+/// and 4.6.3.3. The [CheckTimer] documentation provides more information about the purpose of the
 /// check timer.
 ///
 /// This trait also allows the creation of different check timers depending on
@@ -63,7 +65,7 @@ pub trait CheckTimerCreator {
     ) -> Box<dyn CheckTimer>;
 }
 
-/// Simple implementation of the [CheckTimerProvider] trait assuming a standard runtime.
+/// Simple implementation of the [CheckTimerCreator] trait assuming a standard runtime.
 /// It also assumes that a second accuracy of the check timer period is sufficient.
 #[cfg(feature = "std")]
 #[derive(Debug)]
@@ -97,17 +99,76 @@ impl CheckTimer for StdCheckTimer {
     }
 }
 
+/// This structure models the remote entity configuration information as specified in chapter 8.3
+/// of the CFDP standard.
+
+/// Some of the fields which were not considered necessary for the Rust implementation
+/// were omitted. Some other fields which are not contained inside the standard but are considered
+/// necessary for the Rust implementation are included.
+///
+/// ## Notes on Positive Acknowledgment Procedures
+///
+/// The `positive_ack_timer_interval_seconds` and `positive_ack_timer_expiration_limit` will
+/// be used for positive acknowledgement procedures as specified in CFDP chapter 4.7. The sending
+/// entity will start the timer for any PDUs where an acknowledgment is required (e.g. EOF PDU).
+/// Once the expected ACK response has not been received for that interval, as counter will be
+/// incremented and the timer will be reset. Once the counter exceeds the
+/// `positive_ack_timer_expiration_limit`, a Positive ACK Limit Reached fault will be declared.
+///
+/// ## Notes on Deferred Lost Segment Procedures
+///
+/// This procedure will be active if an EOF (No Error) PDU is received in acknowledged mode. After
+/// issuing the NAK sequence which has the whole file scope, a timer will be started. The timer is
+/// reset when missing segments or missing metadata is received. The timer will be deactivated if
+/// all missing data is received. If the timer expires, a new NAK sequence will be issued and a
+/// counter will be incremented, which can lead to a NAK Limit Reached fault being declared.
+///
+/// ## Fields
+///
+/// * `entity_id` - The ID of the remote entity.
+/// * `max_packet_len` - This determines of all PDUs generated for that remote entity in addition
+///    to the `max_file_segment_len` attribute which also determines the size of file data PDUs.
+/// * `max_file_segment_len` The maximum file segment length which determines the maximum size
+///   of file data PDUs in addition to the `max_packet_len` attribute. If this field is set
+///   to None, the maximum file segment length will be derived from the maximum packet length.
+///   If this has some value which is smaller than the segment value derived from
+///   `max_packet_len`, this value will be picked.
+/// * `closure_requested_by_default` - If the closure requested field is not supplied as part of
+///    the Put Request, it will be determined from this field in the remote configuration.
+/// * `crc_on_transmission_by_default` - If the CRC option is not supplied as part of the Put
+///    Request, it will be determined from this field in the remote configuration.
+/// * `default_transmission_mode` - If the transmission mode is not supplied as part of the
+///   Put Request, it will be determined from this field in the remote configuration.
+/// * `disposition_on_cancellation` - Determines whether an incomplete received file is discard on
+///   transaction cancellation. Defaults to False.
+/// * `default_crc_type` - Default checksum type used to calculate for all file transmissions to
+///   this remote entity.
+/// * `check_limit` - This timer determines the expiry period for incrementing a check counter
+///   after an EOF PDU is received for an incomplete file transfer. This allows out-of-order
+///   reception of file data PDUs and EOF PDUs. Also see 4.6.3.3 of the CFDP standard. Defaults to
+///   2, so the check limit timer may expire twice.
+/// * `positive_ack_timer_interval_seconds`- See the notes on the Positive Acknowledgment
+///    Procedures inside the class documentation. Expected as floating point seconds. Defaults to
+///    10 seconds.
+/// * `positive_ack_timer_expiration_limit` - See the notes on the Positive Acknowledgment
+///    Procedures inside the class documentation. Defaults to 2, so the timer may expire twice.
+/// * `immediate_nak_mode` - Specifies whether a NAK sequence should be issued immediately when a
+///    file data gap or lost metadata is detected in the acknowledged mode. Defaults to True.
+/// * `nak_timer_interval_seconds` -  See the notes on the Deferred Lost Segment Procedure inside
+///    the class documentation. Expected as floating point seconds. Defaults to 10 seconds.
+/// * `nak_timer_expiration_limit` - See the notes on the Deferred Lost Segment Procedure inside
+///    the class documentation. Defaults to 2, so the timer may expire two times.
 #[derive(Debug, Copy, Clone)]
 pub struct RemoteEntityConfig {
     pub entity_id: UnsignedByteField,
-    pub max_file_segment_len: usize,
     pub max_packet_len: usize,
+    pub max_file_segment_len: usize,
     pub closure_requested_by_default: bool,
     pub crc_on_transmission_by_default: bool,
     pub default_transmission_mode: TransmissionMode,
+    pub disposition_on_cancellation: bool,
     pub default_crc_type: ChecksumType,
     pub check_limit: u32,
-    pub disposition_on_cancellation: bool,
 }
 
 impl RemoteEntityConfig {
@@ -138,11 +199,11 @@ pub trait RemoteEntityConfigProvider {
     /// Retrieve the remote entity configuration for the given remote ID.
     fn get_remote_config(&self, remote_id: u64) -> Option<&RemoteEntityConfig>;
     fn get_remote_config_mut(&mut self, remote_id: u64) -> Option<&mut RemoteEntityConfig>;
-    /// Add a new remote configuration. Return [True] if the configuration was
-    /// inserted successfully, and [False] if a configuration already exists.
+    /// Add a new remote configuration. Return [true] if the configuration was
+    /// inserted successfully, and [false] if a configuration already exists.
     fn add_config(&mut self, cfg: &RemoteEntityConfig) -> bool;
-    /// Remote a configuration. Returns [True] if the configuration was removed successfully,
-    /// and [False] if no configuration exists for the given remote ID.
+    /// Remote a configuration. Returns [true] if the configuration was removed successfully,
+    /// and [false] if no configuration exists for the given remote ID.
     fn remove_config(&mut self, remote_id: u64) -> bool;
 }
 
@@ -171,8 +232,15 @@ impl RemoteEntityConfigProvider for StdRemoteEntityConfigProvider {
 }
 
 /// This trait introduces some callbacks which will be called when a particular CFDP fault
-/// handler is called. This allows to implement some CFDP features like fault handler logging,
-/// which would not be possible generically otherwise.
+/// handler is called.
+///
+/// It is passed into the CFDP handlers as part of the [DefaultFaultHandler] and the local entity
+/// configuration and provides a way to specify custom user error handlers. This allows to
+/// implement some CFDP features like fault handler logging, which would not be possible
+/// generically otherwise.
+///
+/// For each error reported by the [DefaultFaultHandler], the appropriate fault handler callback
+/// will be called depending on the [FaultHandlerCode].
 pub trait UserFaultHandler {
     fn notice_of_suspension_cb(
         &mut self,
@@ -193,6 +261,26 @@ pub trait UserFaultHandler {
     fn ignore_cb(&mut self, transaction_id: TransactionId, cond: ConditionCode, progress: u64);
 }
 
+/// This structure is used to implement the fault handling as specified in chapter 4.8 of the CFDP
+/// standard.
+///
+/// It does so by mapping each applicable [spacepackets::cfdp::ConditionCode] to a fault handler
+/// which is denoted by the four [spacepackets::cfdp::FaultHandlerCode]s. This code is used
+/// to select the error handling inside the CFDP handler itself in addition to dispatching to a
+/// user-provided callback function provided by the [UserFaultHandler].
+///
+/// Some note on the provided default settings:
+///
+/// - Checksum failures will be ignored by default. This is because for unacknowledged transfers,
+///   cancelling the transfer immediately would interfere with the check limit mechanism specified
+///   in chapter 4.6.3.3.
+/// - Unsupported checksum types will also be ignored by default. Even if the checksum type is
+///   not supported the file transfer might still have worked properly.
+///
+/// For all other faults, the default fault handling operation will be to cancel the transaction.
+/// These defaults can be overriden by using the [Self::set_fault_handler] method.
+/// Please note that in any case, fault handler overrides can be specified by the sending CFDP
+/// entity.
 pub struct DefaultFaultHandler {
     handler_array: [FaultHandlerCode; 10],
     // Could also change the user fault handler trait to have non mutable methods, but that limits
@@ -308,6 +396,8 @@ pub struct LocalEntityConfig {
     pub default_fault_handler: DefaultFaultHandler,
 }
 
+/// The CFDP transaction ID of a CFDP transaction consists of the source entity ID and the sequence
+/// number of that transfer which is also determined by the CFDP source entity.
 #[derive(Debug, Eq, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TransactionId {

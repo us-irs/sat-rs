@@ -155,6 +155,8 @@ pub enum DestError {
     EmptySrcFileField,
     #[error("empty dest file field")]
     EmptyDestFileField,
+    #[error("packets to be sent are still left")]
+    PacketToSendLeft,
     #[error("pdu error {0}")]
     Pdu(#[from] PduError),
     #[error("io error {0}")]
@@ -176,10 +178,12 @@ pub enum DestError {
 /// The following core functions are the primary interface for interacting with the destination
 /// handler:
 
-/// 1. [DestinationHandler::state_machine]: Can be used to insert packets into the destination
-///    handler. Please note that the destination handler can also only process Metadata, EOF and
-///    Prompt PDUs in addition to ACK PDUs where the acknowledged PDU is the Finished PDU.
-/// 2. [DestinationHandler::get_next_packet]: Retrieve next packet to be sent back to the remote
+/// 1. [DestinationHandler::state_machine] - Can be used to insert packets into the destination
+///    handler and/or advance the state machine. Advancing the state machine might generate new
+///    packets to be sent to the remote entity. Please note that the destination handler can also
+///    only process Metadata, EOF and Prompt PDUs in addition to ACK PDUs where the acknowledged
+///    PDU is the Finished PDU.
+/// 2. [DestinationHandler::get_next_packet] - Retrieve next packet to be sent back to the remote
 ///    CFDP source entity ID.
 
 /// A new file transfer (Metadata PDU reception) is only be accepted if the handler is in the
@@ -215,11 +219,23 @@ impl DestinationHandler {
         }
     }
 
+    /// This is the core function to drive the destination handler. It is also used to insert
+    /// packets into the destination handler.
+    ///
+    /// Please note that this function will fail if there are still packets which need to be
+    /// retrieved with [Self::get_next_packet]. After each state machine call, the user has to
+    /// retrieve all packets before calling the state machine again. The state machine should
+    /// either be called if a packet with the appropriate destination ID is received, or
+    /// periodically in IDLE periods to perform all CFDP related tasks, for example checking for
+    /// timeouts or missed file segments.
     pub fn state_machine(
         &mut self,
         cfdp_user: &mut impl CfdpUser,
         packet_to_insert: Option<&PacketInfo>,
     ) -> Result<(), DestError> {
+        if self.packet_to_send_ready() {
+            return Err(DestError::PacketToSendLeft);
+        }
         if let Some(packet) = packet_to_insert {
             self.insert_packet(cfdp_user, packet)?;
         }
