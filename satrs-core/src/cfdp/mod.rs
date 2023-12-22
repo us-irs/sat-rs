@@ -37,8 +37,12 @@ pub enum TimerContext {
         remote_id: UnsignedByteField,
         entity_type: EntityType,
     },
-    NakActivity(f32),
-    PositiveAck(f32),
+    NakActivity {
+        expiry_time_seconds: f32,
+    },
+    PositiveAck {
+        expiry_time_seconds: f32,
+    },
 }
 
 /// Generic abstraction for a check timer which is used by 3 mechanisms of the CFDP protocol.

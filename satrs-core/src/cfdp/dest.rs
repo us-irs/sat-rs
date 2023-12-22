@@ -178,21 +178,17 @@ pub trait CfdpPacketSender: Send {
 /// This is the primary CFDP destination handler. It models the CFDP destination entity, which is
 /// primarily responsible for receiving files sent from another CFDP entity. It performs the
 /// reception side of File Copy Operations.
-
-/// The following core functions are the primary interface for interacting with the destination
-/// handler:
-
-/// 1. [DestinationHandler::state_machine] - Can be used to insert packets into the destination
-///    handler and/or advance the state machine. Advancing the state machine might generate new
-///    packets to be sent to the remote entity. Please note that the destination handler can also
-///    only process Metadata, EOF and Prompt PDUs in addition to ACK PDUs where the acknowledged
-///    PDU is the Finished PDU.
-/// 2. [DestinationHandler::get_next_packet] - Retrieve next packet to be sent back to the remote
-///    CFDP source entity ID.
-
-/// A new file transfer (Metadata PDU reception) is only be accepted if the handler is in the
-/// IDLE state. Furthermore, packet insertion is not allowed until all packets to send were
-/// retrieved after a state machine call.
+///
+/// The [DestinationHandler::state_machine] function is the primary function to drive the
+/// destination handler. It can be used to insert packets into the destination
+/// handler and driving the state machine, which might generate new
+/// packets to be sent to the remote entity. Please note that the destination handler can also
+/// only process Metadata, EOF and Prompt PDUs in addition to ACK PDUs where the acknowledged
+/// PDU is the Finished PDU.
+///
+/// All generated packets are sent via the [CfdpPacketSender] trait, which is implemented by the
+/// user and passed as a constructor parameter. The number of generated packets is returned
+/// by the state machine call.
 pub struct DestinationHandler {
     local_cfg: LocalEntityConfig,
     step: TransactionStep,
@@ -206,6 +202,25 @@ pub struct DestinationHandler {
 }
 
 impl DestinationHandler {
+    /// Constructs a new destination handler.
+    ///
+    /// # Arguments
+    /// * `local_cfg` - The local CFDP entity configuration, consisting of the local entity ID,
+    ///    the indication configuration, and the fault handlers.
+    /// * `max_packet_len` - The maximum expected generated packet size in bytes. Each time a
+    ///    packet is sent, it will be buffered inside an internal buffer. The length of this buffer
+    ///    will be determined by this parameter. This parameter can either be a known upper bound,
+    ///    or it can specifically be determined by the largest packet size parameter of all remote
+    ///    entity configurations in the passed `remote_cfg_table`.
+    /// * `packet_sender` - All generated packets are sent via this abstraction.
+    /// * `vfs` - Virtual filestore implementation to decouple the CFDP implementation from the
+    ///    underlying filestore/filesystem. This allows to use this handler for embedded systems
+    ///    where a standard runtime might not be available.
+    /// * `remote_cfg_table` - A table of all expected remote entities this entity will communicate
+    ///    with. It contains various configuration parameters required for file transfers.
+    /// * `check_timer_creator` - This is used by the CFDP handler to generate timers required
+    ///    by various tasks.
+    /// * ``
     pub fn new(
         local_cfg: LocalEntityConfig,
         max_packet_len: usize,
@@ -230,12 +245,9 @@ impl DestinationHandler {
     /// This is the core function to drive the destination handler. It is also used to insert
     /// packets into the destination handler.
     ///
-    /// Please note that this function will fail if there are still packets which need to be
-    /// retrieved with [Self::get_next_packet]. After each state machine call, the user has to
-    /// retrieve all packets before calling the state machine again. The state machine should
-    /// either be called if a packet with the appropriate destination ID is received, or
-    /// periodically in IDLE periods to perform all CFDP related tasks, for example checking for
-    /// timeouts or missed file segments.
+    /// The state machine should either be called if a packet with the appropriate destination ID
+    /// is received, or periodically in IDLE periods to perform all CFDP related tasks, for example
+    /// checking for timeouts or missed file segments.
     pub fn state_machine(
         &mut self,
         cfdp_user: &mut impl CfdpUser,
