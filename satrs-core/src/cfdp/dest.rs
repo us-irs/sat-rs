@@ -205,6 +205,7 @@ impl DestinationHandler {
     /// Constructs a new destination handler.
     ///
     /// # Arguments
+    ///
     /// * `local_cfg` - The local CFDP entity configuration, consisting of the local entity ID,
     ///    the indication configuration, and the fault handlers.
     /// * `max_packet_len` - The maximum expected generated packet size in bytes. Each time a
@@ -220,7 +221,6 @@ impl DestinationHandler {
     ///    with. It contains various configuration parameters required for file transfers.
     /// * `check_timer_creator` - This is used by the CFDP handler to generate timers required
     ///    by various tasks.
-    /// * ``
     pub fn new(
         local_cfg: LocalEntityConfig,
         max_packet_len: usize,
