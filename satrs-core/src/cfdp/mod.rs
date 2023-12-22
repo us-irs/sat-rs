@@ -31,7 +31,23 @@ pub enum EntityType {
     Receiving,
 }
 
-/// Generic abstraction for a check timer which has different functionality depending on whether
+pub enum TimerContext {
+    CheckLimit {
+        local_id: UnsignedByteField,
+        remote_id: UnsignedByteField,
+        entity_type: EntityType,
+    },
+    NakActivity(f32),
+    PositiveAck(f32),
+}
+
+/// Generic abstraction for a check timer which is used by 3 mechanisms of the CFDP protocol.
+///
+/// ## 1. Check limit handling
+///
+/// The first mechanism is the check limit handling for unacknowledged transfers as specified
+/// in 4.6.3.2 and 4.6.3.3 of the CFDP standard.
+/// For this mechanism, the timer has different functionality depending on whether
 /// the using entity is the sending entity or the receiving entity for the unacknowledged
 /// transmission mode.
 ///
@@ -42,6 +58,18 @@ pub enum EntityType {
 /// For the receiving entity, this timer determines the expiry period for incrementing a check
 /// counter after an EOF PDU is received for an incomplete file transfer. This allows out-of-order
 /// reception of file data PDUs and EOF PDUs. Also see 4.6.3.3 of the CFDP standard.
+///
+/// ## 2. NAK activity limit
+///
+/// The timer will be used to perform the NAK activity check as specified in 4.6.4.7 of the CFDP
+/// standard. The expiration period will be provided by the NAK timer expiration limit of the
+/// remote entity configuration.
+///
+/// ## 3. Positive ACK procedures
+///
+/// The timer will be used to perform the Positive Acknowledgement Procedures as  specified in
+/// 4.7. 1of the CFDP standard. The expiration period will be provided by the Positive ACK timer
+/// interval of the remote entity configuration.
 pub trait CheckTimer: Debug {
     fn has_expired(&self) -> bool;
     fn reset(&mut self);
@@ -50,19 +78,14 @@ pub trait CheckTimer: Debug {
 /// A generic trait which allows CFDP entities to create check timers which are required to
 /// implement special procedures in unacknowledged transmission mode, as specified in 4.6.3.2
 /// and 4.6.3.3. The [CheckTimer] documentation provides more information about the purpose of the
-/// check timer.
+/// check timer in the context of CFDP.
 ///
-/// This trait also allows the creation of different check timers depending on
-/// the ID of the local entity, the ID of the remote entity for a given transaction, and the
-/// type of entity.
+/// This trait also allows the creation of different check timers depending on context and purpose
+/// of the timer, the runtime environment (e.g. standard clock timer vs. timer using a RTC) or
+/// other factors.
 #[cfg(feature = "alloc")]
 pub trait CheckTimerCreator {
-    fn get_check_timer_provider(
-        &self,
-        local_id: &UnsignedByteField,
-        remote_id: &UnsignedByteField,
-        entity_type: EntityType,
-    ) -> Box<dyn CheckTimer>;
+    fn get_check_timer_provider(&self, timer_context: TimerContext) -> Box<dyn CheckTimer>;
 }
 
 /// Simple implementation of the [CheckTimerCreator] trait assuming a standard runtime.

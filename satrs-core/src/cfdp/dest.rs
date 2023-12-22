@@ -6,7 +6,8 @@ use super::{
     filestore::{FilestoreError, VirtualFilestore},
     user::{CfdpUser, FileSegmentRecvdParams, MetadataReceivedParams},
     CheckTimer, CheckTimerCreator, EntityType, LocalEntityConfig, PacketInfo, PacketTarget,
-    RemoteEntityConfig, RemoteEntityConfigProvider, State, TransactionId, TransactionStep,
+    RemoteEntityConfig, RemoteEntityConfigProvider, State, TimerContext, TransactionId,
+    TransactionStep,
 };
 use alloc::boxed::Box;
 use smallvec::SmallVec;
@@ -25,12 +26,6 @@ use spacepackets::{
     util::UnsignedByteField,
 };
 use thiserror::Error;
-
-#[derive(Debug, Default)]
-struct PacketsToSendContext {
-    packet_available: bool,
-    directive: Option<FileDirectiveType>,
-}
 
 #[derive(Debug)]
 struct FileProperties {
@@ -171,6 +166,15 @@ pub enum DestError {
     NoRemoteCfgFound(UnsignedByteField),
 }
 
+pub trait CfdpPacketSender: Send {
+    fn send_pdu(
+        &mut self,
+        pdu_type: PduType,
+        file_directive_type: Option<FileDirectiveType>,
+        raw_pdu: &[u8],
+    ) -> Result<(), PduError>;
+}
+
 /// This is the primary CFDP destination handler. It models the CFDP destination entity, which is
 /// primarily responsible for receiving files sent from another CFDP entity. It performs the
 /// reception side of File Copy Operations.
@@ -194,7 +198,8 @@ pub struct DestinationHandler {
     step: TransactionStep,
     state: State,
     tparams: TransactionParams,
-    packets_to_send_ctx: PacketsToSendContext,
+    packet_buf: alloc::vec::Vec<u8>,
+    packet_sender: Box<dyn CfdpPacketSender>,
     vfs: Box<dyn VirtualFilestore>,
     remote_cfg_table: Box<dyn RemoteEntityConfigProvider>,
     check_timer_creator: Box<dyn CheckTimerCreator>,
@@ -203,6 +208,8 @@ pub struct DestinationHandler {
 impl DestinationHandler {
     pub fn new(
         local_cfg: LocalEntityConfig,
+        max_packet_len: usize,
+        packet_sender: Box<dyn CfdpPacketSender>,
         vfs: Box<dyn VirtualFilestore>,
         remote_cfg_table: Box<dyn RemoteEntityConfigProvider>,
         check_timer_creator: Box<dyn CheckTimerCreator>,
@@ -212,7 +219,8 @@ impl DestinationHandler {
             step: TransactionStep::Idle,
             state: State::Idle,
             tparams: Default::default(),
-            packets_to_send_ctx: Default::default(),
+            packet_buf: alloc::vec![0; max_packet_len],
+            packet_sender,
             vfs,
             remote_cfg_table,
             check_timer_creator,
@@ -232,10 +240,7 @@ impl DestinationHandler {
         &mut self,
         cfdp_user: &mut impl CfdpUser,
         packet_to_insert: Option<&PacketInfo>,
-    ) -> Result<(), DestError> {
-        if self.packet_to_send_ready() {
-            return Err(DestError::PacketToSendLeft);
-        }
+    ) -> Result<u32, DestError> {
         if let Some(packet) = packet_to_insert {
             self.insert_packet(cfdp_user, packet)?;
         }
@@ -257,54 +262,6 @@ impl DestinationHandler {
 
     pub fn transaction_id(&self) -> Option<TransactionId> {
         self.tstate().transaction_id
-    }
-
-    pub fn packet_to_send_ready(&self) -> bool {
-        self.packets_to_send_ctx.packet_available
-    }
-
-    pub fn get_next_packet(
-        &self,
-        buf: &mut [u8],
-    ) -> Result<Option<(FileDirectiveType, usize)>, DestError> {
-        if !self.packet_to_send_ready() {
-            return Ok(None);
-        }
-        let directive = self.packets_to_send_ctx.directive.unwrap();
-        let tstate = self.tstate();
-        let written_size = match directive {
-            FileDirectiveType::FinishedPdu => {
-                let pdu_header = PduHeader::new_no_file_data(self.tparams.pdu_conf, 0);
-                let finished_pdu = if tstate.condition_code == ConditionCode::NoError
-                    || tstate.condition_code == ConditionCode::UnsupportedChecksumType
-                {
-                    FinishedPduCreator::new_default(
-                        pdu_header,
-                        tstate.delivery_code,
-                        tstate.file_status,
-                    )
-                } else {
-                    // TODO: Are there cases where this ID is actually the source entity ID?
-                    let entity_id = EntityIdTlv::new(self.local_cfg.id);
-                    FinishedPduCreator::new_with_error(
-                        pdu_header,
-                        tstate.condition_code,
-                        tstate.delivery_code,
-                        tstate.file_status,
-                        entity_id,
-                    )
-                };
-                finished_pdu.write_to_bytes(buf)?
-            }
-            FileDirectiveType::AckPdu => todo!(),
-            FileDirectiveType::NakPdu => todo!(),
-            FileDirectiveType::KeepAlivePdu => todo!(),
-            _ => {
-                // This should never happen and is considered an internal impl error
-                panic!("invalid file directive {directive:?} for dest handler send packet");
-            }
-        };
-        Ok(Some((directive, written_size)))
     }
 
     fn insert_packet(
@@ -532,12 +489,14 @@ impl DestinationHandler {
 
     fn start_check_limit_handling(&mut self) {
         self.step = TransactionStep::ReceivingFileDataPdusWithCheckLimitHandling;
-        self.tparams.tstate.current_check_timer =
-            Some(self.check_timer_creator.get_check_timer_provider(
-                &self.local_cfg.id,
-                &self.tparams.remote_cfg.unwrap().entity_id,
-                EntityType::Receiving,
-            ));
+        self.tparams.tstate.current_check_timer = Some(
+            self.check_timer_creator
+                .get_check_timer_provider(TimerContext::CheckLimit {
+                    local_id: self.local_cfg.id,
+                    remote_id: self.tparams.remote_cfg.unwrap().entity_id,
+                    entity_type: EntityType::Receiving,
+                }),
+        );
         self.tparams.tstate.current_check_count = 0;
     }
 
@@ -571,7 +530,8 @@ impl DestinationHandler {
         todo!();
     }
 
-    fn fsm_busy(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
+    fn fsm_busy(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<u32, DestError> {
+        let mut sent_packets = 0;
         if self.step == TransactionStep::TransactionStart {
             self.transaction_start(cfdp_user)?;
         }
@@ -579,7 +539,7 @@ impl DestinationHandler {
             self.check_limit_handling();
         }
         if self.step == TransactionStep::TransferCompletion {
-            self.transfer_completion(cfdp_user)?;
+            sent_packets += self.transfer_completion(cfdp_user)?;
         }
         if self.step == TransactionStep::SendingAckPdu {
             todo!("no support for acknowledged mode yet");
@@ -587,7 +547,7 @@ impl DestinationHandler {
         if self.step == TransactionStep::SendingFinishedPdu {
             self.reset();
         }
-        Ok(())
+        Ok(sent_packets)
     }
 
     /// Get the step, which denotes the exact step of a pending CFDP transaction when applicable.
@@ -669,17 +629,18 @@ impl DestinationHandler {
         Ok(())
     }
 
-    fn transfer_completion(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
+    fn transfer_completion(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<u32, DestError> {
+        let mut sent_packets = 0;
         self.notice_of_completion(cfdp_user)?;
         if self.tparams.transmission_mode() == TransmissionMode::Acknowledged
             || self.tparams.metadata_params().closure_requested
         {
-            self.prepare_finished_pdu()?;
+            sent_packets += self.send_finished_pdu()?;
             self.step = TransactionStep::SendingFinishedPdu;
         } else {
             self.reset();
         }
-        Ok(())
+        Ok(sent_packets)
     }
 
     fn notice_of_completion(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<(), DestError> {
@@ -745,15 +706,36 @@ impl DestinationHandler {
     fn reset(&mut self) {
         self.step = TransactionStep::Idle;
         self.state = State::Idle;
-        self.packets_to_send_ctx.packet_available = false;
+        // self.packets_to_send_ctx.packet_available = false;
         self.tparams.reset();
     }
 
-    fn prepare_finished_pdu(&mut self) -> Result<(), DestError> {
-        self.packets_to_send_ctx.packet_available = true;
-        self.packets_to_send_ctx.directive = Some(FileDirectiveType::FinishedPdu);
-        self.step = TransactionStep::SendingFinishedPdu;
-        Ok(())
+    fn send_finished_pdu(&mut self) -> Result<u32, DestError> {
+        let tstate = self.tstate();
+
+        let pdu_header = PduHeader::new_no_file_data(self.tparams.pdu_conf, 0);
+        let finished_pdu = if tstate.condition_code == ConditionCode::NoError
+            || tstate.condition_code == ConditionCode::UnsupportedChecksumType
+        {
+            FinishedPduCreator::new_default(pdu_header, tstate.delivery_code, tstate.file_status)
+        } else {
+            // TODO: Are there cases where this ID is actually the source entity ID?
+            let entity_id = EntityIdTlv::new(self.local_cfg.id);
+            FinishedPduCreator::new_with_error(
+                pdu_header,
+                tstate.condition_code,
+                tstate.delivery_code,
+                tstate.file_status,
+                entity_id,
+            )
+        };
+        finished_pdu.write_to_bytes(&mut self.packet_buf)?;
+        self.packet_sender.send_pdu(
+            finished_pdu.pdu_type(),
+            finished_pdu.file_directive_type(),
+            &self.packet_buf[0..finished_pdu.len_written()],
+        )?;
+        Ok(1)
     }
 
     fn tstate(&self) -> &TransferState {
@@ -800,6 +782,27 @@ mod tests {
         pub length: usize,
     }
 
+    type SharedPduPacketQueue = Arc<Mutex<VecDeque<(PduType, Option<FileDirectiveType>, Vec<u8>)>>>;
+    #[derive(Default, Clone)]
+    struct TestCfdpSender {
+        packet_queue: SharedPduPacketQueue,
+    }
+
+    impl CfdpPacketSender for TestCfdpSender {
+        fn send_pdu(
+            &mut self,
+            pdu_type: PduType,
+            file_directive_type: Option<FileDirectiveType>,
+            raw_pdu: &[u8],
+        ) -> Result<(), PduError> {
+            self.packet_queue.lock().unwrap().push_back((
+                pdu_type,
+                file_directive_type,
+                raw_pdu.to_vec(),
+            ));
+            Ok(())
+        }
+    }
     #[derive(Default)]
     struct TestCfdpUser {
         next_expected_seq_num: u64,
@@ -1025,28 +1028,33 @@ mod tests {
     }
 
     struct TestCheckTimerCreator {
-        expired_flag: Arc<AtomicBool>,
+        check_limit_expired_flag: Arc<AtomicBool>,
     }
 
     impl TestCheckTimerCreator {
         pub fn new(expired_flag: Arc<AtomicBool>) -> Self {
-            Self { expired_flag }
+            Self {
+                check_limit_expired_flag: expired_flag,
+            }
         }
     }
 
     impl CheckTimerCreator for TestCheckTimerCreator {
-        fn get_check_timer_provider(
-            &self,
-            _local_id: &UnsignedByteField,
-            _remote_id: &UnsignedByteField,
-            _entity_type: crate::cfdp::EntityType,
-        ) -> Box<dyn CheckTimer> {
-            Box::new(TestCheckTimer::new(self.expired_flag.clone()))
+        fn get_check_timer_provider(&self, timer_context: TimerContext) -> Box<dyn CheckTimer> {
+            match timer_context {
+                TimerContext::CheckLimit { .. } => {
+                    Box::new(TestCheckTimer::new(self.check_limit_expired_flag.clone()))
+                }
+                _ => {
+                    panic!("invalid check timer creator, can only be used for check limit handling")
+                }
+            }
         }
     }
 
     struct DestHandlerTester {
         check_timer_expired: Arc<AtomicBool>,
+        test_sender: TestCfdpSender,
         handler: DestinationHandler,
         src_path: PathBuf,
         dest_path: PathBuf,
@@ -1061,11 +1069,17 @@ mod tests {
     impl DestHandlerTester {
         fn new(fault_handler: TestFaultHandler) -> Self {
             let check_timer_expired = Arc::new(AtomicBool::new(false));
-            let dest_handler = default_dest_handler(fault_handler, check_timer_expired.clone());
+            let test_sender = TestCfdpSender::default();
+            let dest_handler = default_dest_handler(
+                fault_handler,
+                test_sender.clone(),
+                check_timer_expired.clone(),
+            );
             let (src_path, dest_path) = init_full_filenames();
             assert!(!Path::exists(&dest_path));
             let handler = Self {
                 check_timer_expired,
+                test_sender,
                 handler: dest_handler,
                 src_path,
                 dest_path,
@@ -1134,7 +1148,7 @@ mod tests {
             user: &mut TestCfdpUser,
             offset: u64,
             file_data_chunk: &[u8],
-        ) -> Result<(), DestError> {
+        ) -> Result<u32, DestError> {
             let filedata_pdu =
                 FileDataPdu::new_no_seg_metadata(self.pdu_header, offset, file_data_chunk);
             filedata_pdu
@@ -1157,7 +1171,7 @@ mod tests {
             &mut self,
             user: &mut TestCfdpUser,
             expected_full_data: Vec<u8>,
-        ) -> Result<(), DestError> {
+        ) -> Result<u32, DestError> {
             self.expected_full_data = expected_full_data;
             let eof_pdu = create_no_error_eof(&self.expected_full_data, &self.pdu_header);
             let packet_info = create_packet_info(&eof_pdu, &mut self.buf);
@@ -1218,6 +1232,7 @@ mod tests {
 
     fn default_dest_handler(
         test_fault_handler: TestFaultHandler,
+        test_packet_sender: TestCfdpSender,
         check_timer_expired: Arc<AtomicBool>,
     ) -> DestinationHandler {
         let local_entity_cfg = LocalEntityConfig {
@@ -1227,6 +1242,8 @@ mod tests {
         };
         DestinationHandler::new(
             local_entity_cfg,
+            2048,
+            Box::new(test_packet_sender),
             Box::<NativeFilestore>::default(),
             Box::new(basic_remote_cfg_table()),
             Box::new(TestCheckTimerCreator::new(check_timer_expired)),
@@ -1284,7 +1301,8 @@ mod tests {
     #[test]
     fn test_basic() {
         let fault_handler = TestFaultHandler::default();
-        let dest_handler = default_dest_handler(fault_handler.clone(), Arc::default());
+        let test_sender = TestCfdpSender::default();
+        let dest_handler = default_dest_handler(fault_handler.clone(), test_sender, Arc::default());
         assert!(dest_handler.transmission_mode().is_none());
         assert!(fault_handler.all_queues_empty());
     }
