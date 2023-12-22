@@ -166,9 +166,14 @@ pub struct RemoteEntityConfig {
     pub closure_requested_by_default: bool,
     pub crc_on_transmission_by_default: bool,
     pub default_transmission_mode: TransmissionMode,
-    pub disposition_on_cancellation: bool,
     pub default_crc_type: ChecksumType,
+    pub positive_ack_timer_interval_seconds: f32,
+    pub positive_ack_timer_expiration_limit: u32,
     pub check_limit: u32,
+    pub disposition_on_cancellation: bool,
+    pub immediate_nak_mode: bool,
+    pub nak_timer_interval_seconds: f32,
+    pub nak_timer_expiration_limit: u32,
 }
 
 impl RemoteEntityConfig {
@@ -190,7 +195,12 @@ impl RemoteEntityConfig {
             default_transmission_mode,
             default_crc_type,
             check_limit: 2,
+            positive_ack_timer_interval_seconds: 10.0,
+            positive_ack_timer_expiration_limit: 2,
             disposition_on_cancellation: false,
+            immediate_nak_mode: true,
+            nak_timer_interval_seconds: 10.0,
+            nak_timer_expiration_limit: 2,
         }
     }
 }
