@@ -21,7 +21,7 @@ use spacepackets::{
             CfdpPdu, CommonPduConfig, FileDirectiveType, PduError, PduHeader, WritablePduPacket,
         },
         tlv::{msg_to_user::MsgToUserTlv, EntityIdTlv, GenericTlv, TlvType},
-        ConditionCode, FaultHandlerCode, PduType, TransmissionMode,
+        ChecksumType, ConditionCode, FaultHandlerCode, PduType, TransmissionMode,
     },
     util::UnsignedByteField,
 };
@@ -47,6 +47,7 @@ struct TransferState {
     transaction_id: Option<TransactionId>,
     metadata_params: MetadataGenericParams,
     progress: u64,
+    metadata_only: bool,
     condition_code: ConditionCode,
     delivery_code: DeliveryCode,
     file_status: FileStatus,
@@ -62,6 +63,7 @@ impl Default for TransferState {
             transaction_id: None,
             metadata_params: Default::default(),
             progress: Default::default(),
+            metadata_only: false,
             condition_code: ConditionCode::NoError,
             delivery_code: DeliveryCode::Incomplete,
             file_status: FileStatus::Unreported,
@@ -344,21 +346,29 @@ impl DestinationHandler {
 
         // TODO: Support for metadata only PDUs.
         let src_name = metadata_pdu.src_file_name();
-        if src_name.is_empty() {
+        let dest_name = metadata_pdu.dest_file_name();
+        if src_name.is_empty() && dest_name.is_empty() {
+            self.tparams.tstate.metadata_only = true;
+        }
+        if !self.tparams.tstate.metadata_only && src_name.is_empty() {
             return Err(DestError::EmptySrcFileField);
         }
-        self.tparams.file_properties.src_file_name[..src_name.len_value()]
-            .copy_from_slice(src_name.value());
-        self.tparams.file_properties.src_file_name_len = src_name.len_value();
-        let dest_name = metadata_pdu.dest_file_name();
-        if dest_name.is_empty() {
+        if !self.tparams.tstate.metadata_only && dest_name.is_empty() {
             return Err(DestError::EmptyDestFileField);
         }
-        self.tparams.file_properties.dest_file_name[..dest_name.len_value()]
-            .copy_from_slice(dest_name.value());
-        self.tparams.file_properties.dest_file_name_len = dest_name.len_value();
-        self.tparams.pdu_conf = *metadata_pdu.pdu_header().common_pdu_conf();
-        self.tparams.msgs_to_user_size = 0;
+        if !self.tparams.tstate.metadata_only {
+            self.tparams.file_properties.src_file_name[..src_name.len_value()]
+                .copy_from_slice(src_name.value());
+            self.tparams.file_properties.src_file_name_len = src_name.len_value();
+            if dest_name.is_empty() {
+                return Err(DestError::EmptyDestFileField);
+            }
+            self.tparams.file_properties.dest_file_name[..dest_name.len_value()]
+                .copy_from_slice(dest_name.value());
+            self.tparams.file_properties.dest_file_name_len = dest_name.len_value();
+            self.tparams.pdu_conf = *metadata_pdu.pdu_header().common_pdu_conf();
+            self.tparams.msgs_to_user_size = 0;
+        }
         if !metadata_pdu.options().is_empty() {
             for option_tlv in metadata_pdu.options_iter().unwrap() {
                 if option_tlv.is_standard_tlv()
@@ -476,27 +486,38 @@ impl DestinationHandler {
     }
 
     fn checksum_verify(&mut self, checksum: u32) -> bool {
-        match self.vfs.checksum_verify(
-            self.tparams.file_properties.dest_path_buf.to_str().unwrap(),
-            self.tparams.metadata_params().checksum_type,
-            checksum,
-            &mut self.tparams.cksum_buf,
-        ) {
-            Ok(checksum_success) => checksum_success,
-            Err(e) => match e {
-                FilestoreError::ChecksumTypeNotImplemented(_) => {
-                    self.declare_fault(ConditionCode::UnsupportedChecksumType);
-                    // For this case, the applicable algorithm shall the the null checksum, which
-                    // is always succesful.
-                    true
+        let mut file_delivery_complete = false;
+        if self.tparams.metadata_params().checksum_type == ChecksumType::NullChecksum
+            || self.tparams.tstate.metadata_only
+        {
+            file_delivery_complete = true;
+            self.tparams.tstate.delivery_code = DeliveryCode::Complete;
+            self.tparams.tstate.condition_code = ConditionCode::NoError;
+        } else {
+            match self.vfs.checksum_verify(
+                self.tparams.file_properties.dest_path_buf.to_str().unwrap(),
+                self.tparams.metadata_params().checksum_type,
+                checksum,
+                &mut self.tparams.cksum_buf,
+            ) {
+                Ok(checksum_success) => {
+                    file_delivery_complete = checksum_success;
                 }
-                _ => {
-                    self.declare_fault(ConditionCode::FilestoreRejection);
-                    // Treat this equivalent to a failed checksum procedure.
-                    false
-                }
-            },
+                Err(e) => match e {
+                    FilestoreError::ChecksumTypeNotImplemented(_) => {
+                        self.declare_fault(ConditionCode::UnsupportedChecksumType);
+                        // For this case, the applicable algorithm shall be the the null checksum,
+                        // which is always succesful.
+                        file_delivery_complete = true;
+                    }
+                    _ => {
+                        self.declare_fault(ConditionCode::FilestoreRejection);
+                        // Treat this equivalent to a failed checksum procedure.
+                    }
+                },
+            };
         }
+        file_delivery_complete
     }
 
     fn start_check_limit_handling(&mut self) {
@@ -771,7 +792,7 @@ mod tests {
     use spacepackets::{
         cfdp::{
             lv::Lv,
-            pdu::{metadata::MetadataPduCreator, WritablePduPacket},
+            pdu::{finished::FinishedPduReader, metadata::MetadataPduCreator, WritablePduPacket},
             ChecksumType, TransmissionMode,
         },
         util::{UbfU16, UnsignedByteFieldU16},
@@ -794,7 +815,12 @@ mod tests {
         pub length: usize,
     }
 
-    type SharedPduPacketQueue = Arc<Mutex<VecDeque<(PduType, Option<FileDirectiveType>, Vec<u8>)>>>;
+    struct SentPdu {
+        pdu_type: PduType,
+        file_directive_type: Option<FileDirectiveType>,
+        raw_pdu: Vec<u8>,
+    }
+    type SharedPduPacketQueue = Arc<Mutex<VecDeque<SentPdu>>>;
     #[derive(Default, Clone)]
     struct TestCfdpSender {
         packet_queue: SharedPduPacketQueue,
@@ -807,16 +833,19 @@ mod tests {
             file_directive_type: Option<FileDirectiveType>,
             raw_pdu: &[u8],
         ) -> Result<(), PduError> {
-            self.packet_queue.lock().unwrap().push_back((
+            self.packet_queue.lock().unwrap().push_back(SentPdu {
                 pdu_type,
                 file_directive_type,
-                raw_pdu.to_vec(),
-            ));
+                raw_pdu: raw_pdu.to_vec(),
+            });
             Ok(())
         }
     }
 
     impl TestCfdpSender {
+        pub fn retrieve_next_pdu(&self) -> Option<SentPdu> {
+            self.packet_queue.lock().unwrap().pop_front()
+        }
         pub fn queue_empty(&self) -> bool {
             self.packet_queue.lock().unwrap().is_empty()
         }
@@ -1153,7 +1182,7 @@ mod tests {
                 self.src_path.as_path(),
                 self.dest_path.as_path(),
                 file_size,
-                self.closure_requested
+                self.closure_requested,
             );
             let packet_info = create_packet_info(&metadata_pdu, &mut self.buf);
             self.handler.state_machine(user, Some(&packet_info))?;
@@ -1284,14 +1313,15 @@ mod tests {
         src_name: &'filename Path,
         dest_name: &'filename Path,
         file_size: u64,
-        closure_requested: bool
+        closure_requested: bool,
     ) -> MetadataPduCreator<'filename, 'filename, 'static> {
         let checksum_type = if file_size == 0 {
             ChecksumType::NullChecksum
         } else {
             ChecksumType::Crc32
         };
-        let metadata_params = MetadataGenericParams::new(closure_requested, checksum_type, file_size);
+        let metadata_params =
+            MetadataGenericParams::new(closure_requested, checksum_type, file_size);
         MetadataPduCreator::new_no_opts(
             *pdu_header,
             metadata_params,
@@ -1528,6 +1558,20 @@ mod tests {
         assert!(fs::remove_file(test_obj.dest_path().as_path()).is_ok());
     }
 
+    fn check_finished_pdu_success(sent_pdu: &SentPdu) {
+        assert_eq!(sent_pdu.pdu_type, PduType::FileDirective);
+        assert_eq!(
+            sent_pdu.file_directive_type,
+            Some(FileDirectiveType::FinishedPdu)
+        );
+        let finished_pdu = FinishedPduReader::from_bytes(&sent_pdu.raw_pdu).unwrap();
+        assert_eq!(finished_pdu.file_status(), FileStatus::Retained);
+        assert_eq!(finished_pdu.condition_code(), ConditionCode::NoError);
+        assert_eq!(finished_pdu.delivery_code(), DeliveryCode::Complete);
+        assert!(finished_pdu.fault_location().is_none());
+        assert_eq!(finished_pdu.fs_responses_raw(), &[]);
+    }
+
     #[test]
     fn test_file_transfer_with_closure() {
         let fault_handler = TestFaultHandler::default();
@@ -1537,11 +1581,15 @@ mod tests {
             .generic_transfer_init(&mut test_user, 0)
             .expect("transfer init failed");
         test_obj.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
-        test_obj
+        let sent_packets = test_obj
             .generic_eof_no_error(&mut test_user, Vec::new())
             .expect("EOF no error insertion failed");
+        assert_eq!(sent_packets, 1);
         assert!(fault_handler.all_queues_empty());
+        // The Finished PDU was sent, so the state machine is done.
         test_obj.state_check(State::Idle, TransactionStep::Idle);
-        // assert!(!test_obj.pdu_sender.queue_empty());
+        assert!(!test_obj.pdu_sender.queue_empty());
+        let sent_pdu = test_obj.pdu_sender.retrieve_next_pdu().unwrap();
+        check_finished_pdu_success(&sent_pdu);
     }
 }
