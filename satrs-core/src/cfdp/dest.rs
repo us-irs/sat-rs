@@ -1592,4 +1592,9 @@ mod tests {
         let sent_pdu = test_obj.pdu_sender.retrieve_next_pdu().unwrap();
         check_finished_pdu_success(&sent_pdu);
     }
+
+    #[test]
+    fn test_file_transfer_with_closure_check_limit_reached() {
+        // TODO: Implement test.
+    }
 }
