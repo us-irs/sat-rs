@@ -39,7 +39,7 @@
 //!
 //! let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
 //! let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-//! let pus_tc_0 = PusTcCreator::new(&mut sph, tc_header, None, true);
+//! let pus_tc_0 = PusTcCreator::new_no_app_data(&mut sph, tc_header, true);
 //! let init_token = reporter.add_tc(&pus_tc_0);
 //!
 //! // Complete success sequence for a telecommand
@@ -87,7 +87,7 @@ use delegate::delegate;
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::tc::IsPusTelecommand;
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
-use spacepackets::ecss::{EcssEnumeration, PusError, SerializablePusPacket};
+use spacepackets::ecss::{EcssEnumeration, PusError, WritablePusPacket};
 use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
 use spacepackets::{SpHeader, MAX_APID};
 
@@ -353,7 +353,7 @@ impl<'src_data, State, SuccessOrFailure> VerificationSendable<'src_data, State, 
     }
 
     pub fn len_packed(&self) -> usize {
-        self.pus_tm.as_ref().unwrap().len_packed()
+        self.pus_tm.as_ref().unwrap().len_written()
     }
 
     pub fn pus_tm(&self) -> &PusTmCreator<'src_data> {
@@ -877,7 +877,7 @@ impl VerificationReporterCore {
         PusTmCreator::new(
             sp_header,
             tm_sec_header,
-            Some(&src_data_buf[0..source_data_len]),
+            &src_data_buf[0..source_data_len],
             true,
         )
     }
@@ -1438,6 +1438,7 @@ mod tests {
     fn base_tc_init(app_data: Option<&[u8]>) -> (PusTcCreator, RequestId) {
         let mut sph = SpHeader::tc_unseg(TEST_APID, 0x34, 0).unwrap();
         let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let app_data = app_data.unwrap_or(&[]);
         let pus_tc = PusTcCreator::new(&mut sph, tc_header, app_data, true);
         let req_id = RequestId::new(&pus_tc);
         (pus_tc, req_id)
@@ -2162,7 +2163,7 @@ mod tests {
 
         let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
         let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-        let pus_tc_0 = PusTcCreator::new(&mut sph, tc_header, None, true);
+        let pus_tc_0 = PusTcCreator::new_no_app_data(&mut sph, tc_header, true);
         let init_token = reporter.add_tc(&pus_tc_0);
 
         // Complete success sequence for a telecommand

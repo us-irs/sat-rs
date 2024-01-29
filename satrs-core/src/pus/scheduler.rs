@@ -626,7 +626,7 @@ mod tests {
     use crate::pool::{LocalPool, PoolCfg, PoolProvider, StoreAddr, StoreError};
     use alloc::collections::btree_map::Range;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
-    use spacepackets::ecss::SerializablePusPacket;
+    use spacepackets::ecss::WritablePusPacket;
     use spacepackets::time::{cds, TimeWriter, UnixTimestamp};
     use spacepackets::SpHeader;
     use std::time::Duration;
@@ -857,7 +857,7 @@ mod tests {
         let mut sp_header = SpHeader::tc_unseg(apid_to_set, 105, 0).unwrap();
         let mut sec_header = PusTcSecondaryHeader::new_simple(17, 1);
         sec_header.source_id = src_id_to_set;
-        let ping_tc = PusTcCreator::new(&mut sp_header, sec_header, None, true);
+        let ping_tc = PusTcCreator::new_no_app_data(&mut sp_header, sec_header, true);
         let req_id = RequestId::from_tc(&ping_tc);
         assert_eq!(req_id.source_id(), src_id_to_set);
         assert_eq!(req_id.apid(), apid_to_set);
