@@ -14,7 +14,7 @@ from spacepackets.ccsds.time import CdsShortTimestamp
 from tmtccmd import CcsdsTmtcBackend, TcHandlerBase, ProcedureParamsWrapper
 from tmtccmd.core.base import BackendRequest
 from tmtccmd.pus import VerificationWrapper
-from tmtccmd.tm import CcsdsTmHandler, SpecificApidHandlerBase
+from tmtccmd.tmtc import CcsdsTmHandler, SpecificApidHandlerBase
 from tmtccmd.com import ComInterface
 from tmtccmd.config import (
     default_json_path,
@@ -30,7 +30,7 @@ from tmtccmd.logging.pus import (
     RawTmtcTimedLogWrapper,
     TimedLogWhen,
 )
-from tmtccmd.tc import (
+from tmtccmd.tmtc import (
     TcQueueEntryType,
     ProcedureWrapper,
     TcProcedureType,
@@ -45,7 +45,7 @@ from tmtccmd.util.obj_id import ObjectIdDictT
 
 import pus_tc
 import tc_definitions
-from common import EXAMPLE_PUS_APID, EventU32
+from common import EXAMPLE_PUS_APID, TM_PACKET_IDS, EventU32
 
 _LOGGER = logging.getLogger()
 
@@ -63,7 +63,7 @@ class SatRsConfigHook(HookBase):
         cfg = create_com_interface_cfg_default(
             com_if_key=com_if_key,
             json_cfg_path=self.cfg_path,
-            space_packet_ids=None,
+            space_packet_ids=TM_PACKET_IDS,
         )
         return create_com_interface_default(cfg)
 
@@ -128,6 +128,7 @@ class PusHandler(SpecificApidHandlerBase):
                 if len(pus_tm.source_data) < 8:
                     raise ValueError("No addressable ID in HK packet")
                 json_str = pus_tm.source_data[8:]
+                _LOGGER.info(json_str)
             dedicated_handler = True
         if service == 5:
             tm_packet = PusTelemetry.unpack(

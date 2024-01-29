@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use alloc::vec;
 use cobs::encode;
 use delegate::delegate;
@@ -29,7 +28,6 @@ impl<TmError, TcError: 'static> TcpTcParser<TmError, TcError> for CobsTcParser {
         current_write_idx: usize,
         next_write_idx: &mut usize,
     ) -> Result<(), TcpTmtcError<TmError, TcError>> {
-        // Reader vec full, need to parse for packets.
         conn_result.num_received_tcs += parse_buffer_for_cobs_encoded_packets(
             &mut tc_buffer[..current_write_idx],
             tc_receiver.upcast_mut(),
@@ -111,11 +109,23 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
 ///
 /// The [TCP integration tests](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-core/tests/tcp_servers.rs)
 /// test also serves as the example application for this module.
-pub struct TcpTmtcInCobsServer<TmError, TcError: 'static> {
-    generic_server: TcpTmtcGenericServer<TmError, TcError, CobsTmSender, CobsTcParser>,
+pub struct TcpTmtcInCobsServer<
+    TmError,
+    TcError: 'static,
+    TmSource: TmPacketSource<Error = TmError>,
+    TcReceiver: ReceivesTc<Error = TcError>,
+> {
+    generic_server:
+        TcpTmtcGenericServer<TmError, TcError, TmSource, TcReceiver, CobsTmSender, CobsTcParser>,
 }
 
-impl<TmError: 'static, TcError: 'static> TcpTmtcInCobsServer<TmError, TcError> {
+impl<
+        TmError: 'static,
+        TcError: 'static,
+        TmSource: TmPacketSource<Error = TmError>,
+        TcReceiver: ReceivesTc<Error = TcError>,
+    > TcpTmtcInCobsServer<TmError, TcError, TmSource, TcReceiver>
+{
     /// Create a new TCP TMTC server which exchanges TMTC packets encoded with
     /// [COBS protocol](https://en.wikipedia.org/wiki/Consistent_Overhead_Byte_Stuffing).
     ///
@@ -128,9 +138,9 @@ impl<TmError: 'static, TcError: 'static> TcpTmtcInCobsServer<TmError, TcError> {
     ///     forwarded to this TC receiver.
     pub fn new(
         cfg: ServerConfig,
-        tm_source: Box<dyn TmPacketSource<Error = TmError>>,
-        tc_receiver: Box<dyn ReceivesTc<Error = TcError>>,
-    ) -> Result<Self, TcpTmtcError<TmError, TcError>> {
+        tm_source: TmSource,
+        tc_receiver: TcReceiver,
+    ) -> Result<Self, std::io::Error> {
         Ok(Self {
             generic_server: TcpTmtcGenericServer::new(
                 cfg,
@@ -177,7 +187,7 @@ mod tests {
             ServerConfig,
         },
     };
-    use alloc::{boxed::Box, sync::Arc};
+    use alloc::sync::Arc;
     use cobs::encode;
 
     use super::TcpTmtcInCobsServer;
@@ -202,11 +212,11 @@ mod tests {
         addr: &SocketAddr,
         tc_receiver: SyncTcCacher,
         tm_source: SyncTmSource,
-    ) -> TcpTmtcInCobsServer<(), ()> {
+    ) -> TcpTmtcInCobsServer<(), (), SyncTmSource, SyncTcCacher> {
         TcpTmtcInCobsServer::new(
             ServerConfig::new(*addr, Duration::from_millis(2), 1024, 1024),
-            Box::new(tm_source),
-            Box::new(tc_receiver),
+            tm_source,
+            tc_receiver,
         )
         .expect("TCP server generation failed")
     }

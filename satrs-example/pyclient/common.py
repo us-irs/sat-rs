@@ -4,7 +4,11 @@ import dataclasses
 import enum
 import struct
 
+from spacepackets.ecss.tc import PacketId, PacketType
+
 EXAMPLE_PUS_APID = 0x02
+EXAMPLE_PUS_PACKET_ID_TM = PacketId(PacketType.TM, True, EXAMPLE_PUS_APID)
+TM_PACKET_IDS = [EXAMPLE_PUS_PACKET_ID_TM]
 
 
 class EventSeverity(enum.IntEnum):
