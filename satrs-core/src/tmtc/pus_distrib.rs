@@ -18,7 +18,7 @@
 //! # Example
 //!
 //! ```rust
-//! use spacepackets::ecss::SerializablePusPacket;
+//! use spacepackets::ecss::WritablePusPacket;
 //! use satrs_core::tmtc::pus_distrib::{PusDistributor, PusServiceProvider};
 //! use satrs_core::tmtc::{ReceivesTc, ReceivesTcCore};
 //! use spacepackets::SpHeader;

@@ -2,7 +2,7 @@ use satrs_core::pus::verification::RequestId;
 use satrs_core::spacepackets::ecss::tc::PusTcCreator;
 use satrs_core::spacepackets::ecss::tm::PusTmReader;
 use satrs_core::{
-    spacepackets::ecss::{PusPacket, SerializablePusPacket},
+    spacepackets::ecss::{PusPacket, WritablePusPacket},
     spacepackets::SpHeader,
 };
 use satrs_example::{OBSW_SERVER_ADDR, SERVER_PORT};
