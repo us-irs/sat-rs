@@ -39,7 +39,7 @@ impl PusService5EventHandler {
     }
 
     pub fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        let possible_packet = self.psb.retrieve_next_packet()?;
+        let possible_packet = self.psb.retrieve_and_accept_next_packet()?;
         if possible_packet.is_none() {
             return Ok(PusPacketHandlerResult::Empty);
         }

@@ -200,8 +200,15 @@ pub trait EcssTcSenderCore: EcssChannel {
     fn send_tc(&self, tc: PusTcCreator, token: Option<TcStateToken>) -> Result<(), EcssTmtcError>;
 }
 
+#[non_exhaustive]
+pub enum TcInMemory {
+    StoreAddr(StoreAddr),
+    #[cfg(feature = "alloc")]
+    Vec(alloc::vec::Vec<u8>),
+}
+
 pub struct ReceivedTcWrapper {
-    pub store_addr: StoreAddr,
+    pub store_addr: TcInMemory,
     pub token: Option<TcStateToken>,
 }
 
@@ -334,6 +341,8 @@ pub mod std_mod {
     use std::sync::mpsc;
     use std::sync::mpsc::TryRecvError;
     use thiserror::Error;
+
+    use super::TcInMemory;
 
     impl From<mpsc::SendError<StoreAddr>> for EcssTmtcError {
         fn from(_: mpsc::SendError<StoreAddr>) -> Self {
@@ -703,17 +712,25 @@ pub mod std_mod {
 
         pub fn retrieve_next_packet(
             &mut self,
-        ) -> Result<Option<(StoreAddr, VerificationToken<TcStateAccepted>)>, PusPacketHandlingError>
+            handle_acceptance: bool,
+        ) -> Result<Option<ReceivedTcWrapper>,PusPacketHandlingError>
         {
             match self.tc_receiver.recv_tc() {
                 Ok(ReceivedTcWrapper { store_addr, token }) => {
-                    if token.is_none() {
-                        return Err(PusPacketHandlingError::InvalidVerificationToken);
+                    let mut passed_token = token;
+                    if handle_acceptance {
+                        if token.is_none() {
+                            return Err(PusPacketHandlingError::InvalidVerificationToken);
+                        }
+                        let token = token.unwrap();
+                        let accepted_token = VerificationToken::<TcStateAccepted>::try_from(token)
+                            .map_err(|_| PusPacketHandlingError::InvalidVerificationToken)?;
+                        passed_token = Some(accepted_token.into());
                     }
-                    let token = token.unwrap();
-                    let accepted_token = VerificationToken::<TcStateAccepted>::try_from(token)
-                        .map_err(|_| PusPacketHandlingError::InvalidVerificationToken)?;
-                    Ok(Some((store_addr, accepted_token)))
+                    Ok(Some(ReceivedTcWrapper {
+                        store_addr,
+                        token: passed_token
+                    }))
                 }
                 Err(e) => match e {
                     TryRecvTmtcError::Error(e) => Err(PusPacketHandlingError::EcssTmtc(e)),
