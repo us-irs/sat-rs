@@ -442,6 +442,7 @@ fn main() {
                         match request.targeted_request.request {
                             Request::Hk(hk_req) => match hk_req {
                                 HkRequest::OneShot(unique_id) => {
+                                    // TODO: We should check whether the unique ID is even valid.
                                     let target = request.targeted_request.target_id;
                                     assert_eq!(
                                         target.target_id(),
@@ -463,11 +464,8 @@ fn main() {
                                             &timestamp,
                                         );
                                         let mut buf: [u8; 8] = [0; 8];
-
-                                        let hk_id = HkUniqueId::new(unique_id);
-                                        hk_id
-                                            .bytes_from_target_id_with_apid(&mut buf, target)
-                                            .unwrap();
+                                        let hk_id = HkUniqueId::new(target.target_id(), unique_id);
+                                        hk_id.write_to_be_bytes(&mut buf).unwrap();
                                         let pus_tm = PusTmCreator::new(
                                             &mut sp_header,
                                             sec_header,

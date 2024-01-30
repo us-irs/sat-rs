@@ -1,5 +1,5 @@
 use derive_new::new;
-use satrs_example::TargetIdWithApid;
+use satrs_core::spacepackets::ByteConversionError;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum AcsHkIds {
@@ -8,36 +8,30 @@ pub enum AcsHkIds {
 
 #[derive(Debug, new, Copy, Clone)]
 pub struct HkUniqueId {
-    id: u32,
-}
-
-impl From<u32> for HkUniqueId {
-    fn from(id: u32) -> Self {
-        Self { id }
-    }
+    target_id: u32,
+    set_id: u32,
 }
 
 impl HkUniqueId {
     #[allow(dead_code)]
-    pub fn id(&self) -> u32 {
-        self.id
+    pub fn target_id(&self) -> u32 {
+        self.target_id
+    }
+    #[allow(dead_code)]
+    pub fn set_id(&self) -> u32 {
+        self.set_id
     }
 
-    pub fn bytes_from_target_id(&self, buf: &mut [u8], target_id: u32) -> Result<(), ()> {
+    pub fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
         if buf.len() < 8 {
-            return Err(());
+            return Err(ByteConversionError::ToSliceTooSmall {
+                found: buf.len(),
+                expected: 8,
+            });
         }
-        buf[0..4].copy_from_slice(&self.id.to_be_bytes());
-        buf[4..8].copy_from_slice(&target_id.to_be_bytes());
+        buf[0..4].copy_from_slice(&self.target_id.to_be_bytes());
+        buf[4..8].copy_from_slice(&self.set_id.to_be_bytes());
 
-        Ok(())
-    }
-
-    pub fn bytes_from_target_id_with_apid(
-        &self,
-        buf: &mut [u8],
-        target_id: TargetIdWithApid,
-    ) -> Result<(), ()> {
-        self.bytes_from_target_id(buf, target_id.target)
+        Ok(8)
     }
 }
