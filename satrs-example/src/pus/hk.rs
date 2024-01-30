@@ -1,13 +1,11 @@
 use crate::requests::{Request, RequestWithToken};
 use log::{error, warn};
 use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
-use satrs_core::pool::{SharedPool, StoreAddr};
-use satrs_core::pus::verification::{
-    FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
-};
+use satrs_core::pool::SharedPool;
+use satrs_core::pus::verification::{FailParams, StdVerifReporterWithSender};
 use satrs_core::pus::{
-    EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
-    PusServiceHandler,
+    EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError,
+    PusServiceBaseWithStore,
 };
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::{hk, PusPacket};
@@ -17,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
 pub struct PusService3HkHandler {
-    psb: PusServiceBase,
+    psb: PusServiceBaseWithStore,
     request_handlers: HashMap<TargetId, Sender<RequestWithToken>>,
 }
 
@@ -31,7 +29,7 @@ impl PusService3HkHandler {
         request_handlers: HashMap<TargetId, Sender<RequestWithToken>>,
     ) -> Self {
         Self {
-            psb: PusServiceBase::new(
+            psb: PusServiceBaseWithStore::new(
                 tc_receiver,
                 shared_tc_pool,
                 tm_sender,
@@ -41,26 +39,18 @@ impl PusService3HkHandler {
             request_handlers,
         }
     }
-}
 
-impl PusServiceHandler for PusService3HkHandler {
-    fn psb_mut(&mut self) -> &mut PusServiceBase {
-        &mut self.psb
-    }
-    fn psb(&self) -> &PusServiceBase {
-        &self.psb
-    }
-
-    fn handle_one_tc(
-        &mut self,
-        addr: StoreAddr,
-        token: VerificationToken<TcStateAccepted>,
-    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTcReader::new(&self.psb().pus_buf).unwrap();
+    fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        let possible_packet = self.psb.retrieve_next_packet()?;
+        if possible_packet.is_none() {
+            return Ok(PusPacketHandlerResult::Empty);
+        }
+        let (addr, token) = possible_packet.unwrap();
+        self.psb.copy_tc_to_buf(addr)?;
+        let (tc, _) = PusTcReader::new(&self.psb.pus_buf).unwrap();
         let subservice = tc.subservice();
         let mut partial_error = None;
-        let time_stamp = self.psb().get_current_timestamp(&mut partial_error);
+        let time_stamp = self.psb.get_current_timestamp(&mut partial_error);
         let user_data = tc.user_data();
         if user_data.is_empty() {
             self.psb
@@ -168,7 +158,7 @@ pub struct Pus3Wrapper {
 
 impl Pus3Wrapper {
     pub fn handle_next_packet(&mut self) -> bool {
-        match self.pus_3_handler.handle_next_packet() {
+        match self.pus_3_handler.handle_one_tc() {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {

@@ -1,12 +1,12 @@
 use crate::requests::{ActionRequest, Request, RequestWithToken};
 use log::{error, warn};
-use satrs_core::pool::{SharedPool, StoreAddr};
+use satrs_core::pool::SharedPool;
 use satrs_core::pus::verification::{
     FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
 };
 use satrs_core::pus::{
-    EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
-    PusServiceHandler,
+    EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError,
+    PusServiceBaseWithStore,
 };
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
 pub struct PusService8ActionHandler {
-    psb: PusServiceBase,
+    psb: PusServiceBaseWithStore,
     request_handlers: HashMap<TargetId, Sender<RequestWithToken>>,
 }
 
@@ -30,7 +30,7 @@ impl PusService8ActionHandler {
         request_handlers: HashMap<TargetId, Sender<RequestWithToken>>,
     ) -> Self {
         Self {
-            psb: PusServiceBase::new(
+            psb: PusServiceBaseWithStore::new(
                 tc_receiver,
                 shared_tc_pool,
                 tm_sender,
@@ -51,7 +51,7 @@ impl PusService8ActionHandler {
     ) -> Result<(), PusPacketHandlingError> {
         let user_data = tc.user_data();
         if user_data.len() < 8 {
-            self.psb()
+            self.psb
                 .verification_handler
                 .borrow_mut()
                 .start_failure(
@@ -79,7 +79,7 @@ impl PusService8ActionHandler {
         } else {
             let mut fail_data: [u8; 4] = [0; 4];
             fail_data.copy_from_slice(&target_id.to_be_bytes());
-            self.psb()
+            self.psb
                 .verification_handler
                 .borrow_mut()
                 .start_failure(
@@ -97,33 +97,25 @@ impl PusService8ActionHandler {
         }
         Ok(())
     }
-}
 
-impl PusServiceHandler for PusService8ActionHandler {
-    fn psb_mut(&mut self) -> &mut PusServiceBase {
-        &mut self.psb
-    }
-    fn psb(&self) -> &PusServiceBase {
-        &self.psb
-    }
-
-    fn handle_one_tc(
-        &mut self,
-        addr: StoreAddr,
-        token: VerificationToken<TcStateAccepted>,
-    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTcReader::new(&self.psb().pus_buf).unwrap();
+    fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        let possible_packet = self.psb.retrieve_next_packet()?;
+        if possible_packet.is_none() {
+            return Ok(PusPacketHandlerResult::Empty);
+        }
+        let (addr, token) = possible_packet.unwrap();
+        self.psb.copy_tc_to_buf(addr)?;
+        let (tc, _) = PusTcReader::new(&self.psb.pus_buf).unwrap();
         let subservice = tc.subservice();
         let mut partial_error = None;
-        let time_stamp = self.psb().get_current_timestamp(&mut partial_error);
+        let time_stamp = self.psb.get_current_timestamp(&mut partial_error);
         match subservice {
             128 => {
                 self.handle_action_request_with_id(token, &tc, &time_stamp)?;
             }
             _ => {
                 let fail_data = [subservice];
-                self.psb_mut()
+                self.psb
                     .verification_handler
                     .get_mut()
                     .start_failure(
@@ -153,7 +145,7 @@ pub struct Pus8Wrapper {
 
 impl Pus8Wrapper {
     pub fn handle_next_packet(&mut self) -> bool {
-        match self.pus_8_handler.handle_next_packet() {
+        match self.pus_8_handler.handle_one_tc() {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {

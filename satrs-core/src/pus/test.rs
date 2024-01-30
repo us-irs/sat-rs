@@ -1,8 +1,8 @@
-use crate::pool::{SharedPool, StoreAddr};
-use crate::pus::verification::{StdVerifReporterWithSender, TcStateAccepted, VerificationToken};
+use crate::pool::SharedPool;
+use crate::pus::verification::StdVerifReporterWithSender;
 use crate::pus::{
     EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
-    PusPacketHandlingError, PusServiceBase, PusServiceHandler, PusTmWrapper,
+    PusPacketHandlingError, PusServiceBaseWithStore, PusTmWrapper,
 };
 use spacepackets::ecss::tc::PusTcReader;
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
@@ -13,7 +13,7 @@ use std::boxed::Box;
 /// This is a helper class for [std] environments to handle generic PUS 17 (test service) packets.
 /// This handler only processes ping requests and generates a ping reply for them accordingly.
 pub struct PusService17TestHandler {
-    psb: PusServiceBase,
+    pub psb: PusServiceBaseWithStore,
 }
 
 impl PusService17TestHandler {
@@ -25,7 +25,7 @@ impl PusService17TestHandler {
         verification_handler: StdVerifReporterWithSender,
     ) -> Self {
         Self {
-            psb: PusServiceBase::new(
+            psb: PusServiceBaseWithStore::new(
                 tc_receiver,
                 shared_tc_store,
                 tm_sender,
@@ -34,29 +34,21 @@ impl PusService17TestHandler {
             ),
         }
     }
-}
 
-impl PusServiceHandler for PusService17TestHandler {
-    fn psb_mut(&mut self) -> &mut PusServiceBase {
-        &mut self.psb
-    }
-    fn psb(&self) -> &PusServiceBase {
-        &self.psb
-    }
-
-    fn handle_one_tc(
-        &mut self,
-        addr: StoreAddr,
-        token: VerificationToken<TcStateAccepted>,
-    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        self.copy_tc_to_buf(addr)?;
+    pub fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        let possible_packet = self.psb.retrieve_next_packet()?;
+        if possible_packet.is_none() {
+            return Ok(PusPacketHandlerResult::Empty);
+        }
+        let (addr, token) = possible_packet.unwrap();
+        self.psb.copy_tc_to_buf(addr)?;
         let (tc, _) = PusTcReader::new(&self.psb.pus_buf)?;
         if tc.service() != 17 {
             return Err(PusPacketHandlingError::WrongService(tc.service()));
         }
         if tc.subservice() == 1 {
             let mut partial_error = None;
-            let time_stamp = self.psb().get_current_timestamp(&mut partial_error);
+            let time_stamp = self.psb.get_current_timestamp(&mut partial_error);
             let result = self
                 .psb
                 .verification_handler
@@ -114,7 +106,7 @@ mod tests {
     use crate::pus::verification::{
         RequestId, StdVerifReporterWithSender, VerificationReporterCfg,
     };
-    use crate::pus::{MpscTcInStoreReceiver, MpscTmInStoreSender, PusServiceHandler};
+    use crate::pus::{MpscTcInStoreReceiver, MpscTmInStoreSender};
     use crate::tmtc::tm_helper::SharedTmStore;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTmReader;
@@ -165,7 +157,7 @@ mod tests {
         drop(tc_pool);
         // Send accepted TC to test service handler.
         test_srv_tc_tx.send((addr, token.into())).unwrap();
-        let result = pus_17_handler.handle_next_packet();
+        let result = pus_17_handler.handle_one_tc();
         assert!(result.is_ok());
         // We should see 4 replies in the TM queue now: Acceptance TM, Start TM, ping reply and
         // Completion TM
@@ -174,7 +166,7 @@ mod tests {
         let mut tm_addr = next_msg.unwrap();
         let tm_pool = tm_pool_shared.read().unwrap();
         let tm_raw = tm_pool.read(&tm_addr).unwrap();
-        let (tm, _) = PusTmReader::new(&tm_raw, 0).unwrap();
+        let (tm, _) = PusTmReader::new(tm_raw, 0).unwrap();
         assert_eq!(tm.service(), 1);
         assert_eq!(tm.subservice(), 1);
         let req_id = RequestId::from_bytes(tm.user_data()).expect("generating request ID failed");
@@ -186,7 +178,7 @@ mod tests {
         tm_addr = next_msg.unwrap();
         let tm_raw = tm_pool.read(&tm_addr).unwrap();
         // Is generated with CDS short timestamp.
-        let (tm, _) = PusTmReader::new(&tm_raw, 7).unwrap();
+        let (tm, _) = PusTmReader::new(tm_raw, 7).unwrap();
         assert_eq!(tm.service(), 1);
         assert_eq!(tm.subservice(), 3);
         let req_id = RequestId::from_bytes(tm.user_data()).expect("generating request ID failed");
@@ -198,7 +190,7 @@ mod tests {
         tm_addr = next_msg.unwrap();
         let tm_raw = tm_pool.read(&tm_addr).unwrap();
         // Is generated with CDS short timestamp.
-        let (tm, _) = PusTmReader::new(&tm_raw, 7).unwrap();
+        let (tm, _) = PusTmReader::new(tm_raw, 7).unwrap();
         assert_eq!(tm.service(), 17);
         assert_eq!(tm.subservice(), 2);
         assert!(tm.user_data().is_empty());
@@ -209,7 +201,7 @@ mod tests {
         tm_addr = next_msg.unwrap();
         let tm_raw = tm_pool.read(&tm_addr).unwrap();
         // Is generated with CDS short timestamp.
-        let (tm, _) = PusTmReader::new(&tm_raw, 7).unwrap();
+        let (tm, _) = PusTmReader::new(tm_raw, 7).unwrap();
         assert_eq!(tm.service(), 1);
         assert_eq!(tm.subservice(), 7);
         let req_id = RequestId::from_bytes(tm.user_data()).expect("generating request ID failed");

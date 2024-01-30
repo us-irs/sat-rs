@@ -1,9 +1,9 @@
-use crate::pool::{SharedPool, StoreAddr};
+use crate::pool::SharedPool;
 use crate::pus::scheduler::PusScheduler;
-use crate::pus::verification::{StdVerifReporterWithSender, TcStateAccepted, VerificationToken};
+use crate::pus::verification::StdVerifReporterWithSender;
 use crate::pus::{
-    EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
-    PusServiceHandler,
+    EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError,
+    PusServiceBaseWithStore,
 };
 use spacepackets::ecss::tc::PusTcReader;
 use spacepackets::ecss::{scheduling, PusPacket};
@@ -19,7 +19,7 @@ use std::boxed::Box;
 /// [Self::scheduler] and [Self::scheduler_mut] function and then use the scheduler API to release
 /// telecommands when applicable.
 pub struct PusService11SchedHandler {
-    psb: PusServiceBase,
+    psb: PusServiceBaseWithStore,
     scheduler: PusScheduler,
 }
 
@@ -33,7 +33,7 @@ impl PusService11SchedHandler {
         scheduler: PusScheduler,
     ) -> Self {
         Self {
-            psb: PusServiceBase::new(
+            psb: PusServiceBaseWithStore::new(
                 tc_receiver,
                 shared_tc_store,
                 tm_sender,
@@ -51,22 +51,14 @@ impl PusService11SchedHandler {
     pub fn scheduler(&self) -> &PusScheduler {
         &self.scheduler
     }
-}
 
-impl PusServiceHandler for PusService11SchedHandler {
-    fn psb_mut(&mut self) -> &mut PusServiceBase {
-        &mut self.psb
-    }
-    fn psb(&self) -> &PusServiceBase {
-        &self.psb
-    }
-
-    fn handle_one_tc(
-        &mut self,
-        addr: StoreAddr,
-        token: VerificationToken<TcStateAccepted>,
-    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        self.copy_tc_to_buf(addr)?;
+    pub fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        let possible_packet = self.psb.retrieve_next_packet()?;
+        if possible_packet.is_none() {
+            return Ok(PusPacketHandlerResult::Empty);
+        }
+        let (addr, token) = possible_packet.unwrap();
+        self.psb.copy_tc_to_buf(addr)?;
         let (tc, _) = PusTcReader::new(&self.psb.pus_buf)?;
         let subservice = tc.subservice();
         let std_service = scheduling::Subservice::try_from(subservice);
@@ -77,7 +69,7 @@ impl PusServiceHandler for PusService11SchedHandler {
             ));
         }
         let mut partial_error = None;
-        let time_stamp = self.psb().get_current_timestamp(&mut partial_error);
+        let time_stamp = self.psb.get_current_timestamp(&mut partial_error);
         match std_service.unwrap() {
             scheduling::Subservice::TcEnableScheduling => {
                 let start_token = self

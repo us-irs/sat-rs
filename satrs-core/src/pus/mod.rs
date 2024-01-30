@@ -637,7 +637,7 @@ pub mod std_mod {
     /// Base class for handlers which can handle PUS TC packets. Right now, the verification
     /// reporter is constrained to the [StdVerifReporterWithSender] and the service handler
     /// relies on TMTC packets being exchanged via a [SharedPool].
-    pub struct PusServiceBase {
+    pub struct PusServiceBaseWithStore {
         pub tc_receiver: Box<dyn EcssTcReceiver>,
         pub shared_tc_store: SharedPool,
         pub tm_sender: Box<dyn EcssTmSender>,
@@ -649,7 +649,7 @@ pub mod std_mod {
         pub pus_size: usize,
     }
 
-    impl PusServiceBase {
+    impl PusServiceBaseWithStore {
         pub fn new(
             tc_receiver: Box<dyn EcssTcReceiver>,
             shared_tc_store: SharedPool,
@@ -688,32 +688,24 @@ pub mod std_mod {
             let mut dummy = None;
             self.get_current_timestamp(&mut dummy)
         }
-    }
 
-    pub trait PusServiceHandler {
-        fn psb_mut(&mut self) -> &mut PusServiceBase;
-        fn psb(&self) -> &PusServiceBase;
-        fn handle_one_tc(
-            &mut self,
-            addr: StoreAddr,
-            token: VerificationToken<TcStateAccepted>,
-        ) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
-
-        fn copy_tc_to_buf(&mut self, addr: StoreAddr) -> Result<(), PusPacketHandlingError> {
+        pub fn copy_tc_to_buf(&mut self, addr: StoreAddr) -> Result<(), PusPacketHandlingError> {
             // Keep locked section as short as possible.
-            let psb_mut = self.psb_mut();
-            let mut tc_pool = psb_mut
+            let mut tc_pool = self
                 .shared_tc_store
                 .write()
                 .map_err(|_| PusPacketHandlingError::EcssTmtc(EcssTmtcError::StoreLock))?;
             let tc_guard = tc_pool.read_with_guard(addr);
             let tc_raw = tc_guard.read().unwrap();
-            psb_mut.pus_buf[0..tc_raw.len()].copy_from_slice(tc_raw);
+            self.pus_buf[0..tc_raw.len()].copy_from_slice(tc_raw);
             Ok(())
         }
 
-        fn handle_next_packet(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-            match self.psb().tc_receiver.recv_tc() {
+        pub fn retrieve_next_packet(
+            &mut self,
+        ) -> Result<Option<(StoreAddr, VerificationToken<TcStateAccepted>)>, PusPacketHandlingError>
+        {
+            match self.tc_receiver.recv_tc() {
                 Ok(ReceivedTcWrapper { store_addr, token }) => {
                     if token.is_none() {
                         return Err(PusPacketHandlingError::InvalidVerificationToken);
@@ -721,11 +713,11 @@ pub mod std_mod {
                     let token = token.unwrap();
                     let accepted_token = VerificationToken::<TcStateAccepted>::try_from(token)
                         .map_err(|_| PusPacketHandlingError::InvalidVerificationToken)?;
-                    self.handle_one_tc(store_addr, accepted_token)
+                    Ok(Some((store_addr, accepted_token)))
                 }
                 Err(e) => match e {
                     TryRecvTmtcError::Error(e) => Err(PusPacketHandlingError::EcssTmtc(e)),
-                    TryRecvTmtcError::Empty => Ok(PusPacketHandlerResult::Empty),
+                    TryRecvTmtcError::Empty => Ok(None),
                 },
             }
         }

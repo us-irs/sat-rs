@@ -3,7 +3,7 @@ use satrs_core::events::EventU32;
 use satrs_core::params::Params;
 use satrs_core::pus::test::PusService17TestHandler;
 use satrs_core::pus::verification::FailParams;
-use satrs_core::pus::{PusPacketHandlerResult, PusServiceHandler};
+use satrs_core::pus::PusPacketHandlerResult;
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::spacepackets::time::cds::TimeProvider;
@@ -18,7 +18,7 @@ pub struct Service17CustomWrapper {
 
 impl Service17CustomWrapper {
     pub fn handle_next_packet(&mut self) -> bool {
-        let res = self.pus17_handler.handle_next_packet();
+        let res = self.pus17_handler.handle_one_tc();
         if res.is_err() {
             warn!("PUS17 handler failed with error {:?}", res.unwrap_err());
             return true;
@@ -38,7 +38,7 @@ impl Service17CustomWrapper {
                 warn!("PUS17: Subservice {subservice} not implemented")
             }
             PusPacketHandlerResult::CustomSubservice(subservice, token) => {
-                let psb_mut = self.pus17_handler.psb_mut();
+                let psb_mut = &mut self.pus17_handler.psb;
                 let buf = psb_mut.pus_buf;
                 let (tc, _) = PusTcReader::new(&buf).unwrap();
                 let time_stamper = TimeProvider::from_now_with_u16_days().unwrap();
@@ -62,7 +62,7 @@ impl Service17CustomWrapper {
                 } else {
                     let fail_data = [tc.subservice()];
                     self.pus17_handler
-                        .psb_mut()
+                        .psb
                         .verification_handler
                         .get_mut()
                         .start_failure(
