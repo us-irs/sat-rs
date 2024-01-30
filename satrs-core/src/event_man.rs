@@ -2,23 +2,13 @@
 //!
 //! This module provides components to perform event routing. The most important component for this
 //! task is the [EventManager]. It receives all events and then routes them to event subscribers
-//! where appropriate.
-#![cfg_attr(feature = "doc-images",
-cfg_attr(all(),
-doc = ::embed_doc_image::embed_image!("event_man_arch", "images/event_man_arch.png"
-)))]
-#![cfg_attr(
-    not(feature = "doc-images"),
-    doc = "**Doc images not enabled**. Compile with feature `doc-images` and Rust version >= 1.54 \
-           to enable."
-)]
-//! One common use case for satellite systems is to offer a light-weight publish-subscribe mechanism
-//! and IPC mechanism for software and hardware events which are also packaged as telemetry (TM) or
-//! can trigger a system response.
+//! where appropriate. One common use case for satellite systems is to offer a light-weight
+//! publish-subscribe mechanism and IPC mechanism for software and hardware events which are also
+//! packaged as telemetry (TM) or can trigger a system response.
 //!
-//! The following graph shows how the event flow for such a setup could look like:
-//!
-//! ![Event flow][event_man_arch]
+//! It is recommended to read the
+//! [sat-rs book chapter](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/book/events.html)
+//! about events first:
 //!
 //! The event manager has a listener table abstracted by the [ListenerTable], which maps
 //! listener groups identified by [ListenerKey]s to a [sender ID][ChannelId].

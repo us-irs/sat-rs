@@ -90,7 +90,7 @@ Creator 3<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:
           <y:Geometry height="60.0" width="145.19999999999993" x="734.2060377358491" y="620.26"/>
           <y:Fill color="#FFCC00" transparent="false"/>
           <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-          <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Ubuntu" fontSize="16" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="39.872074127197266" horizontalTextPosition="center" iconTextGap="4" modelName="custom" textColor="#000000" verticalTextPosition="bottom" visible="true" width="122.38423156738281" x="11.407884216308616" xml:space="preserve" y="10.063962936401367">PUS Service 5
+          <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Ubuntu" fontSize="16" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="39.872074127197266" horizontalTextPosition="center" iconTextGap="4" modelName="custom" textColor="#000000" verticalTextPosition="bottom" visible="true" width="122.38423156738281" x="11.407884216308503" xml:space="preserve" y="10.063962936401367">PUS Service 5
 Event Reporting
 <y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:ModelParameter><y:SmartNodeLabelModelParameter labelRatioX="0.0" labelRatioY="0.0" nodeRatioX="0.0" nodeRatioY="0.0" offsetX="0.0" offsetY="0.0" upX="0.0" upY="-1.0"/></y:ModelParameter></y:NodeLabel>
           <y:Shape type="rectangle"/>
@@ -112,10 +112,10 @@ Event Action<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel>
     <node id="n8">
       <data key="d6">
         <y:ShapeNode>
-          <y:Geometry height="60.0" width="87.27999999999997" x="792.1260377358491" y="733.8400000000001"/>
+          <y:Geometry height="60.0" width="97.27999999999997" x="787.1260377358491" y="733.8400000000001"/>
           <y:Fill color="#FFCC99" transparent="false"/>
           <y:BorderStyle color="#000000" raised="false" type="line" width="1.0"/>
-          <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Ubuntu" fontSize="14" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="35.38786315917969" horizontalTextPosition="center" iconTextGap="4" modelName="custom" textColor="#000000" verticalTextPosition="bottom" visible="true" width="69.25376892089844" x="9.013115539550768" xml:space="preserve" y="12.306068420410156">Telemetry
+          <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Ubuntu" fontSize="16" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="39.872074127197266" horizontalTextPosition="center" iconTextGap="4" modelName="custom" textColor="#000000" verticalTextPosition="bottom" visible="true" width="78.57614135742188" x="9.351929321289049" xml:space="preserve" y="10.063962936401367">Telemetry
 Sink<y:LabelModel><y:SmartNodeLabelModel distance="4.0"/></y:LabelModel><y:ModelParameter><y:SmartNodeLabelModelParameter labelRatioX="0.0" labelRatioY="0.0" nodeRatioX="0.0" nodeRatioY="0.0" offsetX="0.0" offsetY="0.0" upX="0.0" upY="-1.0"/></y:ModelParameter></y:NodeLabel>
           <y:Shape type="rectangle"/>
         </y:ShapeNode>
