@@ -472,7 +472,7 @@ fn main() {
                                         let pus_tm = PusTmCreator::new(
                                             &mut sp_header,
                                             sec_header,
-                                            Some(&buf),
+                                            &buf,
                                             true,
                                         );
                                         let addr = aocs_tm_store

@@ -113,7 +113,7 @@ pub fn parse_buffer_for_ccsds_space_packets<E>(
 #[cfg(test)]
 mod tests {
     use spacepackets::{
-        ecss::{tc::PusTcCreator, SerializablePusPacket},
+        ecss::{tc::PusTcCreator, WritablePusPacket},
         PacketId, SpHeader,
     };
 

@@ -21,7 +21,7 @@
 //! use satrs_core::tmtc::ccsds_distrib::{CcsdsPacketHandler, CcsdsDistributor};
 //! use satrs_core::tmtc::{ReceivesTc, ReceivesTcCore};
 //! use spacepackets::{CcsdsPacket, SpHeader};
-//! use spacepackets::ecss::SerializablePusPacket;
+//! use spacepackets::ecss::WritablePusPacket;
 //! use spacepackets::ecss::tc::{PusTc, PusTcCreator};
 //!
 //! #[derive (Default)]
@@ -226,7 +226,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::tmtc::ccsds_distrib::{CcsdsDistributor, CcsdsPacketHandler};
     use spacepackets::ecss::tc::PusTcCreator;
-    use spacepackets::ecss::SerializablePusPacket;
+    use spacepackets::ecss::WritablePusPacket;
     use spacepackets::CcsdsPacket;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
@@ -244,9 +244,10 @@ pub(crate) mod tests {
         &buf[0..size]
     }
 
+    type SharedPacketQueue = Arc<Mutex<VecDeque<(u16, Vec<u8>)>>>;
     pub struct BasicApidHandlerSharedQueue {
-        pub known_packet_queue: Arc<Mutex<VecDeque<(u16, Vec<u8>)>>>,
-        pub unknown_packet_queue: Arc<Mutex<VecDeque<(u16, Vec<u8>)>>>,
+        pub known_packet_queue: SharedPacketQueue,
+        pub unknown_packet_queue: SharedPacketQueue,
     }
 
     #[derive(Default)]
@@ -268,11 +269,11 @@ pub(crate) mod tests {
         ) -> Result<(), Self::Error> {
             let mut vec = Vec::new();
             vec.extend_from_slice(tc_raw);
-            Ok(self
-                .known_packet_queue
+            self.known_packet_queue
                 .lock()
                 .unwrap()
-                .push_back((sp_header.apid(), vec)))
+                .push_back((sp_header.apid(), vec));
+            Ok(())
         }
 
         fn handle_unknown_apid(
@@ -282,11 +283,11 @@ pub(crate) mod tests {
         ) -> Result<(), Self::Error> {
             let mut vec = Vec::new();
             vec.extend_from_slice(tc_raw);
-            Ok(self
-                .unknown_packet_queue
+            self.unknown_packet_queue
                 .lock()
                 .unwrap()
-                .push_back((sp_header.apid(), vec)))
+                .push_back((sp_header.apid(), vec));
+            Ok(())
         }
     }
 

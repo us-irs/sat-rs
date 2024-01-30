@@ -28,5 +28,5 @@ num-derive = "0.3"
 path = "../satrs-core"
 
 [dependencies.satrs-mib]
-version = "0.1.0-alpha.1"
-# path = "../satrs-mib"
+# version = "0.1.0-alpha.1"
+path = "../satrs-mib"

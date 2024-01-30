@@ -147,7 +147,7 @@ impl EventReporterBase {
         Ok(PusTmCreator::new(
             &mut sp_header,
             sec_header,
-            Some(&buf[0..current_idx]),
+            &buf[0..current_idx],
             true,
         ))
     }

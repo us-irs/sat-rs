@@ -11,7 +11,7 @@ pub mod std_mod {
     use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr};
     use crate::pus::EcssTmtcError;
     use spacepackets::ecss::tm::PusTmCreator;
-    use spacepackets::ecss::SerializablePusPacket;
+    use spacepackets::ecss::WritablePusPacket;
     use std::sync::{Arc, RwLock};
 
     #[derive(Clone)]
@@ -32,7 +32,7 @@ pub mod std_mod {
 
         pub fn add_pus_tm(&self, pus_tm: &PusTmCreator) -> Result<StoreAddr, EcssTmtcError> {
             let mut pg = self.pool.write().map_err(|_| EcssTmtcError::StoreLock)?;
-            let (addr, buf) = pg.free_element(pus_tm.len_packed())?;
+            let (addr, buf) = pg.free_element(pus_tm.len_written())?;
             pus_tm
                 .write_to_bytes(buf)
                 .expect("writing PUS TM to store failed");
@@ -59,7 +59,7 @@ impl PusTmWithCdsShortHelper {
         &'a mut self,
         service: u8,
         subservice: u8,
-        source_data: Option<&'a [u8]>,
+        source_data: &'a [u8],
         seq_count: u16,
     ) -> PusTmCreator {
         let time_stamp = TimeProvider::from_now_with_u16_days().unwrap();
@@ -71,7 +71,7 @@ impl PusTmWithCdsShortHelper {
         &'a mut self,
         service: u8,
         subservice: u8,
-        source_data: Option<&'a [u8]>,
+        source_data: &'a [u8],
         stamper: &TimeProvider,
         seq_count: u16,
     ) -> PusTmCreator {
@@ -83,7 +83,7 @@ impl PusTmWithCdsShortHelper {
         &'a self,
         service: u8,
         subservice: u8,
-        source_data: Option<&'a [u8]>,
+        source_data: &'a [u8],
         seq_count: u16,
     ) -> PusTmCreator {
         let mut reply_header = SpHeader::tm_unseg(self.apid, seq_count, 0).unwrap();

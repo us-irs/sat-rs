@@ -28,7 +28,7 @@ use satrs_core::{
     tmtc::{ReceivesTcCore, TmPacketSourceCore},
 };
 use spacepackets::{
-    ecss::{tc::PusTcCreator, SerializablePusPacket},
+    ecss::{tc::PusTcCreator, WritablePusPacket},
     PacketId, SpHeader,
 };
 use std::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};

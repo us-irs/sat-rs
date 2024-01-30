@@ -173,7 +173,7 @@ mod tests {
     use alloc::{boxed::Box, sync::Arc};
     use hashbrown::HashSet;
     use spacepackets::{
-        ecss::{tc::PusTcCreator, SerializablePusPacket},
+        ecss::{tc::PusTcCreator, WritablePusPacket},
         PacketId, SpHeader,
     };
 
