@@ -1,8 +1,3 @@
-#![allow(unused_imports)]
-
-use chrono;
-use log::{debug, error, info, trace, warn};
-
 pub fn setup_logger() -> Result<(), fern::InitError> {
     fern::Dispatch::new()
         .format(|out, message, record| {

@@ -1,6 +1,6 @@
 use crate::requests::{Request, RequestWithToken};
 use log::{error, warn};
-use satrs_core::hk::{CollectionIntervalFactor, HkRequest, UniqueId};
+use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
 use satrs_core::pool::{SharedPool, StoreAddr};
 use satrs_core::pus::verification::{
     FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
@@ -11,7 +11,6 @@ use satrs_core::pus::{
 };
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::{hk, PusPacket};
-use satrs_core::tmtc::TargetId;
 use satrs_example::{hk_err, tmtc_err, TargetIdWithApid};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;

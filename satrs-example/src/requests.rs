@@ -2,7 +2,6 @@ use derive_new::new;
 use satrs_core::hk::HkRequest;
 use satrs_core::mode::ModeRequest;
 use satrs_core::pus::verification::{TcStateAccepted, VerificationToken};
-use satrs_core::tmtc::TargetId;
 use satrs_example::TargetIdWithApid;
 
 #[allow(dead_code)]

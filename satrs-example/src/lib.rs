@@ -12,7 +12,6 @@ use thiserror::Error;
 
 use satrs_mib::res_code::{ResultU16, ResultU16Info};
 use satrs_mib::resultcode;
-mod logger;
 
 pub type Apid = u16;
 
@@ -64,37 +63,6 @@ impl TargetIdWithApid {
     }
 }
 
-// #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash, new)]
-// #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-// pub struct TargetIdWithUniqueId {
-//     target_id: TargetIdWithApid,
-//     unique_id: u32,
-// }
-//
-// impl TargetIdWithUniqueId {
-//     delegate! {
-//        to self.target_id {
-//             pub fn apid(&self) -> Apid;
-//             pub fn target_id(&self) -> TargetId;
-//             }
-//         }
-//     pub fn unique_id(&self) -> u32 {
-//         self.unique_id
-//     }
-//
-//     pub fn write_target_id_and_unique_id_as_pus_header(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
-//        if buf.len() < 8 {
-//            return Err(ByteConversionError::ToSliceTooSmall(SizeMissmatch {
-//                found: buf.len(),
-//                expected: 8,
-//            }));
-//        }
-//         buf[0..4].copy_from_slice(&self.target_id.target_id().to_be_bytes());
-//         buf[4..8].copy_from_slice(&self.unique_id.to_be_bytes());
-//         Ok(8)
-//     }
-// }
-//
 pub const PUS_APID: u16 = 0x02;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, TryFromPrimitive, IntoPrimitive)]

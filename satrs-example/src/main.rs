@@ -1,6 +1,6 @@
 mod ccsds;
 mod hk;
-mod logging;
+mod logger;
 mod pus;
 mod requests;
 mod tcp;
@@ -12,9 +12,8 @@ use satrs_core::hal::std::tcp_server::ServerConfig;
 use satrs_core::hal::std::udp_server::UdpTcServer;
 
 use crate::ccsds::CcsdsReceiver;
-use crate::hk::AcsHkIds;
 use crate::hk::{AcsHkIds, HkUniqueId};
-use crate::logging::setup_logger;
+use crate::logger::setup_logger;
 use crate::pus::action::{Pus8Wrapper, PusService8ActionHandler};
 use crate::pus::event::Pus5Wrapper;
 use crate::pus::hk::{Pus3Wrapper, PusService3HkHandler};
@@ -51,7 +50,7 @@ use satrs_core::spacepackets::{
     SpHeader,
 };
 use satrs_core::tmtc::tm_helper::SharedTmStore;
-use satrs_core::tmtc::TargetId;
+use satrs_core::tmtc::{CcsdsDistributor, TargetId};
 use satrs_core::ChannelId;
 use satrs_example::{
     RequestTargetId, TargetIdWithApid, TcReceiverId, TmSenderId, OBSW_SERVER_ADDR, PUS_APID,
@@ -465,7 +464,7 @@ fn main() {
                                         );
                                         let mut buf: [u8; 8] = [0; 8];
 
-                                        let hk_id = HkUniqueId::new(1);
+                                        let hk_id = HkUniqueId::new(unique_id);
                                         hk_id
                                             .bytes_from_target_id_with_apid(&mut buf, target)
                                             .unwrap();

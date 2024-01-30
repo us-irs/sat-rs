@@ -1,6 +1,5 @@
 use derive_new::new;
 use satrs_example::TargetIdWithApid;
-use zerocopy::AsBytes;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum AcsHkIds {
@@ -19,6 +18,7 @@ impl From<u32> for HkUniqueId {
 }
 
 impl HkUniqueId {
+    #[allow(dead_code)]
     pub fn id(&self) -> u32 {
         self.id
     }
