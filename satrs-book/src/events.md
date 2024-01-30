@@ -13,4 +13,4 @@ event components recommended by this framework do not really need this service.
 The following images shows how the flow of events could look like in a system where components
 can generate events, and where other system components might be interested in those events:
 
-![Event flow](images/event_man_arch.png)
+![Event flow](../../images/events/event_man_arch.png)
