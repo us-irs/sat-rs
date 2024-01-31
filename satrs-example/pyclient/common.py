@@ -44,10 +44,6 @@ class AcsHkIds(enum.IntEnum):
     MGM_SET = 1
 
 
-class HkOpCodes:
-    GENERATE_ONE_SHOT = ["0", "oneshot"]
-
-
 def make_addressable_id(target_id: int, unique_id: int) -> bytes:
     byte_string = bytearray(struct.pack("!I", target_id))
     byte_string.extend(struct.pack("!I", unique_id))

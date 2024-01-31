@@ -1,14 +1,14 @@
 use log::{error, warn};
 use satrs_core::pus::event_srv::PusService5EventHandler;
-use satrs_core::pus::{PusPacketHandlerResult, PusServiceHandler};
+use satrs_core::pus::{EcssTcInStoreConverter, PusPacketHandlerResult};
 
 pub struct Pus5Wrapper {
-    pub pus_5_handler: PusService5EventHandler,
+    pub pus_5_handler: PusService5EventHandler<EcssTcInStoreConverter>,
 }
 
 impl Pus5Wrapper {
     pub fn handle_next_packet(&mut self) -> bool {
-        match self.pus_5_handler.handle_next_packet() {
+        match self.pus_5_handler.handle_one_tc() {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {

@@ -42,7 +42,7 @@ use satrs_core::pus::test::PusService17TestHandler;
 use satrs_core::pus::verification::{
     TcStateStarted, VerificationReporterCfg, VerificationReporterWithSender, VerificationToken,
 };
-use satrs_core::pus::{MpscTcInStoreReceiver, MpscTmInStoreSender};
+use satrs_core::pus::{EcssTcInStoreConverter, MpscTcInStoreReceiver, MpscTmInStoreSender};
 use satrs_core::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore};
 use satrs_core::spacepackets::ecss::tm::{PusTmCreator, PusTmZeroCopyWriter};
 use satrs_core::spacepackets::{
@@ -179,10 +179,10 @@ fn main() {
     );
     let pus17_handler = PusService17TestHandler::new(
         Box::new(test_srv_receiver),
-        tc_store.pool.clone(),
         Box::new(test_srv_tm_sender),
         PUS_APID,
         verif_reporter.clone(),
+        EcssTcInStoreConverter::new(tc_store.pool.clone(), 2048),
     );
     let mut pus_17_wrapper = Service17CustomWrapper {
         pus17_handler,
@@ -204,10 +204,11 @@ fn main() {
         .expect("Creating PUS Scheduler failed");
     let pus_11_handler = PusService11SchedHandler::new(
         Box::new(sched_srv_receiver),
-        tc_store.pool.clone(),
         Box::new(sched_srv_tm_sender),
         PUS_APID,
         verif_reporter.clone(),
+        EcssTcInStoreConverter::new(tc_store.pool.clone(), 2048),
+        tc_store.pool.clone(),
         scheduler,
     );
     let mut pus_11_wrapper = Pus11Wrapper {
@@ -228,10 +229,10 @@ fn main() {
     );
     let pus_5_handler = PusService5EventHandler::new(
         Box::new(event_srv_receiver),
-        tc_store.pool.clone(),
         Box::new(event_srv_tm_sender),
         PUS_APID,
         verif_reporter.clone(),
+        EcssTcInStoreConverter::new(tc_store.pool.clone(), 2048),
         event_request_tx,
     );
     let mut pus_5_wrapper = Pus5Wrapper { pus_5_handler };
@@ -249,10 +250,10 @@ fn main() {
     );
     let pus_8_handler = PusService8ActionHandler::new(
         Box::new(action_srv_receiver),
-        tc_store.pool.clone(),
         Box::new(action_srv_tm_sender),
         PUS_APID,
         verif_reporter.clone(),
+        EcssTcInStoreConverter::new(tc_store.pool.clone(), 2048),
         request_map.clone(),
     );
     let mut pus_8_wrapper = Pus8Wrapper { pus_8_handler };
@@ -267,10 +268,10 @@ fn main() {
         MpscTcInStoreReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
     let pus_3_handler = PusService3HkHandler::new(
         Box::new(hk_srv_receiver),
-        tc_store.pool.clone(),
         Box::new(hk_srv_tm_sender),
         PUS_APID,
         verif_reporter.clone(),
+        EcssTcInStoreConverter::new(tc_store.pool.clone(), 2048),
         request_map,
     );
     let mut pus_3_wrapper = Pus3Wrapper { pus_3_handler };

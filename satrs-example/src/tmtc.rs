@@ -1,12 +1,11 @@
 use log::warn;
-use satrs_core::pus::ReceivesEcssPusTc;
+use satrs_core::pus::{EcssTcAndToken, ReceivesEcssPusTc};
 use satrs_core::spacepackets::SpHeader;
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
 use thiserror::Error;
 
 use crate::pus::PusReceiver;
 use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
-use satrs_core::pus::TcAddrWithToken;
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::tmtc::tm_helper::SharedTmStore;
@@ -35,7 +34,7 @@ pub enum MpscStoreAndSendError {
     #[error("Store error: {0}")]
     Store(#[from] StoreError),
     #[error("TC send error: {0}")]
-    TcSend(#[from] SendError<TcAddrWithToken>),
+    TcSend(#[from] SendError<EcssTcAndToken>),
     #[error("TMTC send error: {0}")]
     TmTcSend(#[from] SendError<StoreAddr>),
 }
@@ -103,7 +102,6 @@ impl TmtcTask {
     }
 
     pub fn periodic_operation(&mut self) {
-        //while self.poll_tc() {}
         self.poll_tc();
     }
 
@@ -123,7 +121,11 @@ impl TmtcTask {
                 match PusTcReader::new(&self.tc_buf) {
                     Ok((pus_tc, _)) => {
                         self.pus_receiver
-                            .handle_tc_packet(addr, pus_tc.service(), &pus_tc)
+                            .handle_tc_packet(
+                                satrs_core::pus::TcInMemory::StoreAddr(addr),
+                                pus_tc.service(),
+                                &pus_tc,
+                            )
                             .ok();
                         true
                     }

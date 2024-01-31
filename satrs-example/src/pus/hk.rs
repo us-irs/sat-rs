@@ -1,72 +1,63 @@
 use crate::requests::{Request, RequestWithToken};
 use log::{error, warn};
 use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
-use satrs_core::pool::{SharedPool, StoreAddr};
-use satrs_core::pus::verification::{
-    FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
-};
+use satrs_core::pus::verification::{FailParams, StdVerifReporterWithSender};
 use satrs_core::pus::{
-    EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
-    PusServiceHandler,
+    EcssTcInMemConverter, EcssTcInStoreConverter, EcssTcReceiver, EcssTmSender,
+    PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHandler,
 };
-use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::{hk, PusPacket};
 use satrs_example::{hk_err, tmtc_err, TargetIdWithApid};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
-pub struct PusService3HkHandler {
-    psb: PusServiceBase,
+pub struct PusService3HkHandler<TcInMemConverter: EcssTcInMemConverter> {
+    psb: PusServiceHandler<TcInMemConverter>,
     request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
 }
 
-impl PusService3HkHandler {
+impl<TcInMemConverter: EcssTcInMemConverter> PusService3HkHandler<TcInMemConverter> {
     pub fn new(
         tc_receiver: Box<dyn EcssTcReceiver>,
-        shared_tc_pool: SharedPool,
         tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
+        tc_in_mem_converter: TcInMemConverter,
         request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
     ) -> Self {
         Self {
-            psb: PusServiceBase::new(
+            psb: PusServiceHandler::new(
                 tc_receiver,
-                shared_tc_pool,
                 tm_sender,
                 tm_apid,
                 verification_handler,
+                tc_in_mem_converter,
             ),
             request_handlers,
         }
     }
-}
 
-impl PusServiceHandler for PusService3HkHandler {
-    fn psb_mut(&mut self) -> &mut PusServiceBase {
-        &mut self.psb
-    }
-    fn psb(&self) -> &PusServiceBase {
-        &self.psb
-    }
-
-    fn handle_one_tc(
-        &mut self,
-        addr: StoreAddr,
-        token: VerificationToken<TcStateAccepted>,
-    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTcReader::new(&self.psb().pus_buf).unwrap();
+    fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        let possible_packet = self.psb.retrieve_and_accept_next_packet()?;
+        if possible_packet.is_none() {
+            return Ok(PusPacketHandlerResult::Empty);
+        }
+        let ecss_tc_and_token = possible_packet.unwrap();
+        let tc = self
+            .psb
+            .tc_in_mem_converter
+            .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token)?;
         let subservice = tc.subservice();
         let mut partial_error = None;
-        let time_stamp = self.psb().get_current_timestamp(&mut partial_error);
+        let time_stamp = PusServiceBase::get_current_timestamp(&mut partial_error);
         let user_data = tc.user_data();
         if user_data.is_empty() {
             self.psb
+                .common
                 .verification_handler
                 .borrow_mut()
                 .start_failure(
-                    token,
+                    ecss_tc_and_token.token,
                     FailParams::new(Some(&time_stamp), &tmtc_err::NOT_ENOUGH_APP_DATA, None),
                 )
                 .expect("Sending start failure TM failed");
@@ -81,9 +72,13 @@ impl PusServiceHandler for PusService3HkHandler {
                 &hk_err::UNIQUE_ID_MISSING
             };
             self.psb
+                .common
                 .verification_handler
                 .borrow_mut()
-                .start_failure(token, FailParams::new(Some(&time_stamp), err, None))
+                .start_failure(
+                    ecss_tc_and_token.token,
+                    FailParams::new(Some(&time_stamp), err, None),
+                )
                 .expect("Sending start failure TM failed");
             return Err(PusPacketHandlingError::NotEnoughAppData(
                 "Expected at least 8 bytes of app data".into(),
@@ -93,10 +88,11 @@ impl PusServiceHandler for PusService3HkHandler {
         let unique_id = u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap());
         if !self.request_handlers.contains_key(&target_id) {
             self.psb
+                .common
                 .verification_handler
                 .borrow_mut()
                 .start_failure(
-                    token,
+                    ecss_tc_and_token.token,
                     FailParams::new(Some(&time_stamp), &hk_err::UNKNOWN_TARGET_ID, None),
                 )
                 .expect("Sending start failure TM failed");
@@ -107,7 +103,11 @@ impl PusServiceHandler for PusService3HkHandler {
         let send_request = |target: TargetIdWithApid, request: HkRequest| {
             let sender = self.request_handlers.get(&target).unwrap();
             sender
-                .send(RequestWithToken::new(target, Request::Hk(request), token))
+                .send(RequestWithToken::new(
+                    target,
+                    Request::Hk(request),
+                    ecss_tc_and_token.token,
+                ))
                 .unwrap_or_else(|_| panic!("Sending HK request {request:?} failed"));
         };
         if subservice == hk::Subservice::TcEnableHkGeneration as u8 {
@@ -119,10 +119,11 @@ impl PusServiceHandler for PusService3HkHandler {
         } else if subservice == hk::Subservice::TcModifyHkCollectionInterval as u8 {
             if user_data.len() < 12 {
                 self.psb
+                    .common
                     .verification_handler
                     .borrow_mut()
                     .start_failure(
-                        token,
+                        ecss_tc_and_token.token,
                         FailParams::new(
                             Some(&time_stamp),
                             &hk_err::COLLECTION_INTERVAL_MISSING,
@@ -147,12 +148,12 @@ impl PusServiceHandler for PusService3HkHandler {
 }
 
 pub struct Pus3Wrapper {
-    pub(crate) pus_3_handler: PusService3HkHandler,
+    pub(crate) pus_3_handler: PusService3HkHandler<EcssTcInStoreConverter>,
 }
 
 impl Pus3Wrapper {
     pub fn handle_next_packet(&mut self) -> bool {
-        match self.pus_3_handler.handle_next_packet() {
+        match self.pus_3_handler.handle_one_tc() {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {

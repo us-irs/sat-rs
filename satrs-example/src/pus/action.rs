@@ -1,12 +1,11 @@
 use crate::requests::{ActionRequest, Request, RequestWithToken};
 use log::{error, warn};
-use satrs_core::pool::{SharedPool, StoreAddr};
 use satrs_core::pus::verification::{
-    FailParams, StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
+    FailParams, TcStateAccepted, VerificationReporterWithSender, VerificationToken,
 };
 use satrs_core::pus::{
-    EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase,
-    PusServiceHandler,
+    EcssTcInMemConverter, EcssTcInStoreConverter, EcssTcReceiver, EcssTmSender,
+    PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHandler,
 };
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
@@ -14,34 +13,32 @@ use satrs_example::{tmtc_err, TargetIdWithApid};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
-pub struct PusService8ActionHandler {
-    psb: PusServiceBase,
+pub struct PusService8ActionHandler<TcInMemConverter: EcssTcInMemConverter> {
+    psb: PusServiceHandler<TcInMemConverter>,
     request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
 }
 
-impl PusService8ActionHandler {
+impl<TcInMemConverter: EcssTcInMemConverter> PusService8ActionHandler<TcInMemConverter> {
     pub fn new(
         tc_receiver: Box<dyn EcssTcReceiver>,
-        shared_tc_pool: SharedPool,
         tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
-        verification_handler: StdVerifReporterWithSender,
+        verification_handler: VerificationReporterWithSender,
+        tc_in_mem_converter: TcInMemConverter,
         request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
     ) -> Self {
         Self {
-            psb: PusServiceBase::new(
+            psb: PusServiceHandler::new(
                 tc_receiver,
-                shared_tc_pool,
                 tm_sender,
                 tm_apid,
                 verification_handler,
+                tc_in_mem_converter,
             ),
             request_handlers,
         }
     }
-}
 
-impl PusService8ActionHandler {
     fn handle_action_request_with_id(
         &self,
         token: VerificationToken<TcStateAccepted>,
@@ -50,7 +47,8 @@ impl PusService8ActionHandler {
     ) -> Result<(), PusPacketHandlingError> {
         let user_data = tc.user_data();
         if user_data.len() < 8 {
-            self.psb()
+            self.psb
+                .common
                 .verification_handler
                 .borrow_mut()
                 .start_failure(
@@ -79,7 +77,8 @@ impl PusService8ActionHandler {
         } else {
             let mut fail_data: [u8; 4] = [0; 4];
             fail_data.copy_from_slice(&target_id.target.to_be_bytes());
-            self.psb()
+            self.psb
+                .common
                 .verification_handler
                 .borrow_mut()
                 .start_failure(
@@ -97,37 +96,32 @@ impl PusService8ActionHandler {
         }
         Ok(())
     }
-}
 
-impl PusServiceHandler for PusService8ActionHandler {
-    fn psb_mut(&mut self) -> &mut PusServiceBase {
-        &mut self.psb
-    }
-    fn psb(&self) -> &PusServiceBase {
-        &self.psb
-    }
-
-    fn handle_one_tc(
-        &mut self,
-        addr: StoreAddr,
-        token: VerificationToken<TcStateAccepted>,
-    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        self.copy_tc_to_buf(addr)?;
-        let (tc, _) = PusTcReader::new(&self.psb().pus_buf).unwrap();
+    fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        let possible_packet = self.psb.retrieve_and_accept_next_packet()?;
+        if possible_packet.is_none() {
+            return Ok(PusPacketHandlerResult::Empty);
+        }
+        let ecss_tc_and_token = possible_packet.unwrap();
+        self.psb
+            .tc_in_mem_converter
+            .cache_ecss_tc_in_memory(&ecss_tc_and_token)?;
+        let tc = PusTcReader::new(self.psb.tc_in_mem_converter.tc_slice_raw())?.0;
         let subservice = tc.subservice();
         let mut partial_error = None;
-        let time_stamp = self.psb().get_current_timestamp(&mut partial_error);
+        let time_stamp = PusServiceBase::get_current_timestamp(&mut partial_error);
         match subservice {
             128 => {
-                self.handle_action_request_with_id(token, &tc, &time_stamp)?;
+                self.handle_action_request_with_id(ecss_tc_and_token.token, &tc, &time_stamp)?;
             }
             _ => {
                 let fail_data = [subservice];
-                self.psb_mut()
+                self.psb
+                    .common
                     .verification_handler
                     .get_mut()
                     .start_failure(
-                        token,
+                        ecss_tc_and_token.token,
                         FailParams::new(
                             Some(&time_stamp),
                             &tmtc_err::INVALID_PUS_SUBSERVICE,
@@ -148,12 +142,12 @@ impl PusServiceHandler for PusService8ActionHandler {
 }
 
 pub struct Pus8Wrapper {
-    pub(crate) pus_8_handler: PusService8ActionHandler,
+    pub(crate) pus_8_handler: PusService8ActionHandler<EcssTcInStoreConverter>,
 }
 
 impl Pus8Wrapper {
     pub fn handle_next_packet(&mut self) -> bool {
-        match self.pus_8_handler.handle_next_packet() {
+        match self.pus_8_handler.handle_one_tc() {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {

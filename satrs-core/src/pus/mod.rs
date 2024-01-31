@@ -55,12 +55,6 @@ impl<'tm> From<PusTmCreator<'tm>> for PusTmWrapper<'tm> {
     }
 }
 
-pub type TcAddrWithToken = (StoreAddr, TcStateToken);
-
-/// Generic abstraction for a telecommand being sent around after is has been accepted.
-/// The actual telecommand is stored inside a pre-allocated pool structure.
-pub type AcceptedTc = (StoreAddr, VerificationToken<TcStateAccepted>);
-
 /// Generic error type for sending something via a message queue.
 #[derive(Debug, Copy, Clone)]
 pub enum GenericSendError {
@@ -200,9 +194,69 @@ pub trait EcssTcSenderCore: EcssChannel {
     fn send_tc(&self, tc: PusTcCreator, token: Option<TcStateToken>) -> Result<(), EcssTmtcError>;
 }
 
-pub struct ReceivedTcWrapper {
-    pub store_addr: StoreAddr,
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TcInMemory {
+    StoreAddr(StoreAddr),
+    #[cfg(feature = "alloc")]
+    Vec(alloc::vec::Vec<u8>),
+}
+
+impl From<StoreAddr> for TcInMemory {
+    fn from(value: StoreAddr) -> Self {
+        Self::StoreAddr(value)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl From<alloc::vec::Vec<u8>> for TcInMemory {
+    fn from(value: alloc::vec::Vec<u8>) -> Self {
+        Self::Vec(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EcssTcAndToken {
+    pub tc_in_memory: TcInMemory,
     pub token: Option<TcStateToken>,
+}
+
+impl EcssTcAndToken {
+    pub fn new(tc_in_memory: impl Into<TcInMemory>, token: impl Into<TcStateToken>) -> Self {
+        Self {
+            tc_in_memory: tc_in_memory.into(),
+            token: Some(token.into()),
+        }
+    }
+}
+
+/// Generic abstraction for a telecommand being sent around after is has been accepted.
+pub struct AcceptedEcssTcAndToken {
+    pub tc_in_memory: TcInMemory,
+    pub token: VerificationToken<TcStateAccepted>,
+}
+
+impl From<AcceptedEcssTcAndToken> for EcssTcAndToken {
+    fn from(value: AcceptedEcssTcAndToken) -> Self {
+        EcssTcAndToken {
+            tc_in_memory: value.tc_in_memory,
+            token: Some(value.token.into()),
+        }
+    }
+}
+
+impl TryFrom<EcssTcAndToken> for AcceptedEcssTcAndToken {
+    type Error = ();
+
+    fn try_from(value: EcssTcAndToken) -> Result<Self, Self::Error> {
+        if let Some(TcStateToken::Accepted(token)) = value.token {
+            return Ok(AcceptedEcssTcAndToken {
+                tc_in_memory: value.tc_in_memory,
+                token,
+            });
+        }
+        Err(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -231,7 +285,7 @@ impl From<StoreError> for TryRecvTmtcError {
 
 /// Generic trait for a user supplied receiver object.
 pub trait EcssTcReceiverCore: EcssChannel {
-    fn recv_tc(&self) -> Result<ReceivedTcWrapper, TryRecvTmtcError>;
+    fn recv_tc(&self) -> Result<EcssTcAndToken, TryRecvTmtcError>;
 }
 
 /// Generic trait for objects which can receive ECSS PUS telecommands. This trait is
@@ -315,15 +369,16 @@ pub mod std_mod {
         StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
     };
     use crate::pus::{
-        EcssChannel, EcssTcReceiver, EcssTcReceiverCore, EcssTmSender, EcssTmSenderCore,
-        EcssTmtcError, GenericRecvError, GenericSendError, PusTmWrapper, ReceivedTcWrapper,
-        TcAddrWithToken, TryRecvTmtcError,
+        EcssChannel, EcssTcAndToken, EcssTcReceiver, EcssTcReceiverCore, EcssTmSender,
+        EcssTmSenderCore, EcssTmtcError, GenericRecvError, GenericSendError, PusTmWrapper,
+        TryRecvTmtcError,
     };
     use crate::tmtc::tm_helper::SharedTmStore;
     use crate::ChannelId;
     use alloc::boxed::Box;
     use alloc::vec::Vec;
     use crossbeam_channel as cb;
+    use spacepackets::ecss::tc::PusTcReader;
     use spacepackets::ecss::tm::PusTmCreator;
     use spacepackets::ecss::PusError;
     use spacepackets::time::cds::TimeProvider;
@@ -334,6 +389,9 @@ pub mod std_mod {
     use std::sync::mpsc;
     use std::sync::mpsc::TryRecvError;
     use thiserror::Error;
+
+    use super::verification::VerificationReporterWithSender;
+    use super::{AcceptedEcssTcAndToken, TcInMemory};
 
     impl From<mpsc::SendError<StoreAddr>> for EcssTmtcError {
         fn from(_: mpsc::SendError<StoreAddr>) -> Self {
@@ -414,7 +472,7 @@ pub mod std_mod {
     pub struct MpscTcInStoreReceiver {
         id: ChannelId,
         name: &'static str,
-        receiver: mpsc::Receiver<TcAddrWithToken>,
+        receiver: mpsc::Receiver<EcssTcAndToken>,
     }
 
     impl EcssChannel for MpscTcInStoreReceiver {
@@ -428,16 +486,12 @@ pub mod std_mod {
     }
 
     impl EcssTcReceiverCore for MpscTcInStoreReceiver {
-        fn recv_tc(&self) -> Result<ReceivedTcWrapper, TryRecvTmtcError> {
-            let (store_addr, token) = self.receiver.try_recv().map_err(|e| match e {
+        fn recv_tc(&self) -> Result<EcssTcAndToken, TryRecvTmtcError> {
+            self.receiver.try_recv().map_err(|e| match e {
                 TryRecvError::Empty => TryRecvTmtcError::Empty,
                 TryRecvError::Disconnected => {
                     TryRecvTmtcError::Error(EcssTmtcError::from(GenericRecvError::TxDisconnected))
                 }
-            })?;
-            Ok(ReceivedTcWrapper {
-                store_addr,
-                token: Some(token),
             })
         }
     }
@@ -446,7 +500,7 @@ pub mod std_mod {
         pub fn new(
             id: ChannelId,
             name: &'static str,
-            receiver: mpsc::Receiver<TcAddrWithToken>,
+            receiver: mpsc::Receiver<EcssTcAndToken>,
         ) -> Self {
             Self { id, name, receiver }
         }
@@ -548,14 +602,14 @@ pub mod std_mod {
     pub struct CrossbeamTcInStoreReceiver {
         id: ChannelId,
         name: &'static str,
-        receiver: cb::Receiver<TcAddrWithToken>,
+        receiver: cb::Receiver<EcssTcAndToken>,
     }
 
     impl CrossbeamTcInStoreReceiver {
         pub fn new(
             id: ChannelId,
             name: &'static str,
-            receiver: cb::Receiver<TcAddrWithToken>,
+            receiver: cb::Receiver<EcssTcAndToken>,
         ) -> Self {
             Self { id, name, receiver }
         }
@@ -572,16 +626,12 @@ pub mod std_mod {
     }
 
     impl EcssTcReceiverCore for CrossbeamTcInStoreReceiver {
-        fn recv_tc(&self) -> Result<ReceivedTcWrapper, TryRecvTmtcError> {
-            let (store_addr, token) = self.receiver.try_recv().map_err(|e| match e {
+        fn recv_tc(&self) -> Result<EcssTcAndToken, TryRecvTmtcError> {
+            self.receiver.try_recv().map_err(|e| match e {
                 cb::TryRecvError::Empty => TryRecvTmtcError::Empty,
                 cb::TryRecvError::Disconnected => {
                     TryRecvTmtcError::Error(EcssTmtcError::from(GenericRecvError::TxDisconnected))
                 }
-            })?;
-            Ok(ReceivedTcWrapper {
-                store_addr,
-                token: Some(token),
             })
         }
     }
@@ -596,8 +646,12 @@ pub mod std_mod {
         InvalidSubservice(u8),
         #[error("not enough application data available: {0}")]
         NotEnoughAppData(String),
+        #[error("PUS packet too large, does not fit in buffer: {0}")]
+        PusPacketTooLarge(usize),
         #[error("invalid application data")]
         InvalidAppData(String),
+        #[error("invalid format of TC in memory: {0:?}")]
+        InvalidTcInMemoryFormat(TcInMemory),
         #[error("generic ECSS tmtc error: {0}")]
         EcssTmtc(#[from] EcssTmtcError),
         #[error("invalid verification token")]
@@ -634,42 +688,118 @@ pub mod std_mod {
         }
     }
 
-    /// Base class for handlers which can handle PUS TC packets. Right now, the verification
-    /// reporter is constrained to the [StdVerifReporterWithSender] and the service handler
-    /// relies on TMTC packets being exchanged via a [SharedPool].
+    pub trait EcssTcInMemConverter {
+        fn cache_ecss_tc_in_memory<'a>(
+            &'a mut self,
+            possible_packet: &'a AcceptedEcssTcAndToken,
+        ) -> Result<(), PusPacketHandlingError>;
+
+        fn tc_slice_raw(&self) -> &[u8];
+
+        fn convert_ecss_tc_in_memory_to_reader<'a>(
+            &'a mut self,
+            possible_packet: &'a AcceptedEcssTcAndToken,
+        ) -> Result<PusTcReader<'a>, PusPacketHandlingError> {
+            self.cache_ecss_tc_in_memory(possible_packet)?;
+            Ok(PusTcReader::new(self.tc_slice_raw())?.0)
+        }
+    }
+
+    pub struct EcssTcInVecConverter {
+        pub pus_tc_raw: Option<Vec<u8>>,
+    }
+
+    impl EcssTcInMemConverter for EcssTcInVecConverter {
+        fn cache_ecss_tc_in_memory<'a>(
+            &'a mut self,
+            possible_packet: &'a AcceptedEcssTcAndToken,
+        ) -> Result<(), PusPacketHandlingError> {
+            self.pus_tc_raw = None;
+            match &possible_packet.tc_in_memory {
+                super::TcInMemory::StoreAddr(_) => {
+                    return Err(PusPacketHandlingError::InvalidTcInMemoryFormat(
+                        possible_packet.tc_in_memory.clone(),
+                    ));
+                }
+                super::TcInMemory::Vec(vec) => {
+                    self.pus_tc_raw = Some(vec.clone());
+                }
+            };
+            Ok(())
+        }
+
+        fn tc_slice_raw(&self) -> &[u8] {
+            if self.pus_tc_raw.is_none() {
+                return &[];
+            }
+            self.pus_tc_raw.as_ref().unwrap()
+        }
+    }
+
+    pub struct EcssTcInStoreConverter {
+        pub shared_tc_store: SharedPool,
+        pub pus_buf: Vec<u8>,
+    }
+
+    impl EcssTcInStoreConverter {
+        pub fn new(shared_tc_store: SharedPool, max_expected_tc_size: usize) -> Self {
+            Self {
+                shared_tc_store,
+                pus_buf: alloc::vec![0; max_expected_tc_size],
+            }
+        }
+
+        pub fn copy_tc_to_buf(&mut self, addr: StoreAddr) -> Result<(), PusPacketHandlingError> {
+            // Keep locked section as short as possible.
+            let mut tc_pool = self
+                .shared_tc_store
+                .write()
+                .map_err(|_| PusPacketHandlingError::EcssTmtc(EcssTmtcError::StoreLock))?;
+            let tc_guard = tc_pool.read_with_guard(addr);
+            let tc_raw = tc_guard.read().unwrap();
+            if tc_raw.len() > self.pus_buf.len() {
+                return Err(PusPacketHandlingError::PusPacketTooLarge(tc_raw.len()));
+            }
+            self.pus_buf[0..tc_raw.len()].copy_from_slice(tc_raw);
+            Ok(())
+        }
+    }
+
+    impl EcssTcInMemConverter for EcssTcInStoreConverter {
+        fn cache_ecss_tc_in_memory<'a>(
+            &'a mut self,
+            possible_packet: &'a AcceptedEcssTcAndToken,
+        ) -> Result<(), PusPacketHandlingError> {
+            match &possible_packet.tc_in_memory {
+                super::TcInMemory::StoreAddr(addr) => {
+                    self.copy_tc_to_buf(*addr)?;
+                }
+                super::TcInMemory::Vec(_) => {
+                    return Err(PusPacketHandlingError::InvalidTcInMemoryFormat(
+                        possible_packet.tc_in_memory.clone(),
+                    ));
+                }
+            };
+            Ok(())
+        }
+
+        fn tc_slice_raw(&self) -> &[u8] {
+            self.pus_buf.as_ref()
+        }
+    }
+
     pub struct PusServiceBase {
         pub tc_receiver: Box<dyn EcssTcReceiver>,
-        pub shared_tc_store: SharedPool,
         pub tm_sender: Box<dyn EcssTmSender>,
         pub tm_apid: u16,
         /// The verification handler is wrapped in a [RefCell] to allow the interior mutability
         /// pattern. This makes writing methods which are not mutable a lot easier.
         pub verification_handler: RefCell<StdVerifReporterWithSender>,
-        pub pus_buf: [u8; 2048],
-        pub pus_size: usize,
     }
 
     impl PusServiceBase {
-        pub fn new(
-            tc_receiver: Box<dyn EcssTcReceiver>,
-            shared_tc_store: SharedPool,
-            tm_sender: Box<dyn EcssTmSender>,
-            tm_apid: u16,
-            verification_handler: StdVerifReporterWithSender,
-        ) -> Self {
-            Self {
-                tc_receiver,
-                shared_tc_store,
-                tm_apid,
-                tm_sender,
-                verification_handler: RefCell::new(verification_handler),
-                pus_buf: [0; 2048],
-                pus_size: 0,
-            }
-        }
-
+        #[cfg(feature = "std")]
         pub fn get_current_timestamp(
-            &self,
             partial_error: &mut Option<PartialPusHandlingError>,
         ) -> [u8; 7] {
             let mut time_stamp: [u8; 7] = [0; 7];
@@ -684,48 +814,65 @@ pub mod std_mod {
             time_stamp
         }
 
-        pub fn get_current_timestamp_ignore_error(&self) -> [u8; 7] {
+        #[cfg(feature = "std")]
+        pub fn get_current_timestamp_ignore_error() -> [u8; 7] {
             let mut dummy = None;
-            self.get_current_timestamp(&mut dummy)
+            Self::get_current_timestamp(&mut dummy)
         }
     }
 
-    pub trait PusServiceHandler {
-        fn psb_mut(&mut self) -> &mut PusServiceBase;
-        fn psb(&self) -> &PusServiceBase;
-        fn handle_one_tc(
-            &mut self,
-            addr: StoreAddr,
-            token: VerificationToken<TcStateAccepted>,
-        ) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
+    /// Base class for handlers which can handle PUS TC packets. Right now, the verification
+    /// reporter is constrained to the [StdVerifReporterWithSender] and the service handler
+    /// relies on TMTC packets being exchanged via a [SharedPool]. Please note that this variant
+    /// of the PUS service base is not optimized for handling packets sent as a `Vec<u8>` and
+    /// might perform additional copies to the internal buffer as well. The class should
+    /// still behave correctly.
+    pub struct PusServiceHandler<TcInMemConverter: EcssTcInMemConverter> {
+        pub common: PusServiceBase,
+        pub tc_in_mem_converter: TcInMemConverter,
+    }
 
-        fn copy_tc_to_buf(&mut self, addr: StoreAddr) -> Result<(), PusPacketHandlingError> {
-            // Keep locked section as short as possible.
-            let psb_mut = self.psb_mut();
-            let mut tc_pool = psb_mut
-                .shared_tc_store
-                .write()
-                .map_err(|_| PusPacketHandlingError::EcssTmtc(EcssTmtcError::StoreLock))?;
-            let tc_guard = tc_pool.read_with_guard(addr);
-            let tc_raw = tc_guard.read().unwrap();
-            psb_mut.pus_buf[0..tc_raw.len()].copy_from_slice(tc_raw);
-            Ok(())
+    impl<TcInMemConverter: EcssTcInMemConverter> PusServiceHandler<TcInMemConverter> {
+        pub fn new(
+            tc_receiver: Box<dyn EcssTcReceiver>,
+            tm_sender: Box<dyn EcssTmSender>,
+            tm_apid: u16,
+            verification_handler: VerificationReporterWithSender,
+            tc_in_mem_converter: TcInMemConverter,
+        ) -> Self {
+            Self {
+                common: PusServiceBase {
+                    tc_receiver,
+                    tm_sender,
+                    tm_apid,
+                    verification_handler: RefCell::new(verification_handler),
+                },
+                tc_in_mem_converter,
+            }
         }
 
-        fn handle_next_packet(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-            match self.psb().tc_receiver.recv_tc() {
-                Ok(ReceivedTcWrapper { store_addr, token }) => {
+        pub fn retrieve_and_accept_next_packet(
+            &mut self,
+        ) -> Result<Option<AcceptedEcssTcAndToken>, PusPacketHandlingError> {
+            match self.common.tc_receiver.recv_tc() {
+                Ok(EcssTcAndToken {
+                    tc_in_memory,
+                    token,
+                }) => {
                     if token.is_none() {
                         return Err(PusPacketHandlingError::InvalidVerificationToken);
                     }
                     let token = token.unwrap();
                     let accepted_token = VerificationToken::<TcStateAccepted>::try_from(token)
                         .map_err(|_| PusPacketHandlingError::InvalidVerificationToken)?;
-                    self.handle_one_tc(store_addr, accepted_token)
+                    Ok(Some(AcceptedEcssTcAndToken {
+                        tc_in_memory,
+                        token: accepted_token,
+                    }))
                 }
                 Err(e) => match e {
                     TryRecvTmtcError::Error(e) => Err(PusPacketHandlingError::EcssTmtc(e)),
-                    TryRecvTmtcError::Empty => Ok(PusPacketHandlerResult::Empty),
+                    TryRecvTmtcError::Empty => Ok(None),
                 },
             }
         }
