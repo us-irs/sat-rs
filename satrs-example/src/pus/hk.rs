@@ -11,14 +11,13 @@ use satrs_core::pus::{
 };
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::{hk, PusPacket};
-use satrs_core::tmtc::{AddressableId, TargetId};
-use satrs_example::{hk_err, tmtc_err};
+use satrs_example::{hk_err, tmtc_err, TargetIdWithApid};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
 pub struct PusService3HkHandler {
     psb: PusServiceBase,
-    request_handlers: HashMap<TargetId, Sender<RequestWithToken>>,
+    request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
 }
 
 impl PusService3HkHandler {
@@ -28,7 +27,7 @@ impl PusService3HkHandler {
         tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
-        request_handlers: HashMap<TargetId, Sender<RequestWithToken>>,
+        request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
     ) -> Self {
         Self {
             psb: PusServiceBase::new(
@@ -90,11 +89,9 @@ impl PusServiceHandler for PusService3HkHandler {
                 "Expected at least 8 bytes of app data".into(),
             ));
         }
-        let addressable_id = AddressableId::from_raw_be(user_data).unwrap();
-        if !self
-            .request_handlers
-            .contains_key(&addressable_id.target_id)
-        {
+        let target_id = TargetIdWithApid::from_tc(&tc).expect("invalid tc format");
+        let unique_id = u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap());
+        if !self.request_handlers.contains_key(&target_id) {
             self.psb
                 .verification_handler
                 .borrow_mut()
@@ -103,35 +100,22 @@ impl PusServiceHandler for PusService3HkHandler {
                     FailParams::new(Some(&time_stamp), &hk_err::UNKNOWN_TARGET_ID, None),
                 )
                 .expect("Sending start failure TM failed");
-            let tgt_id = addressable_id.target_id;
             return Err(PusPacketHandlingError::NotEnoughAppData(format!(
-                "Unknown target ID {tgt_id}"
+                "Unknown target ID {target_id}"
             )));
         }
-        let send_request = |target: TargetId, request: HkRequest| {
-            let sender = self
-                .request_handlers
-                .get(&addressable_id.target_id)
-                .unwrap();
+        let send_request = |target: TargetIdWithApid, request: HkRequest| {
+            let sender = self.request_handlers.get(&target).unwrap();
             sender
                 .send(RequestWithToken::new(target, Request::Hk(request), token))
                 .unwrap_or_else(|_| panic!("Sending HK request {request:?} failed"));
         };
         if subservice == hk::Subservice::TcEnableHkGeneration as u8 {
-            send_request(
-                addressable_id.target_id,
-                HkRequest::Enable(addressable_id.unique_id),
-            );
+            send_request(target_id, HkRequest::Enable(unique_id));
         } else if subservice == hk::Subservice::TcDisableHkGeneration as u8 {
-            send_request(
-                addressable_id.target_id,
-                HkRequest::Disable(addressable_id.unique_id),
-            );
+            send_request(target_id, HkRequest::Disable(unique_id));
         } else if subservice == hk::Subservice::TcGenerateOneShotHk as u8 {
-            send_request(
-                addressable_id.target_id,
-                HkRequest::OneShot(addressable_id.unique_id),
-            );
+            send_request(target_id, HkRequest::OneShot(unique_id));
         } else if subservice == hk::Subservice::TcModifyHkCollectionInterval as u8 {
             if user_data.len() < 12 {
                 self.psb
@@ -151,9 +135,9 @@ impl PusServiceHandler for PusService3HkHandler {
                 ));
             }
             send_request(
-                addressable_id.target_id,
+                target_id,
                 HkRequest::ModifyCollectionInterval(
-                    addressable_id.unique_id,
+                    unique_id,
                     CollectionIntervalFactor::from_be_bytes(user_data[8..12].try_into().unwrap()),
                 ),
             );

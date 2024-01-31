@@ -1,6 +1,6 @@
 mod ccsds;
 mod hk;
-mod logging;
+mod logger;
 mod pus;
 mod requests;
 mod tcp;
@@ -12,8 +12,8 @@ use satrs_core::hal::std::tcp_server::ServerConfig;
 use satrs_core::hal::std::udp_server::UdpTcServer;
 
 use crate::ccsds::CcsdsReceiver;
-use crate::hk::AcsHkIds;
-use crate::logging::setup_logger;
+use crate::hk::{AcsHkIds, HkUniqueId};
+use crate::logger::setup_logger;
 use crate::pus::action::{Pus8Wrapper, PusService8ActionHandler};
 use crate::pus::event::Pus5Wrapper;
 use crate::pus::hk::{Pus3Wrapper, PusService3HkHandler};
@@ -50,10 +50,11 @@ use satrs_core::spacepackets::{
     SpHeader,
 };
 use satrs_core::tmtc::tm_helper::SharedTmStore;
-use satrs_core::tmtc::{AddressableId, CcsdsDistributor, TargetId};
+use satrs_core::tmtc::{CcsdsDistributor, TargetId};
 use satrs_core::ChannelId;
 use satrs_example::{
-    RequestTargetId, TcReceiverId, TmSenderId, OBSW_SERVER_ADDR, PUS_APID, SERVER_PORT,
+    RequestTargetId, TargetIdWithApid, TcReceiverId, TmSenderId, OBSW_SERVER_ADDR, PUS_APID,
+    SERVER_PORT,
 };
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -131,7 +132,8 @@ fn main() {
     // Some request are targetable. This map is used to retrieve sender handles based on a target ID.
     let mut request_map = HashMap::new();
     let (acs_thread_tx, acs_thread_rx) = channel::<RequestWithToken>();
-    request_map.insert(RequestTargetId::AcsSubsystem as TargetId, acs_thread_tx);
+    let target_apid = TargetIdWithApid::new(PUS_APID, RequestTargetId::AcsSubsystem as TargetId);
+    request_map.insert(target_apid, acs_thread_tx);
 
     let tc_source_wrapper = PusTcSource {
         tc_store: tc_store.clone(),
@@ -440,9 +442,13 @@ fn main() {
                         match request.targeted_request.request {
                             Request::Hk(hk_req) => match hk_req {
                                 HkRequest::OneShot(unique_id) => {
+                                    // TODO: We should check whether the unique ID is even valid.
                                     let target = request.targeted_request.target_id;
-                                    assert_eq!(target, RequestTargetId::AcsSubsystem as u32);
-                                    if request.targeted_request.target_id
+                                    assert_eq!(
+                                        target.target_id(),
+                                        RequestTargetId::AcsSubsystem as u32
+                                    );
+                                    if request.targeted_request.target_id.target
                                         == AcsHkIds::TestMgmSet as u32
                                     {
                                         let mut sp_header = SpHeader::tm(
@@ -458,11 +464,8 @@ fn main() {
                                             &timestamp,
                                         );
                                         let mut buf: [u8; 8] = [0; 8];
-                                        let addressable_id = AddressableId {
-                                            target_id: target,
-                                            unique_id,
-                                        };
-                                        addressable_id.write_to_be_bytes(&mut buf).unwrap();
+                                        let hk_id = HkUniqueId::new(target.target_id(), unique_id);
+                                        hk_id.write_to_be_bytes(&mut buf).unwrap();
                                         let pus_tm = PusTmCreator::new(
                                             &mut sp_header,
                                             sec_header,
