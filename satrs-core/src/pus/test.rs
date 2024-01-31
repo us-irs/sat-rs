@@ -40,8 +40,9 @@ impl PusService17TestHandler {
         if possible_packet.is_none() {
             return Ok(PusPacketHandlerResult::Empty);
         }
-        let (addr, token) = possible_packet.unwrap();
-        self.psb.copy_tc_to_buf(addr)?;
+        let ecss_tc_and_token = possible_packet.unwrap();
+        self.psb
+            .convert_possible_packet_to_tc_buf(&ecss_tc_and_token)?;
         let (tc, _) = PusTcReader::new(&self.psb.pus_buf)?;
         if tc.service() != 17 {
             return Err(PusPacketHandlingError::WrongService(tc.service()));
@@ -53,7 +54,7 @@ impl PusService17TestHandler {
                 .psb
                 .verification_handler
                 .get_mut()
-                .start_success(token, Some(&time_stamp))
+                .start_success(ecss_tc_and_token.token, Some(&time_stamp))
                 .map_err(|_| PartialPusHandlingError::Verification);
             let start_token = if let Ok(result) = result {
                 Some(result)
@@ -90,12 +91,13 @@ impl PusService17TestHandler {
                     partial_error,
                 ));
             };
-            return Ok(PusPacketHandlerResult::RequestHandled);
+        } else {
+            return Ok(PusPacketHandlerResult::CustomSubservice(
+                tc.subservice(),
+                ecss_tc_and_token.token.into(),
+            ));
         }
-        Ok(PusPacketHandlerResult::CustomSubservice(
-            tc.subservice(),
-            token,
-        ))
+        Ok(PusPacketHandlerResult::RequestHandled)
     }
 }
 

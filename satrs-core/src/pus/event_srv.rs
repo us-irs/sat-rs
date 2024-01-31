@@ -43,15 +43,16 @@ impl PusService5EventHandler {
         if possible_packet.is_none() {
             return Ok(PusPacketHandlerResult::Empty);
         }
-        let (addr, token) = possible_packet.unwrap();
-        self.psb.copy_tc_to_buf(addr)?;
+        let ecss_tc_and_token = possible_packet.unwrap();
+        self.psb
+            .convert_possible_packet_to_tc_buf(&ecss_tc_and_token)?;
         let (tc, _) = PusTcReader::new(&self.psb.pus_buf)?;
         let subservice = tc.subservice();
         let srv = Subservice::try_from(subservice);
         if srv.is_err() {
             return Ok(PusPacketHandlerResult::CustomSubservice(
                 tc.subservice(),
-                token,
+                ecss_tc_and_token.token,
             ));
         }
         let handle_enable_disable_request = |enable: bool, stamp: [u8; 7]| {
@@ -66,10 +67,10 @@ impl PusService5EventHandler {
                 .psb
                 .verification_handler
                 .borrow_mut()
-                .start_success(token, Some(&stamp))
+                .start_success(ecss_tc_and_token.token, Some(&stamp))
                 .map_err(|_| PartialPusHandlingError::Verification);
             let partial_error = start_token.clone().err();
-            let mut token: TcStateToken = token.into();
+            let mut token: TcStateToken = ecss_tc_and_token.token.into();
             if let Ok(start_token) = start_token {
                 token = start_token.into();
             }
@@ -113,7 +114,8 @@ impl PusService5EventHandler {
             }
             Subservice::TcReportDisabledList | Subservice::TmDisabledEventsReport => {
                 return Ok(PusPacketHandlerResult::SubserviceNotImplemented(
-                    subservice, token,
+                    subservice,
+                    ecss_tc_and_token.token,
                 ));
             }
         }

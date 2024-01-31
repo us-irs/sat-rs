@@ -1,8 +1,7 @@
 use crate::tmtc::MpscStoreAndSendError;
 use log::warn;
-use satrs_core::pool::StoreAddr;
 use satrs_core::pus::verification::{FailParams, StdVerifReporterWithSender};
-use satrs_core::pus::{PusPacketHandlerResult, TcAddrWithToken};
+use satrs_core::pus::{EcssTcAndToken, PusPacketHandlerResult, TcInMemory};
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusServiceId;
 use satrs_core::spacepackets::time::cds::TimeProvider;
@@ -17,11 +16,11 @@ pub mod scheduler;
 pub mod test;
 
 pub struct PusTcMpscRouter {
-    pub test_service_receiver: Sender<TcAddrWithToken>,
-    pub event_service_receiver: Sender<TcAddrWithToken>,
-    pub sched_service_receiver: Sender<TcAddrWithToken>,
-    pub hk_service_receiver: Sender<TcAddrWithToken>,
-    pub action_service_receiver: Sender<TcAddrWithToken>,
+    pub test_service_receiver: Sender<EcssTcAndToken>,
+    pub event_service_receiver: Sender<EcssTcAndToken>,
+    pub sched_service_receiver: Sender<EcssTcAndToken>,
+    pub hk_service_receiver: Sender<EcssTcAndToken>,
+    pub action_service_receiver: Sender<EcssTcAndToken>,
 }
 
 pub struct PusReceiver {
@@ -70,7 +69,7 @@ impl PusReceiver {
 impl PusReceiver {
     pub fn handle_tc_packet(
         &mut self,
-        store_addr: StoreAddr,
+        tc_in_memory: TcInMemory,
         service: u8,
         pus_tc: &PusTcReader,
     ) -> Result<PusPacketHandlerResult, MpscStoreAndSendError> {
@@ -84,22 +83,33 @@ impl PusReceiver {
         match service {
             Ok(standard_service) => match standard_service {
                 PusServiceId::Test => {
-                    self.pus_router
-                        .test_service_receiver
-                        .send((store_addr, accepted_token.into()))?;
+                    self.pus_router.test_service_receiver.send(EcssTcAndToken {
+                        tc_in_memory,
+                        token: Some(accepted_token.into()),
+                    })?
                 }
-                PusServiceId::Housekeeping => self
-                    .pus_router
-                    .hk_service_receiver
-                    .send((store_addr, accepted_token.into()))?,
-                PusServiceId::Event => self
-                    .pus_router
-                    .event_service_receiver
-                    .send((store_addr, accepted_token.into()))?,
-                PusServiceId::Scheduling => self
-                    .pus_router
-                    .sched_service_receiver
-                    .send((store_addr, accepted_token.into()))?,
+                PusServiceId::Housekeeping => {
+                    self.pus_router.hk_service_receiver.send(EcssTcAndToken {
+                        tc_in_memory,
+                        token: Some(accepted_token.into()),
+                    })?
+                }
+                PusServiceId::Event => {
+                    self.pus_router
+                        .event_service_receiver
+                        .send(EcssTcAndToken {
+                            tc_in_memory,
+                            token: Some(accepted_token.into()),
+                        })?
+                }
+                PusServiceId::Scheduling => {
+                    self.pus_router
+                        .sched_service_receiver
+                        .send(EcssTcAndToken {
+                            tc_in_memory,
+                            token: Some(accepted_token.into()),
+                        })?
+                }
                 _ => {
                     let result = self.verif_reporter.start_failure(
                         accepted_token,

@@ -52,7 +52,7 @@ impl Service17CustomWrapper {
                     let start_token = psb_mut
                         .verification_handler
                         .get_mut()
-                        .start_success(token, Some(&stamp_buf))
+                        .start_success(token.into(), Some(&stamp_buf))
                         .expect("Error sending start success");
                     psb_mut
                         .verification_handler

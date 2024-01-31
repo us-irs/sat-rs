@@ -57,15 +57,14 @@ impl PusService11SchedHandler {
         if possible_packet.is_none() {
             return Ok(PusPacketHandlerResult::Empty);
         }
-        let (addr, token) = possible_packet.unwrap();
-        self.psb.copy_tc_to_buf(addr)?;
+        let ecss_tc_and_token = possible_packet.unwrap();
         let (tc, _) = PusTcReader::new(&self.psb.pus_buf)?;
         let subservice = tc.subservice();
         let std_service = scheduling::Subservice::try_from(subservice);
         if std_service.is_err() {
             return Ok(PusPacketHandlerResult::CustomSubservice(
                 tc.subservice(),
-                token,
+                ecss_tc_and_token.token,
             ));
         }
         let mut partial_error = None;
@@ -76,7 +75,7 @@ impl PusService11SchedHandler {
                     .psb
                     .verification_handler
                     .get_mut()
-                    .start_success(token, Some(&time_stamp))
+                    .start_success(ecss_tc_and_token.token, Some(&time_stamp))
                     .expect("Error sending start success");
 
                 self.scheduler.enable();
@@ -95,7 +94,7 @@ impl PusService11SchedHandler {
                     .psb
                     .verification_handler
                     .get_mut()
-                    .start_success(token, Some(&time_stamp))
+                    .start_success(ecss_tc_and_token.token, Some(&time_stamp))
                     .expect("Error sending start success");
 
                 self.scheduler.disable();
@@ -114,7 +113,7 @@ impl PusService11SchedHandler {
                     .psb
                     .verification_handler
                     .get_mut()
-                    .start_success(token, Some(&time_stamp))
+                    .start_success(ecss_tc_and_token.token, Some(&time_stamp))
                     .expect("Error sending start success");
 
                 let mut pool = self
@@ -138,7 +137,7 @@ impl PusService11SchedHandler {
                     .psb
                     .verification_handler
                     .get_mut()
-                    .start_success(token, Some(&time_stamp))
+                    .start_success(ecss_tc_and_token.token, Some(&time_stamp))
                     .expect("error sending start success");
 
                 let mut pool = self
@@ -157,9 +156,10 @@ impl PusService11SchedHandler {
                     .expect("sending completion success failed");
             }
             _ => {
+                // Treat unhandled standard subservices as custom subservices for now.
                 return Ok(PusPacketHandlerResult::CustomSubservice(
                     tc.subservice(),
-                    token,
+                    ecss_tc_and_token.token.into(),
                 ));
             }
         }
@@ -168,9 +168,6 @@ impl PusService11SchedHandler {
                 partial_error,
             ));
         }
-        Ok(PusPacketHandlerResult::CustomSubservice(
-            tc.subservice(),
-            token,
-        ))
+        Ok(PusPacketHandlerResult::RequestHandled)
     }
 }

@@ -45,8 +45,9 @@ impl PusService3HkHandler {
         if possible_packet.is_none() {
             return Ok(PusPacketHandlerResult::Empty);
         }
-        let (addr, token) = possible_packet.unwrap();
-        self.psb.copy_tc_to_buf(addr)?;
+        let ecss_tc_and_token = possible_packet.unwrap();
+        self.psb
+            .convert_possible_packet_to_tc_buf(&ecss_tc_and_token)?;
         let (tc, _) = PusTcReader::new(&self.psb.pus_buf).unwrap();
         let subservice = tc.subservice();
         let mut partial_error = None;
@@ -57,7 +58,7 @@ impl PusService3HkHandler {
                 .verification_handler
                 .borrow_mut()
                 .start_failure(
-                    token,
+                    ecss_tc_and_token.token,
                     FailParams::new(Some(&time_stamp), &tmtc_err::NOT_ENOUGH_APP_DATA, None),
                 )
                 .expect("Sending start failure TM failed");
@@ -74,7 +75,10 @@ impl PusService3HkHandler {
             self.psb
                 .verification_handler
                 .borrow_mut()
-                .start_failure(token, FailParams::new(Some(&time_stamp), err, None))
+                .start_failure(
+                    ecss_tc_and_token.token,
+                    FailParams::new(Some(&time_stamp), err, None),
+                )
                 .expect("Sending start failure TM failed");
             return Err(PusPacketHandlingError::NotEnoughAppData(
                 "Expected at least 8 bytes of app data".into(),
@@ -89,7 +93,7 @@ impl PusService3HkHandler {
                 .verification_handler
                 .borrow_mut()
                 .start_failure(
-                    token,
+                    ecss_tc_and_token.token,
                     FailParams::new(Some(&time_stamp), &hk_err::UNKNOWN_TARGET_ID, None),
                 )
                 .expect("Sending start failure TM failed");
@@ -104,7 +108,11 @@ impl PusService3HkHandler {
                 .get(&addressable_id.target_id)
                 .unwrap();
             sender
-                .send(RequestWithToken::new(target, Request::Hk(request), token))
+                .send(RequestWithToken::new(
+                    target,
+                    Request::Hk(request),
+                    ecss_tc_and_token.token,
+                ))
                 .unwrap_or_else(|_| panic!("Sending HK request {request:?} failed"));
         };
         if subservice == hk::Subservice::TcEnableHkGeneration as u8 {
@@ -128,7 +136,7 @@ impl PusService3HkHandler {
                     .verification_handler
                     .borrow_mut()
                     .start_failure(
-                        token,
+                        ecss_tc_and_token.token,
                         FailParams::new(
                             Some(&time_stamp),
                             &hk_err::COLLECTION_INTERVAL_MISSING,

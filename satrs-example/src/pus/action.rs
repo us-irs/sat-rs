@@ -103,15 +103,16 @@ impl PusService8ActionHandler {
         if possible_packet.is_none() {
             return Ok(PusPacketHandlerResult::Empty);
         }
-        let (addr, token) = possible_packet.unwrap();
-        self.psb.copy_tc_to_buf(addr)?;
+        let ecss_tc_and_token = possible_packet.unwrap();
+        self.psb
+            .convert_possible_packet_to_tc_buf(&ecss_tc_and_token)?;
         let (tc, _) = PusTcReader::new(&self.psb.pus_buf).unwrap();
         let subservice = tc.subservice();
         let mut partial_error = None;
         let time_stamp = self.psb.get_current_timestamp(&mut partial_error);
         match subservice {
             128 => {
-                self.handle_action_request_with_id(token, &tc, &time_stamp)?;
+                self.handle_action_request_with_id(ecss_tc_and_token.token, &tc, &time_stamp)?;
             }
             _ => {
                 let fail_data = [subservice];
@@ -119,7 +120,7 @@ impl PusService8ActionHandler {
                     .verification_handler
                     .get_mut()
                     .start_failure(
-                        token,
+                        ecss_tc_and_token.token,
                         FailParams::new(
                             Some(&time_stamp),
                             &tmtc_err::INVALID_PUS_SUBSERVICE,

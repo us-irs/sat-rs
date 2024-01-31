@@ -55,12 +55,6 @@ impl<'tm> From<PusTmCreator<'tm>> for PusTmWrapper<'tm> {
     }
 }
 
-pub type TcAddrWithToken = (StoreAddr, TcStateToken);
-
-/// Generic abstraction for a telecommand being sent around after is has been accepted.
-/// The actual telecommand is stored inside a pre-allocated pool structure.
-pub type AcceptedTc = (StoreAddr, VerificationToken<TcStateAccepted>);
-
 /// Generic error type for sending something via a message queue.
 #[derive(Debug, Copy, Clone)]
 pub enum GenericSendError {
@@ -201,15 +195,46 @@ pub trait EcssTcSenderCore: EcssChannel {
 }
 
 #[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TcInMemory {
     StoreAddr(StoreAddr),
     #[cfg(feature = "alloc")]
     Vec(alloc::vec::Vec<u8>),
 }
 
-pub struct ReceivedTcWrapper {
-    pub store_addr: TcInMemory,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EcssTcAndToken {
+    pub tc_in_memory: TcInMemory,
     pub token: Option<TcStateToken>,
+}
+
+/// Generic abstraction for a telecommand being sent around after is has been accepted.
+pub struct AcceptedEcssTcAndToken {
+    pub tc_in_memory: TcInMemory,
+    pub token: VerificationToken<TcStateAccepted>,
+}
+
+impl From<AcceptedEcssTcAndToken> for EcssTcAndToken {
+    fn from(value: AcceptedEcssTcAndToken) -> Self {
+        EcssTcAndToken {
+            tc_in_memory: value.tc_in_memory,
+            token: Some(value.token.into()),
+        }
+    }
+}
+
+impl TryFrom<EcssTcAndToken> for AcceptedEcssTcAndToken {
+    type Error = ();
+
+    fn try_from(value: EcssTcAndToken) -> Result<Self, Self::Error> {
+        if let Some(TcStateToken::Accepted(token)) = value.token {
+            return Ok(AcceptedEcssTcAndToken {
+                tc_in_memory: value.tc_in_memory,
+                token,
+            });
+        }
+        Err(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -238,7 +263,7 @@ impl From<StoreError> for TryRecvTmtcError {
 
 /// Generic trait for a user supplied receiver object.
 pub trait EcssTcReceiverCore: EcssChannel {
-    fn recv_tc(&self) -> Result<ReceivedTcWrapper, TryRecvTmtcError>;
+    fn recv_tc(&self) -> Result<EcssTcAndToken, TryRecvTmtcError>;
 }
 
 /// Generic trait for objects which can receive ECSS PUS telecommands. This trait is
@@ -322,9 +347,9 @@ pub mod std_mod {
         StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
     };
     use crate::pus::{
-        EcssChannel, EcssTcReceiver, EcssTcReceiverCore, EcssTmSender, EcssTmSenderCore,
-        EcssTmtcError, GenericRecvError, GenericSendError, PusTmWrapper, ReceivedTcWrapper,
-        TcAddrWithToken, TryRecvTmtcError,
+        EcssChannel, EcssTcAndToken, EcssTcReceiver, EcssTcReceiverCore, EcssTmSender,
+        EcssTmSenderCore, EcssTmtcError, GenericRecvError, GenericSendError, PusTmWrapper,
+        TryRecvTmtcError,
     };
     use crate::tmtc::tm_helper::SharedTmStore;
     use crate::ChannelId;
@@ -342,7 +367,7 @@ pub mod std_mod {
     use std::sync::mpsc::TryRecvError;
     use thiserror::Error;
 
-    use super::TcInMemory;
+    use super::AcceptedEcssTcAndToken;
 
     impl From<mpsc::SendError<StoreAddr>> for EcssTmtcError {
         fn from(_: mpsc::SendError<StoreAddr>) -> Self {
@@ -423,7 +448,7 @@ pub mod std_mod {
     pub struct MpscTcInStoreReceiver {
         id: ChannelId,
         name: &'static str,
-        receiver: mpsc::Receiver<TcAddrWithToken>,
+        receiver: mpsc::Receiver<EcssTcAndToken>,
     }
 
     impl EcssChannel for MpscTcInStoreReceiver {
@@ -437,16 +462,12 @@ pub mod std_mod {
     }
 
     impl EcssTcReceiverCore for MpscTcInStoreReceiver {
-        fn recv_tc(&self) -> Result<ReceivedTcWrapper, TryRecvTmtcError> {
-            let (store_addr, token) = self.receiver.try_recv().map_err(|e| match e {
+        fn recv_tc(&self) -> Result<EcssTcAndToken, TryRecvTmtcError> {
+            self.receiver.try_recv().map_err(|e| match e {
                 TryRecvError::Empty => TryRecvTmtcError::Empty,
                 TryRecvError::Disconnected => {
                     TryRecvTmtcError::Error(EcssTmtcError::from(GenericRecvError::TxDisconnected))
                 }
-            })?;
-            Ok(ReceivedTcWrapper {
-                store_addr,
-                token: Some(token),
             })
         }
     }
@@ -455,7 +476,7 @@ pub mod std_mod {
         pub fn new(
             id: ChannelId,
             name: &'static str,
-            receiver: mpsc::Receiver<TcAddrWithToken>,
+            receiver: mpsc::Receiver<EcssTcAndToken>,
         ) -> Self {
             Self { id, name, receiver }
         }
@@ -557,14 +578,14 @@ pub mod std_mod {
     pub struct CrossbeamTcInStoreReceiver {
         id: ChannelId,
         name: &'static str,
-        receiver: cb::Receiver<TcAddrWithToken>,
+        receiver: cb::Receiver<EcssTcAndToken>,
     }
 
     impl CrossbeamTcInStoreReceiver {
         pub fn new(
             id: ChannelId,
             name: &'static str,
-            receiver: cb::Receiver<TcAddrWithToken>,
+            receiver: cb::Receiver<EcssTcAndToken>,
         ) -> Self {
             Self { id, name, receiver }
         }
@@ -581,16 +602,12 @@ pub mod std_mod {
     }
 
     impl EcssTcReceiverCore for CrossbeamTcInStoreReceiver {
-        fn recv_tc(&self) -> Result<ReceivedTcWrapper, TryRecvTmtcError> {
-            let (store_addr, token) = self.receiver.try_recv().map_err(|e| match e {
+        fn recv_tc(&self) -> Result<EcssTcAndToken, TryRecvTmtcError> {
+            self.receiver.try_recv().map_err(|e| match e {
                 cb::TryRecvError::Empty => TryRecvTmtcError::Empty,
                 cb::TryRecvError::Disconnected => {
                     TryRecvTmtcError::Error(EcssTmtcError::from(GenericRecvError::TxDisconnected))
                 }
-            })?;
-            Ok(ReceivedTcWrapper {
-                store_addr,
-                token: Some(token),
             })
         }
     }
@@ -710,26 +727,38 @@ pub mod std_mod {
             Ok(())
         }
 
-        pub fn retrieve_next_packet(
+        pub fn convert_possible_packet_to_tc_buf(
             &mut self,
-            handle_acceptance: bool,
-        ) -> Result<Option<ReceivedTcWrapper>,PusPacketHandlingError>
-        {
+            possible_packet: &AcceptedEcssTcAndToken,
+        ) -> Result<(), PusPacketHandlingError> {
+            match &possible_packet.tc_in_memory {
+                super::TcInMemory::StoreAddr(addr) => {
+                    self.copy_tc_to_buf(*addr)?;
+                }
+                super::TcInMemory::Vec(vec) => {
+                    self.pus_buf.copy_from_slice(vec);
+                }
+            };
+            Ok(())
+        }
+
+        pub fn retrieve_and_accept_next_packet(
+            &mut self,
+        ) -> Result<Option<AcceptedEcssTcAndToken>, PusPacketHandlingError> {
             match self.tc_receiver.recv_tc() {
-                Ok(ReceivedTcWrapper { store_addr, token }) => {
-                    let mut passed_token = token;
-                    if handle_acceptance {
-                        if token.is_none() {
-                            return Err(PusPacketHandlingError::InvalidVerificationToken);
-                        }
-                        let token = token.unwrap();
-                        let accepted_token = VerificationToken::<TcStateAccepted>::try_from(token)
-                            .map_err(|_| PusPacketHandlingError::InvalidVerificationToken)?;
-                        passed_token = Some(accepted_token.into());
+                Ok(EcssTcAndToken {
+                    tc_in_memory,
+                    token,
+                }) => {
+                    if token.is_none() {
+                        return Err(PusPacketHandlingError::InvalidVerificationToken);
                     }
-                    Ok(Some(ReceivedTcWrapper {
-                        store_addr,
-                        token: passed_token
+                    let token = token.unwrap();
+                    let accepted_token = VerificationToken::<TcStateAccepted>::try_from(token)
+                        .map_err(|_| PusPacketHandlingError::InvalidVerificationToken)?;
+                    Ok(Some(AcceptedEcssTcAndToken {
+                        tc_in_memory,
+                        token: accepted_token,
                     }))
                 }
                 Err(e) => match e {
