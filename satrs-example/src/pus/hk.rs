@@ -4,8 +4,7 @@ use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
 use satrs_core::pool::SharedPool;
 use satrs_core::pus::verification::{FailParams, StdVerifReporterWithSender};
 use satrs_core::pus::{
-    EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError,
-    PusServiceBaseWithStore,
+    EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceHandler,
 };
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::{hk, PusPacket};
@@ -15,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
 pub struct PusService3HkHandler {
-    psb: PusServiceBaseWithStore,
+    psb: PusServiceHandler,
     request_handlers: HashMap<TargetId, Sender<RequestWithToken>>,
 }
 
@@ -29,7 +28,7 @@ impl PusService3HkHandler {
         request_handlers: HashMap<TargetId, Sender<RequestWithToken>>,
     ) -> Self {
         Self {
-            psb: PusServiceBaseWithStore::new(
+            psb: PusServiceHandler::new(
                 tc_receiver,
                 shared_tc_pool,
                 tm_sender,

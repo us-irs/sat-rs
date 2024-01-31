@@ -1,38 +1,38 @@
 use crate::events::EventU32;
-use crate::pool::SharedPool;
 use crate::pus::event_man::{EventRequest, EventRequestWithToken};
 use crate::pus::verification::{StdVerifReporterWithSender, TcStateToken};
 use crate::pus::{
     EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
-    PusPacketHandlingError, PusServiceBaseWithStore,
+    PusPacketHandlingError,
 };
 use alloc::boxed::Box;
 use spacepackets::ecss::event::Subservice;
-use spacepackets::ecss::tc::PusTcReader;
 use spacepackets::ecss::PusPacket;
 use std::sync::mpsc::Sender;
 
-pub struct PusService5EventHandler {
-    psb: PusServiceBaseWithStore,
+use super::{EcssTcInMemConverter, PusServiceBase, PusServiceHandler};
+
+pub struct PusService5EventHandler<TcInMemConverter: EcssTcInMemConverter> {
+    pub psb: PusServiceHandler<TcInMemConverter>,
     event_request_tx: Sender<EventRequestWithToken>,
 }
 
-impl PusService5EventHandler {
+impl<TcInMemConverter: EcssTcInMemConverter> PusService5EventHandler<TcInMemConverter> {
     pub fn new(
         tc_receiver: Box<dyn EcssTcReceiver>,
-        shared_tc_store: SharedPool,
         tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
         event_request_tx: Sender<EventRequestWithToken>,
+        tc_in_mem_converter: TcInMemConverter,
     ) -> Self {
         Self {
-            psb: PusServiceBaseWithStore::new(
+            psb: PusServiceHandler::new(
                 tc_receiver,
-                shared_tc_store,
                 tm_sender,
                 tm_apid,
                 verification_handler,
+                tc_in_mem_converter,
             ),
             event_request_tx,
         }
@@ -44,9 +44,10 @@ impl PusService5EventHandler {
             return Ok(PusPacketHandlerResult::Empty);
         }
         let ecss_tc_and_token = possible_packet.unwrap();
-        self.psb
-            .convert_possible_packet_to_tc_buf(&ecss_tc_and_token)?;
-        let (tc, _) = PusTcReader::new(&self.psb.pus_buf)?;
+        let tc = self
+            .psb
+            .tc_in_mem_converter
+            .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token)?;
         let subservice = tc.subservice();
         let srv = Subservice::try_from(subservice);
         if srv.is_err() {
@@ -65,6 +66,7 @@ impl PusService5EventHandler {
             let event_u32 = EventU32::from(u32::from_be_bytes(user_data[0..4].try_into().unwrap()));
             let start_token = self
                 .psb
+                .common
                 .verification_handler
                 .borrow_mut()
                 .start_success(ecss_tc_and_token.token, Some(&stamp))
@@ -98,7 +100,7 @@ impl PusService5EventHandler {
             Ok(PusPacketHandlerResult::RequestHandled)
         };
         let mut partial_error = None;
-        let time_stamp = self.psb.get_current_timestamp(&mut partial_error);
+        let time_stamp = PusServiceBase::get_current_timestamp(&mut partial_error);
         match srv.unwrap() {
             Subservice::TmInfoReport
             | Subservice::TmLowSeverityReport
