@@ -45,7 +45,8 @@ def create_cmd_definition_tree() -> CmdTreeNode:
 
 
 def pack_pus_telecommands(q: DefaultPusQueueHelper, cmd_path: str):
-    cmd_path_list = cmd_path.split("/")
+    # It should always be at least the root path "/", so we split of the empty portion left of it.
+    cmd_path_list = cmd_path.split("/")[1:]
     if len(cmd_path_list) == 0:
         _LOGGER.warning("empty command path")
         return
