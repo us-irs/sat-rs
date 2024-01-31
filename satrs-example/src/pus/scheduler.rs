@@ -2,10 +2,10 @@ use crate::tmtc::PusTcSource;
 use log::{error, info, warn};
 use satrs_core::pus::scheduler::TcInfo;
 use satrs_core::pus::scheduler_srv::PusService11SchedHandler;
-use satrs_core::pus::PusPacketHandlerResult;
+use satrs_core::pus::{EcssTcInStoreConverter, PusPacketHandlerResult};
 
 pub struct Pus11Wrapper {
-    pub pus_11_handler: PusService11SchedHandler,
+    pub pus_11_handler: PusService11SchedHandler<EcssTcInStoreConverter>,
     pub tc_source_wrapper: PusTcSource,
 }
 

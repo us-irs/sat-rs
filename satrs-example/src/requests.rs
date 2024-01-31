@@ -1,7 +1,8 @@
+use derive_new::new;
 use satrs_core::hk::HkRequest;
 use satrs_core::mode::ModeRequest;
 use satrs_core::pus::verification::{TcStateAccepted, VerificationToken};
-use satrs_core::tmtc::TargetId;
+use satrs_example::TargetIdWithApid;
 
 #[allow(dead_code)]
 #[derive(Clone, Eq, PartialEq, Debug)]
@@ -19,16 +20,10 @@ pub enum Request {
     Action(ActionRequest),
 }
 
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, new)]
 pub struct TargetedRequest {
-    pub(crate) target_id: TargetId,
+    pub(crate) target_id: TargetIdWithApid,
     pub(crate) request: Request,
-}
-
-impl TargetedRequest {
-    pub fn new(target_id: TargetId, request: Request) -> Self {
-        Self { target_id, request }
-    }
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
@@ -39,7 +34,7 @@ pub struct RequestWithToken {
 
 impl RequestWithToken {
     pub fn new(
-        target_id: u32,
+        target_id: TargetIdWithApid,
         request: Request,
         token: VerificationToken<TcStateAccepted>,
     ) -> Self {

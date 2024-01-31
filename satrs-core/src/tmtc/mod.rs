@@ -7,9 +7,7 @@
 //! routing without the overhead and complication of using message queues. However, it also requires
 #[cfg(feature = "alloc")]
 use downcast_rs::{impl_downcast, Downcast};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-use spacepackets::{ByteConversionError, SpHeader};
+use spacepackets::SpHeader;
 
 #[cfg(feature = "alloc")]
 pub mod ccsds_distrib;
@@ -23,40 +21,6 @@ pub use ccsds_distrib::{CcsdsDistributor, CcsdsError, CcsdsPacketHandler};
 pub use pus_distrib::{PusDistributor, PusServiceProvider};
 
 pub type TargetId = u32;
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct AddressableId {
-    pub target_id: TargetId,
-    pub unique_id: u32,
-}
-
-impl AddressableId {
-    pub fn from_raw_be(buf: &[u8]) -> Result<Self, ByteConversionError> {
-        if buf.len() < 8 {
-            return Err(ByteConversionError::FromSliceTooSmall {
-                found: buf.len(),
-                expected: 8,
-            });
-        }
-        Ok(Self {
-            target_id: u32::from_be_bytes(buf[0..4].try_into().unwrap()),
-            unique_id: u32::from_be_bytes(buf[4..8].try_into().unwrap()),
-        })
-    }
-
-    pub fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
-        if buf.len() < 8 {
-            return Err(ByteConversionError::ToSliceTooSmall {
-                found: buf.len(),
-                expected: 8,
-            });
-        }
-        buf[0..4].copy_from_slice(&self.target_id.to_be_bytes());
-        buf[4..8].copy_from_slice(&self.unique_id.to_be_bytes());
-        Ok(8)
-    }
-}
 
 /// Generic trait for object which can receive any telecommands in form of a raw bytestream, with
 /// no assumptions about the received protocol.

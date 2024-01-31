@@ -646,6 +646,8 @@ pub mod std_mod {
         InvalidSubservice(u8),
         #[error("not enough application data available: {0}")]
         NotEnoughAppData(String),
+        #[error("PUS packet too large, does not fit in buffer: {0}")]
+        PusPacketTooLarge(usize),
         #[error("invalid application data")]
         InvalidAppData(String),
         #[error("invalid format of TC in memory: {0:?}")]
@@ -687,12 +689,20 @@ pub mod std_mod {
     }
 
     pub trait EcssTcInMemConverter {
+        fn cache_ecss_tc_in_memory<'a>(
+            &'a mut self,
+            possible_packet: &'a AcceptedEcssTcAndToken,
+        ) -> Result<(), PusPacketHandlingError>;
+
+        fn tc_slice_raw(&self) -> &[u8];
+
         fn convert_ecss_tc_in_memory_to_reader<'a>(
             &'a mut self,
             possible_packet: &'a AcceptedEcssTcAndToken,
-        ) -> Result<PusTcReader<'a>, PusPacketHandlingError>;
-
-        fn tc_slice_raw(&self) -> &[u8];
+        ) -> Result<PusTcReader<'a>, PusPacketHandlingError> {
+            self.cache_ecss_tc_in_memory(possible_packet)?;
+            Ok(PusTcReader::new(self.tc_slice_raw())?.0)
+        }
     }
 
     pub struct EcssTcInVecConverter {
@@ -700,10 +710,11 @@ pub mod std_mod {
     }
 
     impl EcssTcInMemConverter for EcssTcInVecConverter {
-        fn convert_ecss_tc_in_memory_to_reader<'a>(
+        fn cache_ecss_tc_in_memory<'a>(
             &'a mut self,
             possible_packet: &'a AcceptedEcssTcAndToken,
-        ) -> Result<PusTcReader<'a>, PusPacketHandlingError> {
+        ) -> Result<(), PusPacketHandlingError> {
+            self.pus_tc_raw = None;
             match &possible_packet.tc_in_memory {
                 super::TcInMemory::StoreAddr(_) => {
                     return Err(PusPacketHandlingError::InvalidTcInMemoryFormat(
@@ -714,8 +725,7 @@ pub mod std_mod {
                     self.pus_tc_raw = Some(vec.clone());
                 }
             };
-            let (tc, _) = PusTcReader::new(self.pus_tc_raw.as_ref().unwrap())?;
-            Ok(tc)
+            Ok(())
         }
 
         fn tc_slice_raw(&self) -> &[u8] {
@@ -728,14 +738,14 @@ pub mod std_mod {
 
     pub struct EcssTcInStoreConverter {
         pub shared_tc_store: SharedPool,
-        pub pus_buf: [u8; 2048],
+        pub pus_buf: Vec<u8>,
     }
 
     impl EcssTcInStoreConverter {
-        pub fn new(shared_tc_store: SharedPool) -> Self {
+        pub fn new(shared_tc_store: SharedPool, max_expected_tc_size: usize) -> Self {
             Self {
                 shared_tc_store,
-                pus_buf: [0; 2048],
+                pus_buf: alloc::vec![0; max_expected_tc_size],
             }
         }
 
@@ -747,27 +757,30 @@ pub mod std_mod {
                 .map_err(|_| PusPacketHandlingError::EcssTmtc(EcssTmtcError::StoreLock))?;
             let tc_guard = tc_pool.read_with_guard(addr);
             let tc_raw = tc_guard.read().unwrap();
+            if tc_raw.len() > self.pus_buf.len() {
+                return Err(PusPacketHandlingError::PusPacketTooLarge(tc_raw.len()));
+            }
             self.pus_buf[0..tc_raw.len()].copy_from_slice(tc_raw);
             Ok(())
         }
     }
 
     impl EcssTcInMemConverter for EcssTcInStoreConverter {
-        fn convert_ecss_tc_in_memory_to_reader<'a>(
+        fn cache_ecss_tc_in_memory<'a>(
             &'a mut self,
             possible_packet: &'a AcceptedEcssTcAndToken,
-        ) -> Result<PusTcReader<'a>, PusPacketHandlingError> {
-            Ok(match &possible_packet.tc_in_memory {
+        ) -> Result<(), PusPacketHandlingError> {
+            match &possible_packet.tc_in_memory {
                 super::TcInMemory::StoreAddr(addr) => {
                     self.copy_tc_to_buf(*addr)?;
-                    PusTcReader::new(&self.pus_buf)?.0
                 }
                 super::TcInMemory::Vec(_) => {
                     return Err(PusPacketHandlingError::InvalidTcInMemoryFormat(
                         possible_packet.tc_in_memory.clone(),
                     ));
                 }
-            })
+            };
+            Ok(())
         }
 
         fn tc_slice_raw(&self) -> &[u8] {

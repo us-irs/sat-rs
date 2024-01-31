@@ -1,6 +1,6 @@
 use crate::events::EventU32;
 use crate::pus::event_man::{EventRequest, EventRequestWithToken};
-use crate::pus::verification::{StdVerifReporterWithSender, TcStateToken};
+use crate::pus::verification::TcStateToken;
 use crate::pus::{
     EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
     PusPacketHandlingError,
@@ -10,6 +10,7 @@ use spacepackets::ecss::event::Subservice;
 use spacepackets::ecss::PusPacket;
 use std::sync::mpsc::Sender;
 
+use super::verification::VerificationReporterWithSender;
 use super::{EcssTcInMemConverter, PusServiceBase, PusServiceHandler};
 
 pub struct PusService5EventHandler<TcInMemConverter: EcssTcInMemConverter> {
@@ -22,9 +23,9 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService5EventHandler<TcInMemConv
         tc_receiver: Box<dyn EcssTcReceiver>,
         tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
-        verification_handler: StdVerifReporterWithSender,
-        event_request_tx: Sender<EventRequestWithToken>,
+        verification_handler: VerificationReporterWithSender,
         tc_in_mem_converter: TcInMemConverter,
+        event_request_tx: Sender<EventRequestWithToken>,
     ) -> Self {
         Self {
             psb: PusServiceHandler::new(

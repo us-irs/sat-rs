@@ -1,9 +1,9 @@
 use log::{error, warn};
 use satrs_core::pus::event_srv::PusService5EventHandler;
-use satrs_core::pus::PusPacketHandlerResult;
+use satrs_core::pus::{EcssTcInStoreConverter, PusPacketHandlerResult};
 
 pub struct Pus5Wrapper {
-    pub pus_5_handler: PusService5EventHandler,
+    pub pus_5_handler: PusService5EventHandler<EcssTcInStoreConverter>,
 }
 
 impl Pus5Wrapper {

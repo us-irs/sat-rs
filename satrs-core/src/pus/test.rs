@@ -144,7 +144,7 @@ mod tests {
             VerificationReporterWithSender::new(&verif_cfg, Box::new(verif_sender));
         let test_srv_tm_sender = MpscTmInStoreSender::new(0, "TEST_SENDER", shared_tm_store, tm_tx);
         let test_srv_tc_receiver = MpscTcInStoreReceiver::new(0, "TEST_RECEIVER", test_srv_tc_rx);
-        let in_store_converter = EcssTcInStoreConverter::new(tc_pool_shared.clone());
+        let in_store_converter = EcssTcInStoreConverter::new(tc_pool_shared.clone(), 2048);
         let mut pus_17_handler = PusService17TestHandler::new(
             Box::new(test_srv_tc_receiver),
             Box::new(test_srv_tm_sender),

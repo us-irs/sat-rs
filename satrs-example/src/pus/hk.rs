@@ -1,39 +1,37 @@
 use crate::requests::{Request, RequestWithToken};
 use log::{error, warn};
 use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
-use satrs_core::pool::SharedPool;
 use satrs_core::pus::verification::{FailParams, StdVerifReporterWithSender};
 use satrs_core::pus::{
-    EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError, PusServiceHandler,
+    EcssTcInMemConverter, EcssTcInStoreConverter, EcssTcReceiver, EcssTmSender,
+    PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHandler,
 };
-use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::{hk, PusPacket};
-use satrs_core::tmtc::{AddressableId, TargetId};
-use satrs_example::{hk_err, tmtc_err};
+use satrs_example::{hk_err, tmtc_err, TargetIdWithApid};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
-pub struct PusService3HkHandler {
-    psb: PusServiceHandler,
-    request_handlers: HashMap<TargetId, Sender<RequestWithToken>>,
+pub struct PusService3HkHandler<TcInMemConverter: EcssTcInMemConverter> {
+    psb: PusServiceHandler<TcInMemConverter>,
+    request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
 }
 
-impl PusService3HkHandler {
+impl<TcInMemConverter: EcssTcInMemConverter> PusService3HkHandler<TcInMemConverter> {
     pub fn new(
         tc_receiver: Box<dyn EcssTcReceiver>,
-        shared_tc_pool: SharedPool,
         tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
         verification_handler: StdVerifReporterWithSender,
-        request_handlers: HashMap<TargetId, Sender<RequestWithToken>>,
+        tc_in_mem_converter: TcInMemConverter,
+        request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
     ) -> Self {
         Self {
             psb: PusServiceHandler::new(
                 tc_receiver,
-                shared_tc_pool,
                 tm_sender,
                 tm_apid,
                 verification_handler,
+                tc_in_mem_converter,
             ),
             request_handlers,
         }
@@ -45,15 +43,17 @@ impl PusService3HkHandler {
             return Ok(PusPacketHandlerResult::Empty);
         }
         let ecss_tc_and_token = possible_packet.unwrap();
-        self.psb
-            .convert_possible_packet_to_tc_buf(&ecss_tc_and_token)?;
-        let (tc, _) = PusTcReader::new(&self.psb.pus_buf).unwrap();
+        let tc = self
+            .psb
+            .tc_in_mem_converter
+            .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token)?;
         let subservice = tc.subservice();
         let mut partial_error = None;
-        let time_stamp = self.psb.get_current_timestamp(&mut partial_error);
+        let time_stamp = PusServiceBase::get_current_timestamp(&mut partial_error);
         let user_data = tc.user_data();
         if user_data.is_empty() {
             self.psb
+                .common
                 .verification_handler
                 .borrow_mut()
                 .start_failure(
@@ -72,6 +72,7 @@ impl PusService3HkHandler {
                 &hk_err::UNIQUE_ID_MISSING
             };
             self.psb
+                .common
                 .verification_handler
                 .borrow_mut()
                 .start_failure(
@@ -83,12 +84,11 @@ impl PusService3HkHandler {
                 "Expected at least 8 bytes of app data".into(),
             ));
         }
-        let addressable_id = AddressableId::from_raw_be(user_data).unwrap();
-        if !self
-            .request_handlers
-            .contains_key(&addressable_id.target_id)
-        {
+        let target_id = TargetIdWithApid::from_tc(&tc).expect("invalid tc format");
+        let unique_id = u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap());
+        if !self.request_handlers.contains_key(&target_id) {
             self.psb
+                .common
                 .verification_handler
                 .borrow_mut()
                 .start_failure(
@@ -96,16 +96,12 @@ impl PusService3HkHandler {
                     FailParams::new(Some(&time_stamp), &hk_err::UNKNOWN_TARGET_ID, None),
                 )
                 .expect("Sending start failure TM failed");
-            let tgt_id = addressable_id.target_id;
             return Err(PusPacketHandlingError::NotEnoughAppData(format!(
-                "Unknown target ID {tgt_id}"
+                "Unknown target ID {target_id}"
             )));
         }
-        let send_request = |target: TargetId, request: HkRequest| {
-            let sender = self
-                .request_handlers
-                .get(&addressable_id.target_id)
-                .unwrap();
+        let send_request = |target: TargetIdWithApid, request: HkRequest| {
+            let sender = self.request_handlers.get(&target).unwrap();
             sender
                 .send(RequestWithToken::new(
                     target,
@@ -115,23 +111,15 @@ impl PusService3HkHandler {
                 .unwrap_or_else(|_| panic!("Sending HK request {request:?} failed"));
         };
         if subservice == hk::Subservice::TcEnableHkGeneration as u8 {
-            send_request(
-                addressable_id.target_id,
-                HkRequest::Enable(addressable_id.unique_id),
-            );
+            send_request(target_id, HkRequest::Enable(unique_id));
         } else if subservice == hk::Subservice::TcDisableHkGeneration as u8 {
-            send_request(
-                addressable_id.target_id,
-                HkRequest::Disable(addressable_id.unique_id),
-            );
+            send_request(target_id, HkRequest::Disable(unique_id));
         } else if subservice == hk::Subservice::TcGenerateOneShotHk as u8 {
-            send_request(
-                addressable_id.target_id,
-                HkRequest::OneShot(addressable_id.unique_id),
-            );
+            send_request(target_id, HkRequest::OneShot(unique_id));
         } else if subservice == hk::Subservice::TcModifyHkCollectionInterval as u8 {
             if user_data.len() < 12 {
                 self.psb
+                    .common
                     .verification_handler
                     .borrow_mut()
                     .start_failure(
@@ -148,9 +136,9 @@ impl PusService3HkHandler {
                 ));
             }
             send_request(
-                addressable_id.target_id,
+                target_id,
                 HkRequest::ModifyCollectionInterval(
-                    addressable_id.unique_id,
+                    unique_id,
                     CollectionIntervalFactor::from_be_bytes(user_data[8..12].try_into().unwrap()),
                 ),
             );
@@ -160,7 +148,7 @@ impl PusService3HkHandler {
 }
 
 pub struct Pus3Wrapper {
-    pub(crate) pus_3_handler: PusService3HkHandler,
+    pub(crate) pus_3_handler: PusService3HkHandler<EcssTcInStoreConverter>,
 }
 
 impl Pus3Wrapper {

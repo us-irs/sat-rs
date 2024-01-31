@@ -1,11 +1,11 @@
 use crate::pool::SharedPool;
 use crate::pus::scheduler::PusScheduler;
-use crate::pus::verification::StdVerifReporterWithSender;
 use crate::pus::{EcssTcReceiver, EcssTmSender, PusPacketHandlerResult, PusPacketHandlingError};
 use spacepackets::ecss::{scheduling, PusPacket};
 use spacepackets::time::cds::TimeProvider;
 use std::boxed::Box;
 
+use super::verification::VerificationReporterWithSender;
 use super::{EcssTcInMemConverter, PusServiceBase, PusServiceHandler};
 
 /// This is a helper class for [std] environments to handle generic PUS 11 (scheduling service)
@@ -27,7 +27,7 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService11SchedHandler<TcInMemCon
         tc_receiver: Box<dyn EcssTcReceiver>,
         tm_sender: Box<dyn EcssTmSender>,
         tm_apid: u16,
-        verification_handler: StdVerifReporterWithSender,
+        verification_handler: VerificationReporterWithSender,
         tc_in_mem_converter: TcInMemConverter,
         shared_tc_store: SharedPool,
         scheduler: PusScheduler,
