@@ -8,7 +8,9 @@ pub use std_mod::*;
 
 #[cfg(feature = "std")]
 pub mod std_mod {
-    use crate::pool::{ShareablePoolProvider, SharedPool, StoreAddr};
+    use crate::pool::{
+        PoolProviderMemInPlace, SharedStaticMemoryPool, StaticMemoryPool, StoreAddr,
+    };
     use crate::pus::EcssTmtcError;
     use spacepackets::ecss::tm::PusTmCreator;
     use spacepackets::ecss::WritablePusPacket;
@@ -16,22 +18,25 @@ pub mod std_mod {
 
     #[derive(Clone)]
     pub struct SharedTmStore {
-        pool: SharedPool,
+        pub shared_pool: SharedStaticMemoryPool,
     }
 
     impl SharedTmStore {
-        pub fn new(backing_pool: ShareablePoolProvider) -> Self {
+        pub fn new(shared_pool: StaticMemoryPool) -> Self {
             Self {
-                pool: Arc::new(RwLock::new(backing_pool)),
+                shared_pool: Arc::new(RwLock::new(shared_pool)),
             }
         }
 
-        pub fn clone_backing_pool(&self) -> SharedPool {
-            self.pool.clone()
+        pub fn clone_backing_pool(&self) -> SharedStaticMemoryPool {
+            self.shared_pool.clone()
         }
 
         pub fn add_pus_tm(&self, pus_tm: &PusTmCreator) -> Result<StoreAddr, EcssTmtcError> {
-            let mut pg = self.pool.write().map_err(|_| EcssTmtcError::StoreLock)?;
+            let mut pg = self
+                .shared_pool
+                .write()
+                .map_err(|_| EcssTmtcError::StoreLock)?;
             let (addr, buf) = pg.free_element(pus_tm.len_written())?;
             pus_tm
                 .write_to_bytes(buf)
@@ -89,5 +94,35 @@ impl PusTmWithCdsShortHelper {
         let mut reply_header = SpHeader::tm_unseg(self.apid, seq_count, 0).unwrap();
         let tc_header = PusTmSecondaryHeader::new_simple(service, subservice, &self.cds_short_buf);
         PusTmCreator::new(&mut reply_header, tc_header, source_data, true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use spacepackets::{ecss::PusPacket, time::cds::TimeProvider, CcsdsPacket};
+
+    use super::PusTmWithCdsShortHelper;
+
+    #[test]
+    fn test_helper_with_stamper() {
+        let mut pus_tm_helper = PusTmWithCdsShortHelper::new(0x123);
+        let stamper = TimeProvider::new_with_u16_days(0, 0);
+        let tm = pus_tm_helper.create_pus_tm_with_stamper(17, 1, &[1, 2, 3, 4], &stamper, 25);
+        assert_eq!(tm.service(), 17);
+        assert_eq!(tm.subservice(), 1);
+        assert_eq!(tm.user_data(), &[1, 2, 3, 4]);
+        assert_eq!(tm.seq_count(), 25);
+        assert_eq!(tm.timestamp(), [64, 0, 0, 0, 0, 0, 0])
+    }
+
+    #[test]
+    fn test_helper_from_now() {
+        let mut pus_tm_helper = PusTmWithCdsShortHelper::new(0x123);
+        let tm = pus_tm_helper.create_pus_tm_timestamp_now(17, 1, &[1, 2, 3, 4], 25);
+        assert_eq!(tm.service(), 17);
+        assert_eq!(tm.subservice(), 1);
+        assert_eq!(tm.user_data(), &[1, 2, 3, 4]);
+        assert_eq!(tm.seq_count(), 25);
+        assert_eq!(tm.timestamp().len(), 7);
     }
 }

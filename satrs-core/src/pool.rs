@@ -1,23 +1,13 @@
-//! # Pool implementation providing pre-allocated sub-pools with fixed size memory blocks
+//! # Pool implementation providing memory pools for packet storage.
 //!
-//! This is a simple memory pool implementation which pre-allocates all sub-pools using a given pool
-//! configuration. After the pre-allocation, no dynamic memory allocation will be performed
-//! during run-time. This makes the implementation suitable for real-time applications and
-//! embedded environments. The pool implementation will also track the size of the data stored
-//! inside it.
-//!
-//! Transactions with the [pool][LocalPool] are done using a special [address][StoreAddr] type.
-//! Adding any data to the pool will yield a store address. Modification and read operations are
-//! done using a reference to a store address. Deletion will consume the store address.
-//!
-//! # Example
+//! # Example for the [StaticMemoryPool]
 //!
 //! ```
-//! use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider};
+//! use satrs_core::pool::{PoolProviderMemInPlace, StaticMemoryPool, StaticPoolConfig};
 //!
 //! // 4 buckets of 4 bytes, 2 of 8 bytes and 1 of 16 bytes
-//! let pool_cfg = PoolCfg::new(vec![(4, 4), (2, 8), (1, 16)]);
-//! let mut local_pool = LocalPool::new(pool_cfg);
+//! let pool_cfg = StaticPoolConfig::new(vec![(4, 4), (2, 8), (1, 16)]);
+//! let mut local_pool = StaticMemoryPool::new(pool_cfg);
 //! let mut addr;
 //! {
 //!     // Add new data to the pool
@@ -77,22 +67,24 @@
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub use alloc_mod::*;
 use core::fmt::{Display, Formatter};
+use delegate::delegate;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "std")]
 use std::error::Error;
 
 type NumBlocks = u16;
+pub type StoreAddr = u64;
 
 /// Simple address type used for transactions with the local pool.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct StoreAddr {
+pub struct StaticPoolAddr {
     pub(crate) pool_idx: u16,
     pub(crate) packet_idx: NumBlocks,
 }
 
-impl StoreAddr {
+impl StaticPoolAddr {
     pub const INVALID_ADDR: u32 = 0xFFFFFFFF;
 
     pub fn raw(&self) -> u32 {
@@ -100,7 +92,22 @@ impl StoreAddr {
     }
 }
 
-impl Display for StoreAddr {
+impl From<StaticPoolAddr> for StoreAddr {
+    fn from(value: StaticPoolAddr) -> Self {
+        ((value.pool_idx as u64) << 16) | value.packet_idx as u64
+    }
+}
+
+impl From<StoreAddr> for StaticPoolAddr {
+    fn from(value: StoreAddr) -> Self {
+        Self {
+            pool_idx: ((value >> 16) & 0xff) as u16,
+            packet_idx: (value & 0xff) as u16,
+        }
+    }
+}
+
+impl Display for StaticPoolAddr {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
@@ -180,39 +187,158 @@ impl Error for StoreError {
     }
 }
 
+/// Generic trait for pool providers where the data can be modified and read in-place. This
+/// generally means that a shared pool structure has to be wrapped inside a lock structure.
+pub trait PoolProviderMemInPlace {
+    /// Add new data to the pool. The provider should attempt to reserve a memory block with the
+    /// appropriate size and then copy the given data to the block. Yields a [StoreAddr] which can
+    /// be used to access the data stored in the pool
+    fn add(&mut self, data: &[u8]) -> Result<StoreAddr, StoreError>;
+
+    /// The provider should attempt to reserve a free memory block with the appropriate size and
+    /// then return a mutable reference to it. Yields a [StoreAddr] which can be used to access
+    /// the data stored in the pool
+    fn free_element(&mut self, len: usize) -> Result<(StoreAddr, &mut [u8]), StoreError>;
+
+    /// Modify data added previously using a given [StoreAddr] by yielding a mutable reference
+    /// to it
+    fn modify(&mut self, addr: &StoreAddr) -> Result<&mut [u8], StoreError>;
+
+    /// Read data by yielding a read-only reference given a [StoreAddr]
+    fn read(&self, addr: &StoreAddr) -> Result<&[u8], StoreError>;
+
+    /// Delete data inside the pool given a [StoreAddr]
+    fn delete(&mut self, addr: StoreAddr) -> Result<(), StoreError>;
+    fn has_element_at(&self, addr: &StoreAddr) -> Result<bool, StoreError>;
+
+    /// Retrieve the length of the data at the given store address.
+    fn len_of_data(&self, addr: &StoreAddr) -> Result<usize, StoreError> {
+        if !self.has_element_at(addr)? {
+            return Err(StoreError::DataDoesNotExist(*addr));
+        }
+        Ok(self.read(addr)?.len())
+    }
+}
+
+pub trait PoolProviderMemInPlaceWithGuards: PoolProviderMemInPlace {
+    /// This function behaves like [PoolProviderMemInPlace::read], but consumes the provided address
+    /// and returns a RAII conformant guard object.
+    ///
+    /// Unless the guard [PoolRwGuard::release] method is called, the data for the
+    /// given address will be deleted automatically when the guard is dropped.
+    /// This can prevent memory leaks. Users can read the data and release the guard
+    /// if the data in the store is valid for further processing. If the data is faulty, no
+    /// manual deletion is necessary when returning from a processing function prematurely.
+    fn read_with_guard(&mut self, addr: StoreAddr) -> PoolGuard<Self>;
+
+    /// This function behaves like [PoolProviderMemInPlace::modify], but consumes the provided
+    /// address and returns a RAII conformant guard object.
+    ///
+    /// Unless the guard [PoolRwGuard::release] method is called, the data for the
+    /// given address will be deleted automatically when the guard is dropped.
+    /// This can prevent memory leaks. Users can read (and modify) the data and release the guard
+    /// if the data in the store is valid for further processing. If the data is faulty, no
+    /// manual deletion is necessary when returning from a processing function prematurely.
+    fn modify_with_guard(&mut self, addr: StoreAddr) -> PoolRwGuard<Self>;
+}
+
+pub struct PoolGuard<'a, MemProvider: PoolProviderMemInPlace + ?Sized> {
+    pool: &'a mut MemProvider,
+    pub addr: StoreAddr,
+    no_deletion: bool,
+    deletion_failed_error: Option<StoreError>,
+}
+
+/// This helper object
+impl<'a, MemProvider: PoolProviderMemInPlace> PoolGuard<'a, MemProvider> {
+    pub fn new(pool: &'a mut MemProvider, addr: StoreAddr) -> Self {
+        Self {
+            pool,
+            addr,
+            no_deletion: false,
+            deletion_failed_error: None,
+        }
+    }
+
+    pub fn read(&self) -> Result<&[u8], StoreError> {
+        self.pool.read(&self.addr)
+    }
+
+    /// Releasing the pool guard will disable the automatic deletion of the data when the guard
+    /// is dropped.
+    pub fn release(&mut self) {
+        self.no_deletion = true;
+    }
+}
+
+impl<MemProvider: PoolProviderMemInPlace + ?Sized> Drop for PoolGuard<'_, MemProvider> {
+    fn drop(&mut self) {
+        if !self.no_deletion {
+            if let Err(e) = self.pool.delete(self.addr) {
+                self.deletion_failed_error = Some(e);
+            }
+        }
+    }
+}
+
+pub struct PoolRwGuard<'a, MemProvider: PoolProviderMemInPlace + ?Sized> {
+    guard: PoolGuard<'a, MemProvider>,
+}
+
+impl<'a, MemProvider: PoolProviderMemInPlace> PoolRwGuard<'a, MemProvider> {
+    pub fn new(pool: &'a mut MemProvider, addr: StoreAddr) -> Self {
+        Self {
+            guard: PoolGuard::new(pool, addr),
+        }
+    }
+
+    pub fn modify(&mut self) -> Result<&mut [u8], StoreError> {
+        self.guard.pool.modify(&self.guard.addr)
+    }
+
+    delegate!(
+        to self.guard {
+            pub fn read(&self) -> Result<&[u8], StoreError>;
+            /// Releasing the pool guard will disable the automatic deletion of the data when the guard
+            /// is dropped.
+            pub fn release(&mut self);
+        }
+    );
+}
+
 #[cfg(feature = "alloc")]
 mod alloc_mod {
+    use super::{
+        PoolGuard, PoolProviderMemInPlace, PoolProviderMemInPlaceWithGuards, PoolRwGuard,
+        StaticPoolAddr,
+    };
     use crate::pool::{NumBlocks, StoreAddr, StoreError, StoreIdError};
-    use alloc::boxed::Box;
     use alloc::vec;
     use alloc::vec::Vec;
-    use delegate::delegate;
     #[cfg(feature = "std")]
     use std::sync::{Arc, RwLock};
 
     #[cfg(feature = "std")]
-    pub type ShareablePoolProvider = Box<dyn PoolProvider + Send + Sync>;
-    #[cfg(feature = "std")]
-    pub type SharedPool = Arc<RwLock<ShareablePoolProvider>>;
+    pub type SharedStaticMemoryPool = Arc<RwLock<StaticMemoryPool>>;
 
     type PoolSize = usize;
     const STORE_FREE: PoolSize = PoolSize::MAX;
     pub const POOL_MAX_SIZE: PoolSize = STORE_FREE - 1;
 
-    /// Configuration structure of the [local pool][LocalPool]
+    /// Configuration structure of the [static memory pool][StaticMemoryPool]
     ///
     /// # Parameters
     ///
     /// * `cfg`: Vector of tuples which represent a subpool. The first entry in the tuple specifies the
     ///       number of memory blocks in the subpool, the second entry the size of the blocks
     #[derive(Clone)]
-    pub struct PoolCfg {
+    pub struct StaticPoolConfig {
         cfg: Vec<(NumBlocks, usize)>,
     }
 
-    impl PoolCfg {
+    impl StaticPoolConfig {
         pub fn new(cfg: Vec<(NumBlocks, usize)>) -> Self {
-            PoolCfg { cfg }
+            StaticPoolConfig { cfg }
         }
 
         pub fn cfg(&self) -> &Vec<(NumBlocks, usize)> {
@@ -228,135 +354,30 @@ mod alloc_mod {
         }
     }
 
-    pub struct PoolGuard<'a> {
-        pool: &'a mut LocalPool,
-        pub addr: StoreAddr,
-        no_deletion: bool,
-        deletion_failed_error: Option<StoreError>,
-    }
-
-    /// This helper object
-    impl<'a> PoolGuard<'a> {
-        pub fn new(pool: &'a mut LocalPool, addr: StoreAddr) -> Self {
-            Self {
-                pool,
-                addr,
-                no_deletion: false,
-                deletion_failed_error: None,
-            }
-        }
-
-        pub fn read(&self) -> Result<&[u8], StoreError> {
-            self.pool.read(&self.addr)
-        }
-
-        /// Releasing the pool guard will disable the automatic deletion of the data when the guard
-        /// is dropped.
-        pub fn release(&mut self) {
-            self.no_deletion = true;
-        }
-    }
-
-    impl Drop for PoolGuard<'_> {
-        fn drop(&mut self) {
-            if !self.no_deletion {
-                if let Err(e) = self.pool.delete(self.addr) {
-                    self.deletion_failed_error = Some(e);
-                }
-            }
-        }
-    }
-
-    pub struct PoolRwGuard<'a> {
-        guard: PoolGuard<'a>,
-    }
-
-    impl<'a> PoolRwGuard<'a> {
-        pub fn new(pool: &'a mut LocalPool, addr: StoreAddr) -> Self {
-            Self {
-                guard: PoolGuard::new(pool, addr),
-            }
-        }
-
-        pub fn modify(&mut self) -> Result<&mut [u8], StoreError> {
-            self.guard.pool.modify(&self.guard.addr)
-        }
-
-        delegate!(
-            to self.guard {
-                pub fn read(&self) -> Result<&[u8], StoreError>;
-                /// Releasing the pool guard will disable the automatic deletion of the data when the guard
-                /// is dropped.
-                pub fn release(&mut self);
-            }
-        );
-    }
-
-    pub trait PoolProvider {
-        /// Add new data to the pool. The provider should attempt to reserve a memory block with the
-        /// appropriate size and then copy the given data to the block. Yields a [StoreAddr] which can
-        /// be used to access the data stored in the pool
-        fn add(&mut self, data: &[u8]) -> Result<StoreAddr, StoreError>;
-
-        /// The provider should attempt to reserve a free memory block with the appropriate size and
-        /// then return a mutable reference to it. Yields a [StoreAddr] which can be used to access
-        /// the data stored in the pool
-        fn free_element(&mut self, len: usize) -> Result<(StoreAddr, &mut [u8]), StoreError>;
-
-        /// Modify data added previously using a given [StoreAddr] by yielding a mutable reference
-        /// to it
-        fn modify(&mut self, addr: &StoreAddr) -> Result<&mut [u8], StoreError>;
-
-        /// This function behaves like [Self::modify], but consumes the provided address and returns a
-        /// RAII conformant guard object.
-        ///
-        /// Unless the guard [PoolRwGuard::release] method is called, the data for the
-        /// given address will be deleted automatically when the guard is dropped.
-        /// This can prevent memory leaks. Users can read (and modify) the data and release the guard
-        /// if the data in the store is valid for further processing. If the data is faulty, no
-        /// manual deletion is necessary when returning from a processing function prematurely.
-        fn modify_with_guard(&mut self, addr: StoreAddr) -> PoolRwGuard;
-
-        /// Read data by yielding a read-only reference given a [StoreAddr]
-        fn read(&self, addr: &StoreAddr) -> Result<&[u8], StoreError>;
-
-        /// This function behaves like [Self::read], but consumes the provided address and returns a
-        /// RAII conformant guard object.
-        ///
-        /// Unless the guard [PoolRwGuard::release] method is called, the data for the
-        /// given address will be deleted automatically when the guard is dropped.
-        /// This can prevent memory leaks. Users can read the data and release the guard
-        /// if the data in the store is valid for further processing. If the data is faulty, no
-        /// manual deletion is necessary when returning from a processing function prematurely.
-        fn read_with_guard(&mut self, addr: StoreAddr) -> PoolGuard;
-
-        /// Delete data inside the pool given a [StoreAddr]
-        fn delete(&mut self, addr: StoreAddr) -> Result<(), StoreError>;
-        fn has_element_at(&self, addr: &StoreAddr) -> Result<bool, StoreError>;
-
-        /// Retrieve the length of the data at the given store address.
-        fn len_of_data(&self, addr: &StoreAddr) -> Result<usize, StoreError> {
-            if !self.has_element_at(addr)? {
-                return Err(StoreError::DataDoesNotExist(*addr));
-            }
-            Ok(self.read(addr)?.len())
-        }
-    }
-
-    /// Pool implementation providing sub-pools with fixed size memory blocks. More details in
-    /// the [module documentation][crate::pool]
-    pub struct LocalPool {
-        pool_cfg: PoolCfg,
+    /// Pool implementation providing sub-pools with fixed size memory blocks.
+    ///
+    /// This is a simple memory pool implementation which pre-allocates all sub-pools using a given pool
+    /// configuration. After the pre-allocation, no dynamic memory allocation will be performed
+    /// during run-time. This makes the implementation suitable for real-time applications and
+    /// embedded environments. The pool implementation will also track the size of the data stored
+    /// inside it.
+    ///
+    /// Transactions with the [pool][StaticMemoryPool] are done using a generic
+    /// [address][StoreAddr] type.
+    /// Adding any data to the pool will yield a store address. Modification and read operations are
+    /// done using a reference to a store address. Deletion will consume the store address.
+    pub struct StaticMemoryPool {
+        pool_cfg: StaticPoolConfig,
         pool: Vec<Vec<u8>>,
         sizes_lists: Vec<Vec<PoolSize>>,
     }
 
-    impl LocalPool {
-        /// Create a new local pool from the [given configuration][PoolCfg]. This function will sanitize
-        /// the given configuration as well.
-        pub fn new(mut cfg: PoolCfg) -> LocalPool {
+    impl StaticMemoryPool {
+        /// Create a new local pool from the [given configuration][StaticPoolConfig]. This function
+        /// will sanitize the given configuration as well.
+        pub fn new(mut cfg: StaticPoolConfig) -> StaticMemoryPool {
             let subpools_num = cfg.sanitize();
-            let mut local_pool = LocalPool {
+            let mut local_pool = StaticMemoryPool {
                 pool_cfg: cfg,
                 pool: Vec::with_capacity(subpools_num),
                 sizes_lists: Vec::with_capacity(subpools_num),
@@ -372,39 +393,39 @@ mod alloc_mod {
             local_pool
         }
 
-        fn addr_check(&self, addr: &StoreAddr) -> Result<usize, StoreError> {
+        fn addr_check(&self, addr: &StaticPoolAddr) -> Result<usize, StoreError> {
             self.validate_addr(addr)?;
             let pool_idx = addr.pool_idx as usize;
             let size_list = self.sizes_lists.get(pool_idx).unwrap();
             let curr_size = size_list[addr.packet_idx as usize];
             if curr_size == STORE_FREE {
-                return Err(StoreError::DataDoesNotExist(*addr));
+                return Err(StoreError::DataDoesNotExist(StoreAddr::from(*addr)));
             }
             Ok(curr_size)
         }
 
-        fn validate_addr(&self, addr: &StoreAddr) -> Result<(), StoreError> {
+        fn validate_addr(&self, addr: &StaticPoolAddr) -> Result<(), StoreError> {
             let pool_idx = addr.pool_idx as usize;
             if pool_idx >= self.pool_cfg.cfg.len() {
                 return Err(StoreError::InvalidStoreId(
                     StoreIdError::InvalidSubpool(addr.pool_idx),
-                    Some(*addr),
+                    Some(StoreAddr::from(*addr)),
                 ));
             }
             if addr.packet_idx >= self.pool_cfg.cfg[addr.pool_idx as usize].0 {
                 return Err(StoreError::InvalidStoreId(
                     StoreIdError::InvalidPacketIdx(addr.packet_idx),
-                    Some(*addr),
+                    Some(StoreAddr::from(*addr)),
                 ));
             }
             Ok(())
         }
 
-        fn reserve(&mut self, data_len: usize) -> Result<StoreAddr, StoreError> {
+        fn reserve(&mut self, data_len: usize) -> Result<StaticPoolAddr, StoreError> {
             let subpool_idx = self.find_subpool(data_len, 0)?;
             let (slot, size_slot_ref) = self.find_empty(subpool_idx)?;
             *size_slot_ref = data_len;
-            Ok(StoreAddr {
+            Ok(StaticPoolAddr {
                 pool_idx: subpool_idx,
                 packet_idx: slot,
             })
@@ -422,7 +443,7 @@ mod alloc_mod {
             Err(StoreError::DataTooLarge(req_size))
         }
 
-        fn write(&mut self, addr: &StoreAddr, data: &[u8]) -> Result<(), StoreError> {
+        fn write(&mut self, addr: &StaticPoolAddr, data: &[u8]) -> Result<(), StoreError> {
             let packet_pos = self.raw_pos(addr).ok_or(StoreError::InternalError(0))?;
             let subpool = self
                 .pool
@@ -449,13 +470,13 @@ mod alloc_mod {
             Err(StoreError::StoreFull(subpool))
         }
 
-        fn raw_pos(&self, addr: &StoreAddr) -> Option<usize> {
+        fn raw_pos(&self, addr: &StaticPoolAddr) -> Option<usize> {
             let (_, size) = self.pool_cfg.cfg.get(addr.pool_idx as usize)?;
             Some(addr.packet_idx as usize * size)
         }
     }
 
-    impl PoolProvider for LocalPool {
+    impl PoolProviderMemInPlace for StaticMemoryPool {
         fn add(&mut self, data: &[u8]) -> Result<StoreAddr, StoreError> {
             let data_len = data.len();
             if data_len > POOL_MAX_SIZE {
@@ -463,7 +484,7 @@ mod alloc_mod {
             }
             let addr = self.reserve(data_len)?;
             self.write(&addr, data)?;
-            Ok(addr)
+            Ok(addr.into())
         }
 
         fn free_element(&mut self, len: usize) -> Result<(StoreAddr, &mut [u8]), StoreError> {
@@ -474,34 +495,29 @@ mod alloc_mod {
             let raw_pos = self.raw_pos(&addr).unwrap();
             let block =
                 &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + len];
-            Ok((addr, block))
+            Ok((addr.into(), block))
         }
 
         fn modify(&mut self, addr: &StoreAddr) -> Result<&mut [u8], StoreError> {
-            let curr_size = self.addr_check(addr)?;
-            let raw_pos = self.raw_pos(addr).unwrap();
+            let addr = StaticPoolAddr::from(*addr);
+            let curr_size = self.addr_check(&addr)?;
+            let raw_pos = self.raw_pos(&addr).unwrap();
             let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()
                 [raw_pos..raw_pos + curr_size];
             Ok(block)
         }
 
-        fn modify_with_guard(&mut self, addr: StoreAddr) -> PoolRwGuard {
-            PoolRwGuard::new(self, addr)
-        }
-
         fn read(&self, addr: &StoreAddr) -> Result<&[u8], StoreError> {
-            let curr_size = self.addr_check(addr)?;
-            let raw_pos = self.raw_pos(addr).unwrap();
+            let addr = StaticPoolAddr::from(*addr);
+            let curr_size = self.addr_check(&addr)?;
+            let raw_pos = self.raw_pos(&addr).unwrap();
             let block =
                 &self.pool.get(addr.pool_idx as usize).unwrap()[raw_pos..raw_pos + curr_size];
             Ok(block)
         }
 
-        fn read_with_guard(&mut self, addr: StoreAddr) -> PoolGuard {
-            PoolGuard::new(self, addr)
-        }
-
         fn delete(&mut self, addr: StoreAddr) -> Result<(), StoreError> {
+            let addr = StaticPoolAddr::from(addr);
             self.addr_check(&addr)?;
             let block_size = self.pool_cfg.cfg.get(addr.pool_idx as usize).unwrap().1;
             let raw_pos = self.raw_pos(&addr).unwrap();
@@ -514,7 +530,8 @@ mod alloc_mod {
         }
 
         fn has_element_at(&self, addr: &StoreAddr) -> Result<bool, StoreError> {
-            self.validate_addr(addr)?;
+            let addr = StaticPoolAddr::from(*addr);
+            self.validate_addr(&addr)?;
             let pool_idx = addr.pool_idx as usize;
             let size_list = self.sizes_lists.get(pool_idx).unwrap();
             let curr_size = size_list[addr.packet_idx as usize];
@@ -524,34 +541,45 @@ mod alloc_mod {
             Ok(true)
         }
     }
+
+    impl PoolProviderMemInPlaceWithGuards for StaticMemoryPool {
+        fn modify_with_guard(&mut self, addr: StoreAddr) -> PoolRwGuard<Self> {
+            PoolRwGuard::new(self, addr)
+        }
+
+        fn read_with_guard(&mut self, addr: StoreAddr) -> PoolGuard<Self> {
+            PoolGuard::new(self, addr)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::pool::{
-        LocalPool, PoolCfg, PoolGuard, PoolProvider, PoolRwGuard, StoreAddr, StoreError,
-        StoreIdError, POOL_MAX_SIZE,
+        PoolGuard, PoolProviderMemInPlace, PoolProviderMemInPlaceWithGuards, PoolRwGuard,
+        StaticMemoryPool, StaticPoolAddr, StaticPoolConfig, StoreError, StoreIdError,
+        POOL_MAX_SIZE,
     };
     use std::vec;
 
-    fn basic_small_pool() -> LocalPool {
+    fn basic_small_pool() -> StaticMemoryPool {
         // 4 buckets of 4 bytes, 2 of 8 bytes and 1 of 16 bytes
-        let pool_cfg = PoolCfg::new(vec![(4, 4), (2, 8), (1, 16)]);
-        LocalPool::new(pool_cfg)
+        let pool_cfg = StaticPoolConfig::new(vec![(4, 4), (2, 8), (1, 16)]);
+        StaticMemoryPool::new(pool_cfg)
     }
 
     #[test]
     fn test_cfg() {
         // Values where number of buckets is 0 or size is too large should be removed
-        let mut pool_cfg = PoolCfg::new(vec![(0, 0), (1, 0), (2, POOL_MAX_SIZE)]);
+        let mut pool_cfg = StaticPoolConfig::new(vec![(0, 0), (1, 0), (2, POOL_MAX_SIZE)]);
         pool_cfg.sanitize();
         assert_eq!(*pool_cfg.cfg(), vec![(1, 0)]);
         // Entries should be ordered according to bucket size
-        pool_cfg = PoolCfg::new(vec![(16, 6), (32, 3), (8, 12)]);
+        pool_cfg = StaticPoolConfig::new(vec![(16, 6), (32, 3), (8, 12)]);
         pool_cfg.sanitize();
         assert_eq!(*pool_cfg.cfg(), vec![(32, 3), (16, 6), (8, 12)]);
         // Unstable sort is used, so order of entries with same block length should not matter
-        pool_cfg = PoolCfg::new(vec![(12, 12), (14, 16), (10, 12)]);
+        pool_cfg = StaticPoolConfig::new(vec![(12, 12), (14, 16), (10, 12)]);
         pool_cfg.sanitize();
         assert!(
             *pool_cfg.cfg() == vec![(12, 12), (10, 12), (14, 16)]
@@ -600,10 +628,10 @@ mod tests {
         let (addr, buf_ref) = res.unwrap();
         assert_eq!(
             addr,
-            StoreAddr {
+            u64::from(StaticPoolAddr {
                 pool_idx: 2,
                 packet_idx: 0
-            }
+            })
         );
         assert_eq!(buf_ref.len(), 12);
     }
@@ -655,10 +683,13 @@ mod tests {
     fn test_read_does_not_exist() {
         let local_pool = basic_small_pool();
         // Try to access data which does not exist
-        let res = local_pool.read(&StoreAddr {
-            packet_idx: 0,
-            pool_idx: 0,
-        });
+        let res = local_pool.read(
+            &StaticPoolAddr {
+                packet_idx: 0,
+                pool_idx: 0,
+            }
+            .into(),
+        );
         assert!(res.is_err());
         assert!(matches!(
             res.unwrap_err(),
@@ -684,10 +715,11 @@ mod tests {
     #[test]
     fn test_invalid_pool_idx() {
         let local_pool = basic_small_pool();
-        let addr = StoreAddr {
+        let addr = StaticPoolAddr {
             pool_idx: 3,
             packet_idx: 0,
-        };
+        }
+        .into();
         let res = local_pool.read(&addr);
         assert!(res.is_err());
         let err = res.unwrap_err();
@@ -700,12 +732,12 @@ mod tests {
     #[test]
     fn test_invalid_packet_idx() {
         let local_pool = basic_small_pool();
-        let addr = StoreAddr {
+        let addr = StaticPoolAddr {
             pool_idx: 2,
             packet_idx: 1,
         };
         assert_eq!(addr.raw(), 0x00020001);
-        let res = local_pool.read(&addr);
+        let res = local_pool.read(&addr.into());
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert!(matches!(

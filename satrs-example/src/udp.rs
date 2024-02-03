@@ -3,7 +3,7 @@ use std::{net::SocketAddr, sync::mpsc::Receiver};
 use log::{info, warn};
 use satrs_core::{
     hal::std::udp_server::{ReceiveResult, UdpTcServer},
-    pool::{SharedPool, StoreAddr},
+    pool::{PoolProviderMemInPlaceWithGuards, SharedStaticMemoryPool, StoreAddr},
     tmtc::CcsdsError,
 };
 
@@ -12,7 +12,7 @@ use crate::tmtc::MpscStoreAndSendError;
 pub struct UdpTmtcServer {
     pub udp_tc_server: UdpTcServer<CcsdsError<MpscStoreAndSendError>>,
     pub tm_rx: Receiver<StoreAddr>,
-    pub tm_store: SharedPool,
+    pub tm_store: SharedStaticMemoryPool,
 }
 impl UdpTmtcServer {
     pub fn periodic_operation(&mut self) {

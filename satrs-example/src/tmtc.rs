@@ -5,7 +5,7 @@ use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
 use thiserror::Error;
 
 use crate::pus::PusReceiver;
-use satrs_core::pool::{SharedPool, StoreAddr, StoreError};
+use satrs_core::pool::{PoolProviderMemInPlace, SharedStaticMemoryPool, StoreAddr, StoreError};
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::tmtc::tm_helper::SharedTmStore;
@@ -41,7 +41,7 @@ pub enum MpscStoreAndSendError {
 
 #[derive(Clone)]
 pub struct TcStore {
-    pub pool: SharedPool,
+    pub pool: SharedStaticMemoryPool,
 }
 
 impl TcStore {

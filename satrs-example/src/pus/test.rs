@@ -7,12 +7,12 @@ use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::spacepackets::time::cds::TimeProvider;
 use satrs_core::spacepackets::time::TimeWriter;
-use satrs_core::{events::EventU32, pus::EcssTcInStoreConverter};
+use satrs_core::{events::EventU32, pus::EcssTcInSharedStoreConverter};
 use satrs_example::{tmtc_err, TEST_EVENT};
 use std::sync::mpsc::Sender;
 
 pub struct Service17CustomWrapper {
-    pub pus17_handler: PusService17TestHandler<EcssTcInStoreConverter>,
+    pub pus17_handler: PusService17TestHandler<EcssTcInSharedStoreConverter>,
     pub test_srv_event_sender: Sender<(EventU32, Option<Params>)>,
 }
 
@@ -38,9 +38,13 @@ impl Service17CustomWrapper {
                 warn!("PUS17: Subservice {subservice} not implemented")
             }
             PusPacketHandlerResult::CustomSubservice(subservice, token) => {
-                let (tc, _) =
-                    PusTcReader::new(self.pus17_handler.psb.tc_in_mem_converter.tc_slice_raw())
-                        .unwrap();
+                let (tc, _) = PusTcReader::new(
+                    self.pus17_handler
+                        .service_helper
+                        .tc_in_mem_converter
+                        .tc_slice_raw(),
+                )
+                .unwrap();
                 let time_stamper = TimeProvider::from_now_with_u16_days().unwrap();
                 let mut stamp_buf: [u8; 7] = [0; 7];
                 time_stamper.write_to_bytes(&mut stamp_buf).unwrap();
@@ -51,14 +55,14 @@ impl Service17CustomWrapper {
                         .expect("Sending test event failed");
                     let start_token = self
                         .pus17_handler
-                        .psb
+                        .service_helper
                         .common
                         .verification_handler
                         .get_mut()
                         .start_success(token, Some(&stamp_buf))
                         .expect("Error sending start success");
                     self.pus17_handler
-                        .psb
+                        .service_helper
                         .common
                         .verification_handler
                         .get_mut()
@@ -67,7 +71,7 @@ impl Service17CustomWrapper {
                 } else {
                     let fail_data = [tc.subservice()];
                     self.pus17_handler
-                        .psb
+                        .service_helper
                         .common
                         .verification_handler
                         .get_mut()

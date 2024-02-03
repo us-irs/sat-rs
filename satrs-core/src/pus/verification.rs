@@ -15,7 +15,7 @@
 //! ```
 //! use std::sync::{Arc, mpsc, RwLock};
 //! use std::time::Duration;
-//! use satrs_core::pool::{LocalPool, PoolCfg, PoolProvider, SharedPool};
+//! use satrs_core::pool::{PoolProviderMemInPlaceWithGuards, StaticMemoryPool, StaticPoolConfig};
 //! use satrs_core::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
 //! use satrs_core::seq_count::SeqCountProviderSimple;
 //! use satrs_core::pus::MpscTmInStoreSender;
@@ -28,9 +28,9 @@
 //! const EMPTY_STAMP: [u8; 7] = [0; 7];
 //! const TEST_APID: u16 = 0x02;
 //!
-//! let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
-//! let tm_pool = LocalPool::new(pool_cfg.clone());
-//! let shared_tm_store = SharedTmStore::new(Box::new(tm_pool));
+//! let pool_cfg = StaticPoolConfig::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
+//! let tm_pool = StaticMemoryPool::new(pool_cfg.clone());
+//! let shared_tm_store = SharedTmStore::new(tm_pool);
 //! let tm_store = shared_tm_store.clone_backing_pool();
 //! let (verif_tx, verif_rx) = mpsc::channel();
 //! let sender = MpscTmInStoreSender::new(0, "Test Sender", shared_tm_store, verif_tx);
@@ -208,6 +208,8 @@ impl WasAtLeastAccepted for TcStateAccepted {}
 impl WasAtLeastAccepted for TcStateStarted {}
 impl WasAtLeastAccepted for TcStateCompleted {}
 
+/// Token wrapper to model all possible verification tokens. These tokens are used to
+/// enforce the correct order for the verification steps when doing verification reporting.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TcStateToken {
     None(VerificationToken<TcStateNone>),
@@ -1323,7 +1325,7 @@ mod std_mod {
 
 #[cfg(test)]
 mod tests {
-    use crate::pool::{LocalPool, PoolCfg};
+    use crate::pool::{PoolProviderMemInPlaceWithGuards, StaticMemoryPool, StaticPoolConfig};
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
         EcssTmSenderCore, EcssTmtcError, FailParams, FailParamsWithStep, RequestId, TcStateNone,
@@ -1447,12 +1449,11 @@ mod tests {
     fn base_init(api_sel: bool) -> (TestBase<'static>, VerificationToken<TcStateNone>) {
         let mut reporter = base_reporter();
         let (tc, req_id) = base_tc_init(None);
-        let init_tok;
-        if api_sel {
-            init_tok = reporter.add_tc_with_req_id(req_id);
+        let init_tok = if api_sel {
+            reporter.add_tc_with_req_id(req_id)
         } else {
-            init_tok = reporter.add_tc(&tc);
-        }
+            reporter.add_tc(&tc)
+        };
         (TestBase { vr: reporter, tc }, init_tok)
     }
 
@@ -1475,7 +1476,7 @@ mod tests {
                 time_stamp: EMPTY_STAMP,
             },
             additional_data: None,
-            req_id: req_id.clone(),
+            req_id: *req_id,
         };
         let mut service_queue = sender.service_queue.borrow_mut();
         assert_eq!(service_queue.len(), 1);
@@ -1485,9 +1486,8 @@ mod tests {
 
     #[test]
     fn test_mpsc_verif_send_sync() {
-        let pool = LocalPool::new(PoolCfg::new(vec![(8, 8)]));
-        let tm_store = Box::new(pool);
-        let shared_tm_store = SharedTmStore::new(tm_store);
+        let pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(8, 8)]));
+        let shared_tm_store = SharedTmStore::new(pool);
         let (tx, _) = mpsc::channel();
         let mpsc_verif_sender = MpscTmInStoreSender::new(0, "verif_sender", shared_tm_store, tx);
         is_send(&mpsc_verif_sender);
@@ -1505,7 +1505,7 @@ mod tests {
     fn test_basic_acceptance_success() {
         let (b, tok) = base_init(false);
         let mut sender = TestSender::default();
-        b.vr.acceptance_success(tok, &mut sender, Some(&EMPTY_STAMP))
+        b.vr.acceptance_success(tok, &sender, Some(&EMPTY_STAMP))
             .expect("Sending acceptance success failed");
         acceptance_check(&mut sender, &tok.req_id);
     }
@@ -1605,7 +1605,7 @@ mod tests {
     #[test]
     fn test_basic_acceptance_failure_with_fail_data() {
         let (b, tok) = base_init(false);
-        let mut sender = TestSender::default();
+        let sender = TestSender::default();
         let fail_code = EcssEnumU8::new(10);
         let fail_data = EcssEnumU32::new(12);
         let mut fail_data_raw = [0; 4];
@@ -1615,7 +1615,7 @@ mod tests {
             &fail_code,
             Some(fail_data_raw.as_slice()),
         );
-        b.vr.acceptance_failure(tok, &mut sender, fail_params)
+        b.vr.acceptance_failure(tok, &sender, fail_params)
             .expect("Sending acceptance success failed");
         let cmp_info = TmInfo {
             common: CommonTmInfo {
@@ -1784,8 +1784,7 @@ mod tests {
             .rep()
             .start_success(accepted_token, &mut sender, Some(&[0, 1, 0, 1, 0, 1, 0]))
             .expect("Sending start success failed");
-        let mut empty = b
-            .rep()
+        b.rep()
             .step_success(
                 &started_token,
                 &mut sender,
@@ -1793,16 +1792,13 @@ mod tests {
                 EcssEnumU8::new(0),
             )
             .expect("Sending step 0 success failed");
-        assert_eq!(empty, ());
-        empty =
-            b.vr.step_success(
-                &started_token,
-                &mut sender,
-                Some(&EMPTY_STAMP),
-                EcssEnumU8::new(1),
-            )
-            .expect("Sending step 1 success failed");
-        assert_eq!(empty, ());
+        b.vr.step_success(
+            &started_token,
+            &mut sender,
+            Some(&EMPTY_STAMP),
+            EcssEnumU8::new(1),
+        )
+        .expect("Sending step 1 success failed");
         assert_eq!(sender.service_queue.borrow().len(), 4);
         step_success_check(&mut sender, tok.req_id);
     }
@@ -1818,16 +1814,12 @@ mod tests {
             .helper
             .start_success(accepted_token, Some(&[0, 1, 0, 1, 0, 1, 0]))
             .expect("Sending start success failed");
-        let mut empty = b
-            .helper
+        b.helper
             .step_success(&started_token, Some(&EMPTY_STAMP), EcssEnumU8::new(0))
             .expect("Sending step 0 success failed");
-        assert_eq!(empty, ());
-        empty = b
-            .helper
+        b.helper
             .step_success(&started_token, Some(&EMPTY_STAMP), EcssEnumU8::new(1))
             .expect("Sending step 1 success failed");
-        assert_eq!(empty, ());
         let sender: &mut TestSender = b.helper.sender.downcast_mut().unwrap();
         assert_eq!(sender.service_queue.borrow().len(), 4);
         step_success_check(sender, tok.req_id);
@@ -2122,10 +2114,8 @@ mod tests {
         let started_token =
             b.vr.start_success(accepted_token, &mut sender, Some(&[0, 1, 0, 1, 0, 1, 0]))
                 .expect("Sending start success failed");
-        let empty =
-            b.vr.completion_success(started_token, &mut sender, Some(&EMPTY_STAMP))
-                .expect("Sending completion success failed");
-        assert_eq!(empty, ());
+        b.vr.completion_success(started_token, &mut sender, Some(&EMPTY_STAMP))
+            .expect("Sending completion success failed");
         completion_success_check(&mut sender, tok.req_id);
     }
 
@@ -2140,11 +2130,9 @@ mod tests {
             .helper
             .start_success(accepted_token, Some(&[0, 1, 0, 1, 0, 1, 0]))
             .expect("Sending start success failed");
-        let empty = b
-            .helper
+        b.helper
             .completion_success(started_token, Some(&EMPTY_STAMP))
             .expect("Sending completion success failed");
-        assert_eq!(empty, ());
         let sender: &mut TestSender = b.helper.sender.downcast_mut().unwrap();
         completion_success_check(sender, tok.req_id);
     }
@@ -2152,8 +2140,8 @@ mod tests {
     #[test]
     // TODO: maybe a bit more extensive testing, all I have time for right now
     fn test_seq_count_increment() {
-        let pool_cfg = PoolCfg::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
-        let tm_pool = Box::new(LocalPool::new(pool_cfg.clone()));
+        let pool_cfg = StaticPoolConfig::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
+        let tm_pool = StaticMemoryPool::new(pool_cfg.clone());
         let shared_tm_store = SharedTmStore::new(tm_pool);
         let shared_tm_pool = shared_tm_store.clone_backing_pool();
         let (verif_tx, verif_rx) = mpsc::channel();

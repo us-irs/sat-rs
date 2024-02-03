@@ -1,4 +1,6 @@
-use satrs_core::pool::{LocalPool, PoolCfg, PoolGuard, PoolProvider, StoreAddr};
+use satrs_core::pool::{
+    PoolGuard, PoolProviderMemInPlace, StaticMemoryPool, StaticPoolConfig, StoreAddr,
+};
 use std::ops::DerefMut;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
@@ -9,8 +11,8 @@ const DUMMY_DATA: [u8; 4] = [0, 1, 2, 3];
 
 #[test]
 fn threaded_usage() {
-    let pool_cfg = PoolCfg::new(vec![(16, 6), (32, 3), (8, 12)]);
-    let shared_pool = Arc::new(RwLock::new(LocalPool::new(pool_cfg)));
+    let pool_cfg = StaticPoolConfig::new(vec![(16, 6), (32, 3), (8, 12)]);
+    let shared_pool = Arc::new(RwLock::new(StaticMemoryPool::new(pool_cfg)));
     let shared_clone = shared_pool.clone();
     let (tx, rx): (Sender<StoreAddr>, Receiver<StoreAddr>) = mpsc::channel();
     let jh0 = thread::spawn(move || {

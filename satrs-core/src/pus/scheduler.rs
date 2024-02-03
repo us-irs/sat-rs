@@ -2,23 +2,25 @@
 //!
 //! The core data structure of this module is the [PusScheduler]. This structure can be used
 //! to perform the scheduling of telecommands like specified in the ECSS standard.
-use core::fmt::Debug;
+use core::fmt::{Debug, Display, Formatter};
+use core::time::Duration;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::scheduling::TimeWindowType;
-use spacepackets::ecss::tc::{GenericPusTcSecondaryHeader, IsPusTelecommand};
-use spacepackets::time::CcsdsTimeProvider;
+use spacepackets::ecss::tc::{GenericPusTcSecondaryHeader, IsPusTelecommand, PusTcReader};
+use spacepackets::ecss::{PusError, PusPacket};
+use spacepackets::time::{CcsdsTimeProvider, TimeReader, TimestampError, UnixTimestamp};
 use spacepackets::CcsdsPacket;
 #[cfg(feature = "std")]
 use std::error::Error;
 
-use crate::pool::StoreAddr;
+use crate::pool::{PoolProviderMemInPlace, StoreError};
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
 
 /// This is the request ID as specified in ECSS-E-ST-70-41C 5.4.11.2 of the standard.
 ///
-/// This version of the request ID is used to identify scheduled  commands and also contains
+/// This version of the request ID is used to identify scheduled commands and also contains
 /// the source ID found in the secondary header of PUS telecommands.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -56,17 +58,19 @@ impl RequestId {
     }
 }
 
+pub type AddrInStore = u64;
+
 /// This is the format stored internally by the TC scheduler for each scheduled telecommand.
-/// It consists of the address of that telecommand in the TC pool and a request ID.
+/// It consists of a generic address for that telecommand in the TC pool and a request ID.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TcInfo {
-    addr: StoreAddr,
+    addr: AddrInStore,
     request_id: RequestId,
 }
 
 impl TcInfo {
-    pub fn addr(&self) -> StoreAddr {
+    pub fn addr(&self) -> AddrInStore {
         self.addr
     }
 
@@ -74,7 +78,7 @@ impl TcInfo {
         self.request_id
     }
 
-    pub fn new(addr: StoreAddr, request_id: RequestId) -> Self {
+    pub fn new(addr: u64, request_id: RequestId) -> Self {
         TcInfo { addr, request_id }
     }
 }
@@ -133,23 +137,172 @@ impl<TimeProvider: CcsdsTimeProvider + Clone> TimeWindow<TimeProvider> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ScheduleError {
+    PusError(PusError),
+    /// The release time is within the time-margin added on top of the current time.
+    /// The first parameter is the current time, the second one the time margin, and the third one
+    /// the release time.
+    ReleaseTimeInTimeMargin {
+        current_time: UnixTimestamp,
+        time_margin: Duration,
+        release_time: UnixTimestamp,
+    },
+    /// Nested time-tagged commands are not allowed.
+    NestedScheduledTc,
+    StoreError(StoreError),
+    TcDataEmpty,
+    TimestampError(TimestampError),
+    WrongSubservice,
+    WrongService,
+}
+
+impl Display for ScheduleError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ScheduleError::PusError(e) => {
+                write!(f, "Pus Error: {e}")
+            }
+            ScheduleError::ReleaseTimeInTimeMargin {
+                current_time,
+                time_margin,
+                release_time,
+            } => {
+                write!(
+                    f,
+                    "Error: time margin too short, current time: {current_time:?}, time margin: {time_margin:?}, release time: {release_time:?}"
+                )
+            }
+            ScheduleError::NestedScheduledTc => {
+                write!(f, "Error: nested scheduling is not allowed")
+            }
+            ScheduleError::StoreError(e) => {
+                write!(f, "Store Error: {e}")
+            }
+            ScheduleError::TcDataEmpty => {
+                write!(f, "Error: empty Tc Data field")
+            }
+            ScheduleError::TimestampError(e) => {
+                write!(f, "Timestamp Error: {e}")
+            }
+            ScheduleError::WrongService => {
+                write!(f, "Error: Service not 11.")
+            }
+            ScheduleError::WrongSubservice => {
+                write!(f, "Error: Subservice not 4.")
+            }
+        }
+    }
+}
+
+impl From<PusError> for ScheduleError {
+    fn from(e: PusError) -> Self {
+        ScheduleError::PusError(e)
+    }
+}
+
+impl From<StoreError> for ScheduleError {
+    fn from(e: StoreError) -> Self {
+        ScheduleError::StoreError(e)
+    }
+}
+
+impl From<TimestampError> for ScheduleError {
+    fn from(e: TimestampError) -> Self {
+        ScheduleError::TimestampError(e)
+    }
+}
+
+#[cfg(feature = "std")]
+impl Error for ScheduleError {}
+
+pub trait PusSchedulerInterface {
+    type TimeProvider: CcsdsTimeProvider + TimeReader;
+
+    fn reset(
+        &mut self,
+        store: &mut (impl PoolProviderMemInPlace + ?Sized),
+    ) -> Result<(), StoreError>;
+
+    fn is_enabled(&self) -> bool;
+
+    fn enable(&mut self);
+
+    /// A disabled scheduler should still delete commands where the execution time has been reached
+    /// but should not release them to be executed.
+    fn disable(&mut self);
+
+    /// Insert a telecommand which was already unwrapped from the outer Service 11 packet and stored
+    /// inside the telecommand packet pool.
+    fn insert_unwrapped_and_stored_tc(
+        &mut self,
+        time_stamp: UnixTimestamp,
+        info: TcInfo,
+    ) -> Result<(), ScheduleError>;
+
+    /// Insert a telecommand based on the fully wrapped time-tagged telecommand. The timestamp
+    /// provider needs to be supplied via a generic.
+    fn insert_wrapped_tc<TimeProvider>(
+        &mut self,
+        pus_tc: &(impl IsPusTelecommand + PusPacket + GenericPusTcSecondaryHeader),
+        pool: &mut (impl PoolProviderMemInPlace + ?Sized),
+    ) -> Result<TcInfo, ScheduleError> {
+        if PusPacket::service(pus_tc) != 11 {
+            return Err(ScheduleError::WrongService);
+        }
+        if PusPacket::subservice(pus_tc) != 4 {
+            return Err(ScheduleError::WrongSubservice);
+        }
+        if pus_tc.user_data().is_empty() {
+            return Err(ScheduleError::TcDataEmpty);
+        }
+        let user_data = pus_tc.user_data();
+        let stamp: Self::TimeProvider = TimeReader::from_bytes(user_data)?;
+        let unix_stamp = stamp.unix_stamp();
+        let stamp_len = stamp.len_as_bytes();
+        self.insert_unwrapped_tc(unix_stamp, &user_data[stamp_len..], pool)
+    }
+
+    /// Insert a telecommand which was already unwrapped from the outer Service 11 packet but still
+    /// needs to be stored inside the telecommand pool.
+    fn insert_unwrapped_tc(
+        &mut self,
+        time_stamp: UnixTimestamp,
+        tc: &[u8],
+        pool: &mut (impl PoolProviderMemInPlace + ?Sized),
+    ) -> Result<TcInfo, ScheduleError> {
+        let check_tc = PusTcReader::new(tc)?;
+        if PusPacket::service(&check_tc.0) == 11 && PusPacket::subservice(&check_tc.0) == 4 {
+            return Err(ScheduleError::NestedScheduledTc);
+        }
+        let req_id = RequestId::from_tc(&check_tc.0);
+
+        match pool.add(tc) {
+            Ok(addr) => {
+                let info = TcInfo::new(addr, req_id);
+                self.insert_unwrapped_and_stored_tc(time_stamp, info)?;
+                Ok(info)
+            }
+            Err(err) => Err(err.into()),
+        }
+    }
+}
+
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
     use super::*;
-    use crate::pool::{PoolProvider, StoreAddr, StoreError};
+    use crate::pool::{PoolProviderMemInPlace, StoreAddr, StoreError};
     use alloc::collections::btree_map::{Entry, Range};
     use alloc::collections::BTreeMap;
     use alloc::vec;
     use alloc::vec::Vec;
-    use core::fmt::{Display, Formatter};
     use core::time::Duration;
     use spacepackets::ecss::scheduling::TimeWindowType;
-    use spacepackets::ecss::tc::{
-        GenericPusTcSecondaryHeader, IsPusTelecommand, PusTc, PusTcReader,
-    };
-    use spacepackets::ecss::{PusError, PusPacket};
+    use spacepackets::ecss::tc::{PusTc, PusTcReader};
+    use spacepackets::ecss::PusPacket;
     use spacepackets::time::cds::DaysLen24Bits;
-    use spacepackets::time::{cds, CcsdsTimeProvider, TimeReader, TimestampError, UnixTimestamp};
+    use spacepackets::time::{cds, CcsdsTimeProvider, UnixTimestamp};
 
     #[cfg(feature = "std")]
     use std::time::SystemTimeError;
@@ -159,86 +312,14 @@ pub mod alloc_mod {
         WithStoreDeletion(Result<bool, StoreError>),
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub enum ScheduleError {
-        PusError(PusError),
-        /// The release time is within the time-margin added on top of the current time.
-        /// The first parameter is the current time, the second one the time margin, and the third one
-        /// the release time.
-        ReleaseTimeInTimeMargin(UnixTimestamp, Duration, UnixTimestamp),
-        /// Nested time-tagged commands are not allowed.
-        NestedScheduledTc,
-        StoreError(StoreError),
-        TcDataEmpty,
-        TimestampError(TimestampError),
-        WrongSubservice,
-        WrongService,
-    }
-
-    impl Display for ScheduleError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-            match self {
-                ScheduleError::PusError(e) => {
-                    write!(f, "Pus Error: {e}")
-                }
-                ScheduleError::ReleaseTimeInTimeMargin(current_time, margin, timestamp) => {
-                    write!(
-                        f,
-                        "Error: time margin too short, current time: {current_time:?}, time margin: {margin:?}, release time: {timestamp:?}"
-                    )
-                }
-                ScheduleError::NestedScheduledTc => {
-                    write!(f, "Error: nested scheduling is not allowed")
-                }
-                ScheduleError::StoreError(e) => {
-                    write!(f, "Store Error: {e}")
-                }
-                ScheduleError::TcDataEmpty => {
-                    write!(f, "Error: empty Tc Data field")
-                }
-                ScheduleError::TimestampError(e) => {
-                    write!(f, "Timestamp Error: {e}")
-                }
-                ScheduleError::WrongService => {
-                    write!(f, "Error: Service not 11.")
-                }
-                ScheduleError::WrongSubservice => {
-                    write!(f, "Error: Subservice not 4.")
-                }
-            }
-        }
-    }
-
-    impl From<PusError> for ScheduleError {
-        fn from(e: PusError) -> Self {
-            ScheduleError::PusError(e)
-        }
-    }
-
-    impl From<StoreError> for ScheduleError {
-        fn from(e: StoreError) -> Self {
-            ScheduleError::StoreError(e)
-        }
-    }
-
-    impl From<TimestampError> for ScheduleError {
-        fn from(e: TimestampError) -> Self {
-            ScheduleError::TimestampError(e)
-        }
-    }
-
-    #[cfg(feature = "std")]
-    impl Error for ScheduleError {}
-
     /// This is the core data structure for scheduling PUS telecommands with [alloc] support.
     ///
     /// It is assumed that the actual telecommand data is stored in a separate TC pool offering
-    /// a [crate::pool::PoolProvider] API. This data structure just tracks the store addresses and their
-    /// release times and offers a convenient API to insert and release telecommands and perform
-    /// other functionality specified by the ECSS standard in section 6.11. The time is tracked
-    /// as a [spacepackets::time::UnixTimestamp] but the only requirement to the timekeeping of
-    /// the user is that it is convertible to that timestamp.
+    /// a [crate::pool::PoolProviderMemInPlace] API. This data structure just tracks the store
+    /// addresses and their release times and offers a convenient API to insert and release
+    /// telecommands and perform other functionality specified by the ECSS standard in section 6.11.
+    /// The time is tracked as a [spacepackets::time::UnixTimestamp] but the only requirement to
+    /// the timekeeping of the user is that it is convertible to that timestamp.
     ///
     /// The standard also specifies that the PUS scheduler can be enabled and disabled.
     /// A disabled scheduler should still delete commands where the execution time has been reached
@@ -292,44 +373,6 @@ pub mod alloc_mod {
             num_entries
         }
 
-        pub fn is_enabled(&self) -> bool {
-            self.enabled
-        }
-
-        pub fn enable(&mut self) {
-            self.enabled = true;
-        }
-
-        /// A disabled scheduler should still delete commands where the execution time has been reached
-        /// but should not release them to be executed.
-        pub fn disable(&mut self) {
-            self.enabled = false;
-        }
-
-        /// This will disable the scheduler and clear the schedule as specified in 6.11.4.4.
-        /// Be careful with this command as it will delete all the commands in the schedule.
-        ///
-        /// The holding store for the telecommands needs to be passed so all the stored telecommands
-        /// can be deleted to avoid a memory leak. If at last one deletion operation fails, the error
-        /// will be returned but the method will still try to delete all the commands in the schedule.
-        pub fn reset(
-            &mut self,
-            store: &mut (impl PoolProvider + ?Sized),
-        ) -> Result<(), StoreError> {
-            self.enabled = false;
-            let mut deletion_ok = Ok(());
-            for tc_lists in &mut self.tc_map {
-                for tc in tc_lists.1 {
-                    let res = store.delete(tc.addr);
-                    if res.is_err() {
-                        deletion_ok = res;
-                    }
-                }
-            }
-            self.tc_map.clear();
-            deletion_ok
-        }
-
         pub fn update_time(&mut self, current_time: UnixTimestamp) {
             self.current_time = current_time;
         }
@@ -346,11 +389,11 @@ pub mod alloc_mod {
             info: TcInfo,
         ) -> Result<(), ScheduleError> {
             if time_stamp < self.current_time + self.time_margin {
-                return Err(ScheduleError::ReleaseTimeInTimeMargin(
-                    self.current_time,
-                    self.time_margin,
-                    time_stamp,
-                ));
+                return Err(ScheduleError::ReleaseTimeInTimeMargin {
+                    current_time: self.current_time,
+                    time_margin: self.time_margin,
+                    release_time: time_stamp,
+                });
             }
             match self.tc_map.entry(time_stamp) {
                 Entry::Vacant(e) => {
@@ -369,7 +412,7 @@ pub mod alloc_mod {
             &mut self,
             time_stamp: UnixTimestamp,
             tc: &[u8],
-            pool: &mut (impl PoolProvider + ?Sized),
+            pool: &mut (impl PoolProviderMemInPlace + ?Sized),
         ) -> Result<TcInfo, ScheduleError> {
             let check_tc = PusTcReader::new(tc)?;
             if PusPacket::service(&check_tc.0) == 11 && PusPacket::subservice(&check_tc.0) == 4 {
@@ -387,35 +430,12 @@ pub mod alloc_mod {
             }
         }
 
-        /// Insert a telecommand based on the fully wrapped time-tagged telecommand. The timestamp
-        /// provider needs to be supplied via a generic.
-        pub fn insert_wrapped_tc<TimeStamp: CcsdsTimeProvider + TimeReader>(
-            &mut self,
-            pus_tc: &(impl IsPusTelecommand + PusPacket + GenericPusTcSecondaryHeader),
-            pool: &mut (impl PoolProvider + ?Sized),
-        ) -> Result<TcInfo, ScheduleError> {
-            if PusPacket::service(pus_tc) != 11 {
-                return Err(ScheduleError::WrongService);
-            }
-            if PusPacket::subservice(pus_tc) != 4 {
-                return Err(ScheduleError::WrongSubservice);
-            }
-            if pus_tc.user_data().is_empty() {
-                return Err(ScheduleError::TcDataEmpty);
-            }
-            let user_data = pus_tc.user_data();
-            let stamp: TimeStamp = TimeReader::from_bytes(user_data)?;
-            let unix_stamp = stamp.unix_stamp();
-            let stamp_len = stamp.len_as_bytes();
-            self.insert_unwrapped_tc(unix_stamp, &user_data[stamp_len..], pool)
-        }
-
         /// Insert a telecommand based on the fully wrapped time-tagged telecommand using a CDS
         /// short timestamp with 16-bit length of days field.
         pub fn insert_wrapped_tc_cds_short(
             &mut self,
             pus_tc: &PusTc,
-            pool: &mut (impl PoolProvider + ?Sized),
+            pool: &mut (impl PoolProviderMemInPlace + ?Sized),
         ) -> Result<TcInfo, ScheduleError> {
             self.insert_wrapped_tc::<cds::TimeProvider>(pus_tc, pool)
         }
@@ -425,7 +445,7 @@ pub mod alloc_mod {
         pub fn insert_wrapped_tc_cds_long(
             &mut self,
             pus_tc: &PusTc,
-            pool: &mut (impl PoolProvider + ?Sized),
+            pool: &mut (impl PoolProviderMemInPlace + ?Sized),
         ) -> Result<TcInfo, ScheduleError> {
             self.insert_wrapped_tc::<cds::TimeProvider<DaysLen24Bits>>(pus_tc, pool)
         }
@@ -441,7 +461,7 @@ pub mod alloc_mod {
         pub fn delete_by_time_filter<TimeProvider: CcsdsTimeProvider + Clone>(
             &mut self,
             time_window: TimeWindow<TimeProvider>,
-            pool: &mut (impl PoolProvider + ?Sized),
+            pool: &mut (impl PoolProviderMemInPlace + ?Sized),
         ) -> Result<u64, (u64, StoreError)> {
             let range = self.retrieve_by_time_filter(time_window);
             let mut del_packets = 0;
@@ -471,7 +491,7 @@ pub mod alloc_mod {
         /// the last deletion will be supplied in addition to the number of deleted commands.
         pub fn delete_all(
             &mut self,
-            pool: &mut (impl PoolProvider + ?Sized),
+            pool: &mut (impl PoolProviderMemInPlace + ?Sized),
         ) -> Result<u64, (u64, StoreError)> {
             self.delete_by_time_filter(TimeWindow::<cds::TimeProvider>::new_select_all(), pool)
         }
@@ -518,7 +538,7 @@ pub mod alloc_mod {
         /// called repeatedly.
         pub fn delete_by_request_id(&mut self, req_id: &RequestId) -> Option<StoreAddr> {
             if let DeletionResult::WithoutStoreDeletion(v) =
-                self.delete_by_request_id_internal(req_id, None::<&mut dyn PoolProvider>)
+                self.delete_by_request_id_internal_without_store_deletion(req_id)
             {
                 return v;
             }
@@ -529,20 +549,19 @@ pub mod alloc_mod {
         pub fn delete_by_request_id_and_from_pool(
             &mut self,
             req_id: &RequestId,
-            pool: &mut (impl PoolProvider + ?Sized),
+            pool: &mut (impl PoolProviderMemInPlace + ?Sized),
         ) -> Result<bool, StoreError> {
             if let DeletionResult::WithStoreDeletion(v) =
-                self.delete_by_request_id_internal(req_id, Some(pool))
+                self.delete_by_request_id_internal_with_store_deletion(req_id, pool)
             {
                 return v;
             }
             panic!("unexpected deletion result");
         }
 
-        fn delete_by_request_id_internal(
+        fn delete_by_request_id_internal_without_store_deletion(
             &mut self,
             req_id: &RequestId,
-            pool: Option<&mut (impl PoolProvider + ?Sized)>,
         ) -> DeletionResult {
             let mut idx_found = None;
             for time_bucket in &mut self.tc_map {
@@ -553,24 +572,33 @@ pub mod alloc_mod {
                 }
                 if let Some(idx) = idx_found {
                     let addr = time_bucket.1.remove(idx).addr;
-                    if let Some(pool) = pool {
-                        return match pool.delete(addr) {
-                            Ok(_) => DeletionResult::WithStoreDeletion(Ok(true)),
-                            Err(e) => DeletionResult::WithStoreDeletion(Err(e)),
-                        };
-                    }
                     return DeletionResult::WithoutStoreDeletion(Some(addr));
                 }
             }
-            if pool.is_none() {
-                DeletionResult::WithoutStoreDeletion(None)
-            } else {
-                DeletionResult::WithStoreDeletion(Ok(false))
-            }
+            DeletionResult::WithoutStoreDeletion(None)
         }
-        /// Retrieve all telecommands which should be release based on the current time.
-        pub fn telecommands_to_release(&self) -> Range<'_, UnixTimestamp, Vec<TcInfo>> {
-            self.tc_map.range(..=self.current_time)
+
+        fn delete_by_request_id_internal_with_store_deletion(
+            &mut self,
+            req_id: &RequestId,
+            pool: &mut (impl PoolProviderMemInPlace + ?Sized),
+        ) -> DeletionResult {
+            let mut idx_found = None;
+            for time_bucket in &mut self.tc_map {
+                for (idx, tc_info) in time_bucket.1.iter().enumerate() {
+                    if &tc_info.request_id == req_id {
+                        idx_found = Some(idx);
+                    }
+                }
+                if let Some(idx) = idx_found {
+                    let addr = time_bucket.1.remove(idx).addr;
+                    return match pool.delete(addr) {
+                        Ok(_) => DeletionResult::WithStoreDeletion(Ok(true)),
+                        Err(e) => DeletionResult::WithStoreDeletion(Err(e)),
+                    };
+                }
+            }
+            DeletionResult::WithStoreDeletion(Ok(false))
         }
 
         #[cfg(feature = "std")]
@@ -582,29 +610,31 @@ pub mod alloc_mod {
 
         /// Utility method which calls [Self::telecommands_to_release] and then calls a releaser
         /// closure for each telecommand which should be released. This function will also delete
-        /// the telecommands from the holding store after calling the release closure, if the scheduler
-        /// is disabled.
+        /// the telecommands from the holding store after calling the release closure if the user
+        /// returns [true] from the release closure.
         ///
         /// # Arguments
         ///
         /// * `releaser` - Closure where the first argument is whether the scheduler is enabled and
-        ///     the second argument is the telecommand information also containing the store address.
-        ///     This closure should return whether the command should be deleted if the scheduler is
-        ///     disabled to prevent memory leaks.
-        /// * `store` - The holding store of the telecommands.
-        pub fn release_telecommands<R: FnMut(bool, &TcInfo) -> bool>(
+        ///     the second argument is the telecommand information also containing the store
+        ///     address. This closure should return whether the command should be deleted. Please
+        ///     note that returning false might lead to memory leaks if the TC is not cleared from
+        ///     the store in some other way.
+        /// * `tc_store` - The holding store of the telecommands.
+        pub fn release_telecommands<R: FnMut(bool, &TcInfo, &[u8]) -> bool>(
             &mut self,
             mut releaser: R,
-            tc_store: &mut (impl PoolProvider + ?Sized),
+            tc_store: &mut (impl PoolProviderMemInPlace + ?Sized),
         ) -> Result<u64, (u64, StoreError)> {
             let tcs_to_release = self.telecommands_to_release();
             let mut released_tcs = 0;
             let mut store_error = Ok(());
             for tc in tcs_to_release {
                 for info in tc.1 {
-                    let should_delete = releaser(self.enabled, info);
+                    let tc = tc_store.read(&info.addr).map_err(|e| (released_tcs, e))?;
+                    let should_delete = releaser(self.enabled, info, tc);
                     released_tcs += 1;
-                    if should_delete && !self.is_enabled() {
+                    if should_delete {
                         let res = tc_store.delete(info.addr);
                         if res.is_err() {
                             store_error = res;
@@ -617,13 +647,112 @@ pub mod alloc_mod {
                 .map(|_| released_tcs)
                 .map_err(|e| (released_tcs, e))
         }
+
+        /// This utility method is similar to [Self::release_telecommands] but will not perform
+        /// store deletions and thus does not require a mutable reference of the TC store.
+        ///
+        /// It will returns a [Vec] of [TcInfo]s to transfer the list of released
+        /// telecommands to the user. The user should take care of deleting those telecommands
+        /// from the holding store to prevent memory leaks.
+        pub fn release_telecommands_no_deletion<R: FnMut(bool, &TcInfo, &[u8])>(
+            &mut self,
+            mut releaser: R,
+            tc_store: &(impl PoolProviderMemInPlace + ?Sized),
+        ) -> Result<Vec<TcInfo>, (Vec<TcInfo>, StoreError)> {
+            let tcs_to_release = self.telecommands_to_release();
+            let mut released_tcs = Vec::new();
+            for tc in tcs_to_release {
+                for info in tc.1 {
+                    let tc = tc_store
+                        .read(&info.addr)
+                        .map_err(|e| (released_tcs.clone(), e))?;
+                    releaser(self.is_enabled(), info, tc);
+                    released_tcs.push(*info);
+                }
+            }
+            self.tc_map.retain(|k, _| k > &self.current_time);
+            Ok(released_tcs)
+        }
+
+        /// Retrieve all telecommands which should be release based on the current time.
+        pub fn telecommands_to_release(&self) -> Range<'_, UnixTimestamp, Vec<TcInfo>> {
+            self.tc_map.range(..=self.current_time)
+        }
+    }
+
+    impl PusSchedulerInterface for PusScheduler {
+        type TimeProvider = cds::TimeProvider;
+
+        /// This will disable the scheduler and clear the schedule as specified in 6.11.4.4.
+        /// Be careful with this command as it will delete all the commands in the schedule.
+        ///
+        /// The holding store for the telecommands needs to be passed so all the stored telecommands
+        /// can be deleted to avoid a memory leak. If at last one deletion operation fails, the error
+        /// will be returned but the method will still try to delete all the commands in the schedule.
+        fn reset(
+            &mut self,
+            store: &mut (impl PoolProviderMemInPlace + ?Sized),
+        ) -> Result<(), StoreError> {
+            self.enabled = false;
+            let mut deletion_ok = Ok(());
+            for tc_lists in &mut self.tc_map {
+                for tc in tc_lists.1 {
+                    let res = store.delete(tc.addr);
+                    if res.is_err() {
+                        deletion_ok = res;
+                    }
+                }
+            }
+            self.tc_map.clear();
+            deletion_ok
+        }
+
+        fn is_enabled(&self) -> bool {
+            self.enabled
+        }
+
+        fn enable(&mut self) {
+            self.enabled = true;
+        }
+
+        /// A disabled scheduler should still delete commands where the execution time has been reached
+        /// but should not release them to be executed.
+        fn disable(&mut self) {
+            self.enabled = false;
+        }
+
+        fn insert_unwrapped_and_stored_tc(
+            &mut self,
+            time_stamp: UnixTimestamp,
+            info: TcInfo,
+        ) -> Result<(), ScheduleError> {
+            if time_stamp < self.current_time + self.time_margin {
+                return Err(ScheduleError::ReleaseTimeInTimeMargin {
+                    current_time: self.current_time,
+                    time_margin: self.time_margin,
+                    release_time: time_stamp,
+                });
+            }
+            match self.tc_map.entry(time_stamp) {
+                Entry::Vacant(e) => {
+                    e.insert(vec![info]);
+                }
+                Entry::Occupied(mut v) => {
+                    v.get_mut().push(info);
+                }
+            }
+            Ok(())
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pool::{LocalPool, PoolCfg, PoolProvider, StoreAddr, StoreError};
+    use crate::pool::{
+        PoolProviderMemInPlace, StaticMemoryPool, StaticPoolAddr, StaticPoolConfig, StoreAddr,
+        StoreError,
+    };
     use alloc::collections::btree_map::Range;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::WritablePusPacket;
@@ -694,7 +823,7 @@ mod tests {
     }
 
     fn ping_tc_to_store(
-        pool: &mut LocalPool,
+        pool: &mut StaticMemoryPool,
         buf: &mut [u8],
         seq_count: u16,
         app_data: Option<&'static [u8]>,
@@ -718,7 +847,7 @@ mod tests {
 
     #[test]
     fn reset() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
@@ -769,10 +898,10 @@ mod tests {
             .insert_unwrapped_and_stored_tc(
                 UnixTimestamp::new_only_seconds(100),
                 TcInfo::new(
-                    StoreAddr {
+                    StoreAddr::from(StaticPoolAddr {
                         pool_idx: 0,
                         packet_idx: 1,
-                    },
+                    }),
                     RequestId {
                         seq_count: 1,
                         apid: 0,
@@ -786,10 +915,10 @@ mod tests {
             .insert_unwrapped_and_stored_tc(
                 UnixTimestamp::new_only_seconds(100),
                 TcInfo::new(
-                    StoreAddr {
+                    StoreAddr::from(StaticPoolAddr {
                         pool_idx: 0,
                         packet_idx: 2,
-                    },
+                    }),
                     RequestId {
                         seq_count: 2,
                         apid: 1,
@@ -803,10 +932,11 @@ mod tests {
             .insert_unwrapped_and_stored_tc(
                 UnixTimestamp::new_only_seconds(300),
                 TcInfo::new(
-                    StoreAddr {
+                    StaticPoolAddr {
                         pool_idx: 0,
                         packet_idx: 2,
-                    },
+                    }
+                    .into(),
                     RequestId {
                         source_id: 10,
                         seq_count: 20,
@@ -869,7 +999,7 @@ mod tests {
     }
     #[test]
     fn release_basic() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
@@ -886,7 +1016,7 @@ mod tests {
             .expect("insertion failed");
 
         let mut i = 0;
-        let mut test_closure_1 = |boolvar: bool, tc_info: &TcInfo| {
+        let mut test_closure_1 = |boolvar: bool, tc_info: &TcInfo, _tc: &[u8]| {
             common_check(boolvar, &tc_info.addr, vec![tc_info_0.addr()], &mut i);
             true
         };
@@ -905,10 +1035,11 @@ mod tests {
             .release_telecommands(&mut test_closure_1, &mut pool)
             .expect("deletion failed");
         assert_eq!(released, 1);
-        assert!(pool.has_element_at(&tc_info_0.addr()).unwrap());
+        // TC is deleted.
+        assert!(!pool.has_element_at(&tc_info_0.addr()).unwrap());
 
         // test 3, late timestamp, release 1 overdue tc
-        let mut test_closure_2 = |boolvar: bool, tc_info: &TcInfo| {
+        let mut test_closure_2 = |boolvar: bool, tc_info: &TcInfo, _tc: &[u8]| {
             common_check(boolvar, &tc_info.addr, vec![tc_info_1.addr()], &mut i);
             true
         };
@@ -919,7 +1050,8 @@ mod tests {
             .release_telecommands(&mut test_closure_2, &mut pool)
             .expect("deletion failed");
         assert_eq!(released, 1);
-        assert!(pool.has_element_at(&tc_info_1.addr()).unwrap());
+        // TC is deleted.
+        assert!(!pool.has_element_at(&tc_info_1.addr()).unwrap());
 
         //test 4: no tcs left
         scheduler
@@ -932,7 +1064,7 @@ mod tests {
 
     #[test]
     fn release_multi_with_same_time() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
@@ -949,7 +1081,7 @@ mod tests {
             .expect("insertion failed");
 
         let mut i = 0;
-        let mut test_closure = |boolvar: bool, store_addr: &TcInfo| {
+        let mut test_closure = |boolvar: bool, store_addr: &TcInfo, _tc: &[u8]| {
             common_check(
                 boolvar,
                 &store_addr.addr,
@@ -974,8 +1106,8 @@ mod tests {
             .release_telecommands(&mut test_closure, &mut pool)
             .expect("deletion failed");
         assert_eq!(released, 2);
-        assert!(pool.has_element_at(&tc_info_0.addr()).unwrap());
-        assert!(pool.has_element_at(&tc_info_1.addr()).unwrap());
+        assert!(!pool.has_element_at(&tc_info_0.addr()).unwrap());
+        assert!(!pool.has_element_at(&tc_info_1.addr()).unwrap());
 
         //test 3: no tcs left
         released = scheduler
@@ -989,7 +1121,7 @@ mod tests {
 
     #[test]
     fn release_with_scheduler_disabled() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
@@ -1008,7 +1140,7 @@ mod tests {
             .expect("insertion failed");
 
         let mut i = 0;
-        let mut test_closure_1 = |boolvar: bool, tc_info: &TcInfo| {
+        let mut test_closure_1 = |boolvar: bool, tc_info: &TcInfo, _tc: &[u8]| {
             common_check_disabled(boolvar, &tc_info.addr, vec![tc_info_0.addr()], &mut i);
             true
         };
@@ -1030,7 +1162,7 @@ mod tests {
         assert!(!pool.has_element_at(&tc_info_0.addr()).unwrap());
 
         // test 3, late timestamp, release 1 overdue tc
-        let mut test_closure_2 = |boolvar: bool, tc_info: &TcInfo| {
+        let mut test_closure_2 = |boolvar: bool, tc_info: &TcInfo, _tc: &[u8]| {
             common_check_disabled(boolvar, &tc_info.addr, vec![tc_info_1.addr()], &mut i);
             true
         };
@@ -1057,7 +1189,7 @@ mod tests {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut buf: [u8; 32] = [0; 32];
         let tc_info_0 = ping_tc_to_store(&mut pool, &mut buf, 0, None);
 
@@ -1072,7 +1204,7 @@ mod tests {
         assert!(pool.has_element_at(&tc_info_0.addr()).unwrap());
 
         let data = pool.read(&tc_info_0.addr()).unwrap();
-        let check_tc = PusTcReader::new(&data).expect("incorrect Pus tc raw data");
+        let check_tc = PusTcReader::new(data).expect("incorrect Pus tc raw data");
         assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, None));
 
         assert_eq!(scheduler.num_scheduled_telecommands(), 1);
@@ -1082,7 +1214,7 @@ mod tests {
         let mut addr_vec = Vec::new();
 
         let mut i = 0;
-        let mut test_closure = |boolvar: bool, tc_info: &TcInfo| {
+        let mut test_closure = |boolvar: bool, tc_info: &TcInfo, _tc: &[u8]| {
             common_check(boolvar, &tc_info.addr, vec![info.addr], &mut i);
             // check that tc remains unchanged
             addr_vec.push(tc_info.addr);
@@ -1094,7 +1226,7 @@ mod tests {
             .unwrap();
 
         let data = pool.read(&addr_vec[0]).unwrap();
-        let check_tc = PusTcReader::new(&data).expect("incorrect Pus tc raw data");
+        let check_tc = PusTcReader::new(data).expect("incorrect Pus tc raw data");
         assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, None));
     }
 
@@ -1103,7 +1235,7 @@ mod tests {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
 
         let mut buf: [u8; 32] = [0; 32];
         let tc = scheduled_tc(UnixTimestamp::new_only_seconds(100), &mut buf);
@@ -1118,7 +1250,7 @@ mod tests {
         assert!(pool.has_element_at(&info.addr).unwrap());
 
         let data = pool.read(&info.addr).unwrap();
-        let check_tc = PusTcReader::new(&data).expect("incorrect Pus tc raw data");
+        let check_tc = PusTcReader::new(data).expect("incorrect Pus tc raw data");
         assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, None));
 
         assert_eq!(scheduler.num_scheduled_telecommands(), 1);
@@ -1128,7 +1260,7 @@ mod tests {
         let mut addr_vec = Vec::new();
 
         let mut i = 0;
-        let mut test_closure = |boolvar: bool, tc_info: &TcInfo| {
+        let mut test_closure = |boolvar: bool, tc_info: &TcInfo, _tc: &[u8]| {
             common_check(boolvar, &tc_info.addr, vec![info.addr], &mut i);
             // check that tc remains unchanged
             addr_vec.push(tc_info.addr);
@@ -1140,7 +1272,7 @@ mod tests {
             .unwrap();
 
         let data = pool.read(&addr_vec[0]).unwrap();
-        let check_tc = PusTcReader::new(&data).expect("incorrect PUS tc raw data");
+        let check_tc = PusTcReader::new(data).expect("incorrect PUS tc raw data");
         assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, None));
     }
 
@@ -1149,7 +1281,7 @@ mod tests {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
 
         let mut buf: [u8; 32] = [0; 32];
         let tc = wrong_tc_service(UnixTimestamp::new_only_seconds(100), &mut buf);
@@ -1170,7 +1302,7 @@ mod tests {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
 
         let mut buf: [u8; 32] = [0; 32];
         let tc = wrong_tc_subservice(UnixTimestamp::new_only_seconds(100), &mut buf);
@@ -1190,7 +1322,7 @@ mod tests {
     fn insert_wrapped_tc_faulty_app_data() {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let tc = invalid_time_tagged_cmd();
         let insert_res = scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool);
         assert!(insert_res.is_err());
@@ -1205,7 +1337,7 @@ mod tests {
     fn insert_doubly_wrapped_time_tagged_cmd() {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut buf: [u8; 64] = [0; 64];
         let tc = double_wrapped_time_tagged_tc(UnixTimestamp::new_only_seconds(50), &mut buf);
         let insert_res = scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool);
@@ -1241,7 +1373,7 @@ mod tests {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
 
         let mut buf: [u8; 32] = [0; 32];
 
@@ -1250,9 +1382,13 @@ mod tests {
         assert!(insert_res.is_err());
         let err = insert_res.unwrap_err();
         match err {
-            ScheduleError::ReleaseTimeInTimeMargin(curr_time, margin, release_time) => {
-                assert_eq!(curr_time, UnixTimestamp::new_only_seconds(0));
-                assert_eq!(margin, Duration::from_secs(5));
+            ScheduleError::ReleaseTimeInTimeMargin {
+                current_time,
+                time_margin,
+                release_time,
+            } => {
+                assert_eq!(current_time, UnixTimestamp::new_only_seconds(0));
+                assert_eq!(time_margin, Duration::from_secs(5));
                 assert_eq!(release_time, UnixTimestamp::new_only_seconds(4));
             }
             _ => panic!("unexepcted error {err}"),
@@ -1261,7 +1397,7 @@ mod tests {
 
     #[test]
     fn test_store_error_propagation_release() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
@@ -1271,7 +1407,7 @@ mod tests {
             .expect("insertion failed");
 
         let mut i = 0;
-        let test_closure_1 = |boolvar: bool, tc_info: &TcInfo| {
+        let test_closure_1 = |boolvar: bool, tc_info: &TcInfo, _tc: &[u8]| {
             common_check_disabled(boolvar, &tc_info.addr, vec![tc_info_0.addr()], &mut i);
             true
         };
@@ -1284,7 +1420,8 @@ mod tests {
         let release_res = scheduler.release_telecommands(test_closure_1, &mut pool);
         assert!(release_res.is_err());
         let err = release_res.unwrap_err();
-        assert_eq!(err.0, 1);
+        // TC could not even be read..
+        assert_eq!(err.0, 0);
         match err.1 {
             StoreError::DataDoesNotExist(addr) => {
                 assert_eq!(tc_info_0.addr(), addr);
@@ -1295,7 +1432,7 @@ mod tests {
 
     #[test]
     fn test_store_error_propagation_reset() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
@@ -1319,7 +1456,7 @@ mod tests {
 
     #[test]
     fn test_delete_by_req_id_simple_retrieve_addr() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
@@ -1338,7 +1475,7 @@ mod tests {
 
     #[test]
     fn test_delete_by_req_id_simple_delete_all() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
@@ -1357,7 +1494,7 @@ mod tests {
 
     #[test]
     fn test_delete_by_req_id_complex() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
@@ -1386,7 +1523,7 @@ mod tests {
         let del_res =
             scheduler.delete_by_request_id_and_from_pool(&tc_info_2.request_id(), &mut pool);
         assert!(del_res.is_ok());
-        assert_eq!(del_res.unwrap(), true);
+        assert!(del_res.unwrap());
         assert!(!pool.has_element_at(&tc_info_2.addr()).unwrap());
         assert_eq!(scheduler.num_scheduled_telecommands(), 1);
 
@@ -1394,7 +1531,7 @@ mod tests {
         let addr_1 =
             scheduler.delete_by_request_id_and_from_pool(&tc_info_1.request_id(), &mut pool);
         assert!(addr_1.is_ok());
-        assert_eq!(addr_1.unwrap(), true);
+        assert!(addr_1.unwrap());
         assert!(!pool.has_element_at(&tc_info_1.addr()).unwrap());
         assert_eq!(scheduler.num_scheduled_telecommands(), 0);
     }
@@ -1404,7 +1541,7 @@ mod tests {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(1, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(1, 64)]));
 
         let mut buf: [u8; 32] = [0; 32];
         // Store is full after this.
@@ -1424,7 +1561,7 @@ mod tests {
     }
 
     fn insert_command_with_release_time(
-        pool: &mut LocalPool,
+        pool: &mut StaticMemoryPool,
         scheduler: &mut PusScheduler,
         seq_count: u16,
         release_secs: u64,
@@ -1443,7 +1580,7 @@ mod tests {
 
     #[test]
     fn test_time_window_retrieval_select_all() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let tc_info_0 = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1474,7 +1611,7 @@ mod tests {
 
     #[test]
     fn test_time_window_retrieval_select_from_stamp() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let _ = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1505,7 +1642,7 @@ mod tests {
 
     #[test]
     fn test_time_window_retrieval_select_to_time() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let tc_info_0 = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1536,7 +1673,7 @@ mod tests {
 
     #[test]
     fn test_time_window_retrieval_select_from_time_to_time() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let _ = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1571,7 +1708,7 @@ mod tests {
 
     #[test]
     fn test_deletion_all() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1598,7 +1735,7 @@ mod tests {
 
     #[test]
     fn test_deletion_from_start_time() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1619,7 +1756,7 @@ mod tests {
 
     #[test]
     fn test_deletion_to_end_time() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let cmd_0_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1641,7 +1778,7 @@ mod tests {
 
     #[test]
     fn test_deletion_from_start_time_to_end_time() {
-        let mut pool = LocalPool::new(PoolCfg::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let cmd_out_of_range_0 = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
