@@ -29,7 +29,7 @@ use satrs_core::event_man::{
 };
 use satrs_core::events::EventU32;
 use satrs_core::hk::HkRequest;
-use satrs_core::pool::{LocalPool, PoolCfg};
+use satrs_core::pool::{PoolProviderMemInPlace, StaticMemoryPool, StaticPoolConfig};
 use satrs_core::pus::event_man::{
     DefaultPusMgmtBackendProvider, EventReporter, EventRequest, EventRequestWithToken,
     PusEventDispatcher,
@@ -42,7 +42,9 @@ use satrs_core::pus::test::PusService17TestHandler;
 use satrs_core::pus::verification::{
     TcStateStarted, VerificationReporterCfg, VerificationReporterWithSender, VerificationToken,
 };
-use satrs_core::pus::{EcssTcInStoreConverter, MpscTcInStoreReceiver, MpscTmInStoreSender};
+use satrs_core::pus::{
+    EcssTcInSharedStoreConverter, MpscTcReceiver, MpscTmInStoreSender, PusServiceHelper,
+};
 use satrs_core::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore};
 use satrs_core::spacepackets::ecss::tm::{PusTmCreator, PusTmZeroCopyWriter};
 use satrs_core::spacepackets::{
@@ -66,7 +68,7 @@ use std::time::Duration;
 fn main() {
     setup_logger().expect("setting up logging with fern failed");
     println!("Running OBSW example");
-    let tm_pool = LocalPool::new(PoolCfg::new(vec![
+    let tm_pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![
         (30, 32),
         (15, 64),
         (15, 128),
@@ -74,9 +76,9 @@ fn main() {
         (15, 1024),
         (15, 2048),
     ]));
-    let shared_tm_store = SharedTmStore::new(Box::new(tm_pool));
+    let shared_tm_store = SharedTmStore::new(tm_pool);
     let tm_store_event = shared_tm_store.clone();
-    let tc_pool = LocalPool::new(PoolCfg::new(vec![
+    let tc_pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![
         (30, 32),
         (15, 64),
         (15, 128),
@@ -85,8 +87,16 @@ fn main() {
         (15, 2048),
     ]));
     let tc_store = TcStore {
-        pool: Arc::new(RwLock::new(Box::new(tc_pool))),
+        pool: Arc::new(RwLock::new(tc_pool)),
     };
+    let sched_tc_pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![
+        (30, 32),
+        (15, 64),
+        (15, 128),
+        (15, 256),
+        (15, 1024),
+        (15, 2048),
+    ]));
 
     let seq_count_provider = CcsdsSimpleSeqCountProvider::new();
     let mut msg_counter_map: HashMap<u8, u16> = HashMap::new();
@@ -172,18 +182,18 @@ fn main() {
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
-    let test_srv_receiver = MpscTcInStoreReceiver::new(
+    let test_srv_receiver = MpscTcReceiver::new(
         TcReceiverId::PusTest as ChannelId,
         "PUS_17_TC_RECV",
         pus_test_rx,
     );
-    let pus17_handler = PusService17TestHandler::new(
+    let pus17_handler = PusService17TestHandler::new(PusServiceHelper::new(
         Box::new(test_srv_receiver),
         Box::new(test_srv_tm_sender),
         PUS_APID,
         verif_reporter.clone(),
-        EcssTcInStoreConverter::new(tc_store.pool.clone(), 2048),
-    );
+        EcssTcInSharedStoreConverter::new(tc_store.pool.clone(), 2048),
+    ));
     let mut pus_17_wrapper = Service17CustomWrapper {
         pus17_handler,
         test_srv_event_sender,
@@ -195,7 +205,7 @@ fn main() {
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
-    let sched_srv_receiver = MpscTcInStoreReceiver::new(
+    let sched_srv_receiver = MpscTcReceiver::new(
         TcReceiverId::PusSched as ChannelId,
         "PUS_11_TC_RECV",
         pus_sched_rx,
@@ -203,16 +213,18 @@ fn main() {
     let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
         .expect("Creating PUS Scheduler failed");
     let pus_11_handler = PusService11SchedHandler::new(
-        Box::new(sched_srv_receiver),
-        Box::new(sched_srv_tm_sender),
-        PUS_APID,
-        verif_reporter.clone(),
-        EcssTcInStoreConverter::new(tc_store.pool.clone(), 2048),
-        tc_store.pool.clone(),
+        PusServiceHelper::new(
+            Box::new(sched_srv_receiver),
+            Box::new(sched_srv_tm_sender),
+            PUS_APID,
+            verif_reporter.clone(),
+            EcssTcInSharedStoreConverter::new(tc_store.pool.clone(), 2048),
+        ),
         scheduler,
     );
     let mut pus_11_wrapper = Pus11Wrapper {
         pus_11_handler,
+        sched_tc_pool,
         tc_source_wrapper,
     };
 
@@ -222,17 +234,19 @@ fn main() {
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
-    let event_srv_receiver = MpscTcInStoreReceiver::new(
+    let event_srv_receiver = MpscTcReceiver::new(
         TcReceiverId::PusEvent as ChannelId,
         "PUS_5_TC_RECV",
         pus_event_rx,
     );
     let pus_5_handler = PusService5EventHandler::new(
-        Box::new(event_srv_receiver),
-        Box::new(event_srv_tm_sender),
-        PUS_APID,
-        verif_reporter.clone(),
-        EcssTcInStoreConverter::new(tc_store.pool.clone(), 2048),
+        PusServiceHelper::new(
+            Box::new(event_srv_receiver),
+            Box::new(event_srv_tm_sender),
+            PUS_APID,
+            verif_reporter.clone(),
+            EcssTcInSharedStoreConverter::new(tc_store.pool.clone(), 2048),
+        ),
         event_request_tx,
     );
     let mut pus_5_wrapper = Pus5Wrapper { pus_5_handler };
@@ -243,7 +257,7 @@ fn main() {
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
-    let action_srv_receiver = MpscTcInStoreReceiver::new(
+    let action_srv_receiver = MpscTcReceiver::new(
         TcReceiverId::PusAction as ChannelId,
         "PUS_8_TC_RECV",
         pus_action_rx,
@@ -253,7 +267,7 @@ fn main() {
         Box::new(action_srv_tm_sender),
         PUS_APID,
         verif_reporter.clone(),
-        EcssTcInStoreConverter::new(tc_store.pool.clone(), 2048),
+        EcssTcInSharedStoreConverter::new(tc_store.pool.clone(), 2048),
         request_map.clone(),
     );
     let mut pus_8_wrapper = Pus8Wrapper { pus_8_handler };
@@ -265,13 +279,13 @@ fn main() {
         tm_funnel_tx.clone(),
     );
     let hk_srv_receiver =
-        MpscTcInStoreReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
+        MpscTcReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
     let pus_3_handler = PusService3HkHandler::new(
         Box::new(hk_srv_receiver),
         Box::new(hk_srv_tm_sender),
         PUS_APID,
         verif_reporter.clone(),
-        EcssTcInStoreConverter::new(tc_store.pool.clone(), 2048),
+        EcssTcInSharedStoreConverter::new(tc_store.pool.clone(), 2048),
         request_map,
     );
     let mut pus_3_wrapper = Pus3Wrapper { pus_3_handler };

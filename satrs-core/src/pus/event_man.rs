@@ -82,7 +82,7 @@ pub mod heapless_mod {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum EventRequest<Event: GenericEvent = EventU32> {
     Enable(Event),
     Disable(Event),

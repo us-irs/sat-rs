@@ -1,54 +1,39 @@
 use crate::events::EventU32;
 use crate::pus::event_man::{EventRequest, EventRequestWithToken};
 use crate::pus::verification::TcStateToken;
-use crate::pus::{
-    EcssTcReceiver, EcssTmSender, PartialPusHandlingError, PusPacketHandlerResult,
-    PusPacketHandlingError,
-};
-use alloc::boxed::Box;
+use crate::pus::{PartialPusHandlingError, PusPacketHandlerResult, PusPacketHandlingError};
 use spacepackets::ecss::event::Subservice;
 use spacepackets::ecss::PusPacket;
 use std::sync::mpsc::Sender;
 
-use super::verification::VerificationReporterWithSender;
-use super::{EcssTcInMemConverter, PusServiceBase, PusServiceHandler};
+use super::{EcssTcInMemConverter, PusServiceBase, PusServiceHelper};
 
 pub struct PusService5EventHandler<TcInMemConverter: EcssTcInMemConverter> {
-    pub psb: PusServiceHandler<TcInMemConverter>,
+    pub service_helper: PusServiceHelper<TcInMemConverter>,
     event_request_tx: Sender<EventRequestWithToken>,
 }
 
 impl<TcInMemConverter: EcssTcInMemConverter> PusService5EventHandler<TcInMemConverter> {
     pub fn new(
-        tc_receiver: Box<dyn EcssTcReceiver>,
-        tm_sender: Box<dyn EcssTmSender>,
-        tm_apid: u16,
-        verification_handler: VerificationReporterWithSender,
-        tc_in_mem_converter: TcInMemConverter,
+        service_handler: PusServiceHelper<TcInMemConverter>,
         event_request_tx: Sender<EventRequestWithToken>,
     ) -> Self {
         Self {
-            psb: PusServiceHandler::new(
-                tc_receiver,
-                tm_sender,
-                tm_apid,
-                verification_handler,
-                tc_in_mem_converter,
-            ),
+            service_helper: service_handler,
             event_request_tx,
         }
     }
 
     pub fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        let possible_packet = self.psb.retrieve_and_accept_next_packet()?;
+        let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
         if possible_packet.is_none() {
             return Ok(PusPacketHandlerResult::Empty);
         }
         let ecss_tc_and_token = possible_packet.unwrap();
         let tc = self
-            .psb
+            .service_helper
             .tc_in_mem_converter
-            .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token)?;
+            .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
         let subservice = tc.subservice();
         let srv = Subservice::try_from(subservice);
         if srv.is_err() {
@@ -60,13 +45,13 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService5EventHandler<TcInMemConv
         let handle_enable_disable_request = |enable: bool, stamp: [u8; 7]| {
             if tc.user_data().len() < 4 {
                 return Err(PusPacketHandlingError::NotEnoughAppData(
-                    "At least 4 bytes event ID expected".into(),
+                    "at least 4 bytes event ID expected".into(),
                 ));
             }
             let user_data = tc.user_data();
             let event_u32 = EventU32::from(u32::from_be_bytes(user_data[0..4].try_into().unwrap()));
             let start_token = self
-                .psb
+                .service_helper
                 .common
                 .verification_handler
                 .borrow_mut()
@@ -124,5 +109,172 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService5EventHandler<TcInMemConv
         }
 
         Ok(PusPacketHandlerResult::RequestHandled)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use delegate::delegate;
+    use spacepackets::ecss::event::Subservice;
+    use spacepackets::util::UnsignedEnum;
+    use spacepackets::{
+        ecss::{
+            tc::{PusTcCreator, PusTcSecondaryHeader},
+            tm::PusTmReader,
+        },
+        SequenceFlags, SpHeader,
+    };
+    use std::sync::mpsc::{self, Sender};
+
+    use crate::pus::event_man::EventRequest;
+    use crate::pus::tests::SimplePusPacketHandler;
+    use crate::pus::verification::RequestId;
+    use crate::{
+        events::EventU32,
+        pus::{
+            event_man::EventRequestWithToken,
+            tests::{PusServiceHandlerWithSharedStoreCommon, PusTestHarness, TEST_APID},
+            verification::{TcStateAccepted, VerificationToken},
+            EcssTcInSharedStoreConverter, PusPacketHandlerResult, PusPacketHandlingError,
+        },
+    };
+
+    use super::PusService5EventHandler;
+
+    const TEST_EVENT_0: EventU32 = EventU32::const_new(crate::events::Severity::INFO, 5, 25);
+
+    struct Pus5HandlerWithStoreTester {
+        common: PusServiceHandlerWithSharedStoreCommon,
+        handler: PusService5EventHandler<EcssTcInSharedStoreConverter>,
+    }
+
+    impl Pus5HandlerWithStoreTester {
+        pub fn new(event_request_tx: Sender<EventRequestWithToken>) -> Self {
+            let (common, srv_handler) = PusServiceHandlerWithSharedStoreCommon::new();
+            Self {
+                common,
+                handler: PusService5EventHandler::new(srv_handler, event_request_tx),
+            }
+        }
+    }
+
+    impl PusTestHarness for Pus5HandlerWithStoreTester {
+        delegate! {
+            to self.common {
+                fn send_tc(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted>;
+                fn read_next_tm(&mut self) -> PusTmReader<'_>;
+                fn check_no_tm_available(&self) -> bool;
+                fn check_next_verification_tm(&self, subservice: u8, expected_request_id: RequestId);
+            }
+
+        }
+    }
+
+    impl SimplePusPacketHandler for Pus5HandlerWithStoreTester {
+        delegate! {
+            to self.handler {
+                fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
+            }
+        }
+    }
+
+    fn event_test(
+        test_harness: &mut (impl PusTestHarness + SimplePusPacketHandler),
+        subservice: Subservice,
+        expected_event_req: EventRequest,
+        event_req_receiver: mpsc::Receiver<EventRequestWithToken>,
+    ) {
+        let mut sp_header = SpHeader::tc(TEST_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
+        let sec_header = PusTcSecondaryHeader::new_simple(5, subservice as u8);
+        let mut app_data = [0; 4];
+        TEST_EVENT_0
+            .write_to_be_bytes(&mut app_data)
+            .expect("writing test event failed");
+        let ping_tc = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
+        let token = test_harness.send_tc(&ping_tc);
+        let request_id = token.req_id();
+        test_harness.handle_one_tc().unwrap();
+        test_harness.check_next_verification_tm(1, request_id);
+        test_harness.check_next_verification_tm(3, request_id);
+        // Completion TM is not generated for us.
+        assert!(test_harness.check_no_tm_available());
+        let event_request = event_req_receiver
+            .try_recv()
+            .expect("no event request received");
+        assert_eq!(expected_event_req, event_request.request);
+    }
+
+    #[test]
+    fn test_enabling_event_reporting() {
+        let (event_request_tx, event_request_rx) = mpsc::channel();
+        let mut test_harness = Pus5HandlerWithStoreTester::new(event_request_tx);
+        event_test(
+            &mut test_harness,
+            Subservice::TcEnableEventGeneration,
+            EventRequest::Enable(TEST_EVENT_0),
+            event_request_rx,
+        );
+    }
+
+    #[test]
+    fn test_disabling_event_reporting() {
+        let (event_request_tx, event_request_rx) = mpsc::channel();
+        let mut test_harness = Pus5HandlerWithStoreTester::new(event_request_tx);
+        event_test(
+            &mut test_harness,
+            Subservice::TcDisableEventGeneration,
+            EventRequest::Disable(TEST_EVENT_0),
+            event_request_rx,
+        );
+    }
+
+    #[test]
+    fn test_empty_tc_queue() {
+        let (event_request_tx, _) = mpsc::channel();
+        let mut test_harness = Pus5HandlerWithStoreTester::new(event_request_tx);
+        let result = test_harness.handle_one_tc();
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        if let PusPacketHandlerResult::Empty = result {
+        } else {
+            panic!("unexpected result type {result:?}")
+        }
+    }
+
+    #[test]
+    fn test_sending_custom_subservice() {
+        let (event_request_tx, _) = mpsc::channel();
+        let mut test_harness = Pus5HandlerWithStoreTester::new(event_request_tx);
+        let mut sp_header = SpHeader::tc(TEST_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
+        let sec_header = PusTcSecondaryHeader::new_simple(5, 200);
+        let ping_tc = PusTcCreator::new_no_app_data(&mut sp_header, sec_header, true);
+        test_harness.send_tc(&ping_tc);
+        let result = test_harness.handle_one_tc();
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        if let PusPacketHandlerResult::CustomSubservice(subservice, _) = result {
+            assert_eq!(subservice, 200);
+        } else {
+            panic!("unexpected result type {result:?}")
+        }
+    }
+
+    #[test]
+    fn test_sending_invalid_app_data() {
+        let (event_request_tx, _) = mpsc::channel();
+        let mut test_harness = Pus5HandlerWithStoreTester::new(event_request_tx);
+        let mut sp_header = SpHeader::tc(TEST_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
+        let sec_header =
+            PusTcSecondaryHeader::new_simple(5, Subservice::TcEnableEventGeneration as u8);
+        let ping_tc = PusTcCreator::new(&mut sp_header, sec_header, &[0, 1, 2], true);
+        test_harness.send_tc(&ping_tc);
+        let result = test_harness.handle_one_tc();
+        assert!(result.is_err());
+        let result = result.unwrap_err();
+        if let PusPacketHandlingError::NotEnoughAppData(string) = result {
+            assert_eq!(string, "at least 4 bytes event ID expected");
+        } else {
+            panic!("unexpected result type {result:?}")
+        }
     }
 }

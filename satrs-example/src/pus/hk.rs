@@ -3,8 +3,8 @@ use log::{error, warn};
 use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
 use satrs_core::pus::verification::{FailParams, StdVerifReporterWithSender};
 use satrs_core::pus::{
-    EcssTcInMemConverter, EcssTcInStoreConverter, EcssTcReceiver, EcssTmSender,
-    PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHandler,
+    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcReceiver, EcssTmSender,
+    PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHelper,
 };
 use satrs_core::spacepackets::ecss::{hk, PusPacket};
 use satrs_example::{hk_err, tmtc_err, TargetIdWithApid};
@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
 pub struct PusService3HkHandler<TcInMemConverter: EcssTcInMemConverter> {
-    psb: PusServiceHandler<TcInMemConverter>,
+    psb: PusServiceHelper<TcInMemConverter>,
     request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
 }
 
@@ -26,7 +26,7 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService3HkHandler<TcInMemConvert
         request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
     ) -> Self {
         Self {
-            psb: PusServiceHandler::new(
+            psb: PusServiceHelper::new(
                 tc_receiver,
                 tm_sender,
                 tm_apid,
@@ -46,7 +46,7 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService3HkHandler<TcInMemConvert
         let tc = self
             .psb
             .tc_in_mem_converter
-            .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token)?;
+            .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
         let subservice = tc.subservice();
         let mut partial_error = None;
         let time_stamp = PusServiceBase::get_current_timestamp(&mut partial_error);
@@ -148,7 +148,7 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService3HkHandler<TcInMemConvert
 }
 
 pub struct Pus3Wrapper {
-    pub(crate) pus_3_handler: PusService3HkHandler<EcssTcInStoreConverter>,
+    pub(crate) pus_3_handler: PusService3HkHandler<EcssTcInSharedStoreConverter>,
 }
 
 impl Pus3Wrapper {
