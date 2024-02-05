@@ -8,9 +8,11 @@ use core::time::Duration;
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::scheduling::TimeWindowType;
 use spacepackets::ecss::tc::{GenericPusTcSecondaryHeader, IsPusTelecommand, PusTcReader};
-use spacepackets::ecss::{PusError, PusPacket};
-use spacepackets::time::{CcsdsTimeProvider, TimeReader, TimestampError, UnixTimestamp};
-use spacepackets::CcsdsPacket;
+use spacepackets::ecss::{PusError, PusPacket, WritablePusPacket};
+use spacepackets::time::{
+    CcsdsTimeProvider, TimeReader, TimeWriter, TimestampError, UnixTimestamp,
+};
+use spacepackets::{ByteConversionError, CcsdsPacket};
 #[cfg(feature = "std")]
 use std::error::Error;
 
@@ -154,8 +156,9 @@ pub enum ScheduleError {
     StoreError(StoreError),
     TcDataEmpty,
     TimestampError(TimestampError),
-    WrongSubservice,
-    WrongService,
+    WrongSubservice(u8),
+    WrongService(u8),
+    ByteConversionError(ByteConversionError),
 }
 
 impl Display for ScheduleError {
@@ -171,26 +174,29 @@ impl Display for ScheduleError {
             } => {
                 write!(
                     f,
-                    "Error: time margin too short, current time: {current_time:?}, time margin: {time_margin:?}, release time: {release_time:?}"
+                    "time margin too short, current time: {current_time:?}, time margin: {time_margin:?}, release time: {release_time:?}"
                 )
             }
             ScheduleError::NestedScheduledTc => {
-                write!(f, "Error: nested scheduling is not allowed")
+                write!(f, "nested scheduling is not allowed")
             }
             ScheduleError::StoreError(e) => {
-                write!(f, "Store Error: {e}")
+                write!(f, "pus scheduling: {e}")
             }
             ScheduleError::TcDataEmpty => {
-                write!(f, "Error: empty Tc Data field")
+                write!(f, "empty TC data field")
             }
             ScheduleError::TimestampError(e) => {
-                write!(f, "Timestamp Error: {e}")
+                write!(f, "pus scheduling: {e}")
             }
-            ScheduleError::WrongService => {
-                write!(f, "Error: Service not 11.")
+            ScheduleError::WrongService(srv) => {
+                write!(f, "pus scheduling: wrong service number {srv}")
             }
-            ScheduleError::WrongSubservice => {
-                write!(f, "Error: Subservice not 4.")
+            ScheduleError::WrongSubservice(subsrv) => {
+                write!(f, "pus scheduling: wrong subservice number {subsrv}")
+            }
+            ScheduleError::ByteConversionError(e) => {
+                write!(f, "pus scheduling: {e}")
             }
         }
     }
@@ -198,24 +204,39 @@ impl Display for ScheduleError {
 
 impl From<PusError> for ScheduleError {
     fn from(e: PusError) -> Self {
-        ScheduleError::PusError(e)
+        Self::PusError(e)
     }
 }
 
 impl From<StoreError> for ScheduleError {
     fn from(e: StoreError) -> Self {
-        ScheduleError::StoreError(e)
+        Self::StoreError(e)
     }
 }
 
 impl From<TimestampError> for ScheduleError {
     fn from(e: TimestampError) -> Self {
-        ScheduleError::TimestampError(e)
+        Self::TimestampError(e)
+    }
+}
+impl From<ByteConversionError> for ScheduleError {
+    fn from(e: ByteConversionError) -> Self {
+        Self::ByteConversionError(e)
     }
 }
 
 #[cfg(feature = "std")]
-impl Error for ScheduleError {}
+impl Error for ScheduleError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            ScheduleError::PusError(e) => Some(e),
+            ScheduleError::StoreError(e) => Some(e),
+            ScheduleError::TimestampError(e) => Some(e),
+            ScheduleError::ByteConversionError(e) => Some(e),
+            _ => None,
+        }
+    }
+}
 
 pub trait PusSchedulerInterface {
     type TimeProvider: CcsdsTimeProvider + TimeReader;
@@ -249,10 +270,12 @@ pub trait PusSchedulerInterface {
         pool: &mut (impl PoolProviderMemInPlace + ?Sized),
     ) -> Result<TcInfo, ScheduleError> {
         if PusPacket::service(pus_tc) != 11 {
-            return Err(ScheduleError::WrongService);
+            return Err(ScheduleError::WrongService(PusPacket::service(pus_tc)));
         }
         if PusPacket::subservice(pus_tc) != 4 {
-            return Err(ScheduleError::WrongSubservice);
+            return Err(ScheduleError::WrongSubservice(PusPacket::subservice(
+                pus_tc,
+            )));
         }
         if pus_tc.user_data().is_empty() {
             return Err(ScheduleError::TcDataEmpty);
@@ -289,6 +312,34 @@ pub trait PusSchedulerInterface {
     }
 }
 
+/// Helper function to generate the application data for a PUS telecommand to insert an
+/// activity into a time-based schedule according to ECSS-E-ST-70-41C 8.11.2.4
+///
+/// Please note that the N field is set to a [u16] unsigned bytefield with the value 1.
+pub fn generate_insert_telecommand_app_data(
+    buf: &mut [u8],
+    release_time: &impl TimeWriter,
+    request: &impl WritablePusPacket,
+) -> Result<usize, ScheduleError> {
+    let required_len = 2 + release_time.len_written() + request.len_written();
+    if required_len > buf.len() {
+        return Err(ByteConversionError::ToSliceTooSmall {
+            found: buf.len(),
+            expected: required_len,
+        }
+        .into());
+    }
+    let mut current_len = 0;
+    let n = 1_u16;
+    buf[current_len..current_len + 2].copy_from_slice(&n.to_be_bytes());
+    current_len += 2;
+    current_len += release_time
+        .write_to_bytes(&mut buf[current_len..current_len + release_time.len_written()])?;
+    current_len +=
+        request.write_to_bytes(&mut buf[current_len..current_len + request.len_written()])?;
+    Ok(current_len)
+}
+
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
     use super::*;
@@ -306,6 +357,19 @@ pub mod alloc_mod {
 
     #[cfg(feature = "std")]
     use std::time::SystemTimeError;
+
+    /// This function is similar to [generate_insert_telecommand_app_data] but returns the application
+    /// data as a [alloc::vec::Vec].
+    pub fn generate_insert_telecommand_app_data_as_vec(
+        release_time: &impl TimeWriter,
+        request: &impl WritablePusPacket,
+    ) -> Result<alloc::vec::Vec<u8>, ScheduleError> {
+        let mut vec = alloc::vec::Vec::new();
+        vec.extend_from_slice(&1_u16.to_be_bytes());
+        vec.append(&mut release_time.to_vec()?);
+        vec.append(&mut request.to_vec()?);
+        Ok(vec)
+    }
 
     enum DeletionResult {
         WithoutStoreDeletion(Option<StoreAddr>),
@@ -757,7 +821,7 @@ mod tests {
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::WritablePusPacket;
     use spacepackets::time::{cds, TimeWriter, UnixTimestamp};
-    use spacepackets::SpHeader;
+    use spacepackets::{PacketId, PacketSequenceCtrl, PacketType, SequenceFlags, SpHeader};
     use std::time::Duration;
     use std::vec::Vec;
     #[allow(unused_imports)]
@@ -835,7 +899,7 @@ mod tests {
     }
 
     #[test]
-    fn basic() {
+    fn test_enable_api() {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         assert!(scheduler.is_enabled());
@@ -846,7 +910,7 @@ mod tests {
     }
 
     #[test]
-    fn reset() {
+    fn test_reset() {
         let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
@@ -857,7 +921,7 @@ mod tests {
         scheduler
             .insert_unwrapped_and_stored_tc(
                 UnixTimestamp::new_only_seconds(100),
-                TcInfo::new(tc_info_0.addr.clone(), tc_info_0.request_id),
+                TcInfo::new(tc_info_0.addr, tc_info_0.request_id),
             )
             .unwrap();
 
@@ -866,7 +930,7 @@ mod tests {
         scheduler
             .insert_unwrapped_and_stored_tc(
                 UnixTimestamp::new_only_seconds(200),
-                TcInfo::new(tc_info_1.addr.clone(), tc_info_1.request_id),
+                TcInfo::new(tc_info_1.addr, tc_info_1.request_id),
             )
             .unwrap();
 
@@ -875,7 +939,7 @@ mod tests {
         scheduler
             .insert_unwrapped_and_stored_tc(
                 UnixTimestamp::new_only_seconds(300),
-                TcInfo::new(tc_info_2.addr().clone(), tc_info_2.request_id()),
+                TcInfo::new(tc_info_2.addr(), tc_info_2.request_id()),
             )
             .unwrap();
 
@@ -950,7 +1014,7 @@ mod tests {
     }
 
     #[test]
-    fn time() {
+    fn test_time_update() {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let time = UnixTimestamp::new(1, 2).unwrap();
@@ -964,7 +1028,7 @@ mod tests {
         expected_store_addrs: Vec<StoreAddr>,
         counter: &mut usize,
     ) {
-        assert_eq!(enabled, true);
+        assert!(enabled);
         assert!(expected_store_addrs.contains(store_addr));
         *counter += 1;
     }
@@ -974,13 +1038,13 @@ mod tests {
         expected_store_addrs: Vec<StoreAddr>,
         counter: &mut usize,
     ) {
-        assert_eq!(enabled, false);
+        assert!(!enabled);
         assert!(expected_store_addrs.contains(store_addr));
         *counter += 1;
     }
 
     #[test]
-    fn request_id() {
+    fn test_request_id() {
         let src_id_to_set = 12;
         let apid_to_set = 0x22;
         let seq_count = 105;
@@ -998,7 +1062,7 @@ mod tests {
         );
     }
     #[test]
-    fn release_basic() {
+    fn test_release_telecommands() {
         let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
@@ -1290,7 +1354,9 @@ mod tests {
         assert!(err.is_err());
         let err = err.unwrap_err();
         match err {
-            ScheduleError::WrongService => {}
+            ScheduleError::WrongService(wrong_service) => {
+                assert_eq!(wrong_service, 12);
+            }
             _ => {
                 panic!("unexpected error")
             }
@@ -1311,7 +1377,9 @@ mod tests {
         assert!(err.is_err());
         let err = err.unwrap_err();
         match err {
-            ScheduleError::WrongSubservice => {}
+            ScheduleError::WrongSubservice(wrong_subsrv) => {
+                assert_eq!(wrong_subsrv, 5);
+            }
             _ => {
                 panic!("unexpected error")
             }
@@ -1487,7 +1555,7 @@ mod tests {
         let del_res =
             scheduler.delete_by_request_id_and_from_pool(&tc_info_0.request_id(), &mut pool);
         assert!(del_res.is_ok());
-        assert_eq!(del_res.unwrap(), true);
+        assert!(del_res.unwrap());
         assert!(!pool.has_element_at(&tc_info_0.addr()).unwrap());
         assert_eq!(scheduler.num_scheduled_telecommands(), 0);
     }
@@ -1803,5 +1871,110 @@ mod tests {
         assert!(!pool.has_element_at(&cmd_0_to_delete.addr()).unwrap());
         assert!(!pool.has_element_at(&cmd_1_to_delete.addr()).unwrap());
         assert!(pool.has_element_at(&cmd_out_of_range_1.addr()).unwrap());
+    }
+
+    #[test]
+    fn test_release_without_deletion() {
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut scheduler =
+            PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
+
+        let mut buf: [u8; 32] = [0; 32];
+        let tc_info_0 = ping_tc_to_store(&mut pool, &mut buf, 0, None);
+
+        scheduler
+            .insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(100), tc_info_0)
+            .expect("insertion failed");
+
+        let tc_info_1 = ping_tc_to_store(&mut pool, &mut buf, 1, None);
+        scheduler
+            .insert_unwrapped_and_stored_tc(UnixTimestamp::new_only_seconds(200), tc_info_1)
+            .expect("insertion failed");
+
+        let mut i = 0;
+        let mut test_closure_1 = |boolvar: bool, tc_info: &TcInfo, _tc: &[u8]| {
+            common_check(
+                boolvar,
+                &tc_info.addr,
+                vec![tc_info_0.addr(), tc_info_1.addr()],
+                &mut i,
+            );
+        };
+
+        scheduler.update_time(UnixTimestamp::new_only_seconds(205));
+
+        let tc_info_vec = scheduler
+            .release_telecommands_no_deletion(&mut test_closure_1, &pool)
+            .expect("deletion failed");
+        assert_eq!(tc_info_vec[0], tc_info_0);
+        assert_eq!(tc_info_vec[1], tc_info_1);
+    }
+
+    #[test]
+    fn test_generic_insert_app_data_test() {
+        let time_writer = cds::TimeProvider::new_with_u16_days(1, 1);
+        let mut sph = SpHeader::new(
+            PacketId::const_new(PacketType::Tc, true, 0x002),
+            PacketSequenceCtrl::const_new(SequenceFlags::Unsegmented, 5),
+            0,
+        );
+        let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let ping_tc = PusTcCreator::new_no_app_data(&mut sph, sec_header, true);
+        let mut buf: [u8; 64] = [0; 64];
+        let result = generate_insert_telecommand_app_data(&mut buf, &time_writer, &ping_tc);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 2 + 7 + ping_tc.len_written());
+        let n = u16::from_be_bytes(buf[0..2].try_into().unwrap());
+        assert_eq!(n, 1);
+        let time_reader = cds::TimeProvider::from_bytes_with_u16_days(&buf[2..2 + 7]).unwrap();
+        assert_eq!(time_reader, time_writer);
+        let pus_tc_reader = PusTcReader::new(&buf[9..]).unwrap().0;
+        assert_eq!(pus_tc_reader, ping_tc);
+    }
+
+    #[test]
+    fn test_generic_insert_app_data_test_byte_conv_error() {
+        let time_writer = cds::TimeProvider::new_with_u16_days(1, 1);
+        let mut sph = SpHeader::new(
+            PacketId::const_new(PacketType::Tc, true, 0x002),
+            PacketSequenceCtrl::const_new(SequenceFlags::Unsegmented, 5),
+            0,
+        );
+        let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let ping_tc = PusTcCreator::new_no_app_data(&mut sph, sec_header, true);
+        let mut buf: [u8; 16] = [0; 16];
+        let result = generate_insert_telecommand_app_data(&mut buf, &time_writer, &ping_tc);
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        if let ScheduleError::ByteConversionError(ByteConversionError::ToSliceTooSmall {
+            found,
+            expected,
+        }) = error
+        {
+            assert_eq!(found, 16);
+            assert_eq!(
+                expected,
+                2 + time_writer.len_written() + ping_tc.len_written()
+            );
+        } else {
+            panic!("unexpected error {error}")
+        }
+    }
+
+    #[test]
+    fn test_generic_insert_app_data_test_as_vec() {
+        let time_writer = cds::TimeProvider::new_with_u16_days(1, 1);
+        let mut sph = SpHeader::new(
+            PacketId::const_new(PacketType::Tc, true, 0x002),
+            PacketSequenceCtrl::const_new(SequenceFlags::Unsegmented, 5),
+            0,
+        );
+        let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let ping_tc = PusTcCreator::new_no_app_data(&mut sph, sec_header, true);
+        let mut buf: [u8; 64] = [0; 64];
+        generate_insert_telecommand_app_data(&mut buf, &time_writer, &ping_tc).unwrap();
+        let vec = generate_insert_telecommand_app_data_as_vec(&time_writer, &ping_tc)
+            .expect("vec generation failed");
+        assert_eq!(&buf[..vec.len()], vec);
     }
 }
