@@ -73,7 +73,7 @@ features = ["all"]
 optional = true
 
 [dependencies.spacepackets]
-version = "0.7.0"
+version = "0.8.1"
 default-features = false
 # git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
 # rev = "297cfad22637d3b07a1b27abe56d9a607b5b82a7"
