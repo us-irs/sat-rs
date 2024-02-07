@@ -6,13 +6,14 @@ use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusServiceId;
 use satrs_core::spacepackets::time::cds::TimeProvider;
 use satrs_core::spacepackets::time::TimeWriter;
-use satrs_example::{tmtc_err, CustomPusServiceId};
+use satrs_example::config::{tmtc_err, CustomPusServiceId};
 use std::sync::mpsc::Sender;
 
 pub mod action;
 pub mod event;
 pub mod hk;
 pub mod scheduler;
+pub mod stack;
 pub mod test;
 
 pub struct PusTcMpscRouter {

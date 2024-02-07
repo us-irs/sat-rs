@@ -26,3 +26,7 @@ path = "../satrs-core"
 [dependencies.satrs-mib]
 # version = "0.1.0-alpha.1"
 path = "../satrs-mib"
+
+[features]
+dyn_tmtc = []
+default = ["dyn_tmtc"]

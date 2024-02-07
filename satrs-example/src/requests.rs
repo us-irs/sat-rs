@@ -22,7 +22,7 @@ pub enum Request {
 
 #[derive(Clone, Eq, PartialEq, Debug, new)]
 pub struct TargetedRequest {
-    pub(crate) target_id: TargetIdWithApid,
+    pub(crate) target_id_with_apid: TargetIdWithApid,
     pub(crate) request: Request,
 }
 

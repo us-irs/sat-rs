@@ -1,17 +1,79 @@
 use crate::requests::{ActionRequest, Request, RequestWithToken};
 use log::{error, warn};
+use satrs_core::pool::{SharedStaticMemoryPool, StoreAddr};
 use satrs_core::pus::verification::{
     FailParams, TcStateAccepted, VerificationReporterWithSender, VerificationToken,
 };
 use satrs_core::pus::{
-    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcReceiver, EcssTmSender,
+    EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
+    EcssTcReceiver, EcssTmSender, MpscTcReceiver, MpscTmAsVecSender, MpscTmInStoreSender,
     PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHelper,
 };
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
-use satrs_example::{tmtc_err, TargetIdWithApid};
+use satrs_core::tmtc::tm_helper::SharedTmStore;
+use satrs_core::ChannelId;
+use satrs_example::config::{tmtc_err, TcReceiverId, TmSenderId, PUS_APID};
+use satrs_example::TargetIdWithApid;
 use std::collections::HashMap;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Sender};
+
+pub fn create_action_service_static(
+    shared_tm_store: SharedTmStore,
+    tm_funnel_tx: mpsc::Sender<StoreAddr>,
+    verif_reporter: VerificationReporterWithSender,
+    tc_pool: SharedStaticMemoryPool,
+    pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
+    request_map: HashMap<TargetIdWithApid, mpsc::Sender<RequestWithToken>>,
+) -> Pus8Wrapper<EcssTcInSharedStoreConverter> {
+    let action_srv_tm_sender = MpscTmInStoreSender::new(
+        TmSenderId::PusAction as ChannelId,
+        "PUS_8_TM_SENDER",
+        shared_tm_store.clone(),
+        tm_funnel_tx.clone(),
+    );
+    let action_srv_receiver = MpscTcReceiver::new(
+        TcReceiverId::PusAction as ChannelId,
+        "PUS_8_TC_RECV",
+        pus_action_rx,
+    );
+    let pus_8_handler = PusService8ActionHandler::new(
+        Box::new(action_srv_receiver),
+        Box::new(action_srv_tm_sender),
+        PUS_APID,
+        verif_reporter.clone(),
+        EcssTcInSharedStoreConverter::new(tc_pool.clone(), 2048),
+        request_map.clone(),
+    );
+    Pus8Wrapper { pus_8_handler }
+}
+
+pub fn create_action_service_dynamic(
+    tm_funnel_tx: mpsc::Sender<Vec<u8>>,
+    verif_reporter: VerificationReporterWithSender,
+    pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
+    request_map: HashMap<TargetIdWithApid, mpsc::Sender<RequestWithToken>>,
+) -> Pus8Wrapper<EcssTcInVecConverter> {
+    let action_srv_tm_sender = MpscTmAsVecSender::new(
+        TmSenderId::PusAction as ChannelId,
+        "PUS_8_TM_SENDER",
+        tm_funnel_tx.clone(),
+    );
+    let action_srv_receiver = MpscTcReceiver::new(
+        TcReceiverId::PusAction as ChannelId,
+        "PUS_8_TC_RECV",
+        pus_action_rx,
+    );
+    let pus_8_handler = PusService8ActionHandler::new(
+        Box::new(action_srv_receiver),
+        Box::new(action_srv_tm_sender),
+        PUS_APID,
+        verif_reporter.clone(),
+        EcssTcInVecConverter::default(),
+        request_map.clone(),
+    );
+    Pus8Wrapper { pus_8_handler }
+}
 
 pub struct PusService8ActionHandler<TcInMemConverter: EcssTcInMemConverter> {
     service_helper: PusServiceHelper<TcInMemConverter>,
@@ -141,11 +203,11 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService8ActionHandler<TcInMemCon
     }
 }
 
-pub struct Pus8Wrapper {
-    pub(crate) pus_8_handler: PusService8ActionHandler<EcssTcInSharedStoreConverter>,
+pub struct Pus8Wrapper<TcInMemConverter: EcssTcInMemConverter> {
+    pub(crate) pus_8_handler: PusService8ActionHandler<TcInMemConverter>,
 }
 
-impl Pus8Wrapper {
+impl<TcInMemConverter: EcssTcInMemConverter> Pus8Wrapper<TcInMemConverter> {
     pub fn handle_next_packet(&mut self) -> bool {
         match self.pus_8_handler.handle_one_tc() {
             Ok(result) => match result {

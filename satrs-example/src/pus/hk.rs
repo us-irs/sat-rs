@@ -1,15 +1,73 @@
 use crate::requests::{Request, RequestWithToken};
 use log::{error, warn};
 use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
-use satrs_core::pus::verification::{FailParams, StdVerifReporterWithSender};
+use satrs_core::pool::{SharedStaticMemoryPool, StoreAddr};
+use satrs_core::pus::verification::{
+    FailParams, StdVerifReporterWithSender, VerificationReporterWithSender,
+};
 use satrs_core::pus::{
-    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcReceiver, EcssTmSender,
+    EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
+    EcssTcReceiver, EcssTmSender, MpscTcReceiver, MpscTmAsVecSender, MpscTmInStoreSender,
     PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHelper,
 };
 use satrs_core::spacepackets::ecss::{hk, PusPacket};
-use satrs_example::{hk_err, tmtc_err, TargetIdWithApid};
+use satrs_core::tmtc::tm_helper::SharedTmStore;
+use satrs_core::ChannelId;
+use satrs_example::config::{hk_err, tmtc_err, TcReceiverId, TmSenderId, PUS_APID};
+use satrs_example::TargetIdWithApid;
 use std::collections::HashMap;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Sender};
+
+pub fn create_hk_service_static(
+    shared_tm_store: SharedTmStore,
+    tm_funnel_tx: mpsc::Sender<StoreAddr>,
+    verif_reporter: VerificationReporterWithSender,
+    tc_pool: SharedStaticMemoryPool,
+    pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
+    request_map: HashMap<TargetIdWithApid, mpsc::Sender<RequestWithToken>>,
+) -> Pus3Wrapper<EcssTcInSharedStoreConverter> {
+    let hk_srv_tm_sender = MpscTmInStoreSender::new(
+        TmSenderId::PusHk as ChannelId,
+        "PUS_3_TM_SENDER",
+        shared_tm_store.clone(),
+        tm_funnel_tx.clone(),
+    );
+    let hk_srv_receiver =
+        MpscTcReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
+    let pus_3_handler = PusService3HkHandler::new(
+        Box::new(hk_srv_receiver),
+        Box::new(hk_srv_tm_sender),
+        PUS_APID,
+        verif_reporter.clone(),
+        EcssTcInSharedStoreConverter::new(tc_pool, 2048),
+        request_map,
+    );
+    Pus3Wrapper { pus_3_handler }
+}
+
+pub fn create_hk_service_dynamic(
+    tm_funnel_tx: mpsc::Sender<Vec<u8>>,
+    verif_reporter: VerificationReporterWithSender,
+    pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
+    request_map: HashMap<TargetIdWithApid, mpsc::Sender<RequestWithToken>>,
+) -> Pus3Wrapper<EcssTcInVecConverter> {
+    let hk_srv_tm_sender = MpscTmAsVecSender::new(
+        TmSenderId::PusHk as ChannelId,
+        "PUS_3_TM_SENDER",
+        tm_funnel_tx.clone(),
+    );
+    let hk_srv_receiver =
+        MpscTcReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
+    let pus_3_handler = PusService3HkHandler::new(
+        Box::new(hk_srv_receiver),
+        Box::new(hk_srv_tm_sender),
+        PUS_APID,
+        verif_reporter.clone(),
+        EcssTcInVecConverter::default(),
+        request_map,
+    );
+    Pus3Wrapper { pus_3_handler }
+}
 
 pub struct PusService3HkHandler<TcInMemConverter: EcssTcInMemConverter> {
     psb: PusServiceHelper<TcInMemConverter>,
@@ -147,11 +205,11 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService3HkHandler<TcInMemConvert
     }
 }
 
-pub struct Pus3Wrapper {
-    pub(crate) pus_3_handler: PusService3HkHandler<EcssTcInSharedStoreConverter>,
+pub struct Pus3Wrapper<TcInMemConverter: EcssTcInMemConverter> {
+    pub(crate) pus_3_handler: PusService3HkHandler<TcInMemConverter>,
 }
 
-impl Pus3Wrapper {
+impl<TcInMemConverter: EcssTcInMemConverter> Pus3Wrapper<TcInMemConverter> {
     pub fn handle_next_packet(&mut self) -> bool {
         match self.pus_3_handler.handle_one_tc() {
             Ok(result) => match result {

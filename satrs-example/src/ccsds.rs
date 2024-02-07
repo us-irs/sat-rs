@@ -1,15 +1,22 @@
-use crate::tmtc::{MpscStoreAndSendError, PusTcSource};
+use satrs_core::pus::ReceivesEcssPusTc;
 use satrs_core::spacepackets::{CcsdsPacket, SpHeader};
 use satrs_core::tmtc::{CcsdsPacketHandler, ReceivesCcsdsTc};
-use satrs_example::PUS_APID;
+use satrs_example::config::PUS_APID;
 
 #[derive(Clone)]
-pub struct CcsdsReceiver {
-    pub tc_source: PusTcSource,
+pub struct CcsdsReceiver<
+    TcSource: ReceivesCcsdsTc<Error = E> + ReceivesEcssPusTc<Error = E> + Clone,
+    E,
+> {
+    pub tc_source: TcSource,
 }
 
-impl CcsdsPacketHandler for CcsdsReceiver {
-    type Error = MpscStoreAndSendError;
+impl<
+        TcSource: ReceivesCcsdsTc<Error = E> + ReceivesEcssPusTc<Error = E> + Clone + 'static,
+        E: 'static,
+    > CcsdsPacketHandler for CcsdsReceiver<TcSource, E>
+{
+    type Error = E;
 
     fn valid_apids(&self) -> &'static [u16] {
         &[PUS_APID]
