@@ -73,10 +73,11 @@ features = ["all"]
 optional = true
 
 [dependencies.spacepackets]
-version = "0.8.1"
+version = "0.9.0"
 default-features = false
 # git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
 # rev = "297cfad22637d3b07a1b27abe56d9a607b5b82a7"
+# branch = "main"
 
 [dependencies.cobs]
 git = "https://github.com/robamu/cobs.rs.git"

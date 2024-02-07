@@ -318,10 +318,31 @@ mod alloc_mod {
     /// [Clone].
     #[cfg(feature = "alloc")]
     #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
-    pub trait EcssTmSender: EcssTmSenderCore + Downcast + DynClone {}
+    pub trait EcssTmSender: EcssTmSenderCore + Downcast + DynClone {
+        // Remove this once trait upcasting coercion has been implemented.
+        // Tracking issue: https://github.com/rust-lang/rust/issues/65991
+        fn upcast(&self) -> &dyn EcssTmSenderCore;
+        // Remove this once trait upcasting coercion has been implemented.
+        // Tracking issue: https://github.com/rust-lang/rust/issues/65991
+        fn upcast_mut(&mut self) -> &mut dyn EcssTmSenderCore;
+    }
 
     /// Blanket implementation for all types which implement [EcssTmSenderCore] and are clonable.
-    impl<T> EcssTmSender for T where T: EcssTmSenderCore + Clone + 'static {}
+    impl<T> EcssTmSender for T
+    where
+        T: EcssTmSenderCore + Clone + 'static,
+    {
+        // Remove this once trait upcasting coercion has been implemented.
+        // Tracking issue: https://github.com/rust-lang/rust/issues/65991
+        fn upcast(&self) -> &dyn EcssTmSenderCore {
+            self
+        }
+        // Remove this once trait upcasting coercion has been implemented.
+        // Tracking issue: https://github.com/rust-lang/rust/issues/65991
+        fn upcast_mut(&mut self) -> &mut dyn EcssTmSenderCore {
+            self
+        }
+    }
 
     dyn_clone::clone_trait_object!(EcssTmSender);
     impl_downcast!(EcssTmSender);

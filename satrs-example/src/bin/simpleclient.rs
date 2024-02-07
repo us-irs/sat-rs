@@ -5,7 +5,7 @@ use satrs_core::{
     spacepackets::ecss::{PusPacket, WritablePusPacket},
     spacepackets::SpHeader,
 };
-use satrs_example::{OBSW_SERVER_ADDR, SERVER_PORT};
+use satrs_example::config::{OBSW_SERVER_ADDR, SERVER_PORT};
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::time::Duration;
 

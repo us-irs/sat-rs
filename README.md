@@ -6,8 +6,8 @@ sat-rs
 This is the repository of the sat-rs framework. Its primary goal is to provide re-usable components
 to write on-board software for remote systems like rovers or satellites. It is specifically written
 for the special requirements for these systems. You can find an overview of the project and the
-link to the [more high-level sat-rs book](https://documentation.irs.uni-stuttgart.de/projects/sat-rs/)
-at the [IRS documentation website](https://documentation.irs.uni-stuttgart.de/sat-rs.html).
+link to the [more high-level sat-rs book](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/)
+at the [IRS documentation website](https://absatsw.irs.uni-stuttgart.de/sat-rs.html).
 
 A lot of the architecture and general design considerations are based on the
 [FSFW](https://egit.irs.uni-stuttgart.de/fsfw/fsfw) C++ framework which has flight heritage

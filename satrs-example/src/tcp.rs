@@ -9,9 +9,7 @@ use satrs_core::{
     spacepackets::PacketId,
     tmtc::{CcsdsDistributor, CcsdsError, TmPacketSourceCore},
 };
-use satrs_example::PUS_APID;
-
-use crate::tmtc::MpscStoreAndSendError;
+use satrs_example::config::PUS_APID;
 
 pub const PACKET_ID_LOOKUP: &[PacketId] = &[PacketId::const_tc(true, PUS_APID)];
 
@@ -71,20 +69,21 @@ impl TmPacketSourceCore for SyncTcpTmSource {
     }
 }
 
-pub struct TcpTask {
+pub struct TcpTask<MpscErrorType: 'static> {
     server: TcpSpacepacketsServer<
         (),
-        CcsdsError<MpscStoreAndSendError>,
+        CcsdsError<MpscErrorType>,
         SyncTcpTmSource,
-        CcsdsDistributor<MpscStoreAndSendError>,
+        CcsdsDistributor<MpscErrorType>,
     >,
+    phantom: std::marker::PhantomData<MpscErrorType>,
 }
 
-impl TcpTask {
+impl<MpscErrorType: 'static + core::fmt::Debug> TcpTask<MpscErrorType> {
     pub fn new(
         cfg: ServerConfig,
         tm_source: SyncTcpTmSource,
-        tc_receiver: CcsdsDistributor<MpscStoreAndSendError>,
+        tc_receiver: CcsdsDistributor<MpscErrorType>,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
             server: TcpSpacepacketsServer::new(
@@ -93,6 +92,7 @@ impl TcpTask {
                 tc_receiver,
                 Box::new(PACKET_ID_LOOKUP),
             )?,
+            phantom: std::marker::PhantomData,
         })
     }
 
