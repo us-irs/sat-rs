@@ -17,7 +17,7 @@ it is still centered around small packets. `sat-rs` provides support for these E
 standards and also attempts to fill the gap to the internet protocol by providing the following
 components.
 
-1. [UDP TMTC Server](https://docs.rs/satrs-core/hal/host/udp_server/index.html).
+1. [UDP TMTC Server](https://docs.rs/satrs-core/0.1.0-alpha.0/satrs_core/hal/host/udp_server/index.html).
    UDP is already packet based which makes it an excellent fit for exchanging space packets.
 2. [TCP TMTC Server Components](https://docs.rs/satrs-core/0.1.0-alpha.1/satrs_core/hal/std/tcp_server/index.html).
    TCP is a stream based protocol, so the framework provides building blocks to parse telemetry
