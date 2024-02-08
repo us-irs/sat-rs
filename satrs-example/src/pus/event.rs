@@ -7,22 +7,22 @@ use satrs_core::pus::event_srv::PusService5EventHandler;
 use satrs_core::pus::verification::VerificationReporterWithSender;
 use satrs_core::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    MpscTcReceiver, MpscTmAsVecSender, MpscTmInStoreSender, PusPacketHandlerResult,
+    MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSender, PusPacketHandlerResult,
     PusServiceHelper,
 };
-use satrs_core::tmtc::tm_helper::SharedTmStore;
+use satrs_core::tmtc::tm_helper::SharedTmPool;
 use satrs_core::ChannelId;
 use satrs_example::config::{TcReceiverId, TmSenderId, PUS_APID};
 
 pub fn create_event_service_static(
-    shared_tm_store: SharedTmStore,
+    shared_tm_store: SharedTmPool,
     tm_funnel_tx: mpsc::Sender<StoreAddr>,
     verif_reporter: VerificationReporterWithSender,
     tc_pool: SharedStaticMemoryPool,
     pus_event_rx: mpsc::Receiver<EcssTcAndToken>,
     event_request_tx: mpsc::Sender<EventRequestWithToken>,
 ) -> Pus5Wrapper<EcssTcInSharedStoreConverter> {
-    let event_srv_tm_sender = MpscTmInStoreSender::new(
+    let event_srv_tm_sender = MpscTmInSharedPoolSender::new(
         TmSenderId::PusEvent as ChannelId,
         "PUS_5_TM_SENDER",
         shared_tm_store.clone(),

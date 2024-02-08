@@ -76,7 +76,6 @@ pub struct TcpTask<MpscErrorType: 'static> {
         SyncTcpTmSource,
         CcsdsDistributor<MpscErrorType>,
     >,
-    phantom: std::marker::PhantomData<MpscErrorType>,
 }
 
 impl<MpscErrorType: 'static + core::fmt::Debug> TcpTask<MpscErrorType> {
@@ -92,7 +91,6 @@ impl<MpscErrorType: 'static + core::fmt::Debug> TcpTask<MpscErrorType> {
                 tc_receiver,
                 Box::new(PACKET_ID_LOOKUP),
             )?,
-            phantom: std::marker::PhantomData,
         })
     }
 

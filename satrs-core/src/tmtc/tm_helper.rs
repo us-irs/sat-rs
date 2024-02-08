@@ -17,26 +17,26 @@ pub mod std_mod {
     use std::sync::{Arc, RwLock};
 
     #[derive(Clone)]
-    pub struct SharedTmStore {
-        pub shared_pool: SharedStaticMemoryPool,
-    }
+    pub struct SharedTmPool(pub SharedStaticMemoryPool);
 
-    impl SharedTmStore {
+    impl SharedTmPool {
         pub fn new(shared_pool: StaticMemoryPool) -> Self {
-            Self {
-                shared_pool: Arc::new(RwLock::new(shared_pool)),
-            }
+            Self(Arc::new(RwLock::new(shared_pool)))
         }
 
         pub fn clone_backing_pool(&self) -> SharedStaticMemoryPool {
-            self.shared_pool.clone()
+            self.0.clone()
+        }
+        pub fn shared_pool(&self) -> &SharedStaticMemoryPool {
+            &self.0
+        }
+
+        pub fn shared_pool_mut(&mut self) -> &mut SharedStaticMemoryPool {
+            &mut self.0
         }
 
         pub fn add_pus_tm(&self, pus_tm: &PusTmCreator) -> Result<StoreAddr, EcssTmtcError> {
-            let mut pg = self
-                .shared_pool
-                .write()
-                .map_err(|_| EcssTmtcError::StoreLock)?;
+            let mut pg = self.0.write().map_err(|_| EcssTmtcError::StoreLock)?;
             let (addr, buf) = pg.free_element(pus_tm.len_written())?;
             pus_tm
                 .write_to_bytes(buf)

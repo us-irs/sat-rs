@@ -1,3 +1,5 @@
+<div id="communication-chapter"/>
+
 # Communication with sat-rs based software
 
 Communication is a vital topic for remote system which are usually not (directly)
@@ -15,10 +17,16 @@ it is still centered around small packets. `sat-rs` provides support for these E
 standards and also attempts to fill the gap to the internet protocol by providing the following
 components.
 
-1. [UDP TMTC Server](https://docs.rs/satrs-core/0.1.0-alpha.0/satrs_core/hal/host/udp_server/index.html#).
+1. [UDP TMTC Server](https://docs.rs/satrs-core/hal/host/udp_server/index.html).
    UDP is already packet based which makes it an excellent fit for exchanging space packets.
-2. TCP TMTC Server. This is a stream based protocol, so the server uses the COBS framing protocol
-   to always deliver complete packets.
+2. [TCP TMTC Server Components](https://docs.rs/satrs-core/0.1.0-alpha.1/satrs_core/hal/std/tcp_server/index.html).
+   TCP is a stream based protocol, so the framework provides building blocks to parse telemetry
+   from an arbitrary bytestream. Two concrete implementations are provided:
+    - [TCP spacepackets server](https://docs.rs/satrs-core/0.1.0-alpha.1/satrs_core/hal/std/tcp_server/struct.TcpSpacepacketsServer.html)
+      to parse tightly packed CCSDS Spacepackets.
+    - [TCP COBS server](https://docs.rs/satrs-core/0.1.0-alpha.1/satrs_core/hal/std/tcp_server/struct.TcpTmtcInCobsServer.html)
+      to parse generic frames wrapped with the
+      [COBS protocol](https://en.wikipedia.org/wiki/Consistent_Overhead_Byte_Stuffing).
 
 # Working with telemetry and telecommands (TMTC)
 

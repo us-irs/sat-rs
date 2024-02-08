@@ -8,10 +8,10 @@ use satrs_core::pus::scheduler_srv::PusService11SchedHandler;
 use satrs_core::pus::verification::VerificationReporterWithSender;
 use satrs_core::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    MpscTcReceiver, MpscTmAsVecSender, MpscTmInStoreSender, PusPacketHandlerResult,
+    MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSender, PusPacketHandlerResult,
     PusServiceHelper,
 };
-use satrs_core::tmtc::tm_helper::SharedTmStore;
+use satrs_core::tmtc::tm_helper::SharedTmPool;
 use satrs_core::ChannelId;
 use satrs_example::config::{TcReceiverId, TmSenderId, PUS_APID};
 
@@ -103,14 +103,14 @@ impl<TcInMemConverter: EcssTcInMemConverter> Pus11Wrapper<TcInMemConverter> {
 }
 
 pub fn create_scheduler_service_static(
-    shared_tm_store: SharedTmStore,
+    shared_tm_store: SharedTmPool,
     tm_funnel_tx: mpsc::Sender<StoreAddr>,
     verif_reporter: VerificationReporterWithSender,
     tc_releaser: PusTcSourceProviderSharedPool,
     pus_sched_rx: mpsc::Receiver<EcssTcAndToken>,
     sched_tc_pool: StaticMemoryPool,
 ) -> Pus11Wrapper<EcssTcInSharedStoreConverter> {
-    let sched_srv_tm_sender = MpscTmInStoreSender::new(
+    let sched_srv_tm_sender = MpscTmInSharedPoolSender::new(
         TmSenderId::PusSched as ChannelId,
         "PUS_11_TM_SENDER",
         shared_tm_store.clone(),

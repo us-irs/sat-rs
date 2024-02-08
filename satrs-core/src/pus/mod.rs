@@ -399,7 +399,7 @@ pub mod std_mod {
         EcssTmSenderCore, EcssTmtcError, GenericRecvError, GenericSendError, PusTmWrapper,
         TryRecvTmtcError,
     };
-    use crate::tmtc::tm_helper::SharedTmStore;
+    use crate::tmtc::tm_helper::SharedTmPool;
     use crate::ChannelId;
     use alloc::boxed::Box;
     use alloc::vec::Vec;
@@ -441,14 +441,14 @@ pub mod std_mod {
     }
 
     #[derive(Clone)]
-    pub struct MpscTmInStoreSender {
+    pub struct MpscTmInSharedPoolSender {
         id: ChannelId,
         name: &'static str,
-        shared_tm_store: SharedTmStore,
+        shared_tm_store: SharedTmPool,
         sender: mpsc::Sender<StoreAddr>,
     }
 
-    impl EcssChannel for MpscTmInStoreSender {
+    impl EcssChannel for MpscTmInSharedPoolSender {
         fn id(&self) -> ChannelId {
             self.id
         }
@@ -458,7 +458,7 @@ pub mod std_mod {
         }
     }
 
-    impl MpscTmInStoreSender {
+    impl MpscTmInSharedPoolSender {
         pub fn send_direct_tm(&self, tm: PusTmCreator) -> Result<(), EcssTmtcError> {
             let addr = self.shared_tm_store.add_pus_tm(&tm)?;
             self.sender
@@ -467,7 +467,7 @@ pub mod std_mod {
         }
     }
 
-    impl EcssTmSenderCore for MpscTmInStoreSender {
+    impl EcssTmSenderCore for MpscTmInSharedPoolSender {
         fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
             match tm {
                 PusTmWrapper::InStore(addr) => {
@@ -479,11 +479,11 @@ pub mod std_mod {
         }
     }
 
-    impl MpscTmInStoreSender {
+    impl MpscTmInSharedPoolSender {
         pub fn new(
             id: ChannelId,
             name: &'static str,
-            shared_tm_store: SharedTmStore,
+            shared_tm_store: SharedTmPool,
             sender: mpsc::Sender<StoreAddr>,
         ) -> Self {
             Self {
@@ -582,7 +582,7 @@ pub mod std_mod {
     pub struct CrossbeamTmInStoreSender {
         id: ChannelId,
         name: &'static str,
-        shared_tm_store: SharedTmStore,
+        shared_tm_store: SharedTmPool,
         sender: crossbeam_channel::Sender<StoreAddr>,
     }
 
@@ -590,7 +590,7 @@ pub mod std_mod {
         pub fn new(
             id: ChannelId,
             name: &'static str,
-            shared_tm_store: SharedTmStore,
+            shared_tm_store: SharedTmPool,
             sender: crossbeam_channel::Sender<StoreAddr>,
         ) -> Self {
             Self {
@@ -951,15 +951,15 @@ pub mod tests {
         StoreAddr,
     };
     use crate::pus::verification::RequestId;
-    use crate::tmtc::tm_helper::SharedTmStore;
+    use crate::tmtc::tm_helper::SharedTmPool;
 
     use super::verification::{
         TcStateAccepted, VerificationReporterCfg, VerificationReporterWithSender, VerificationToken,
     };
     use super::{
         EcssTcAndToken, EcssTcInSharedStoreConverter, EcssTcInVecConverter, MpscTcReceiver,
-        MpscTmAsVecSender, MpscTmInStoreSender, PusPacketHandlerResult, PusPacketHandlingError,
-        PusServiceHelper, TcInMemory,
+        MpscTmAsVecSender, MpscTmInSharedPoolSender, PusPacketHandlerResult,
+        PusPacketHandlingError, PusServiceHelper, TcInMemory,
     };
 
     pub const TEST_APID: u16 = 0x101;
@@ -1003,7 +1003,7 @@ pub mod tests {
         pus_buf: [u8; 2048],
         tm_buf: [u8; 2048],
         tc_pool: SharedStaticMemoryPool,
-        tm_pool: SharedTmStore,
+        tm_pool: SharedTmPool,
         tc_sender: mpsc::Sender<EcssTcAndToken>,
         tm_receiver: mpsc::Receiver<StoreAddr>,
         verification_handler: VerificationReporterWithSender,
@@ -1019,17 +1019,21 @@ pub mod tests {
             let tc_pool = StaticMemoryPool::new(pool_cfg.clone());
             let tm_pool = StaticMemoryPool::new(pool_cfg);
             let shared_tc_pool = SharedStaticMemoryPool::new(RwLock::new(tc_pool));
-            let shared_tm_pool = SharedTmStore::new(tm_pool);
+            let shared_tm_pool = SharedTmPool::new(tm_pool);
             let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::channel();
             let (tm_tx, tm_rx) = mpsc::channel();
 
-            let verif_sender =
-                MpscTmInStoreSender::new(0, "verif_sender", shared_tm_pool.clone(), tm_tx.clone());
+            let verif_sender = MpscTmInSharedPoolSender::new(
+                0,
+                "verif_sender",
+                shared_tm_pool.clone(),
+                tm_tx.clone(),
+            );
             let verif_cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
             let verification_handler =
                 VerificationReporterWithSender::new(&verif_cfg, Box::new(verif_sender));
             let test_srv_tm_sender =
-                MpscTmInStoreSender::new(0, "TEST_SENDER", shared_tm_pool.clone(), tm_tx);
+                MpscTmInSharedPoolSender::new(0, "TEST_SENDER", shared_tm_pool.clone(), tm_tx);
             let test_srv_tc_receiver = MpscTcReceiver::new(0, "TEST_RECEIVER", test_srv_tc_rx);
             let in_store_converter =
                 EcssTcInSharedStoreConverter::new(shared_tc_pool.clone(), 2048);
@@ -1073,7 +1077,7 @@ pub mod tests {
             let next_msg = self.tm_receiver.try_recv();
             assert!(next_msg.is_ok());
             let tm_addr = next_msg.unwrap();
-            let tm_pool = self.tm_pool.shared_pool.read().unwrap();
+            let tm_pool = self.tm_pool.0.read().unwrap();
             let tm_raw = tm_pool.read(&tm_addr).unwrap();
             self.tm_buf[0..tm_raw.len()].copy_from_slice(tm_raw);
             PusTmReader::new(&self.tm_buf, 7).unwrap().0
@@ -1091,7 +1095,7 @@ pub mod tests {
             let next_msg = self.tm_receiver.try_recv();
             assert!(next_msg.is_ok());
             let tm_addr = next_msg.unwrap();
-            let tm_pool = self.tm_pool.shared_pool.read().unwrap();
+            let tm_pool = self.tm_pool.0.read().unwrap();
             let tm_raw = tm_pool.read(&tm_addr).unwrap();
             let tm = PusTmReader::new(tm_raw, 7).unwrap().0;
             assert_eq!(PusPacket::service(&tm), 1);

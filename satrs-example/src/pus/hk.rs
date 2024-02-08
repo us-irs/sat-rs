@@ -7,11 +7,11 @@ use satrs_core::pus::verification::{
 };
 use satrs_core::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    EcssTcReceiver, EcssTmSender, MpscTcReceiver, MpscTmAsVecSender, MpscTmInStoreSender,
+    EcssTcReceiver, EcssTmSender, MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSender,
     PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHelper,
 };
 use satrs_core::spacepackets::ecss::{hk, PusPacket};
-use satrs_core::tmtc::tm_helper::SharedTmStore;
+use satrs_core::tmtc::tm_helper::SharedTmPool;
 use satrs_core::ChannelId;
 use satrs_example::config::{hk_err, tmtc_err, TcReceiverId, TmSenderId, PUS_APID};
 use satrs_example::TargetIdWithApid;
@@ -19,14 +19,14 @@ use std::collections::HashMap;
 use std::sync::mpsc::{self, Sender};
 
 pub fn create_hk_service_static(
-    shared_tm_store: SharedTmStore,
+    shared_tm_store: SharedTmPool,
     tm_funnel_tx: mpsc::Sender<StoreAddr>,
     verif_reporter: VerificationReporterWithSender,
     tc_pool: SharedStaticMemoryPool,
     pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
     request_map: HashMap<TargetIdWithApid, mpsc::Sender<RequestWithToken>>,
 ) -> Pus3Wrapper<EcssTcInSharedStoreConverter> {
-    let hk_srv_tm_sender = MpscTmInStoreSender::new(
+    let hk_srv_tm_sender = MpscTmInSharedPoolSender::new(
         TmSenderId::PusHk as ChannelId,
         "PUS_3_TM_SENDER",
         shared_tm_store.clone(),

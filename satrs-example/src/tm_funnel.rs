@@ -11,7 +11,7 @@ use satrs_core::{
         time::cds::MIN_CDS_FIELD_LEN,
         CcsdsPacket,
     },
-    tmtc::tm_helper::SharedTmStore,
+    tmtc::tm_helper::SharedTmPool,
 };
 
 use crate::tcp::SyncTcpTmSource;
@@ -70,14 +70,14 @@ impl TmFunnelCommon {
 
 pub struct TmFunnelStatic {
     common: TmFunnelCommon,
-    shared_tm_store: SharedTmStore,
+    shared_tm_store: SharedTmPool,
     tm_funnel_rx: Receiver<StoreAddr>,
     tm_server_tx: Sender<StoreAddr>,
 }
 
 impl TmFunnelStatic {
     pub fn new(
-        shared_tm_store: SharedTmStore,
+        shared_tm_store: SharedTmPool,
         sync_tm_tcp_source: SyncTcpTmSource,
         tm_funnel_rx: Receiver<StoreAddr>,
         tm_server_tx: Sender<StoreAddr>,

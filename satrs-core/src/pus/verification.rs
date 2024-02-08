@@ -18,8 +18,8 @@
 //! use satrs_core::pool::{PoolProviderMemInPlaceWithGuards, StaticMemoryPool, StaticPoolConfig};
 //! use satrs_core::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
 //! use satrs_core::seq_count::SeqCountProviderSimple;
-//! use satrs_core::pus::MpscTmInStoreSender;
-//! use satrs_core::tmtc::tm_helper::SharedTmStore;
+//! use satrs_core::pus::MpscTmInSharedPoolSender;
+//! use satrs_core::tmtc::tm_helper::SharedTmPool;
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
 //! use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
@@ -30,10 +30,10 @@
 //!
 //! let pool_cfg = StaticPoolConfig::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
 //! let tm_pool = StaticMemoryPool::new(pool_cfg.clone());
-//! let shared_tm_store = SharedTmStore::new(tm_pool);
+//! let shared_tm_store = SharedTmPool::new(tm_pool);
 //! let tm_store = shared_tm_store.clone_backing_pool();
 //! let (verif_tx, verif_rx) = mpsc::channel();
-//! let sender = MpscTmInStoreSender::new(0, "Test Sender", shared_tm_store, verif_tx);
+//! let sender = MpscTmInSharedPoolSender::new(0, "Test Sender", shared_tm_store, verif_tx);
 //! let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
 //! let mut  reporter = VerificationReporterWithSender::new(&cfg , Box::new(sender));
 //!
@@ -1332,8 +1332,8 @@ mod tests {
         VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
         VerificationToken,
     };
-    use crate::pus::{EcssChannel, MpscTmInStoreSender, PusTmWrapper};
-    use crate::tmtc::tm_helper::SharedTmStore;
+    use crate::pus::{EcssChannel, MpscTmInSharedPoolSender, PusTmWrapper};
+    use crate::tmtc::tm_helper::SharedTmPool;
     use crate::ChannelId;
     use alloc::boxed::Box;
     use alloc::format;
@@ -1487,9 +1487,10 @@ mod tests {
     #[test]
     fn test_mpsc_verif_send_sync() {
         let pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(8, 8)]));
-        let shared_tm_store = SharedTmStore::new(pool);
+        let shared_tm_store = SharedTmPool::new(pool);
         let (tx, _) = mpsc::channel();
-        let mpsc_verif_sender = MpscTmInStoreSender::new(0, "verif_sender", shared_tm_store, tx);
+        let mpsc_verif_sender =
+            MpscTmInSharedPoolSender::new(0, "verif_sender", shared_tm_store, tx);
         is_send(&mpsc_verif_sender);
     }
 
@@ -2142,10 +2143,11 @@ mod tests {
     fn test_seq_count_increment() {
         let pool_cfg = StaticPoolConfig::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
         let tm_pool = StaticMemoryPool::new(pool_cfg.clone());
-        let shared_tm_store = SharedTmStore::new(tm_pool);
+        let shared_tm_store = SharedTmPool::new(tm_pool);
         let shared_tm_pool = shared_tm_store.clone_backing_pool();
         let (verif_tx, verif_rx) = mpsc::channel();
-        let sender = MpscTmInStoreSender::new(0, "Verification Sender", shared_tm_store, verif_tx);
+        let sender =
+            MpscTmInSharedPoolSender::new(0, "Verification Sender", shared_tm_store, verif_tx);
         let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
         let mut reporter = VerificationReporterWithSender::new(&cfg, Box::new(sender));
 

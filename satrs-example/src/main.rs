@@ -17,6 +17,7 @@ use log::info;
 use pus::test::create_test_service_dynamic;
 use satrs_core::hal::std::tcp_server::ServerConfig;
 use satrs_core::hal::std::udp_server::UdpTcServer;
+use satrs_core::tmtc::tm_helper::SharedTmPool;
 use satrs_example::config::pool::{create_sched_tc_pool, create_static_pools};
 use satrs_example::config::tasks::{
     FREQ_MS_AOCS, FREQ_MS_EVENT_HANDLING, FREQ_MS_PUS_STACK, FREQ_MS_UDP_TMTC,
@@ -37,14 +38,13 @@ use crate::pus::{PusReceiver, PusTcMpscRouter};
 use crate::requests::RequestWithToken;
 use crate::tcp::{SyncTcpTmSource, TcpTask};
 use crate::tmtc::{
-    PusTcSourceProviderSharedPool, SharedTcPool, TcArgs, TmArgs, TmtcTaskDynamic, TmtcTaskStatic,
+    PusTcSourceProviderSharedPool, SharedTcPool, TcSourceTaskDynamic, TcSourceTaskStatic,
 };
 use crate::udp::{StaticUdpTmHandler, UdpTmtcServer};
 use satrs_core::pus::event_man::EventRequestWithToken;
 use satrs_core::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
-use satrs_core::pus::{EcssTmSender, MpscTmAsVecSender, MpscTmInStoreSender};
+use satrs_core::pus::{EcssTmSender, MpscTmAsVecSender, MpscTmInSharedPoolSender};
 use satrs_core::spacepackets::{time::cds::TimeProvider, time::TimeWriter};
-use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::{CcsdsDistributor, TargetId};
 use satrs_core::ChannelId;
 use satrs_example::TargetIdWithApid;
@@ -65,7 +65,7 @@ fn create_verification_reporter(verif_sender: impl EcssTmSender) -> Verification
 #[allow(dead_code)]
 fn static_tmtc_pool_main() {
     let (tm_pool, tc_pool) = create_static_pools();
-    let shared_tm_store = SharedTmStore::new(tm_pool);
+    let shared_tm_pool = SharedTmPool::new(tm_pool);
     let shared_tc_pool = SharedTcPool {
         pool: Arc::new(RwLock::new(tc_pool)),
     };
@@ -75,10 +75,10 @@ fn static_tmtc_pool_main() {
 
     // Every software component which needs to generate verification telemetry, receives a cloned
     // verification reporter.
-    let verif_reporter = create_verification_reporter(MpscTmInStoreSender::new(
+    let verif_reporter = create_verification_reporter(MpscTmInSharedPoolSender::new(
         TmSenderId::PusVerification as ChannelId,
         "verif_sender",
-        shared_tm_store.clone(),
+        shared_tm_pool.clone(),
         tm_funnel_tx.clone(),
     ));
 
@@ -88,20 +88,11 @@ fn static_tmtc_pool_main() {
     let mut request_map = HashMap::new();
     request_map.insert(acs_target_id, acs_thread_tx);
 
-    let tc_source_wrapper = PusTcSourceProviderSharedPool {
+    // This helper structure is used by all telecommand providers which need to send telecommands
+    // to the TC source.
+    let tc_source = PusTcSourceProviderSharedPool {
         shared_pool: shared_tc_pool.clone(),
         tc_source: tc_source_tx,
-    };
-
-    // Create clones here to allow moving the values
-    let tc_args = TcArgs {
-        tc_source: tc_source_wrapper.clone(),
-        tc_receiver: tc_source_rx,
-    };
-    let tm_args = TmArgs {
-        tm_store: shared_tm_store.clone(),
-        tm_sink_sender: tm_funnel_tx.clone(),
-        tm_udp_server_rx: tm_server_rx,
     };
 
     // Create event handling components
@@ -112,10 +103,10 @@ fn static_tmtc_pool_main() {
     // The event task is the core handler to perform the event routing and TM handling as specified
     // in the sat-rs documentation.
     let mut event_handler = EventHandler::new(
-        MpscTmInStoreSender::new(
+        MpscTmInSharedPoolSender::new(
             TmSenderId::AllEvents as ChannelId,
             "ALL_EVENTS_TX",
-            shared_tm_store.clone(),
+            shared_tm_pool.clone(),
             tm_funnel_tx.clone(),
         ),
         verif_reporter.clone(),
@@ -135,7 +126,7 @@ fn static_tmtc_pool_main() {
         action_service_receiver: pus_action_tx,
     };
     let pus_test_service = create_test_service_static(
-        shared_tm_store.clone(),
+        shared_tm_pool.clone(),
         tm_funnel_tx.clone(),
         verif_reporter.clone(),
         shared_tc_pool.pool.clone(),
@@ -143,15 +134,15 @@ fn static_tmtc_pool_main() {
         pus_test_rx,
     );
     let pus_scheduler_service = create_scheduler_service_static(
-        shared_tm_store.clone(),
+        shared_tm_pool.clone(),
         tm_funnel_tx.clone(),
         verif_reporter.clone(),
-        tc_source_wrapper,
+        tc_source.clone(),
         pus_sched_rx,
         create_sched_tc_pool(),
     );
     let pus_event_service = create_event_service_static(
-        shared_tm_store.clone(),
+        shared_tm_pool.clone(),
         tm_funnel_tx.clone(),
         verif_reporter.clone(),
         shared_tc_pool.pool.clone(),
@@ -159,7 +150,7 @@ fn static_tmtc_pool_main() {
         event_request_tx,
     );
     let pus_action_service = create_action_service_static(
-        shared_tm_store.clone(),
+        shared_tm_pool.clone(),
         tm_funnel_tx.clone(),
         verif_reporter.clone(),
         shared_tc_pool.pool.clone(),
@@ -167,7 +158,7 @@ fn static_tmtc_pool_main() {
         request_map.clone(),
     );
     let pus_hk_service = create_hk_service_static(
-        shared_tm_store.clone(),
+        shared_tm_pool.clone(),
         tm_funnel_tx.clone(),
         verif_reporter.clone(),
         shared_tc_pool.pool.clone(),
@@ -182,11 +173,10 @@ fn static_tmtc_pool_main() {
         pus_test_service,
     );
 
-    let ccsds_receiver = CcsdsReceiver {
-        tc_source: tc_args.tc_source.clone(),
-    };
-    let mut tmtc_task = TmtcTaskStatic::new(
-        tc_args,
+    let ccsds_receiver = CcsdsReceiver { tc_source };
+    let mut tmtc_task = TcSourceTaskStatic::new(
+        shared_tc_pool.clone(),
+        tc_source_rx,
         PusReceiver::new(verif_reporter.clone(), pus_router),
     );
 
@@ -197,8 +187,8 @@ fn static_tmtc_pool_main() {
     let mut udp_tmtc_server = UdpTmtcServer {
         udp_tc_server,
         tm_handler: StaticUdpTmHandler {
-            tm_rx: tm_args.tm_udp_server_rx,
-            tm_store: tm_args.tm_store.clone_backing_pool(),
+            tm_rx: tm_server_rx,
+            tm_store: shared_tm_pool.clone_backing_pool(),
         },
     };
 
@@ -213,10 +203,10 @@ fn static_tmtc_pool_main() {
     .expect("tcp server creation failed");
 
     let mut acs_task = AcsTask::new(
-        MpscTmInStoreSender::new(
+        MpscTmInSharedPoolSender::new(
             TmSenderId::AcsSubsystem as ChannelId,
             "ACS_TASK_SENDER",
-            shared_tm_store.clone(),
+            shared_tm_pool.clone(),
             tm_funnel_tx.clone(),
         ),
         acs_thread_rx,
@@ -224,7 +214,7 @@ fn static_tmtc_pool_main() {
     );
 
     let mut tm_funnel = TmFunnelStatic::new(
-        shared_tm_store,
+        shared_tm_pool,
         sync_tm_tcp_source,
         tm_funnel_rx,
         tm_server_tx,
@@ -399,7 +389,7 @@ fn dyn_tmtc_pool_main() {
 
     let ccsds_receiver = CcsdsReceiver { tc_source };
 
-    let mut tmtc_task = TmtcTaskDynamic::new(
+    let mut tmtc_task = TcSourceTaskDynamic::new(
         tc_source_rx,
         PusReceiver::new(verif_reporter.clone(), pus_router),
     );

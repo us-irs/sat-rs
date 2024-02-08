@@ -5,27 +5,27 @@ use satrs_core::pus::test::PusService17TestHandler;
 use satrs_core::pus::verification::{FailParams, VerificationReporterWithSender};
 use satrs_core::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter, MpscTcReceiver, MpscTmAsVecSender,
-    MpscTmInStoreSender, PusPacketHandlerResult, PusServiceHelper,
+    MpscTmInSharedPoolSender, PusPacketHandlerResult, PusServiceHelper,
 };
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::spacepackets::time::cds::TimeProvider;
 use satrs_core::spacepackets::time::TimeWriter;
-use satrs_core::tmtc::tm_helper::SharedTmStore;
+use satrs_core::tmtc::tm_helper::SharedTmPool;
 use satrs_core::ChannelId;
 use satrs_core::{events::EventU32, pus::EcssTcInSharedStoreConverter};
 use satrs_example::config::{tmtc_err, TcReceiverId, TmSenderId, PUS_APID, TEST_EVENT};
 use std::sync::mpsc::{self, Sender};
 
 pub fn create_test_service_static(
-    shared_tm_store: SharedTmStore,
+    shared_tm_store: SharedTmPool,
     tm_funnel_tx: mpsc::Sender<StoreAddr>,
     verif_reporter: VerificationReporterWithSender,
     tc_pool: SharedStaticMemoryPool,
     event_sender: mpsc::Sender<(EventU32, Option<Params>)>,
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
 ) -> Service17CustomWrapper<EcssTcInSharedStoreConverter> {
-    let test_srv_tm_sender = MpscTmInStoreSender::new(
+    let test_srv_tm_sender = MpscTmInSharedPoolSender::new(
         TmSenderId::PusTest as ChannelId,
         "PUS_17_TM_SENDER",
         shared_tm_store.clone(),

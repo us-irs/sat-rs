@@ -14,8 +14,13 @@ RUN rustup install nightly && \
     rustup target add thumbv7em-none-eabihf armv7-unknown-linux-gnueabihf && \
     rustup component add rustfmt clippy
 
+WORKDIR "/tmp"
 # RUN cargo install mdbook --no-default-features --features search --vers "^0.4" --locked
-RUN curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.34/mdbook-v0.4.34-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory /usr/local/bin
+RUN curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.37/mdbook-v0.4.37-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory /usr/local/bin
+RUN curl -sSL https://github.com/Michael-F-Bryan/mdbook-linkcheck/releases/latest/download/mdbook-linkcheck.x86_64-unknown-linux-gnu.zip -o mdbook-linkcheck.zip && \
+    unzip mdbook-linkcheck.zip && \
+    chmod +x mdbook-linkcheck && \
+    cp mdbook-linkcheck /usr/local/bin
 
 # SSH stuff to allow deployment to doc server
 RUN adduser --uid 114 jenkins
