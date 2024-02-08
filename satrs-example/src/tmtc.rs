@@ -8,26 +8,7 @@ use crate::pus::PusReceiver;
 use satrs_core::pool::{PoolProviderMemInPlace, SharedStaticMemoryPool, StoreAddr, StoreError};
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
-use satrs_core::tmtc::tm_helper::SharedTmStore;
 use satrs_core::tmtc::ReceivesCcsdsTc;
-
-pub struct TmArgs {
-    pub tm_store: SharedTmStore,
-    pub tm_sink_sender: Sender<StoreAddr>,
-    pub tm_udp_server_rx: Receiver<StoreAddr>,
-}
-
-pub struct TcArgs {
-    pub tc_source: PusTcSourceProviderSharedPool,
-    pub tc_receiver: Receiver<StoreAddr>,
-}
-
-impl TcArgs {
-    #[allow(dead_code)]
-    fn split(self) -> (PusTcSourceProviderSharedPool, Receiver<StoreAddr>) {
-        (self.tc_source, self.tc_receiver)
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum MpscStoreAndSendError {
@@ -110,16 +91,23 @@ impl ReceivesCcsdsTc for PusTcSourceProviderDynamic {
     }
 }
 
-pub struct TmtcTaskStatic {
-    tc_args: TcArgs,
+// TC source components where static pools are the backing memory of the received telecommands.
+pub struct TcSourceTaskStatic {
+    shared_tc_pool: SharedTcPool,
+    tc_receiver: Receiver<StoreAddr>,
     tc_buf: [u8; 4096],
     pus_receiver: PusReceiver,
 }
 
-impl TmtcTaskStatic {
-    pub fn new(tc_args: TcArgs, pus_receiver: PusReceiver) -> Self {
+impl TcSourceTaskStatic {
+    pub fn new(
+        shared_tc_pool: SharedTcPool,
+        tc_receiver: Receiver<StoreAddr>,
+        pus_receiver: PusReceiver,
+    ) -> Self {
         Self {
-            tc_args,
+            shared_tc_pool,
+            tc_receiver,
             tc_buf: [0; 4096],
             pus_receiver,
         }
@@ -130,12 +118,10 @@ impl TmtcTaskStatic {
     }
 
     pub fn poll_tc(&mut self) -> bool {
-        match self.tc_args.tc_receiver.try_recv() {
+        match self.tc_receiver.try_recv() {
             Ok(addr) => {
                 let pool = self
-                    .tc_args
-                    .tc_source
-                    .shared_pool
+                    .shared_tc_pool
                     .pool
                     .read()
                     .expect("locking tc pool failed");
@@ -171,12 +157,13 @@ impl TmtcTaskStatic {
     }
 }
 
-pub struct TmtcTaskDynamic {
+// TC source components where the heap is the backing memory of the received telecommands.
+pub struct TcSourceTaskDynamic {
     pub tc_receiver: Receiver<Vec<u8>>,
     pus_receiver: PusReceiver,
 }
 
-impl TmtcTaskDynamic {
+impl TcSourceTaskDynamic {
     pub fn new(tc_receiver: Receiver<Vec<u8>>, pus_receiver: PusReceiver) -> Self {
         Self {
             tc_receiver,

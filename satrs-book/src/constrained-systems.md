@@ -18,7 +18,7 @@ running out of memory (something even Rust can not protect from) or heap fragmen
 A huge candidate for heap allocations is the TMTC and  handling. TC, TMs and IPC data are all
 candidates where the data size might vary greatly. The regular solution for host systems
 might be to send around this data as a `Vec<u8>` until it is dropped. `sat-rs` provides
-another solution to avoid run-time allocations by offering and recommendng pre-allocated static
+another solution to avoid run-time allocations by offering pre-allocated static
 pools.
 
 These pools are split into subpools where each subpool can have different page sizes.
