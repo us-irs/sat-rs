@@ -3,8 +3,9 @@ use std::{
     sync::mpsc::{Receiver, Sender},
 };
 
+use log::info;
 use satrs_core::{
-    pool::{PoolProviderMemInPlace, StoreAddr},
+    pool::{PoolProvider, StoreAddr},
     seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore},
     spacepackets::{
         ecss::{tm::PusTmZeroCopyWriter, PusPacket},
@@ -63,8 +64,13 @@ impl TmFunnelCommon {
             *entry += 1;
         }
 
+        Self::packet_printout(&zero_copy_writer);
         // This operation has to come last!
         zero_copy_writer.finish();
+    }
+
+    fn packet_printout(tm: &PusTmZeroCopyWriter) {
+        info!("Sending PUS TM[{},{}]", tm.service(), tm.subservice());
     }
 }
 
@@ -96,16 +102,21 @@ impl TmFunnelStatic {
             // the CRC.
             let shared_pool = self.shared_tm_store.clone_backing_pool();
             let mut pool_guard = shared_pool.write().expect("Locking TM pool failed");
-            let tm_raw = pool_guard
-                .modify(&addr)
+            let mut tm_copy = Vec::new();
+            pool_guard
+                .modify(&addr, |buf| {
+                    let zero_copy_writer = PusTmZeroCopyWriter::new(buf, MIN_CDS_FIELD_LEN)
+                        .expect("Creating TM zero copy writer failed");
+                    self.common.apply_packet_processing(zero_copy_writer);
+                    tm_copy = buf.to_vec()
+                })
                 .expect("Reading TM from pool failed");
-            let zero_copy_writer = PusTmZeroCopyWriter::new(tm_raw, MIN_CDS_FIELD_LEN)
-                .expect("Creating TM zero copy writer failed");
-            self.common.apply_packet_processing(zero_copy_writer);
             self.tm_server_tx
                 .send(addr)
                 .expect("Sending TM to server failed");
-            self.common.sync_tm_tcp_source.add_tm(tm_raw);
+            // We could also do this step in the update closure, but I'd rather avoid this, could
+            // lead to nested locking.
+            self.common.sync_tm_tcp_source.add_tm(&tm_copy);
         }
     }
 }

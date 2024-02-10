@@ -8,9 +8,7 @@ pub use std_mod::*;
 
 #[cfg(feature = "std")]
 pub mod std_mod {
-    use crate::pool::{
-        PoolProviderMemInPlace, SharedStaticMemoryPool, StaticMemoryPool, StoreAddr,
-    };
+    use crate::pool::{PoolProvider, SharedStaticMemoryPool, StaticMemoryPool, StoreAddr};
     use crate::pus::EcssTmtcError;
     use spacepackets::ecss::tm::PusTmCreator;
     use spacepackets::ecss::WritablePusPacket;
@@ -37,10 +35,11 @@ pub mod std_mod {
 
         pub fn add_pus_tm(&self, pus_tm: &PusTmCreator) -> Result<StoreAddr, EcssTmtcError> {
             let mut pg = self.0.write().map_err(|_| EcssTmtcError::StoreLock)?;
-            let (addr, buf) = pg.free_element(pus_tm.len_written())?;
-            pus_tm
-                .write_to_bytes(buf)
-                .expect("writing PUS TM to store failed");
+            let addr = pg.free_element(pus_tm.len_written(), |buf| {
+                pus_tm
+                    .write_to_bytes(buf)
+                    .expect("writing PUS TM to store failed");
+            })?;
             Ok(addr)
         }
     }

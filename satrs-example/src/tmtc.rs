@@ -5,7 +5,7 @@ use std::sync::mpsc::{self, Receiver, SendError, Sender, TryRecvError};
 use thiserror::Error;
 
 use crate::pus::PusReceiver;
-use satrs_core::pool::{PoolProviderMemInPlace, SharedStaticMemoryPool, StoreAddr, StoreError};
+use satrs_core::pool::{PoolProvider, SharedStaticMemoryPool, StoreAddr, StoreError};
 use satrs_core::spacepackets::ecss::tc::PusTcReader;
 use satrs_core::spacepackets::ecss::PusPacket;
 use satrs_core::tmtc::ReceivesCcsdsTc;
@@ -28,8 +28,9 @@ pub struct SharedTcPool {
 impl SharedTcPool {
     pub fn add_pus_tc(&mut self, pus_tc: &PusTcReader) -> Result<StoreAddr, StoreError> {
         let mut pg = self.pool.write().expect("error locking TC store");
-        let (addr, buf) = pg.free_element(pus_tc.len_packed())?;
-        buf[0..pus_tc.len_packed()].copy_from_slice(pus_tc.raw_data());
+        let addr = pg.free_element(pus_tc.len_packed(), |buf| {
+            buf[0..pus_tc.len_packed()].copy_from_slice(pus_tc.raw_data());
+        })?;
         Ok(addr)
     }
 }
@@ -125,8 +126,8 @@ impl TcSourceTaskStatic {
                     .pool
                     .read()
                     .expect("locking tc pool failed");
-                let data = pool.read(&addr).expect("reading pool failed");
-                self.tc_buf[0..data.len()].copy_from_slice(data);
+                pool.read(&addr, &mut self.tc_buf)
+                    .expect("reading pool failed");
                 drop(pool);
                 match PusTcReader::new(&self.tc_buf) {
                     Ok((pus_tc, _)) => {

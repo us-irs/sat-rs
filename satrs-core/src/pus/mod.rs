@@ -390,7 +390,7 @@ mod alloc_mod {
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod std_mod {
-    use crate::pool::{PoolProviderMemInPlaceWithGuards, SharedStaticMemoryPool, StoreAddr};
+    use crate::pool::{PoolProvider, PoolProviderWithGuards, SharedStaticMemoryPool, StoreAddr};
     use crate::pus::verification::{
         StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
     };
@@ -789,12 +789,15 @@ pub mod std_mod {
                 .shared_tc_store
                 .write()
                 .map_err(|_| PusPacketHandlingError::EcssTmtc(EcssTmtcError::StoreLock))?;
-            let tc_guard = tc_pool.read_with_guard(addr);
-            let tc_raw = tc_guard.read().unwrap();
-            if tc_raw.len() > self.pus_buf.len() {
-                return Err(PusPacketHandlingError::PusPacketTooLarge(tc_raw.len()));
+            let tc_size = tc_pool
+                .len_of_data(&addr)
+                .map_err(|e| PusPacketHandlingError::EcssTmtc(EcssTmtcError::Store(e)))?;
+            if tc_size > self.pus_buf.len() {
+                return Err(PusPacketHandlingError::PusPacketTooLarge(tc_size));
             }
-            self.pus_buf[0..tc_raw.len()].copy_from_slice(tc_raw);
+            let tc_guard = tc_pool.read_with_guard(addr);
+            // TODO: Proper error handling.
+            tc_guard.read(&mut self.pus_buf[0..tc_size]).unwrap();
             Ok(())
         }
     }
@@ -947,8 +950,7 @@ pub mod tests {
     use spacepackets::CcsdsPacket;
 
     use crate::pool::{
-        PoolProviderMemInPlace, SharedStaticMemoryPool, StaticMemoryPool, StaticPoolConfig,
-        StoreAddr,
+        PoolProvider, SharedStaticMemoryPool, StaticMemoryPool, StaticPoolConfig, StoreAddr,
     };
     use crate::pus::verification::RequestId;
     use crate::tmtc::tm_helper::SharedTmPool;
@@ -1078,8 +1080,8 @@ pub mod tests {
             assert!(next_msg.is_ok());
             let tm_addr = next_msg.unwrap();
             let tm_pool = self.tm_pool.0.read().unwrap();
-            let tm_raw = tm_pool.read(&tm_addr).unwrap();
-            self.tm_buf[0..tm_raw.len()].copy_from_slice(tm_raw);
+            let tm_raw = tm_pool.read_as_vec(&tm_addr).unwrap();
+            self.tm_buf[0..tm_raw.len()].copy_from_slice(&tm_raw);
             PusTmReader::new(&self.tm_buf, 7).unwrap().0
         }
 
@@ -1096,8 +1098,8 @@ pub mod tests {
             assert!(next_msg.is_ok());
             let tm_addr = next_msg.unwrap();
             let tm_pool = self.tm_pool.0.read().unwrap();
-            let tm_raw = tm_pool.read(&tm_addr).unwrap();
-            let tm = PusTmReader::new(tm_raw, 7).unwrap().0;
+            let tm_raw = tm_pool.read_as_vec(&tm_addr).unwrap();
+            let tm = PusTmReader::new(&tm_raw, 7).unwrap().0;
             assert_eq!(PusPacket::service(&tm), 1);
             assert_eq!(PusPacket::subservice(&tm), subservice);
             assert_eq!(tm.apid(), TEST_APID);

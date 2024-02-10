@@ -1,6 +1,4 @@
-use satrs_core::pool::{
-    PoolGuard, PoolProviderMemInPlace, StaticMemoryPool, StaticPoolConfig, StoreAddr,
-};
+use satrs_core::pool::{PoolGuard, PoolProvider, StaticMemoryPool, StaticPoolConfig, StoreAddr};
 use std::ops::DerefMut;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
@@ -27,8 +25,10 @@ fn threaded_usage() {
             addr = rx.recv().expect("Receiving store address failed");
             let mut pool_access = shared_clone.write().unwrap();
             let pg = PoolGuard::new(pool_access.deref_mut(), addr);
-            let read_res = pg.read().expect("Reading failed");
-            assert_eq!(read_res, DUMMY_DATA);
+            let mut read_buf: [u8; 4] = [0; 4];
+            let read_bytes = pg.read(&mut read_buf).expect("Reading failed");
+            assert_eq!(read_buf, DUMMY_DATA);
+            assert_eq!(read_bytes, 4);
         }
         let pool_access = shared_clone.read().unwrap();
         assert!(!pool_access.has_element_at(&addr).expect("Invalid address"));
