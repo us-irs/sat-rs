@@ -19,15 +19,33 @@ A huge candidate for heap allocations is the TMTC and  handling. TC, TMs and IPC
 candidates where the data size might vary greatly. The regular solution for host systems
 might be to send around this data as a `Vec<u8>` until it is dropped. `sat-rs` provides
 another solution to avoid run-time allocations by offering pre-allocated static
-pools.
+pools. These pools are split into subpools where each subpool can have different page sizes.
+For example, a very small telecommand (TC) pool might look like this:
 
-These pools are split into subpools where each subpool can have different page sizes.
-For example, a very small TC pool might look like this:
+![Example Pool](images/pools/static-pools.png)
 
-TODO: Add image
+The code to generate this static pool would look like this:
+
+```rust
+use satrs_core::pool::{StaticMemoryPool, StaticPoolConfig};
+
+let tc_pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![
+    (6, 16),
+    (4, 32),
+    (2, 64),
+    (1, 128)
+]));
+```
+
+It should be noted that the buckets only show the maximum size of data being stored inside them.
+The store will keep a separate structure to track the actual size of the data being stored.
+
+<!-- TODO: Add explanation and references for used data-structures. Also explain core trait
+to work with the pool. -->
 
 A TC entry inside this pool has a store address which can then be sent around without having
-to dynamically allocate memory. The same principle can also be applied to the TM and IPC data.
+to dynamically allocate memory. The same principle can also be applied to the telemetry (TM) and
+inter-process communication (IPC) data.
 
 # Using special crates to prevent smaller allocations
 
