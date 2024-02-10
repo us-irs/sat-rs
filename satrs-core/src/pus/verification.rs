@@ -15,7 +15,7 @@
 //! ```
 //! use std::sync::{Arc, mpsc, RwLock};
 //! use std::time::Duration;
-//! use satrs_core::pool::{PoolProviderMemInPlaceWithGuards, StaticMemoryPool, StaticPoolConfig};
+//! use satrs_core::pool::{PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
 //! use satrs_core::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
 //! use satrs_core::seq_count::SeqCountProviderSimple;
 //! use satrs_core::pus::MpscTmInSharedPoolSender;
@@ -56,9 +56,7 @@
 //!     {
 //!         let mut rg = tm_store.write().expect("Error locking shared pool");
 //!         let store_guard = rg.read_with_guard(addr);
-//!         let slice = store_guard.read().expect("Error reading TM slice");
-//!         tm_len = slice.len();
-//!         tm_buf[0..tm_len].copy_from_slice(slice);
+//!         tm_len = store_guard.read(&mut tm_buf).expect("Error reading TM slice");
 //!     }
 //!     let (pus_tm, _) = PusTmReader::new(&tm_buf[0..tm_len], 7)
 //!        .expect("Error reading verification TM");
@@ -1325,7 +1323,7 @@ mod std_mod {
 
 #[cfg(test)]
 mod tests {
-    use crate::pool::{PoolProviderMemInPlaceWithGuards, StaticMemoryPool, StaticPoolConfig};
+    use crate::pool::{PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
         EcssTmSenderCore, EcssTmtcError, FailParams, FailParamsWithStep, RequestId, TcStateNone,
@@ -1547,7 +1545,7 @@ mod tests {
         let mut sender = TestSender::default();
         let fail_code = EcssEnumU16::new(2);
         let fail_params = FailParams::new(Some(stamp_buf.as_slice()), &fail_code, None);
-        b.vr.acceptance_failure(tok, &mut sender, fail_params)
+        b.vr.acceptance_failure(tok, &sender, fail_params)
             .expect("Sending acceptance success failed");
         acceptance_fail_check(&mut sender, tok.req_id, stamp_buf);
     }
@@ -1682,12 +1680,10 @@ mod tests {
         );
 
         let accepted_token =
-            b.vr.acceptance_success(tok, &mut sender, Some(&EMPTY_STAMP))
+            b.vr.acceptance_success(tok, &sender, Some(&EMPTY_STAMP))
                 .expect("Sending acceptance success failed");
-        let empty =
-            b.vr.start_failure(accepted_token, &mut sender, fail_params)
-                .expect("Start failure failure");
-        assert_eq!(empty, ());
+        b.vr.start_failure(accepted_token, &mut sender, fail_params)
+            .expect("Start failure failure");
         start_fail_check(&mut sender, tok.req_id, fail_data_raw);
     }
 
@@ -1779,23 +1775,23 @@ mod tests {
         let mut sender = TestSender::default();
         let accepted_token = b
             .rep()
-            .acceptance_success(tok, &mut sender, Some(&EMPTY_STAMP))
+            .acceptance_success(tok, &sender, Some(&EMPTY_STAMP))
             .expect("Sending acceptance success failed");
         let started_token = b
             .rep()
-            .start_success(accepted_token, &mut sender, Some(&[0, 1, 0, 1, 0, 1, 0]))
+            .start_success(accepted_token, &sender, Some(&[0, 1, 0, 1, 0, 1, 0]))
             .expect("Sending start success failed");
         b.rep()
             .step_success(
                 &started_token,
-                &mut sender,
+                &sender,
                 Some(&EMPTY_STAMP),
                 EcssEnumU8::new(0),
             )
             .expect("Sending step 0 success failed");
         b.vr.step_success(
             &started_token,
-            &mut sender,
+            &sender,
             Some(&EMPTY_STAMP),
             EcssEnumU8::new(1),
         )
@@ -2176,9 +2172,9 @@ mod tests {
             {
                 let mut rg = shared_tm_pool.write().expect("Error locking shared pool");
                 let store_guard = rg.read_with_guard(addr);
-                let slice = store_guard.read().expect("Error reading TM slice");
-                tm_len = slice.len();
-                tm_buf[0..tm_len].copy_from_slice(slice);
+                tm_len = store_guard
+                    .read(&mut tm_buf)
+                    .expect("Error reading TM slice");
             }
             let (pus_tm, _) =
                 PusTmReader::new(&tm_buf[0..tm_len], 7).expect("Error reading verification TM");

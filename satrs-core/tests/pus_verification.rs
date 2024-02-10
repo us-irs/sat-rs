@@ -2,8 +2,7 @@
 pub mod crossbeam_test {
     use hashbrown::HashMap;
     use satrs_core::pool::{
-        PoolProviderMemInPlace, PoolProviderMemInPlaceWithGuards, StaticMemoryPool,
-        StaticPoolConfig,
+        PoolProvider, PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig,
     };
     use satrs_core::pus::verification::{
         FailParams, RequestId, VerificationReporterCfg, VerificationReporterWithSender,
@@ -59,15 +58,21 @@ pub mod crossbeam_test {
             let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
             let pus_tc_0 = PusTcCreator::new_no_app_data(&mut sph, tc_header, true);
             req_id_0 = RequestId::new(&pus_tc_0);
-            let (addr, buf) = tc_guard.free_element(pus_tc_0.len_written()).unwrap();
-            pus_tc_0.write_to_bytes(buf).unwrap();
+            let addr = tc_guard
+                .free_element(pus_tc_0.len_written(), |buf| {
+                    pus_tc_0.write_to_bytes(buf).unwrap();
+                })
+                .unwrap();
             tx_tc_0.send(addr).unwrap();
             let mut sph = SpHeader::tc_unseg(TEST_APID, 1, 0).unwrap();
             let tc_header = PusTcSecondaryHeader::new_simple(5, 1);
             let pus_tc_1 = PusTcCreator::new_no_app_data(&mut sph, tc_header, true);
             req_id_1 = RequestId::new(&pus_tc_1);
-            let (addr, buf) = tc_guard.free_element(pus_tc_0.len_written()).unwrap();
-            pus_tc_1.write_to_bytes(buf).unwrap();
+            let addr = tc_guard
+                .free_element(pus_tc_0.len_written(), |buf| {
+                    pus_tc_1.write_to_bytes(buf).unwrap();
+                })
+                .unwrap();
             tx_tc_1.send(addr).unwrap();
         }
         let verif_sender_0 = thread::spawn(move || {
@@ -79,9 +84,7 @@ pub mod crossbeam_test {
             {
                 let mut tc_guard = shared_tc_pool_0.write().unwrap();
                 let pg = tc_guard.read_with_guard(tc_addr);
-                let buf = pg.read().unwrap();
-                tc_len = buf.len();
-                tc_buf[0..tc_len].copy_from_slice(buf);
+                tc_len = pg.read(&mut tc_buf).unwrap();
             }
             let (_tc, _) = PusTcReader::new(&tc_buf[0..tc_len]).unwrap();
 
@@ -117,9 +120,7 @@ pub mod crossbeam_test {
             {
                 let mut tc_guard = shared_tc_pool_1.write().unwrap();
                 let pg = tc_guard.read_with_guard(tc_addr);
-                let buf = pg.read().unwrap();
-                tc_len = buf.len();
-                tc_buf[0..tc_len].copy_from_slice(buf);
+                tc_len = pg.read(&mut tc_buf).unwrap();
             }
             let (tc, _) = PusTcReader::new(&tc_buf[0..tc_len]).unwrap();
             let token = reporter_with_sender_1.add_tc(&tc);
@@ -149,9 +150,9 @@ pub mod crossbeam_test {
                 {
                     let mut rg = shared_tm_store.write().expect("Error locking shared pool");
                     let store_guard = rg.read_with_guard(verif_addr);
-                    let slice = store_guard.read().expect("Error reading TM slice");
-                    tm_len = slice.len();
-                    tm_buf[0..tm_len].copy_from_slice(slice);
+                    tm_len = store_guard
+                        .read(&mut tm_buf)
+                        .expect("Error reading TM slice");
                 }
                 let (pus_tm, _) =
                     PusTmReader::new(&tm_buf[0..tm_len], 7).expect("Error reading verification TM");

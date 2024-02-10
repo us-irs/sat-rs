@@ -1,6 +1,6 @@
 use super::scheduler::PusSchedulerInterface;
 use super::{EcssTcInMemConverter, PusServiceBase, PusServiceHelper};
-use crate::pool::PoolProviderMemInPlace;
+use crate::pool::PoolProvider;
 use crate::pus::{PusPacketHandlerResult, PusPacketHandlingError};
 use alloc::string::ToString;
 use spacepackets::ecss::{scheduling, PusPacket};
@@ -42,7 +42,7 @@ impl<TcInMemConverter: EcssTcInMemConverter, Scheduler: PusSchedulerInterface>
 
     pub fn handle_one_tc(
         &mut self,
-        sched_tc_pool: &mut (impl PoolProviderMemInPlace + ?Sized),
+        sched_tc_pool: &mut (impl PoolProvider + ?Sized),
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
         if possible_packet.is_none() {
@@ -237,7 +237,7 @@ mod tests {
 
         fn reset(
             &mut self,
-            _store: &mut (impl crate::pool::PoolProviderMemInPlace + ?Sized),
+            _store: &mut (impl crate::pool::PoolProvider + ?Sized),
         ) -> Result<(), crate::pool::StoreError> {
             self.reset_count += 1;
             Ok(())

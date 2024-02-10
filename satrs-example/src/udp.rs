@@ -6,7 +6,7 @@ use std::{
 use log::{info, warn};
 use satrs_core::{
     hal::std::udp_server::{ReceiveResult, UdpTcServer},
-    pool::{PoolProviderMemInPlaceWithGuards, SharedStaticMemoryPool, StoreAddr},
+    pool::{PoolProviderWithGuards, SharedStaticMemoryPool, StoreAddr},
     tmtc::CcsdsError,
 };
 
@@ -29,20 +29,13 @@ impl UdpTmHandler for StaticUdpTmHandler {
             }
             let mut store_lock = store_lock.unwrap();
             let pg = store_lock.read_with_guard(addr);
-            let read_res = pg.read();
+            let read_res = pg.read_as_vec();
             if read_res.is_err() {
                 warn!("Error reading TM pool data");
                 continue;
             }
             let buf = read_res.unwrap();
-            if buf.len() > 9 {
-                let service = buf[7];
-                let subservice = buf[8];
-                info!("Sending PUS TM[{service},{subservice}]")
-            } else {
-                info!("Sending PUS TM");
-            }
-            let result = socket.send_to(buf, recv_addr);
+            let result = socket.send_to(&buf, recv_addr);
             if let Err(e) = result {
                 warn!("Sending TM with UDP socket failed: {e}")
             }

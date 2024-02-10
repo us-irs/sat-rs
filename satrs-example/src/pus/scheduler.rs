@@ -2,7 +2,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use log::{error, info, warn};
-use satrs_core::pool::{PoolProviderMemInPlace, StaticMemoryPool, StoreAddr};
+use satrs_core::pool::{PoolProvider, StaticMemoryPool, StoreAddr};
 use satrs_core::pus::scheduler::{PusScheduler, TcInfo};
 use satrs_core::pus::scheduler_srv::PusService11SchedHandler;
 use satrs_core::pus::verification::VerificationReporterWithSender;
@@ -54,6 +54,7 @@ impl TcReleaser for mpsc::Sender<Vec<u8>> {
 pub struct Pus11Wrapper<TcInMemConverter: EcssTcInMemConverter> {
     pub pus_11_handler: PusService11SchedHandler<TcInMemConverter, PusScheduler>,
     pub sched_tc_pool: StaticMemoryPool,
+    pub releaser_buf: [u8; 4096],
     pub tc_releaser: Box<dyn TcReleaser + Send>,
 }
 
@@ -70,7 +71,11 @@ impl<TcInMemConverter: EcssTcInMemConverter> Pus11Wrapper<TcInMemConverter> {
         let released_tcs = self
             .pus_11_handler
             .scheduler_mut()
-            .release_telecommands(releaser, &mut self.sched_tc_pool)
+            .release_telecommands_with_buffer(
+                releaser,
+                &mut self.sched_tc_pool,
+                &mut self.releaser_buf,
+            )
             .expect("releasing TCs failed");
         if released_tcs > 0 {
             info!("{released_tcs} TC(s) released from scheduler");
@@ -136,6 +141,7 @@ pub fn create_scheduler_service_static(
     Pus11Wrapper {
         pus_11_handler,
         sched_tc_pool,
+        releaser_buf: [0; 4096],
         tc_releaser: Box::new(tc_releaser),
     }
 }
@@ -172,6 +178,7 @@ pub fn create_scheduler_service_dynamic(
     Pus11Wrapper {
         pus_11_handler,
         sched_tc_pool,
+        releaser_buf: [0; 4096],
         tc_releaser: Box::new(tc_source_sender),
     }
 }
