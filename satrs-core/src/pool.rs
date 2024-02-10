@@ -203,8 +203,12 @@ impl Error for StoreError {
     }
 }
 
-/// Generic trait for pool providers where the data can be modified and read in-place. This
-/// generally means that a shared pool structure has to be wrapped inside a lock structure.
+/// Generic trait for pool providers which provide memory pools for variable sized data.
+///
+/// It specifies a basic API to [Self::add], [Self::modify], [Self::read] and [Self::delete] data
+/// in the store at its core. The API was designed so internal optimizations can be performed
+/// more easily and that is is also possible to make the pool structure [Sync] without the whole
+/// pool structure being wrapped inside a lock.
 pub trait PoolProvider {
     /// Add new data to the pool. The provider should attempt to reserve a memory block with the
     /// appropriate size and then copy the given data to the block. Yields a [StoreAddr] which can
@@ -251,6 +255,7 @@ pub trait PoolProvider {
     }
 }
 
+/// Extension trait which adds guarded pool access classes.
 pub trait PoolProviderWithGuards: PoolProvider {
     /// This function behaves like [PoolProvider::read], but consumes the provided address
     /// and returns a RAII conformant guard object.
@@ -280,7 +285,8 @@ pub struct PoolGuard<'a, MemProvider: PoolProvider + ?Sized> {
     deletion_failed_error: Option<StoreError>,
 }
 
-/// This helper object
+/// This helper object can be used to safely access pool data without worrying about memory
+/// leaks.
 impl<'a, MemProvider: PoolProvider> PoolGuard<'a, MemProvider> {
     pub fn new(pool: &'a mut MemProvider, addr: StoreAddr) -> Self {
         Self {
@@ -390,16 +396,21 @@ mod alloc_mod {
 
     /// Pool implementation providing sub-pools with fixed size memory blocks.
     ///
-    /// This is a simple memory pool implementation which pre-allocates all sub-pools using a given pool
-    /// configuration. After the pre-allocation, no dynamic memory allocation will be performed
-    /// during run-time. This makes the implementation suitable for real-time applications and
-    /// embedded environments. The pool implementation will also track the size of the data stored
-    /// inside it.
+    /// This is a simple memory pool implementation which pre-allocates all subpools using a given
+    /// pool configuration. After the pre-allocation, no dynamic memory allocation will be
+    /// performed during run-time. This makes the implementation suitable for real-time
+    /// applications and embedded environments.
+    ///
+    /// The subpool bucket sizes only denote the maximum possible data size being stored inside
+    /// them and the pool implementation will still track the size of the data stored inside it.
+    /// The implementation will generally determine the best fitting subpool for given data to
+    /// add. Currently, the pool does not support spilling to larger subpools if the closest
+    /// fitting subpool is full. This might be added in the future.
     ///
     /// Transactions with the [pool][StaticMemoryPool] are done using a generic
-    /// [address][StoreAddr] type.
-    /// Adding any data to the pool will yield a store address. Modification and read operations are
-    /// done using a reference to a store address. Deletion will consume the store address.
+    /// [address][StoreAddr] type. Adding any data to the pool will yield a store address.
+    /// Modification and read operations are done using a reference to a store address. Deletion
+    /// will consume the store address.
     pub struct StaticMemoryPool {
         pool_cfg: StaticPoolConfig,
         pool: Vec<Vec<u8>>,
