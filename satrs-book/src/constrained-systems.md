@@ -26,15 +26,17 @@ For example, a very small telecommand (TC) pool might look like this:
 ![Example Pool](images/pools/static-pools.png)
 
 The core of the pool abstractions is the
-[PoolProvider trait](https://docs.rs/satrs-core/0.1.0-alpha.3/satrs_core/pool/trait.PoolProvider.html).
+[PoolProvider trait](https://docs.rs/satrs/latest/satrs/pool/trait.PoolProvider.html).
 This trait specifies the general API a pool structure should have without making assumption
 of how the data is stored.
 
 This trait is implemented by a static memory pool implementation.
 The code to generate this static pool would look like this:
 
-```rust
-use satrs_core::pool::{StaticMemoryPool, StaticPoolConfig};
+<!-- Would be nice to test this code sample, but need to wait
+for https://github.com/rust-lang/mdBook/issues/706 to be merged.. -->
+```rust, ignore
+use satrs::pool::{StaticMemoryPool, StaticPoolConfig};
 
 let tc_pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![
     (6, 16),
@@ -52,8 +54,8 @@ inter-process communication (IPC) data.
 
 You can read
 
-- [`StaticPoolConfig` API](https://docs.rs/satrs-core/0.1.0-alpha.3/satrs_core/pool/struct.StaticPoolConfig.html)
-- [`StaticMemoryPool` API](https://docs.rs/satrs-core/0.1.0-alpha.3/satrs_core/pool/struct.StaticMemoryPool.html)
+- [`StaticPoolConfig` API](https://docs.rs/satrs/latest/satrs/pool/struct.StaticPoolConfig.html)
+- [`StaticMemoryPool` API](https://docs.rs/satrs/latest/satrs/pool/struct.StaticMemoryPool.html)
 
 for more details.
 

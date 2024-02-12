@@ -23,11 +23,11 @@ Some additional explanation is provided for the various components.
 The example includes a UDP and TCP server to receive telecommands and poll telemetry from. This
 might be an optional component for an OBSW which is only used during the development phase on
 ground. The UDP server is strongly based on the
-[UDP TC server](https://docs.rs/satrs-core/0.1.0-alpha.1/satrs_core/hal/std/udp_server/struct.UdpTcServer.html).
+[UDP TC server](https://docs.rs/satrs/latest/satrs/hal/std/udp_server/struct.UdpTcServer.html).
 This server component is wrapped by a TMTC server which handles all telemetry to the last connected
 client.
 
-The TCP server is based on the [TCP Spacepacket Server](https://docs.rs/satrs-core/0.1.0-alpha.1/satrs_core/hal/std/tcp_server/struct.TcpSpacepacketsServer.html)
+The TCP server is based on the [TCP Spacepacket Server](https://docs.rs/satrs/latest/satrs/hal/std/tcp_server/struct.TcpSpacepacketsServer.html)
 class. It parses space packets by using the CCSDS space packet ID as the packet
 start delimiter. All available telemetry will be sent back to a client after having read all
 telecommands from the client.
@@ -51,13 +51,13 @@ services. This currently includes the following services:
 
 - Service 1 for telecommand verification. The verification handling is handled locally: Each
   component which generates verification telemetry in some shape or form receives a
-  [reporter](https://docs.rs/satrs-core/0.1.0-alpha.1/satrs_core/pus/verification/struct.VerificationReporterWithSender.html)
+  [reporter](https://docs.rs/satrs/latest/satrs/pus/verification/struct.VerificationReporterWithSender.html)
   object which can be used to send PUS 1 verification telemetry to the TM funnel.
 - Service 3 for housekeeping telemetry handling.
 - Service 5 for management and downlink of on-board events.
 - Service 8 for handling on-board actions.
 - Service 11 for scheduling telecommands to be released at a specific time. This component
-  uses the [PUS scheduler class](https://docs.rs/satrs-core/0.1.0-alpha.1/satrs_core/pus/scheduler/alloc_mod/struct.PusScheduler.html)
+  uses the [PUS scheduler class](https://docs.rs/satrs/latest/satrs/pus/scheduler/alloc_mod/struct.PusScheduler.html)
   which performs the core logic of scheduling telecommands. All telecommands released by the
   scheduler are sent to the central TC source using a message.
 - Service 17 for test purposes like pings.
@@ -65,10 +65,10 @@ services. This currently includes the following services:
 ### Event Management Component
 
 An event manager based on the sat-rs
-[event manager component](https://docs.rs/satrs-core/0.1.0-alpha.1/satrs_core/event_man/index.html)
+[event manager component](https://docs.rs/satrs/latest/satrs/event_man/index.html)
 is provided to handle the event IPC and FDIR mechanism. The event message are converted to PUS 5
 telemetry by the
-[PUS event dispatcher](https://docs.rs/satrs-core/0.1.0-alpha.1/satrs_core/pus/event_man/alloc_mod/struct.PusEventDispatcher.html).
+[PUS event dispatcher](https://docs.rs/satrs/latest/satrs/pus/event_man/alloc_mod/struct.PusEventDispatcher.html).
 
 You can read the [events](./events.md) chapter for more in-depth information about event management.
 

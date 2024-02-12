@@ -1,8 +1,8 @@
-[![Crates.io](https://img.shields.io/crates/v/satrs-core)](https://crates.io/crates/satrs-core)
-[![docs.rs](https://img.shields.io/docsrs/satrs-core)](https://docs.rs/satrs-core)
+[![Crates.io](https://img.shields.io/crates/v/satrs)](https://crates.io/crates/satrs)
+[![docs.rs](https://img.shields.io/docsrs/satrs)](https://docs.rs/satrs)
 
-satrs-core
+sat-rs
 ======
 
-This crate contains the core components of the sat-rs framework.
+This crate contains the primary components of the sat-rs framework.
 You can find more information on the [homepage](https://egit.irs.uni-stuttgart.de/rust/sat-rs).

@@ -4,7 +4,7 @@ description = "Components shared by multiple sat-rs crates"
 version = "0.1.1"
 edition = "2021"
 authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
-homepage = "https://absatsw.uni-stuttgart.de/projects/sat-rs"
+homepage = "https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/"
 repository = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
 license = "Apache-2.0"
 
