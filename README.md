@@ -7,7 +7,7 @@ This is the repository of the sat-rs framework. Its primary goal is to provide r
 to write on-board software for remote systems like rovers or satellites. It is specifically written
 for the special requirements for these systems. You can find an overview of the project and the
 link to the [more high-level sat-rs book](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/)
-at the [IRS documentation website](https://absatsw.irs.uni-stuttgart.de/sat-rs.html).
+at the [IRS software projects website](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/).
 
 A lot of the architecture and general design considerations are based on the
 [FSFW](https://egit.irs.uni-stuttgart.de/fsfw/fsfw) C++ framework which has flight heritage
@@ -41,7 +41,7 @@ Each project has its own `CHANGELOG.md`.
 
  * [`spacepackets`](https://egit.irs.uni-stuttgart.de/rust/spacepackets): Basic ECSS and CCSDS
    packet protocol implementations. This repository is re-exported in the
-   [`satrs-core`](https://egit.irs.uni-stuttgart.de/rust/satrs-launchpad/src/branch/main/satrs-core)
+   [`satrs`](https://egit.irs.uni-stuttgart.de/rust/satrs/src/branch/main/satrs)
    crate.
 
 # Coverage
