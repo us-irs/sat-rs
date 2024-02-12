@@ -11,7 +11,8 @@ time where the OBSW might be running on Linux based systems with hundreds of MBs
 
 A useful pattern used commonly in space systems is to limit heap allocations to program
 initialization time and avoid frequent run-time allocations. This prevents issues like
-running out of memory (something even Rust can not protect from) or heap fragmentation.
+running out of memory (something even Rust can not protect from) or heap fragmentation on systems
+without a MMU.
 
 # Using pre-allocated pool structures
 
@@ -24,6 +25,12 @@ For example, a very small telecommand (TC) pool might look like this:
 
 ![Example Pool](images/pools/static-pools.png)
 
+The core of the pool abstractions is the
+[PoolProvider trait](https://docs.rs/satrs-core/0.1.0-alpha.3/satrs_core/pool/trait.PoolProvider.html).
+This trait specifies the general API a pool structure should have without making assumption
+of how the data is stored.
+
+This trait is implemented by a static memory pool implementation.
 The code to generate this static pool would look like this:
 
 ```rust
@@ -39,13 +46,19 @@ let tc_pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![
 
 It should be noted that the buckets only show the maximum size of data being stored inside them.
 The store will keep a separate structure to track the actual size of the data being stored.
-
-<!-- TODO: Add explanation and references for used data-structures. Also explain core trait
-to work with the pool. -->
-
 A TC entry inside this pool has a store address which can then be sent around without having
 to dynamically allocate memory. The same principle can also be applied to the telemetry (TM) and
 inter-process communication (IPC) data.
+
+You can read
+
+- [`StaticPoolConfig` API](https://docs.rs/satrs-core/0.1.0-alpha.3/satrs_core/pool/struct.StaticPoolConfig.html)
+- [`StaticMemoryPool` API](https://docs.rs/satrs-core/0.1.0-alpha.3/satrs_core/pool/struct.StaticMemoryPool.html)
+
+for more details.
+
+In the future, optimized pool structures which use standard containers or are
+[`Sync`](https://doc.rust-lang.org/std/marker/trait.Sync.html) by default might be added as well.
 
 # Using special crates to prevent smaller allocations
 
@@ -53,7 +66,7 @@ Another common way to use the heap on host systems is using containers like `Str
 to work with data where the size is not known beforehand. The most common solution for embedded
 systems is to determine the maximum expected size and then use a pre-allocated `u8` buffer and a
 size variable. Alternatively, you can use the following crates for more convenience or a smart
-behaviour which at the very least reduce heap allocations:
+behaviour which at the very least reduces heap allocations:
 
 1. [`smallvec`](https://docs.rs/smallvec/latest/smallvec/).
 2. [`arrayvec`](https://docs.rs/arrayvec/latest/arrayvec/index.html) which also contains an
