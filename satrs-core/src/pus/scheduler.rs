@@ -238,7 +238,8 @@ impl Error for ScheduleError {
     }
 }
 
-pub trait PusSchedulerInterface {
+/// Generic trait for scheduler objects which are able to schedule ECSS PUS C packets.
+pub trait PusSchedulerProvider {
     type TimeProvider: CcsdsTimeProvider + TimeReader;
 
     fn reset(&mut self, store: &mut (impl PoolProvider + ?Sized)) -> Result<(), StoreError>;
@@ -782,7 +783,7 @@ pub mod alloc_mod {
         }
     }
 
-    impl PusSchedulerInterface for PusScheduler {
+    impl PusSchedulerProvider for PusScheduler {
         type TimeProvider = cds::TimeProvider;
 
         /// This will disable the scheduler and clear the schedule as specified in 6.11.4.4.
