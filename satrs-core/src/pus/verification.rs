@@ -28,7 +28,7 @@
 //! const EMPTY_STAMP: [u8; 7] = [0; 7];
 //! const TEST_APID: u16 = 0x02;
 //!
-//! let pool_cfg = StaticPoolConfig::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
+//! let pool_cfg = StaticPoolConfig::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)], false);
 //! let tm_pool = StaticMemoryPool::new(pool_cfg.clone());
 //! let shared_tm_store = SharedTmPool::new(tm_pool);
 //! let tm_store = shared_tm_store.clone_backing_pool();
@@ -1484,7 +1484,7 @@ mod tests {
 
     #[test]
     fn test_mpsc_verif_send_sync() {
-        let pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(8, 8)]));
+        let pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(8, 8)], false));
         let shared_tm_store = SharedTmPool::new(pool);
         let (tx, _) = mpsc::channel();
         let mpsc_verif_sender =
@@ -2135,9 +2135,9 @@ mod tests {
     }
 
     #[test]
-    // TODO: maybe a bit more extensive testing, all I have time for right now
     fn test_seq_count_increment() {
-        let pool_cfg = StaticPoolConfig::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)]);
+        let pool_cfg =
+            StaticPoolConfig::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)], false);
         let tm_pool = StaticMemoryPool::new(pool_cfg.clone());
         let shared_tm_store = SharedTmPool::new(tm_pool);
         let shared_tm_pool = shared_tm_store.clone_backing_pool();

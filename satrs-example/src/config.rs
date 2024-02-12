@@ -103,34 +103,43 @@ pub mod pool {
     use super::*;
     pub fn create_static_pools() -> (StaticMemoryPool, StaticMemoryPool) {
         (
-            StaticMemoryPool::new(StaticPoolConfig::new(vec![
-                (30, 32),
-                (15, 64),
-                (15, 128),
-                (15, 256),
-                (15, 1024),
-                (15, 2048),
-            ])),
-            StaticMemoryPool::new(StaticPoolConfig::new(vec![
-                (30, 32),
-                (15, 64),
-                (15, 128),
-                (15, 256),
-                (15, 1024),
-                (15, 2048),
-            ])),
+            StaticMemoryPool::new(StaticPoolConfig::new(
+                vec![
+                    (30, 32),
+                    (15, 64),
+                    (15, 128),
+                    (15, 256),
+                    (15, 1024),
+                    (15, 2048),
+                ],
+                true,
+            )),
+            StaticMemoryPool::new(StaticPoolConfig::new(
+                vec![
+                    (30, 32),
+                    (15, 64),
+                    (15, 128),
+                    (15, 256),
+                    (15, 1024),
+                    (15, 2048),
+                ],
+                true,
+            )),
         )
     }
 
     pub fn create_sched_tc_pool() -> StaticMemoryPool {
-        StaticMemoryPool::new(StaticPoolConfig::new(vec![
-            (30, 32),
-            (15, 64),
-            (15, 128),
-            (15, 256),
-            (15, 1024),
-            (15, 2048),
-        ]))
+        StaticMemoryPool::new(StaticPoolConfig::new(
+            vec![
+                (30, 32),
+                (15, 64),
+                (15, 128),
+                (15, 256),
+                (15, 1024),
+                (15, 2048),
+            ],
+            true,
+        ))
     }
 }
 

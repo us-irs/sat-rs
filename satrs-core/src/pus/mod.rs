@@ -1017,7 +1017,7 @@ pub mod tests {
         ///
         /// The PUS service handler is instantiated with a [EcssTcInStoreConverter].
         pub fn new() -> (Self, PusServiceHelper<EcssTcInSharedStoreConverter>) {
-            let pool_cfg = StaticPoolConfig::new(vec![(16, 16), (8, 32), (4, 64)]);
+            let pool_cfg = StaticPoolConfig::new(vec![(16, 16), (8, 32), (4, 64)], false);
             let tc_pool = StaticMemoryPool::new(pool_cfg.clone());
             let tm_pool = StaticMemoryPool::new(pool_cfg);
             let shared_tc_pool = SharedStaticMemoryPool::new(RwLock::new(tc_pool));

@@ -945,7 +945,7 @@ mod tests {
 
     #[test]
     fn test_reset() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
@@ -1097,7 +1097,7 @@ mod tests {
     }
     #[test]
     fn test_release_telecommands() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
@@ -1163,7 +1163,7 @@ mod tests {
 
     #[test]
     fn release_multi_with_same_time() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
@@ -1221,7 +1221,7 @@ mod tests {
 
     #[test]
     fn release_with_scheduler_disabled() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
@@ -1291,7 +1291,7 @@ mod tests {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut buf: [u8; 32] = [0; 32];
         let tc_info_0 = ping_tc_to_store(&mut pool, &mut buf, 0, None);
 
@@ -1339,7 +1339,7 @@ mod tests {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
 
         let mut buf: [u8; 32] = [0; 32];
         let tc = scheduled_tc(UnixTimestamp::new_only_seconds(100), &mut buf);
@@ -1389,7 +1389,7 @@ mod tests {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
 
         let mut buf: [u8; 32] = [0; 32];
         let tc = wrong_tc_service(UnixTimestamp::new_only_seconds(100), &mut buf);
@@ -1412,7 +1412,7 @@ mod tests {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
 
         let mut buf: [u8; 32] = [0; 32];
         let tc = wrong_tc_subservice(UnixTimestamp::new_only_seconds(100), &mut buf);
@@ -1434,7 +1434,7 @@ mod tests {
     fn insert_wrapped_tc_faulty_app_data() {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let tc = invalid_time_tagged_cmd();
         let insert_res = scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool);
         assert!(insert_res.is_err());
@@ -1449,7 +1449,7 @@ mod tests {
     fn insert_doubly_wrapped_time_tagged_cmd() {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut buf: [u8; 64] = [0; 64];
         let tc = double_wrapped_time_tagged_tc(UnixTimestamp::new_only_seconds(50), &mut buf);
         let insert_res = scheduler.insert_wrapped_tc::<cds::TimeProvider>(&tc, &mut pool);
@@ -1485,7 +1485,7 @@ mod tests {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
 
         let mut buf: [u8; 32] = [0; 32];
 
@@ -1509,7 +1509,7 @@ mod tests {
 
     #[test]
     fn test_store_error_propagation_release() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
@@ -1544,7 +1544,7 @@ mod tests {
 
     #[test]
     fn test_store_error_propagation_reset() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
@@ -1568,7 +1568,7 @@ mod tests {
 
     #[test]
     fn test_delete_by_req_id_simple_retrieve_addr() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
@@ -1587,7 +1587,7 @@ mod tests {
 
     #[test]
     fn test_delete_by_req_id_simple_delete_all() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
@@ -1606,7 +1606,7 @@ mod tests {
 
     #[test]
     fn test_delete_by_req_id_complex() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
@@ -1653,7 +1653,7 @@ mod tests {
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(1, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(1, 64)], false));
 
         let mut buf: [u8; 32] = [0; 32];
         // Store is full after this.
@@ -1692,7 +1692,7 @@ mod tests {
 
     #[test]
     fn test_time_window_retrieval_select_all() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let tc_info_0 = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1723,7 +1723,7 @@ mod tests {
 
     #[test]
     fn test_time_window_retrieval_select_from_stamp() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let _ = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1754,7 +1754,7 @@ mod tests {
 
     #[test]
     fn test_time_window_retrieval_select_to_time() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let tc_info_0 = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1785,7 +1785,7 @@ mod tests {
 
     #[test]
     fn test_time_window_retrieval_select_from_time_to_time() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let _ = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1820,7 +1820,7 @@ mod tests {
 
     #[test]
     fn test_deletion_all() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1847,7 +1847,7 @@ mod tests {
 
     #[test]
     fn test_deletion_from_start_time() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1868,7 +1868,7 @@ mod tests {
 
     #[test]
     fn test_deletion_to_end_time() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let cmd_0_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1890,7 +1890,7 @@ mod tests {
 
     #[test]
     fn test_deletion_from_start_time_to_end_time() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
         let cmd_out_of_range_0 = insert_command_with_release_time(&mut pool, &mut scheduler, 0, 50);
@@ -1919,7 +1919,7 @@ mod tests {
 
     #[test]
     fn test_release_without_deletion() {
-        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)]));
+        let mut pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(10, 32), (5, 64)], false));
         let mut scheduler =
             PusScheduler::new(UnixTimestamp::new_only_seconds(0), Duration::from_secs(5));
 
