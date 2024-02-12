@@ -15,16 +15,13 @@ categories = ["aerospace", "aerospace::space-protocols", "no-std", "hardware-sup
 [dependencies]
 delegate = ">0.7, <=0.10"
 paste = "1"
-
-[dependencies.smallvec]
-version = "1"
+smallvec = "1"
+crc = "3"
+satrs-shared = "0.1.1"
 
 [dependencies.num_enum]
 version = ">0.5, <=0.7"
 default-features = false
-
-[dependencies.crc]
-version = "3"
 
 [dependencies.dyn-clone]
 version = "1"
@@ -70,9 +67,6 @@ version = "0.5.4"
 features = ["all"]
 optional = true
 
-[dependencies.satrs-shared]
-version = "0.1.1"
-
 [dependencies.spacepackets]
 version = "0.9"
 default-features = false
@@ -115,7 +109,7 @@ alloc = [
     "dyn-clone",
     "downcast-rs"
 ]
-serde = ["dep:serde", "spacepackets/serde"]
+serde = ["dep:serde", "spacepackets/serde", "satrs-shared/serde"]
 crossbeam = ["crossbeam-channel"]
 heapless = ["dep:heapless"]
 doc-images = []

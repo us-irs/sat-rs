@@ -15,7 +15,9 @@ RUN rustup install nightly && \
     rustup component add rustfmt clippy
 
 WORKDIR "/tmp"
-# RUN cargo install mdbook --no-default-features --features search --vers "^0.4" --locked
+# Install cargo-nextest
+RUN curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+# Install mdbook and mdbook-linkcheck
 RUN curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.37/mdbook-v0.4.37-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory /usr/local/bin
 RUN curl -sSL https://github.com/Michael-F-Bryan/mdbook-linkcheck/releases/latest/download/mdbook-linkcheck.x86_64-unknown-linux-gnu.zip -o mdbook-linkcheck.zip && \
     unzip mdbook-linkcheck.zip && \

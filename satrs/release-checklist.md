@@ -19,7 +19,5 @@ Checklist for new releases
 
 # Post-Release
 
-1. Create a new annotaged tag and push it with `git tag -a satrs-core-<version>` and
-   `git push -u origin satrs-core-<version>`
-2. Create a new release on `EGit` based on the tag.
+1. Create a new release on `EGit` with the name `satrs-<version>`.
 
