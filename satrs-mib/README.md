@@ -1,3 +1,6 @@
+[![Crates.io](https://img.shields.io/crates/v/satrs-mib)](https://crates.io/crates/satrs-mib)
+[![docs.rs](https://img.shields.io/docsrs/satrs-mib)](https://docs.rs/satrs-mib)
+
 satrs-mib
 =========
 
