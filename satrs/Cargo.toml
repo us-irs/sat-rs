@@ -71,8 +71,8 @@ features = ["all"]
 optional = true
 
 [dependencies.satrs-shared]
-# version = "0.1.0"
-path = "../satrs-shared"
+version = "0.1.1"
+# path = "../satrs-shared"
 
 [dependencies.spacepackets]
 version = "0.9"
