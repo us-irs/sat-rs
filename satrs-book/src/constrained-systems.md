@@ -33,6 +33,8 @@ of how the data is stored.
 This trait is implemented by a static memory pool implementation.
 The code to generate this static pool would look like this:
 
+<!-- Would be nice to test this code sample, but need to wait
+for https://github.com/rust-lang/mdBook/issues/706 to be merged.. -->
 ```rust, ignore
 use satrs::pool::{StaticMemoryPool, StaticPoolConfig};
 

@@ -7,7 +7,7 @@ authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
 description = """
 Helper crate of the sat-rs framework to build a mission information base (MIB) from the
 On-Board Software (OBSW) code directly."""
-homepage = "https://absatsw.uni-stuttgart.de/projects/sat-rs"
+homepage = "https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/"
 repository = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
 license = "Apache-2.0"
 keywords = ["no-std", "space", "aerospace"]
