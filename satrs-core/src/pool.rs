@@ -6,7 +6,7 @@
 //! use satrs_core::pool::{PoolProvider, StaticMemoryPool, StaticPoolConfig};
 //!
 //! // 4 buckets of 4 bytes, 2 of 8 bytes and 1 of 16 bytes
-//! let pool_cfg = StaticPoolConfig::new(vec![(4, 4), (2, 8), (1, 16)]);
+//! let pool_cfg = StaticPoolConfig::new(vec![(4, 4), (2, 8), (1, 16)], false);
 //! let mut local_pool = StaticMemoryPool::new(pool_cfg);
 //! let mut read_buf: [u8; 16] = [0; 16];
 //! let mut addr;
@@ -369,16 +369,24 @@ mod alloc_mod {
     ///
     /// # Parameters
     ///
-    /// * `cfg`: Vector of tuples which represent a subpool. The first entry in the tuple specifies the
-    ///       number of memory blocks in the subpool, the second entry the size of the blocks
+    /// * `cfg` - Vector of tuples which represent a subpool. The first entry in the tuple specifies
+    ///     the number of memory blocks in the subpool, the second entry the size of the blocks
+    /// * `spill_to_higher_subpools` - Specifies whether data will be spilled to higher subpools
+    ///     if the next fitting subpool is full. This is useful to ensure the pool remains useful
+    ///     for all data sizes as long as possible, but it might also lead to frequently used
+    ///     subpools which were not dimensioned properly chocking larger subpools.
     #[derive(Clone)]
     pub struct StaticPoolConfig {
         cfg: Vec<(NumBlocks, usize)>,
+        spill_to_higher_subpools: bool,
     }
 
     impl StaticPoolConfig {
-        pub fn new(cfg: Vec<(NumBlocks, usize)>) -> Self {
-            StaticPoolConfig { cfg }
+        pub fn new(cfg: Vec<(NumBlocks, usize)>, spill_to_higher_subpools: bool) -> Self {
+            StaticPoolConfig {
+                cfg,
+                spill_to_higher_subpools,
+            }
         }
 
         pub fn cfg(&self) -> &Vec<(NumBlocks, usize)> {
@@ -467,7 +475,17 @@ mod alloc_mod {
         }
 
         fn reserve(&mut self, data_len: usize) -> Result<StaticPoolAddr, StoreError> {
-            let subpool_idx = self.find_subpool(data_len, 0)?;
+            let mut subpool_idx = self.find_subpool(data_len, 0)?;
+
+            if self.pool_cfg.spill_to_higher_subpools {
+                while let Err(StoreError::StoreFull(_)) = self.find_empty(subpool_idx) {
+                    if (subpool_idx + 1) as usize == self.sizes_lists.len() {
+                        return Err(StoreError::StoreFull(subpool_idx));
+                    }
+                    subpool_idx += 1;
+                }
+            }
+
             let (slot, size_slot_ref) = self.find_empty(subpool_idx)?;
             *size_slot_ref = data_len;
             Ok(StaticPoolAddr {
@@ -639,22 +657,22 @@ mod tests {
 
     fn basic_small_pool() -> StaticMemoryPool {
         // 4 buckets of 4 bytes, 2 of 8 bytes and 1 of 16 bytes
-        let pool_cfg = StaticPoolConfig::new(vec![(4, 4), (2, 8), (1, 16)]);
+        let pool_cfg = StaticPoolConfig::new(vec![(4, 4), (2, 8), (1, 16)], false);
         StaticMemoryPool::new(pool_cfg)
     }
 
     #[test]
     fn test_cfg() {
         // Values where number of buckets is 0 or size is too large should be removed
-        let mut pool_cfg = StaticPoolConfig::new(vec![(0, 0), (1, 0), (2, POOL_MAX_SIZE)]);
+        let mut pool_cfg = StaticPoolConfig::new(vec![(0, 0), (1, 0), (2, POOL_MAX_SIZE)], false);
         pool_cfg.sanitize();
         assert_eq!(*pool_cfg.cfg(), vec![(1, 0)]);
         // Entries should be ordered according to bucket size
-        pool_cfg = StaticPoolConfig::new(vec![(16, 6), (32, 3), (8, 12)]);
+        pool_cfg = StaticPoolConfig::new(vec![(16, 6), (32, 3), (8, 12)], false);
         pool_cfg.sanitize();
         assert_eq!(*pool_cfg.cfg(), vec![(32, 3), (16, 6), (8, 12)]);
         // Unstable sort is used, so order of entries with same block length should not matter
-        pool_cfg = StaticPoolConfig::new(vec![(12, 12), (14, 16), (10, 12)]);
+        pool_cfg = StaticPoolConfig::new(vec![(12, 12), (14, 16), (10, 12)], false);
         pool_cfg.sanitize();
         assert!(
             *pool_cfg.cfg() == vec![(12, 12), (10, 12), (14, 16)]
@@ -946,5 +964,73 @@ mod tests {
                 assert_eq!(buf, test_buf_3);
             })
             .expect("Modifying data failed");
+    }
+
+    #[test]
+    fn test_spills_to_higher_subpools() {
+        let pool_cfg = StaticPoolConfig::new(vec![(2, 8), (2, 16)], true);
+        let mut local_pool = StaticMemoryPool::new(pool_cfg);
+        local_pool.free_element(8, |_| {}).unwrap();
+        local_pool.free_element(8, |_| {}).unwrap();
+        let mut in_larger_subpool_now = local_pool.free_element(8, |_| {});
+        assert!(in_larger_subpool_now.is_ok());
+        let generic_addr = in_larger_subpool_now.unwrap();
+        let pool_addr = StaticPoolAddr::from(generic_addr);
+        assert_eq!(pool_addr.pool_idx, 1);
+        assert_eq!(pool_addr.packet_idx, 0);
+        assert!(local_pool.has_element_at(&generic_addr).unwrap());
+        in_larger_subpool_now = local_pool.free_element(8, |_| {});
+        assert!(in_larger_subpool_now.is_ok());
+        let generic_addr = in_larger_subpool_now.unwrap();
+        let pool_addr = StaticPoolAddr::from(generic_addr);
+        assert_eq!(pool_addr.pool_idx, 1);
+        assert_eq!(pool_addr.packet_idx, 1);
+        assert!(local_pool.has_element_at(&generic_addr).unwrap());
+    }
+
+    #[test]
+    fn test_spillage_fails_as_well() {
+        let pool_cfg = StaticPoolConfig::new(vec![(1, 8), (1, 16)], true);
+        let mut local_pool = StaticMemoryPool::new(pool_cfg);
+        local_pool.free_element(8, |_| {}).unwrap();
+        local_pool.free_element(8, |_| {}).unwrap();
+        let should_fail = local_pool.free_element(8, |_| {});
+        assert!(should_fail.is_err());
+        if let Err(err) = should_fail {
+            assert_eq!(err, StoreError::StoreFull(1));
+        } else {
+            panic!("unexpected store address");
+        }
+    }
+
+    #[test]
+    fn test_spillage_works_across_multiple_subpools() {
+        let pool_cfg = StaticPoolConfig::new(vec![(1, 8), (1, 12), (1, 16)], true);
+        let mut local_pool = StaticMemoryPool::new(pool_cfg);
+        local_pool.free_element(8, |_| {}).unwrap();
+        local_pool.free_element(12, |_| {}).unwrap();
+        let in_larger_subpool_now = local_pool.free_element(8, |_| {});
+        assert!(in_larger_subpool_now.is_ok());
+        let generic_addr = in_larger_subpool_now.unwrap();
+        let pool_addr = StaticPoolAddr::from(generic_addr);
+        assert_eq!(pool_addr.pool_idx, 2);
+        assert_eq!(pool_addr.packet_idx, 0);
+        assert!(local_pool.has_element_at(&generic_addr).unwrap());
+    }
+
+    #[test]
+    fn test_spillage_fails_across_multiple_subpools() {
+        let pool_cfg = StaticPoolConfig::new(vec![(1, 8), (1, 12), (1, 16)], true);
+        let mut local_pool = StaticMemoryPool::new(pool_cfg);
+        local_pool.free_element(8, |_| {}).unwrap();
+        local_pool.free_element(12, |_| {}).unwrap();
+        local_pool.free_element(16, |_| {}).unwrap();
+        let should_fail = local_pool.free_element(8, |_| {});
+        assert!(should_fail.is_err());
+        if let Err(err) = should_fail {
+            assert_eq!(err, StoreError::StoreFull(2));
+        } else {
+            panic!("unexpected store address");
+        }
     }
 }

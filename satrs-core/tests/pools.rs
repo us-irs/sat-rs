@@ -9,7 +9,7 @@ const DUMMY_DATA: [u8; 4] = [0, 1, 2, 3];
 
 #[test]
 fn threaded_usage() {
-    let pool_cfg = StaticPoolConfig::new(vec![(16, 6), (32, 3), (8, 12)]);
+    let pool_cfg = StaticPoolConfig::new(vec![(16, 6), (32, 3), (8, 12)], false);
     let shared_pool = Arc::new(RwLock::new(StaticMemoryPool::new(pool_cfg)));
     let shared_clone = shared_pool.clone();
     let (tx, rx): (Sender<StoreAddr>, Receiver<StoreAddr>) = mpsc::channel();
