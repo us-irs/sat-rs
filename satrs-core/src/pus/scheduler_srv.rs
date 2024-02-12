@@ -1,4 +1,4 @@
-use super::scheduler::PusSchedulerInterface;
+use super::scheduler::PusSchedulerProvider;
 use super::{EcssTcInMemConverter, PusServiceBase, PusServiceHelper};
 use crate::pool::PoolProvider;
 use crate::pus::{PusPacketHandlerResult, PusPacketHandlingError};
@@ -16,13 +16,13 @@ use spacepackets::time::cds::TimeProvider;
 /// telecommands when applicable.
 pub struct PusService11SchedHandler<
     TcInMemConverter: EcssTcInMemConverter,
-    Scheduler: PusSchedulerInterface,
+    PusScheduler: PusSchedulerProvider,
 > {
     pub service_helper: PusServiceHelper<TcInMemConverter>,
-    scheduler: Scheduler,
+    scheduler: PusScheduler,
 }
 
-impl<TcInMemConverter: EcssTcInMemConverter, Scheduler: PusSchedulerInterface>
+impl<TcInMemConverter: EcssTcInMemConverter, Scheduler: PusSchedulerProvider>
     PusService11SchedHandler<TcInMemConverter, Scheduler>
 {
     pub fn new(service_helper: PusServiceHelper<TcInMemConverter>, scheduler: Scheduler) -> Self {
@@ -173,7 +173,7 @@ mod tests {
     use crate::pool::{StaticMemoryPool, StaticPoolConfig};
     use crate::pus::tests::TEST_APID;
     use crate::pus::{
-        scheduler::{self, PusSchedulerInterface, TcInfo},
+        scheduler::{self, PusSchedulerProvider, TcInfo},
         tests::{PusServiceHandlerWithSharedStoreCommon, PusTestHarness},
         verification::{RequestId, TcStateAccepted, VerificationToken},
         EcssTcInSharedStoreConverter,
@@ -232,7 +232,7 @@ mod tests {
         inserted_tcs: VecDeque<TcInfo>,
     }
 
-    impl PusSchedulerInterface for TestScheduler {
+    impl PusSchedulerProvider for TestScheduler {
         type TimeProvider = cds::TimeProvider;
 
         fn reset(
