@@ -1,0 +1,28 @@
+[package]
+name = "satrs-shared"
+description = "Components shared by multiple sat-rs crates"
+version = "0.1.0"
+edition = "2021"
+authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
+homepage = "https://absatsw.uni-stuttgart.de/projects/sat-rs"
+repository = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
+license = "Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+[dependencies.serde]
+version = "1"
+default-features = false
+optional = true
+
+[dependencies.spacepackets]
+version = "0.9"
+default-features = false
+
+[features]
+serde = ["dep:serde", "spacepackets/serde"]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "doc_cfg", "--generate-link-to-definition"]

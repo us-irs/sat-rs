@@ -19,8 +19,8 @@
 //!
 //! ```rust
 //! use spacepackets::ecss::WritablePusPacket;
-//! use satrs_core::tmtc::pus_distrib::{PusDistributor, PusServiceProvider};
-//! use satrs_core::tmtc::{ReceivesTc, ReceivesTcCore};
+//! use satrs::tmtc::pus_distrib::{PusDistributor, PusServiceProvider};
+//! use satrs::tmtc::{ReceivesTc, ReceivesTcCore};
 //! use spacepackets::SpHeader;
 //! use spacepackets::ecss::tc::{PusTcCreator, PusTcReader};
 //! struct ConcretePusHandler {

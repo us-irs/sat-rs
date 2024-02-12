@@ -1,11 +1,11 @@
 use crate::tmtc::MpscStoreAndSendError;
 use log::warn;
-use satrs_core::pus::verification::{FailParams, StdVerifReporterWithSender};
-use satrs_core::pus::{EcssTcAndToken, PusPacketHandlerResult, TcInMemory};
-use satrs_core::spacepackets::ecss::tc::PusTcReader;
-use satrs_core::spacepackets::ecss::PusServiceId;
-use satrs_core::spacepackets::time::cds::TimeProvider;
-use satrs_core::spacepackets::time::TimeWriter;
+use satrs::pus::verification::{FailParams, StdVerifReporterWithSender};
+use satrs::pus::{EcssTcAndToken, PusPacketHandlerResult, TcInMemory};
+use satrs::spacepackets::ecss::tc::PusTcReader;
+use satrs::spacepackets::ecss::PusServiceId;
+use satrs::spacepackets::time::cds::TimeProvider;
+use satrs::spacepackets::time::TimeWriter;
 use satrs_example::config::{tmtc_err, CustomPusServiceId};
 use std::sync::mpsc::Sender;
 

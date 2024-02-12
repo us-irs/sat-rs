@@ -1,10 +1,10 @@
-use satrs_core::res_code::ResultU16;
+use satrs::res_code::ResultU16;
 use satrs_mib::res_code::ResultU16Info;
 use satrs_mib::resultcode;
 use std::net::Ipv4Addr;
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use satrs_core::{
+use satrs::{
     events::{EventU32TypedSev, SeverityInfo},
     pool::{StaticMemoryPool, StaticPoolConfig},
 };
@@ -42,20 +42,20 @@ pub mod tmtc_err {
     use super::*;
 
     #[resultcode]
-    pub const INVALID_PUS_SERVICE: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 0);
+    pub const INVALID_PUS_SERVICE: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 0);
     #[resultcode]
-    pub const INVALID_PUS_SUBSERVICE: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 1);
+    pub const INVALID_PUS_SUBSERVICE: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 1);
     #[resultcode]
-    pub const PUS_SERVICE_NOT_IMPLEMENTED: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 2);
+    pub const PUS_SERVICE_NOT_IMPLEMENTED: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 2);
     #[resultcode]
-    pub const UNKNOWN_TARGET_ID: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 3);
+    pub const UNKNOWN_TARGET_ID: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 3);
 
     #[resultcode(
         info = "Not enough data inside the TC application data field. Optionally includes: \
           8 bytes of failure data containing 2 failure parameters, \
           P1 (u32 big endian): Expected data length, P2: Found data length"
     )]
-    pub const NOT_ENOUGH_APP_DATA: ResultU16 = ResultU16::const_new(GroupId::Tmtc as u8, 2);
+    pub const NOT_ENOUGH_APP_DATA: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 2);
 
     pub const TMTC_RESULTS: &[ResultU16Info] = &[
         INVALID_PUS_SERVICE_EXT,
@@ -69,13 +69,13 @@ pub mod hk_err {
     use super::*;
 
     #[resultcode]
-    pub const TARGET_ID_MISSING: ResultU16 = ResultU16::const_new(GroupId::Hk as u8, 0);
+    pub const TARGET_ID_MISSING: ResultU16 = ResultU16::new(GroupId::Hk as u8, 0);
     #[resultcode]
-    pub const UNIQUE_ID_MISSING: ResultU16 = ResultU16::const_new(GroupId::Hk as u8, 1);
+    pub const UNIQUE_ID_MISSING: ResultU16 = ResultU16::new(GroupId::Hk as u8, 1);
     #[resultcode]
-    pub const UNKNOWN_TARGET_ID: ResultU16 = ResultU16::const_new(GroupId::Hk as u8, 2);
+    pub const UNKNOWN_TARGET_ID: ResultU16 = ResultU16::new(GroupId::Hk as u8, 2);
     #[resultcode]
-    pub const COLLECTION_INTERVAL_MISSING: ResultU16 = ResultU16::const_new(GroupId::Hk as u8, 3);
+    pub const COLLECTION_INTERVAL_MISSING: ResultU16 = ResultU16::new(GroupId::Hk as u8, 3);
 }
 
 #[allow(clippy::enum_variant_names)]

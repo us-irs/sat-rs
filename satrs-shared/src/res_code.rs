@@ -4,6 +4,7 @@ use spacepackets::ecss::{EcssEnumU16, EcssEnumeration};
 use spacepackets::util::UnsignedEnum;
 use spacepackets::ByteConversionError;
 
+/// Simple [u16] based result code type which also allows to group related resultcodes.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ResultU16 {
@@ -12,7 +13,7 @@ pub struct ResultU16 {
 }
 
 impl ResultU16 {
-    pub const fn const_new(group_id: u8, unique_id: u8) -> Self {
+    pub const fn new(group_id: u8, unique_id: u8) -> Self {
         Self {
             group_id,
             unique_id,
@@ -56,5 +57,28 @@ impl UnsignedEnum for ResultU16 {
 impl EcssEnumeration for ResultU16 {
     fn pfc(&self) -> u8 {
         16
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RESULT_CODE_CONST: ResultU16 = ResultU16::new(1, 1);
+
+    #[test]
+    pub fn test_basic() {
+        let result_code = ResultU16::new(1, 1);
+        assert_eq!(result_code.unique_id(), 1);
+        assert_eq!(result_code.group_id(), 1);
+        assert_eq!(result_code, RESULT_CODE_CONST);
+        assert_eq!(result_code.raw(), (1_u16 << 8) | 1);
+        assert_eq!(result_code.pfc(), 16);
+        assert_eq!(result_code.size(), 2);
+        let mut buf: [u8; 2] = [0; 2];
+        let written = result_code.write_to_be_bytes(&mut buf).unwrap();
+        assert_eq!(written, 2);
+        assert_eq!(buf[0], 1);
+        assert_eq!(buf[1], 1);
     }
 }

@@ -8,7 +8,7 @@ use spacepackets::time::cds::TimeProvider;
 
 /// This is a helper class for [std] environments to handle generic PUS 11 (scheduling service)
 /// packets. This handler is able to handle the most important PUS requests for a scheduling
-/// service which provides the [PusSchedulerInterface].
+/// service which provides the [PusSchedulerProvider].
 ///
 /// Please note that this class does not do the regular periodic handling like releasing any
 /// telecommands inside the scheduler. The user can retrieve the wrapped scheduler via the

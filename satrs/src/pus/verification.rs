@@ -15,11 +15,11 @@
 //! ```
 //! use std::sync::{Arc, mpsc, RwLock};
 //! use std::time::Duration;
-//! use satrs_core::pool::{PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
-//! use satrs_core::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
-//! use satrs_core::seq_count::SeqCountProviderSimple;
-//! use satrs_core::pus::MpscTmInSharedPoolSender;
-//! use satrs_core::tmtc::tm_helper::SharedTmPool;
+//! use satrs::pool::{PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
+//! use satrs::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
+//! use satrs::seq_count::SeqCountProviderSimple;
+//! use satrs::pus::MpscTmInSharedPoolSender;
+//! use satrs::tmtc::tm_helper::SharedTmPool;
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
 //! use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};

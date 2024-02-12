@@ -1,4 +1,4 @@
-use satrs_core::pool::{PoolGuard, PoolProvider, StaticMemoryPool, StaticPoolConfig, StoreAddr};
+use satrs::pool::{PoolGuard, PoolProvider, StaticMemoryPool, StaticPoolConfig, StoreAddr};
 use std::ops::DerefMut;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};

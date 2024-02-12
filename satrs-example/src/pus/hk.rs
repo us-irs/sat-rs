@@ -1,18 +1,18 @@
 use crate::requests::{Request, RequestWithToken};
 use log::{error, warn};
-use satrs_core::hk::{CollectionIntervalFactor, HkRequest};
-use satrs_core::pool::{SharedStaticMemoryPool, StoreAddr};
-use satrs_core::pus::verification::{
+use satrs::hk::{CollectionIntervalFactor, HkRequest};
+use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
+use satrs::pus::verification::{
     FailParams, StdVerifReporterWithSender, VerificationReporterWithSender,
 };
-use satrs_core::pus::{
+use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
     EcssTcReceiver, EcssTmSender, MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSender,
     PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHelper,
 };
-use satrs_core::spacepackets::ecss::{hk, PusPacket};
-use satrs_core::tmtc::tm_helper::SharedTmPool;
-use satrs_core::ChannelId;
+use satrs::spacepackets::ecss::{hk, PusPacket};
+use satrs::tmtc::tm_helper::SharedTmPool;
+use satrs::ChannelId;
 use satrs_example::config::{hk_err, tmtc_err, TcReceiverId, TmSenderId, PUS_APID};
 use satrs_example::TargetIdWithApid;
 use std::collections::HashMap;

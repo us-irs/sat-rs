@@ -13,7 +13,7 @@ use cobs::{decode_in_place, encode, max_encoding_length};
 ///
 /// ```
 /// use cobs::decode_in_place_report;
-/// use satrs_core::encoding::{encode_packet_with_cobs};
+/// use satrs::encoding::{encode_packet_with_cobs};
 //
 /// const SIMPLE_PACKET: [u8; 5] = [1, 2, 3, 4, 5];
 /// const INVERTED_PACKET: [u8; 5] = [5, 4, 3, 2, 1];

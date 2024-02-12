@@ -22,7 +22,7 @@ use std::{
 };
 
 use hashbrown::HashSet;
-use satrs_core::{
+use satrs::{
     encoding::cobs::encode_packet_with_cobs,
     hal::std::tcp_server::{ServerConfig, TcpSpacepacketsServer, TcpTmtcInCobsServer},
     tmtc::{ReceivesTcCore, TmPacketSourceCore},

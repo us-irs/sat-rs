@@ -2,17 +2,17 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use log::{error, info, warn};
-use satrs_core::pool::{PoolProvider, StaticMemoryPool, StoreAddr};
-use satrs_core::pus::scheduler::{PusScheduler, TcInfo};
-use satrs_core::pus::scheduler_srv::PusService11SchedHandler;
-use satrs_core::pus::verification::VerificationReporterWithSender;
-use satrs_core::pus::{
+use satrs::pool::{PoolProvider, StaticMemoryPool, StoreAddr};
+use satrs::pus::scheduler::{PusScheduler, TcInfo};
+use satrs::pus::scheduler_srv::PusService11SchedHandler;
+use satrs::pus::verification::VerificationReporterWithSender;
+use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
     MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSender, PusPacketHandlerResult,
     PusServiceHelper,
 };
-use satrs_core::tmtc::tm_helper::SharedTmPool;
-use satrs_core::ChannelId;
+use satrs::tmtc::tm_helper::SharedTmPool;
+use satrs::ChannelId;
 use satrs_example::config::{TcReceiverId, TmSenderId, PUS_APID};
 
 use crate::tmtc::PusTcSourceProviderSharedPool;

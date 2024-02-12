@@ -1,6 +1,6 @@
 use std::sync::mpsc::{self, SendError};
 
-use satrs_core::{
+use satrs::{
     event_man::{
         EventManager, EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider,
         SendEventProvider,

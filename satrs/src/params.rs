@@ -13,7 +13,7 @@
 //! ## Example for primitive type wrapper
 //!
 //! ```
-//! use satrs_core::params::{ParamsRaw, ToBeBytes, U32Pair, WritableToBeBytes};
+//! use satrs::params::{ParamsRaw, ToBeBytes, U32Pair, WritableToBeBytes};
 //!
 //! let u32_pair = U32Pair(0x1010, 25);
 //! assert_eq!(u32_pair.0, 0x1010);

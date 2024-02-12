@@ -1,13 +1,11 @@
-use satrs_core::event_man::{
+use satrs::event_man::{
     EventManagerWithMpscQueue, MpscEventU32Receiver, MpscEventU32SendProvider, SendEventProvider,
 };
-use satrs_core::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
-use satrs_core::params::U32Pair;
-use satrs_core::params::{Params, ParamsHeapless, WritableToBeBytes};
-use satrs_core::pus::event_man::{
-    DefaultPusMgmtBackendProvider, EventReporter, PusEventDispatcher,
-};
-use satrs_core::pus::MpscTmAsVecSender;
+use satrs::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
+use satrs::params::U32Pair;
+use satrs::params::{Params, ParamsHeapless, WritableToBeBytes};
+use satrs::pus::event_man::{DefaultPusMgmtBackendProvider, EventReporter, PusEventDispatcher};
+use satrs::pus::MpscTmAsVecSender;
 use spacepackets::ecss::tm::PusTmReader;
 use spacepackets::ecss::{PusError, PusPacket};
 use std::sync::mpsc::{channel, SendError, TryRecvError};

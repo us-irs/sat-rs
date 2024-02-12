@@ -4,7 +4,7 @@ use std::{
 };
 
 use log::{info, warn};
-use satrs_core::{
+use satrs::{
     hal::std::tcp_server::{ServerConfig, TcpSpacepacketsServer},
     spacepackets::PacketId,
     tmtc::{CcsdsDistributor, CcsdsError, TmPacketSourceCore},

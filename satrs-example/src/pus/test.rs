@@ -1,19 +1,19 @@
 use log::{info, warn};
-use satrs_core::params::Params;
-use satrs_core::pool::{SharedStaticMemoryPool, StoreAddr};
-use satrs_core::pus::test::PusService17TestHandler;
-use satrs_core::pus::verification::{FailParams, VerificationReporterWithSender};
-use satrs_core::pus::{
+use satrs::params::Params;
+use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
+use satrs::pus::test::PusService17TestHandler;
+use satrs::pus::verification::{FailParams, VerificationReporterWithSender};
+use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter, MpscTcReceiver, MpscTmAsVecSender,
     MpscTmInSharedPoolSender, PusPacketHandlerResult, PusServiceHelper,
 };
-use satrs_core::spacepackets::ecss::tc::PusTcReader;
-use satrs_core::spacepackets::ecss::PusPacket;
-use satrs_core::spacepackets::time::cds::TimeProvider;
-use satrs_core::spacepackets::time::TimeWriter;
-use satrs_core::tmtc::tm_helper::SharedTmPool;
-use satrs_core::ChannelId;
-use satrs_core::{events::EventU32, pus::EcssTcInSharedStoreConverter};
+use satrs::spacepackets::ecss::tc::PusTcReader;
+use satrs::spacepackets::ecss::PusPacket;
+use satrs::spacepackets::time::cds::TimeProvider;
+use satrs::spacepackets::time::TimeWriter;
+use satrs::tmtc::tm_helper::SharedTmPool;
+use satrs::ChannelId;
+use satrs::{events::EventU32, pus::EcssTcInSharedStoreConverter};
 use satrs_example::config::{tmtc_err, TcReceiverId, TmSenderId, PUS_APID, TEST_EVENT};
 use std::sync::mpsc::{self, Sender};
 

@@ -4,7 +4,7 @@ use std::{
 };
 
 use log::info;
-use satrs_core::{
+use satrs::{
     pool::{PoolProvider, StoreAddr},
     seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore},
     spacepackets::{
