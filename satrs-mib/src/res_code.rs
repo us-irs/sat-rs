@@ -73,6 +73,7 @@ pub mod stdmod {
         Ok(())
     }
 
+    /// This function exports a slice of result code information objects to a CSV file.
     pub fn write_resultcodes_to_csv(
         writer_builder: csv::WriterBuilder,
         results: &[ResultU16Info],
