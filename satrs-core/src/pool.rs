@@ -1,5 +1,12 @@
 //! # Pool implementation providing memory pools for packet storage.
 //!
+//! This module provides generic abstractions for memory pools which provide a storage
+//! machanism for variable sized data like Telemetry and Telecommand (TMTC) packets. The core
+//! abstraction for this is the [PoolProvider] trait.
+//!
+//! It also contains the [StaticMemoryPool] as a concrete implementation which can be used to avoid
+//! dynamic run-time allocations for the storage of TMTC packets.
+//!
 //! # Example for the [StaticMemoryPool]
 //!
 //! ```
@@ -373,8 +380,8 @@ mod alloc_mod {
     ///     the number of memory blocks in the subpool, the second entry the size of the blocks
     /// * `spill_to_higher_subpools` - Specifies whether data will be spilled to higher subpools
     ///     if the next fitting subpool is full. This is useful to ensure the pool remains useful
-    ///     for all data sizes as long as possible, but it might also lead to frequently used
-    ///     subpools which were not dimensioned properly chocking larger subpools.
+    ///     for all data sizes as long as possible. However, an undesirable side-effect might be
+    ///     the chocking of larger subpools by underdimensioned smaller subpools.
     #[derive(Clone)]
     pub struct StaticPoolConfig {
         cfg: Vec<(NumBlocks, usize)>,
