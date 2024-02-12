@@ -1,6 +1,6 @@
 [package]
 name = "satrs-mib"
-version = "0.1.0-alpha.2"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.61"
 authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
@@ -23,8 +23,7 @@ version = "1"
 optional = true
 
 [dependencies.satrs-shared]
-# version = "0.1.0"
-path = "../satrs-shared"
+version = "0.1.1"
 features = ["serde"]
 
 [dependencies.satrs-mib-codegen]

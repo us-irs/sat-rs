@@ -31,5 +31,4 @@ trybuild = { version = "1", features = ["diff"] }
 path = ".."
 
 [dev-dependencies.satrs-shared]
-# version = "0.1.0"
-path = "../../satrs-shared"
+version = "0.1.1"
