@@ -1,6 +1,6 @@
 [package]
 name = "satrs-mib-codegen"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 edition = "2021"
 description = "satrs-mib proc macro implementation"
 homepage = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
@@ -20,8 +20,8 @@ quote = "1"
 proc-macro2 = "1"
 
 [dependencies.satrs-core]
-path = "../../satrs-core"
-# version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.3"
+# path = "../../satrs-core"
 # git = "https://egit.irs.uni-stuttgart.de/rust/sat-rs.git"
 # branch = "main"
 # rev = "35e1f7a983f6535c5571186e361fe101d4306b89"
