@@ -1,7 +1,7 @@
-use satrs_core::pus::verification::RequestId;
-use satrs_core::spacepackets::ecss::tc::PusTcCreator;
-use satrs_core::spacepackets::ecss::tm::PusTmReader;
-use satrs_core::{
+use satrs::pus::verification::RequestId;
+use satrs::spacepackets::ecss::tc::PusTcCreator;
+use satrs::spacepackets::ecss::tm::PusTmReader;
+use satrs::{
     spacepackets::ecss::{PusPacket, WritablePusPacket},
     spacepackets::SpHeader,
 };

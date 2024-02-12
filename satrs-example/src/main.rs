@@ -15,9 +15,9 @@ use crate::pus::stack::PusStack;
 use crate::tm_funnel::{TmFunnelDynamic, TmFunnelStatic};
 use log::info;
 use pus::test::create_test_service_dynamic;
-use satrs_core::hal::std::tcp_server::ServerConfig;
-use satrs_core::hal::std::udp_server::UdpTcServer;
-use satrs_core::tmtc::tm_helper::SharedTmPool;
+use satrs::hal::std::tcp_server::ServerConfig;
+use satrs::hal::std::udp_server::UdpTcServer;
+use satrs::tmtc::tm_helper::SharedTmPool;
 use satrs_example::config::pool::{create_sched_tc_pool, create_static_pools};
 use satrs_example::config::tasks::{
     FREQ_MS_AOCS, FREQ_MS_EVENT_HANDLING, FREQ_MS_PUS_STACK, FREQ_MS_UDP_TMTC,
@@ -41,12 +41,12 @@ use crate::tmtc::{
     PusTcSourceProviderSharedPool, SharedTcPool, TcSourceTaskDynamic, TcSourceTaskStatic,
 };
 use crate::udp::{StaticUdpTmHandler, UdpTmtcServer};
-use satrs_core::pus::event_man::EventRequestWithToken;
-use satrs_core::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
-use satrs_core::pus::{EcssTmSender, MpscTmAsVecSender, MpscTmInSharedPoolSender};
-use satrs_core::spacepackets::{time::cds::TimeProvider, time::TimeWriter};
-use satrs_core::tmtc::{CcsdsDistributor, TargetId};
-use satrs_core::ChannelId;
+use satrs::pus::event_man::EventRequestWithToken;
+use satrs::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
+use satrs::pus::{EcssTmSender, MpscTmAsVecSender, MpscTmInSharedPoolSender};
+use satrs::spacepackets::{time::cds::TimeProvider, time::TimeWriter};
+use satrs::tmtc::{CcsdsDistributor, TargetId};
+use satrs::ChannelId;
 use satrs_example::TargetIdWithApid;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};

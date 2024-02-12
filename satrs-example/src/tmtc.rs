@@ -1,14 +1,14 @@
 use log::warn;
-use satrs_core::pus::{EcssTcAndToken, ReceivesEcssPusTc};
-use satrs_core::spacepackets::SpHeader;
+use satrs::pus::{EcssTcAndToken, ReceivesEcssPusTc};
+use satrs::spacepackets::SpHeader;
 use std::sync::mpsc::{self, Receiver, SendError, Sender, TryRecvError};
 use thiserror::Error;
 
 use crate::pus::PusReceiver;
-use satrs_core::pool::{PoolProvider, SharedStaticMemoryPool, StoreAddr, StoreError};
-use satrs_core::spacepackets::ecss::tc::PusTcReader;
-use satrs_core::spacepackets::ecss::PusPacket;
-use satrs_core::tmtc::ReceivesCcsdsTc;
+use satrs::pool::{PoolProvider, SharedStaticMemoryPool, StoreAddr, StoreError};
+use satrs::spacepackets::ecss::tc::PusTcReader;
+use satrs::spacepackets::ecss::PusPacket;
+use satrs::tmtc::ReceivesCcsdsTc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum MpscStoreAndSendError {
@@ -133,7 +133,7 @@ impl TcSourceTaskStatic {
                     Ok((pus_tc, _)) => {
                         self.pus_receiver
                             .handle_tc_packet(
-                                satrs_core::pus::TcInMemory::StoreAddr(addr),
+                                satrs::pus::TcInMemory::StoreAddr(addr),
                                 pus_tc.service(),
                                 &pus_tc,
                             )
@@ -182,7 +182,7 @@ impl TcSourceTaskDynamic {
                 Ok((pus_tc, _)) => {
                     self.pus_receiver
                         .handle_tc_packet(
-                            satrs_core::pus::TcInMemory::Vec(tc.clone()),
+                            satrs::pus::TcInMemory::Vec(tc.clone()),
                             pus_tc.service(),
                             &pus_tc,
                         )

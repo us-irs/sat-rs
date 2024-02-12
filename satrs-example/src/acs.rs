@@ -1,10 +1,10 @@
 use std::sync::mpsc::{self, TryRecvError};
 
 use log::{info, warn};
-use satrs_core::pus::verification::VerificationReporterWithSender;
-use satrs_core::pus::{EcssTmSender, PusTmWrapper};
-use satrs_core::spacepackets::ecss::hk::Subservice as HkSubservice;
-use satrs_core::{
+use satrs::pus::verification::VerificationReporterWithSender;
+use satrs::pus::{EcssTmSender, PusTmWrapper};
+use satrs::spacepackets::ecss::hk::Subservice as HkSubservice;
+use satrs::{
     hk::HkRequest,
     spacepackets::{
         ecss::tm::{PusTmCreator, PusTmSecondaryHeader},

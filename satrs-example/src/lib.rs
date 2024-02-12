@@ -1,8 +1,8 @@
 use derive_new::new;
-use satrs_core::spacepackets::ecss::tc::IsPusTelecommand;
-use satrs_core::spacepackets::ecss::PusPacket;
-use satrs_core::spacepackets::{ByteConversionError, CcsdsPacket};
-use satrs_core::tmtc::TargetId;
+use satrs::spacepackets::ecss::tc::IsPusTelecommand;
+use satrs::spacepackets::ecss::PusPacket;
+use satrs::spacepackets::{ByteConversionError, CcsdsPacket};
+use satrs::tmtc::TargetId;
 use std::fmt;
 use thiserror::Error;
 

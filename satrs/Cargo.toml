@@ -1,16 +1,16 @@
 [package]
-name = "satrs-core"
-version = "0.1.0-alpha.3"
+name = "satrs"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.61"
 authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
-description = "Core components of the sat-rs framework to build software for remote systems"
-homepage = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
+description = "A framework to build software for remote systems"
+homepage = "https://absatsw.uni-stuttgart.de/projects/sat-rs"
 repository = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
 license = "Apache-2.0"
 keywords = ["no-std", "space", "aerospace"]
-categories = ["aerospace", "aerospace::space-protocols", "no-std", "hardware-support", "embedded"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+categories = ["aerospace", "aerospace::space-protocols", "no-std", "hardware-support", "embedded"]
 
 [dependencies]
 delegate = ">0.7, <=0.10"
@@ -70,12 +70,13 @@ version = "0.5.4"
 features = ["all"]
 optional = true
 
+[dependencies.satrs-shared]
+# version = "0.1.0"
+path = "../satrs-shared"
+
 [dependencies.spacepackets]
-version = "0.9.0"
+version = "0.9"
 default-features = false
-# git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
-# rev = "297cfad22637d3b07a1b27abe56d9a607b5b82a7"
-# branch = "main"
 
 [dependencies.cobs]
 git = "https://github.com/robamu/cobs.rs.git"

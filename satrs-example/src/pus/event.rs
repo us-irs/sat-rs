@@ -1,17 +1,17 @@
 use std::sync::mpsc;
 
 use log::{error, warn};
-use satrs_core::pool::{SharedStaticMemoryPool, StoreAddr};
-use satrs_core::pus::event_man::EventRequestWithToken;
-use satrs_core::pus::event_srv::PusService5EventHandler;
-use satrs_core::pus::verification::VerificationReporterWithSender;
-use satrs_core::pus::{
+use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
+use satrs::pus::event_man::EventRequestWithToken;
+use satrs::pus::event_srv::PusService5EventHandler;
+use satrs::pus::verification::VerificationReporterWithSender;
+use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
     MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSender, PusPacketHandlerResult,
     PusServiceHelper,
 };
-use satrs_core::tmtc::tm_helper::SharedTmPool;
-use satrs_core::ChannelId;
+use satrs::tmtc::tm_helper::SharedTmPool;
+use satrs::ChannelId;
 use satrs_example::config::{TcReceiverId, TmSenderId, PUS_APID};
 
 pub fn create_event_service_static(

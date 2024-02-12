@@ -22,12 +22,12 @@ This project currently contains following crates:
    Primary information resource in addition to the API documentation, hosted
    [here](https://documentation.irs.uni-stuttgart.de/projects/sat-rs/). It can be useful to read
    this first before delving into the example application and the API documentation.
-* [`satrs-core`](https://egit.irs.uni-stuttgart.de/rust/satrs-launchpad/src/branch/main/satrs-core):
-   Core components of sat-rs.
-* [`satrs-example`](https://egit.irs.uni-stuttgart.de/rust/satrs-launchpad/src/branch/main/satrs-example):
+* [`satrs`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs):
+   Primary crate.
+* [`satrs-example`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example):
    Example of a simple example on-board software using various sat-rs components which can be run
    on a host computer or on any system with a standard runtime like a Raspberry Pi.
-* [`satrs-mib`](https://egit.irs.uni-stuttgart.de/rust/satrs-launchpad/src/branch/main/satrs-mib):
+* [`satrs-mib`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-mib):
    Components to build a mission information base from the on-board software directly.
 * [`satrs-example-stm32f3-disco`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example-stm32f3-disco):
    Example of a simple example on-board software using sat-rs components on a bare-metal system

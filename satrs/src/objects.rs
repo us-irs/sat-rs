@@ -10,7 +10,7 @@
 //! ```rust
 //! use std::any::Any;
 //! use std::error::Error;
-//! use satrs_core::objects::{ManagedSystemObject, ObjectId, ObjectManager, SystemObject};
+//! use satrs::objects::{ManagedSystemObject, ObjectId, ObjectManager, SystemObject};
 //!
 //! struct ExampleSysObj {
 //!     id: ObjectId,

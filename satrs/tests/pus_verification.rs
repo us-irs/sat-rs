@@ -1,14 +1,12 @@
 //#[cfg(feature = "crossbeam")]
 pub mod crossbeam_test {
     use hashbrown::HashMap;
-    use satrs_core::pool::{
-        PoolProvider, PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig,
-    };
-    use satrs_core::pus::verification::{
+    use satrs::pool::{PoolProvider, PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
+    use satrs::pus::verification::{
         FailParams, RequestId, VerificationReporterCfg, VerificationReporterWithSender,
     };
-    use satrs_core::pus::CrossbeamTmInStoreSender;
-    use satrs_core::tmtc::tm_helper::SharedTmPool;
+    use satrs::pus::CrossbeamTmInStoreSender;
+    use satrs::tmtc::tm_helper::SharedTmPool;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTmReader;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket, WritablePusPacket};

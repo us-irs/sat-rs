@@ -1,4 +1,4 @@
-use satrs_core::pus::EcssTcInMemConverter;
+use satrs::pus::EcssTcInMemConverter;
 
 use super::{
     action::Pus8Wrapper, event::Pus5Wrapper, hk::Pus3Wrapper, scheduler::Pus11Wrapper,

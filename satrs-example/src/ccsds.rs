@@ -1,6 +1,6 @@
-use satrs_core::pus::ReceivesEcssPusTc;
-use satrs_core::spacepackets::{CcsdsPacket, SpHeader};
-use satrs_core::tmtc::{CcsdsPacketHandler, ReceivesCcsdsTc};
+use satrs::pus::ReceivesEcssPusTc;
+use satrs::spacepackets::{CcsdsPacket, SpHeader};
+use satrs::tmtc::{CcsdsPacketHandler, ReceivesCcsdsTc};
 use satrs_example::config::PUS_APID;
 
 #[derive(Clone)]

@@ -4,7 +4,7 @@ use std::{
 };
 
 use log::{info, warn};
-use satrs_core::{
+use satrs::{
     hal::std::udp_server::{ReceiveResult, UdpTcServer},
     pool::{PoolProviderWithGuards, SharedStaticMemoryPool, StoreAddr},
     tmtc::CcsdsError,
@@ -113,7 +113,7 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use satrs_core::{
+    use satrs::{
         spacepackets::{
             ecss::{tc::PusTcCreator, WritablePusPacket},
             SpHeader,

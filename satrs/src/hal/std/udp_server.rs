@@ -20,8 +20,8 @@ use std::vec::Vec;
 /// ```
 /// use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 /// use spacepackets::ecss::WritablePusPacket;
-/// use satrs_core::hal::std::udp_server::UdpTcServer;
-/// use satrs_core::tmtc::{ReceivesTc, ReceivesTcCore};
+/// use satrs::hal::std::udp_server::UdpTcServer;
+/// use satrs::tmtc::{ReceivesTc, ReceivesTcCore};
 /// use spacepackets::SpHeader;
 /// use spacepackets::ecss::tc::PusTcCreator;
 ///

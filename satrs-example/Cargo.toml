@@ -19,13 +19,13 @@ num_enum = "0.7"
 thiserror = "1"
 derive-new = "0.5"
 
-[dependencies.satrs-core]
-version = "0.1.0-alpha.3"
-# path = "../satrs-core"
+[dependencies.satrs]
+# version = "0.1.0-alpha.3"
+path = "../satrs"
 
 [dependencies.satrs-mib]
-version = "0.1.0-alpha.2"
-# path = "../satrs-mib"
+# version = "0.1.0-alpha.2"
+path = "../satrs-mib"
 
 [features]
 dyn_tmtc = []

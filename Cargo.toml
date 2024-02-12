@@ -1,9 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "satrs-core",
+    "satrs",
     "satrs-mib",
     "satrs-example",
+    "satrs-shared",
 ]
 
 exclude = [

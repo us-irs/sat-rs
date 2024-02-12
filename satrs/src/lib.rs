@@ -1,4 +1,4 @@
-//! # Core components of the sat-rs framework
+//! # sat-rs: A framework to build on-board software for remote systems
 //!
 //! You can find more information about the sat-rs framework on the
 //! [homepage](https://egit.irs.uni-stuttgart.de/rust/sat-rs).

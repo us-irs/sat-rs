@@ -1,5 +1,5 @@
 use derive_new::new;
-use satrs_core::spacepackets::ByteConversionError;
+use satrs::spacepackets::ByteConversionError;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum AcsHkIds {

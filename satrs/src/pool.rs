@@ -10,7 +10,7 @@
 //! # Example for the [StaticMemoryPool]
 //!
 //! ```
-//! use satrs_core::pool::{PoolProvider, StaticMemoryPool, StaticPoolConfig};
+//! use satrs::pool::{PoolProvider, StaticMemoryPool, StaticPoolConfig};
 //!
 //! // 4 buckets of 4 bytes, 2 of 8 bytes and 1 of 16 bytes
 //! let pool_cfg = StaticPoolConfig::new(vec![(4, 4), (2, 8), (1, 16)], false);
