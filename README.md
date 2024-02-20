@@ -2,6 +2,8 @@
 
 [![Crates.io](https://img.shields.io/crates/v/satrs)](https://crates.io/crates/satrs)
 [![docs.rs](https://img.shields.io/docsrs/satrs)](https://docs.rs/satrs)
+![sat-rs book](https://img.shields.io/badge/sat--rs-book-green?style=flat&link=https%3A%2F%2Fabsatsw.irs.uni-stuttgart.de%2Fprojects%2Fsat-rs%2F)
+
 
 sat-rs
 =========
