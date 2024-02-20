@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - New `VerificationReportingProvider` abstraction to avoid relying on a concrete verification
   reporting provider.
 
+## Changed
+
+- Verification reporter API timestamp arguments are not `Option`al anymore. Empty timestamps
+  can be passed by simply specifying the `&[]` empty slice argument.
+
 # [v0.1.1] 2024-02-12
 
 - Minor fixes for crate config `homepage` entries and links in documentation.
