@@ -20,8 +20,6 @@ pub use ccsds_distrib::{CcsdsDistributor, CcsdsError, CcsdsPacketHandler};
 #[cfg(feature = "alloc")]
 pub use pus_distrib::{PusDistributor, PusServiceProvider};
 
-pub type TargetId = u32;
-
 /// Generic trait for object which can receive any telecommands in form of a raw bytestream, with
 /// no assumptions about the received protocol.
 ///

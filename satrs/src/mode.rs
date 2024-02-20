@@ -1,8 +1,9 @@
-use crate::tmtc::TargetId;
 use core::mem::size_of;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use spacepackets::ByteConversionError;
+
+use crate::TargetId;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -47,12 +48,12 @@ impl ModeAndSubmode {
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ModeCommand {
+pub struct TargetedModeCommand {
     pub address: TargetId,
     pub mode_submode: ModeAndSubmode,
 }
 
-impl ModeCommand {
+impl TargetedModeCommand {
     pub const fn new(address: TargetId, mode_submode: ModeAndSubmode) -> Self {
         Self {
             address,

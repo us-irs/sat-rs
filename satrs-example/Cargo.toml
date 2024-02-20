@@ -20,12 +20,12 @@ thiserror = "1"
 derive-new = "0.5"
 
 [dependencies.satrs]
-version = "0.1.1"
-# path = "../satrs"
+# version = "0.1.1"
+path = "../satrs"
 
 [dependencies.satrs-mib]
-version = "0.1.0"
-# path = "../satrs-mib"
+# version = "0.1.0"
+path = "../satrs-mib"
 
 [features]
 dyn_tmtc = []

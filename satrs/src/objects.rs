@@ -51,7 +51,6 @@
 //!  assert_eq!(example_obj.id, obj_id);
 //!  assert_eq!(example_obj.dummy, 42);
 //! ```
-use crate::tmtc::TargetId;
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
@@ -62,6 +61,8 @@ use downcast_rs::Downcast;
 use hashbrown::HashMap;
 #[cfg(feature = "std")]
 use std::error::Error;
+
+use crate::TargetId;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub struct ObjectId {

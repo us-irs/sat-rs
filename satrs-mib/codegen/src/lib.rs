@@ -3,10 +3,12 @@ use syn::{parse_macro_input, ItemConst, LitStr};
 
 /// This macro can be used to automatically generate introspection information for return codes.
 ///
-/// For example, it can be applied to types like the [satrs_shared::res_code::ResultU16] type
-/// to automatically generate [satrs_mib::res_code::ResultU16Info] instances. These instances
-/// can then be used for tasks like generating CSVs or YAML files with the list of all result
-/// codes. This information is valuable for both operators and developers.
+/// For example, it can be applied to types like the
+/// [`satrs_mib::res_code::ResultU16`](https://docs.rs/satrs-mib/latest/satrs_mib/res_code/struct.ResultU16.html#) type
+/// to automatically generate
+/// [`satrs_mib::res_code::ResultU16Info`](https://docs.rs/satrs-mib/latest/satrs_mib/res_code/struct.ResultU16Info.html)
+/// instances. These instances can then be used for tasks like generating CSVs or YAML files with
+/// the list of all result codes. This information is valuable for both operators and developers.
 #[proc_macro_attribute]
 pub fn resultcode(
     args: proc_macro::TokenStream,

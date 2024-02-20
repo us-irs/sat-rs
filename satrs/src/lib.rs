@@ -34,19 +34,25 @@ pub mod events;
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod executable;
 pub mod hal;
-pub mod hk;
-pub mod mode;
 pub mod objects;
-pub mod params;
 pub mod pool;
 pub mod power;
 pub mod pus;
+pub mod queue;
 pub mod request;
 pub mod res_code;
 pub mod seq_count;
 pub mod tmtc;
 
+pub mod action;
+pub mod hk;
+pub mod mode;
+pub mod params;
+
 pub use spacepackets;
 
-// Generic channel ID type.
+/// Generic channel ID type.
 pub type ChannelId = u32;
+
+/// Generic target ID type.
+pub type TargetId = u64;

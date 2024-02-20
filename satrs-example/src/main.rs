@@ -17,6 +17,7 @@ use log::info;
 use pus::test::create_test_service_dynamic;
 use satrs::hal::std::tcp_server::ServerConfig;
 use satrs::hal::std::udp_server::UdpTcServer;
+use satrs::request::TargetAndApidId;
 use satrs::tmtc::tm_helper::SharedTmPool;
 use satrs_example::config::pool::{create_sched_tc_pool, create_static_pools};
 use satrs_example::config::tasks::{
@@ -35,7 +36,7 @@ use crate::pus::hk::{create_hk_service_dynamic, create_hk_service_static};
 use crate::pus::scheduler::{create_scheduler_service_dynamic, create_scheduler_service_static};
 use crate::pus::test::create_test_service_static;
 use crate::pus::{PusReceiver, PusTcMpscRouter};
-use crate::requests::RequestWithToken;
+use crate::requests::{GenericRequestRouter, RequestWithToken};
 use crate::tcp::{SyncTcpTmSource, TcpTask};
 use crate::tmtc::{
     PusTcSourceProviderSharedPool, SharedTcPool, TcSourceTaskDynamic, TcSourceTaskStatic,
@@ -45,10 +46,8 @@ use satrs::pus::event_man::EventRequestWithToken;
 use satrs::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
 use satrs::pus::{EcssTmSender, MpscTmAsVecSender, MpscTmInSharedPoolSender};
 use satrs::spacepackets::{time::cds::TimeProvider, time::TimeWriter};
-use satrs::tmtc::{CcsdsDistributor, TargetId};
+use satrs::tmtc::CcsdsDistributor;
 use satrs::ChannelId;
-use satrs_example::TargetIdWithApid;
-use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{self, channel};
 use std::sync::{Arc, RwLock};
@@ -82,11 +81,11 @@ fn static_tmtc_pool_main() {
         tm_funnel_tx.clone(),
     ));
 
-    let acs_target_id = TargetIdWithApid::new(PUS_APID, RequestTargetId::AcsSubsystem as TargetId);
+    let acs_target_id = TargetAndApidId::new(PUS_APID, RequestTargetId::AcsSubsystem as u32);
     let (acs_thread_tx, acs_thread_rx) = channel::<RequestWithToken>();
     // Some request are targetable. This map is used to retrieve sender handles based on a target ID.
-    let mut request_map = HashMap::new();
-    request_map.insert(acs_target_id, acs_thread_tx);
+    let mut request_map = GenericRequestRouter::default();
+    request_map.0.insert(acs_target_id.into(), acs_thread_tx);
 
     // This helper structure is used by all telecommand providers which need to send telecommands
     // to the TC source.
@@ -310,11 +309,11 @@ fn dyn_tmtc_pool_main() {
         tm_funnel_tx.clone(),
     ));
 
-    let acs_target_id = TargetIdWithApid::new(PUS_APID, RequestTargetId::AcsSubsystem as TargetId);
+    let acs_target_id = TargetAndApidId::new(PUS_APID, RequestTargetId::AcsSubsystem as u32);
     let (acs_thread_tx, acs_thread_rx) = channel::<RequestWithToken>();
     // Some request are targetable. This map is used to retrieve sender handles based on a target ID.
-    let mut request_map = HashMap::new();
-    request_map.insert(acs_target_id, acs_thread_tx);
+    let mut request_map = GenericRequestRouter::default();
+    request_map.0.insert(acs_target_id.into(), acs_thread_tx);
 
     let tc_source = PusTcSourceProviderDynamic(tc_source_tx);
 

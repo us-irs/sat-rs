@@ -48,7 +48,11 @@ pub mod tmtc_err {
     #[resultcode]
     pub const PUS_SERVICE_NOT_IMPLEMENTED: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 2);
     #[resultcode]
-    pub const UNKNOWN_TARGET_ID: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 3);
+    pub const PUS_SUBSERVICE_NOT_IMPLEMENTED: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 3);
+    #[resultcode]
+    pub const UNKNOWN_TARGET_ID: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 4);
+    #[resultcode]
+    pub const ROUTING_ERROR: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 5);
 
     #[resultcode(
         info = "Not enough data inside the TC application data field. Optionally includes: \
@@ -60,6 +64,9 @@ pub mod tmtc_err {
     pub const TMTC_RESULTS: &[ResultU16Info] = &[
         INVALID_PUS_SERVICE_EXT,
         INVALID_PUS_SUBSERVICE_EXT,
+        PUS_SERVICE_NOT_IMPLEMENTED_EXT,
+        UNKNOWN_TARGET_ID_EXT,
+        ROUTING_ERROR_EXT,
         NOT_ENOUGH_APP_DATA_EXT,
     ];
 }
@@ -76,6 +83,13 @@ pub mod hk_err {
     pub const UNKNOWN_TARGET_ID: ResultU16 = ResultU16::new(GroupId::Hk as u8, 2);
     #[resultcode]
     pub const COLLECTION_INTERVAL_MISSING: ResultU16 = ResultU16::new(GroupId::Hk as u8, 3);
+
+    pub const HK_ERR_RESULTS: &[ResultU16Info] = &[
+        TARGET_ID_MISSING_EXT,
+        UNKNOWN_TARGET_ID_EXT,
+        UNKNOWN_TARGET_ID_EXT,
+        COLLECTION_INTERVAL_MISSING_EXT,
+    ];
 }
 
 #[allow(clippy::enum_variant_names)]

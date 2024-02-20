@@ -23,7 +23,7 @@ use spacepackets::{
         tlv::{msg_to_user::MsgToUserTlv, EntityIdTlv, GenericTlv, TlvType},
         ChecksumType, ConditionCode, FaultHandlerCode, PduType, TransmissionMode,
     },
-    util::UnsignedByteField,
+    util::{UnsignedByteField, UnsignedEnum},
 };
 use thiserror::Error;
 

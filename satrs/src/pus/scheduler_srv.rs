@@ -1,4 +1,5 @@
 use super::scheduler::PusSchedulerProvider;
+use super::verification::VerificationReportingProvider;
 use super::{EcssTcInMemConverter, PusServiceBase, PusServiceHelper};
 use crate::pool::PoolProvider;
 use crate::pus::{PusPacketHandlerResult, PusPacketHandlingError};
@@ -16,16 +17,23 @@ use spacepackets::time::cds::TimeProvider;
 /// telecommands when applicable.
 pub struct PusService11SchedHandler<
     TcInMemConverter: EcssTcInMemConverter,
+    VerificationReporter: VerificationReportingProvider,
     PusScheduler: PusSchedulerProvider,
 > {
-    pub service_helper: PusServiceHelper<TcInMemConverter>,
+    pub service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
     scheduler: PusScheduler,
 }
 
-impl<TcInMemConverter: EcssTcInMemConverter, Scheduler: PusSchedulerProvider>
-    PusService11SchedHandler<TcInMemConverter, Scheduler>
+impl<
+        TcInMemConverter: EcssTcInMemConverter,
+        VerificationReporter: VerificationReportingProvider,
+        Scheduler: PusSchedulerProvider,
+    > PusService11SchedHandler<TcInMemConverter, VerificationReporter, Scheduler>
 {
-    pub fn new(service_helper: PusServiceHelper<TcInMemConverter>, scheduler: Scheduler) -> Self {
+    pub fn new(
+        service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
+        scheduler: Scheduler,
+    ) -> Self {
         Self {
             service_helper,
             scheduler,
@@ -62,15 +70,16 @@ impl<TcInMemConverter: EcssTcInMemConverter, Scheduler: PusSchedulerProvider>
             ));
         }
         let mut partial_error = None;
-        let time_stamp = PusServiceBase::get_current_timestamp(&mut partial_error);
+        let time_stamp = PusServiceBase::<VerificationReporter>::get_current_cds_short_timestamp(
+            &mut partial_error,
+        );
         match standard_subservice.unwrap() {
             scheduling::Subservice::TcEnableScheduling => {
                 let start_token = self
                     .service_helper
                     .common
                     .verification_handler
-                    .get_mut()
-                    .start_success(ecss_tc_and_token.token, Some(&time_stamp))
+                    .start_success(ecss_tc_and_token.token, &time_stamp)
                     .expect("Error sending start success");
 
                 self.scheduler.enable();
@@ -78,8 +87,7 @@ impl<TcInMemConverter: EcssTcInMemConverter, Scheduler: PusSchedulerProvider>
                     self.service_helper
                         .common
                         .verification_handler
-                        .get_mut()
-                        .completion_success(start_token, Some(&time_stamp))
+                        .completion_success(start_token, &time_stamp)
                         .expect("Error sending completion success");
                 } else {
                     return Err(PusPacketHandlingError::Other(
@@ -92,8 +100,7 @@ impl<TcInMemConverter: EcssTcInMemConverter, Scheduler: PusSchedulerProvider>
                     .service_helper
                     .common
                     .verification_handler
-                    .get_mut()
-                    .start_success(ecss_tc_and_token.token, Some(&time_stamp))
+                    .start_success(ecss_tc_and_token.token, &time_stamp)
                     .expect("Error sending start success");
 
                 self.scheduler.disable();
@@ -101,8 +108,7 @@ impl<TcInMemConverter: EcssTcInMemConverter, Scheduler: PusSchedulerProvider>
                     self.service_helper
                         .common
                         .verification_handler
-                        .get_mut()
-                        .completion_success(start_token, Some(&time_stamp))
+                        .completion_success(start_token, &time_stamp)
                         .expect("Error sending completion success");
                 } else {
                     return Err(PusPacketHandlingError::Other(
@@ -115,8 +121,7 @@ impl<TcInMemConverter: EcssTcInMemConverter, Scheduler: PusSchedulerProvider>
                     .service_helper
                     .common
                     .verification_handler
-                    .get_mut()
-                    .start_success(ecss_tc_and_token.token, Some(&time_stamp))
+                    .start_success(ecss_tc_and_token.token, &time_stamp)
                     .expect("Error sending start success");
 
                 self.scheduler
@@ -126,8 +131,7 @@ impl<TcInMemConverter: EcssTcInMemConverter, Scheduler: PusSchedulerProvider>
                 self.service_helper
                     .common
                     .verification_handler
-                    .get_mut()
-                    .completion_success(start_token, Some(&time_stamp))
+                    .completion_success(start_token, &time_stamp)
                     .expect("Error sending completion success");
             }
             scheduling::Subservice::TcInsertActivity => {
@@ -135,8 +139,7 @@ impl<TcInMemConverter: EcssTcInMemConverter, Scheduler: PusSchedulerProvider>
                     .service_helper
                     .common
                     .verification_handler
-                    .get_mut()
-                    .start_success(ecss_tc_and_token.token, Some(&time_stamp))
+                    .start_success(ecss_tc_and_token.token, &time_stamp)
                     .expect("error sending start success");
 
                 // let mut pool = self.sched_tc_pool.write().expect("locking pool failed");
@@ -147,8 +150,7 @@ impl<TcInMemConverter: EcssTcInMemConverter, Scheduler: PusSchedulerProvider>
                 self.service_helper
                     .common
                     .verification_handler
-                    .get_mut()
-                    .completion_success(start_token, Some(&time_stamp))
+                    .completion_success(start_token, &time_stamp)
                     .expect("sending completion success failed");
             }
             _ => {
@@ -172,6 +174,7 @@ impl<TcInMemConverter: EcssTcInMemConverter, Scheduler: PusSchedulerProvider>
 mod tests {
     use crate::pool::{StaticMemoryPool, StaticPoolConfig};
     use crate::pus::tests::TEST_APID;
+    use crate::pus::verification::VerificationReporterWithSender;
     use crate::pus::{
         scheduler::{self, PusSchedulerProvider, TcInfo},
         tests::{PusServiceHandlerWithSharedStoreCommon, PusTestHarness},
@@ -194,7 +197,11 @@ mod tests {
 
     struct Pus11HandlerWithStoreTester {
         common: PusServiceHandlerWithSharedStoreCommon,
-        handler: PusService11SchedHandler<EcssTcInSharedStoreConverter, TestScheduler>,
+        handler: PusService11SchedHandler<
+            EcssTcInSharedStoreConverter,
+            VerificationReporterWithSender,
+            TestScheduler,
+        >,
         sched_tc_pool: StaticMemoryPool,
     }
 

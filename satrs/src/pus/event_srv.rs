@@ -6,16 +6,24 @@ use spacepackets::ecss::event::Subservice;
 use spacepackets::ecss::PusPacket;
 use std::sync::mpsc::Sender;
 
+use super::verification::VerificationReportingProvider;
 use super::{EcssTcInMemConverter, PusServiceBase, PusServiceHelper};
 
-pub struct PusService5EventHandler<TcInMemConverter: EcssTcInMemConverter> {
-    pub service_helper: PusServiceHelper<TcInMemConverter>,
+pub struct PusService5EventHandler<
+    TcInMemConverter: EcssTcInMemConverter,
+    VerificationReporter: VerificationReportingProvider,
+> {
+    pub service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
     event_request_tx: Sender<EventRequestWithToken>,
 }
 
-impl<TcInMemConverter: EcssTcInMemConverter> PusService5EventHandler<TcInMemConverter> {
+impl<
+        TcInMemConverter: EcssTcInMemConverter,
+        VerificationReporter: VerificationReportingProvider,
+    > PusService5EventHandler<TcInMemConverter, VerificationReporter>
+{
     pub fn new(
-        service_handler: PusServiceHelper<TcInMemConverter>,
+        service_handler: PusServiceHelper<TcInMemConverter, VerificationReporter>,
         event_request_tx: Sender<EventRequestWithToken>,
     ) -> Self {
         Self {
@@ -44,9 +52,10 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService5EventHandler<TcInMemConv
         }
         let handle_enable_disable_request = |enable: bool, stamp: [u8; 7]| {
             if tc.user_data().len() < 4 {
-                return Err(PusPacketHandlingError::NotEnoughAppData(
-                    "at least 4 bytes event ID expected".into(),
-                ));
+                return Err(PusPacketHandlingError::NotEnoughAppData {
+                    expected: 4,
+                    found: tc.user_data().len(),
+                });
             }
             let user_data = tc.user_data();
             let event_u32 = EventU32::from(u32::from_be_bytes(user_data[0..4].try_into().unwrap()));
@@ -54,8 +63,7 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService5EventHandler<TcInMemConv
                 .service_helper
                 .common
                 .verification_handler
-                .borrow_mut()
-                .start_success(ecss_tc_and_token.token, Some(&stamp))
+                .start_success(ecss_tc_and_token.token, &stamp)
                 .map_err(|_| PartialPusHandlingError::Verification);
             let partial_error = start_token.clone().err();
             let mut token: TcStateToken = ecss_tc_and_token.token.into();
@@ -86,7 +94,9 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService5EventHandler<TcInMemConv
             Ok(PusPacketHandlerResult::RequestHandled)
         };
         let mut partial_error = None;
-        let time_stamp = PusServiceBase::get_current_timestamp(&mut partial_error);
+        let time_stamp = PusServiceBase::<VerificationReporter>::get_current_cds_short_timestamp(
+            &mut partial_error,
+        );
         match srv.unwrap() {
             Subservice::TmInfoReport
             | Subservice::TmLowSeverityReport
@@ -128,7 +138,7 @@ mod tests {
 
     use crate::pus::event_man::EventRequest;
     use crate::pus::tests::SimplePusPacketHandler;
-    use crate::pus::verification::RequestId;
+    use crate::pus::verification::{RequestId, VerificationReporterWithSender};
     use crate::{
         events::EventU32,
         pus::{
@@ -145,7 +155,8 @@ mod tests {
 
     struct Pus5HandlerWithStoreTester {
         common: PusServiceHandlerWithSharedStoreCommon,
-        handler: PusService5EventHandler<EcssTcInSharedStoreConverter>,
+        handler:
+            PusService5EventHandler<EcssTcInSharedStoreConverter, VerificationReporterWithSender>,
     }
 
     impl Pus5HandlerWithStoreTester {
@@ -271,8 +282,9 @@ mod tests {
         let result = test_harness.handle_one_tc();
         assert!(result.is_err());
         let result = result.unwrap_err();
-        if let PusPacketHandlingError::NotEnoughAppData(string) = result {
-            assert_eq!(string, "at least 4 bytes event ID expected");
+        if let PusPacketHandlingError::NotEnoughAppData { expected, found } = result {
+            assert_eq!(expected, 4);
+            assert_eq!(found, 3);
         } else {
             panic!("unexpected result type {result:?}")
         }

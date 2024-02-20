@@ -43,8 +43,8 @@ def main():
     parser.add_argument(
         "-p",
         "--package",
-        choices=["satrs-core"],
-        default="satrs-core",
+        choices=["satrs"],
+        default="satrs",
         help="Choose project to generate coverage for",
     )
     parser.add_argument(

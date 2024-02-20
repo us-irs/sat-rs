@@ -1,8 +1,9 @@
 use std::sync::mpsc::{self, TryRecvError};
 
 use log::{info, warn};
-use satrs::pus::verification::VerificationReporterWithSender;
+use satrs::pus::verification::{VerificationReporterWithSender, VerificationReportingProvider};
 use satrs::pus::{EcssTmSender, PusTmWrapper};
+use satrs::request::TargetAndApidId;
 use satrs::spacepackets::ecss::hk::Subservice as HkSubservice;
 use satrs::{
     hk::HkRequest,
@@ -70,12 +71,12 @@ impl AcsTask {
                     "ACS thread: Received HK request {:?}",
                     request.targeted_request
                 );
+                let target_and_apid_id = TargetAndApidId::from(request.targeted_request.target_id);
                 match request.targeted_request.request {
                     Request::Hk(hk_req) => match hk_req {
-                        HkRequest::OneShot(unique_id) => self.handle_hk_request(
-                            request.targeted_request.target_id_with_apid.target_id(),
-                            unique_id,
-                        ),
+                        HkRequest::OneShot(unique_id) => {
+                            self.handle_hk_request(target_and_apid_id.target(), unique_id)
+                        }
                         HkRequest::Enable(_) => {}
                         HkRequest::Disable(_) => {}
                         HkRequest::ModifyCollectionInterval(_, _) => {}
@@ -89,10 +90,10 @@ impl AcsTask {
                 }
                 let started_token = self
                     .verif_reporter
-                    .start_success(request.token, Some(&self.timestamp))
+                    .start_success(request.token, &self.timestamp)
                     .expect("Sending start success failed");
                 self.verif_reporter
-                    .completion_success(started_token, Some(&self.timestamp))
+                    .completion_success(started_token, &self.timestamp)
                     .expect("Sending completion success failed");
                 true
             }
