@@ -12,7 +12,10 @@ use satrs::{
             DefaultPusMgmtBackendProvider, EventReporter, EventRequest, EventRequestWithToken,
             PusEventDispatcher,
         },
-        verification::{TcStateStarted, VerificationReporterWithSender, VerificationToken},
+        verification::{
+            TcStateStarted, VerificationReporterWithSender, VerificationReportingProvider,
+            VerificationToken,
+        },
         EcssTmSender,
     },
     spacepackets::time::cds::{self, TimeProvider},
@@ -73,7 +76,7 @@ impl PusEventHandler {
                 .try_into()
                 .expect("expected start verification token");
             self.verif_handler
-                .completion_success(started_token, Some(timestamp))
+                .completion_success(started_token, timestamp)
                 .expect("Sending completion success failed");
         };
         // handle event requests

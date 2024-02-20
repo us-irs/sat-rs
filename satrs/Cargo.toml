@@ -17,7 +17,7 @@ delegate = ">0.7, <=0.10"
 paste = "1"
 smallvec = "1"
 crc = "3"
-satrs-shared = "0.1.1"
+satrs-shared = "0.1.2"
 
 [dependencies.num_enum]
 version = ">0.5, <=0.7"
@@ -68,7 +68,7 @@ features = ["all"]
 optional = true
 
 [dependencies.spacepackets]
-version = "0.9"
+version = "0.10"
 default-features = false
 
 [dependencies.cobs]

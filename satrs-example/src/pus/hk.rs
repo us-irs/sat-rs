@@ -1,22 +1,145 @@
-use crate::requests::{Request, RequestWithToken};
 use log::{error, warn};
 use satrs::hk::{CollectionIntervalFactor, HkRequest};
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
+use satrs::pus::hk::{PusHkToRequestConverter, PusService3HkHandler};
 use satrs::pus::verification::{
-    FailParams, StdVerifReporterWithSender, VerificationReporterWithSender,
+    FailParams, TcStateAccepted, VerificationReporterWithSender, VerificationReportingProvider,
+    VerificationToken,
 };
 use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    EcssTcReceiver, EcssTmSender, MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSender,
-    PusPacketHandlerResult, PusPacketHandlingError, PusServiceBase, PusServiceHelper,
+    MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSender, PusPacketHandlerResult,
+    PusPacketHandlingError, PusServiceHelper,
 };
+use satrs::request::TargetAndApidId;
+use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{hk, PusPacket};
 use satrs::tmtc::tm_helper::SharedTmPool;
-use satrs::ChannelId;
+use satrs::{ChannelId, TargetId};
 use satrs_example::config::{hk_err, tmtc_err, TcReceiverId, TmSenderId, PUS_APID};
-use satrs_example::TargetIdWithApid;
-use std::collections::HashMap;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self};
+
+use crate::requests::GenericRequestRouter;
+
+use super::GenericRoutingErrorHandler;
+
+#[derive(Default)]
+pub struct ExampleHkRequestConverter {}
+
+impl PusHkToRequestConverter for ExampleHkRequestConverter {
+    type Error = PusPacketHandlingError;
+
+    fn convert(
+        &mut self,
+        token: VerificationToken<TcStateAccepted>,
+        tc: &PusTcReader,
+        time_stamp: &[u8],
+        verif_reporter: &impl VerificationReportingProvider,
+    ) -> Result<(TargetId, HkRequest), Self::Error> {
+        let user_data = tc.user_data();
+        if user_data.is_empty() {
+            let user_data_len = user_data.len() as u32;
+            let user_data_len_raw = user_data_len.to_be_bytes();
+            verif_reporter
+                .start_failure(
+                    token,
+                    FailParams::new(
+                        time_stamp,
+                        &tmtc_err::NOT_ENOUGH_APP_DATA,
+                        &user_data_len_raw,
+                    ),
+                )
+                .expect("Sending start failure TM failed");
+            return Err(PusPacketHandlingError::NotEnoughAppData {
+                expected: 4,
+                found: 0,
+            });
+        }
+        if user_data.len() < 8 {
+            let err = if user_data.len() < 4 {
+                &hk_err::TARGET_ID_MISSING
+            } else {
+                &hk_err::UNIQUE_ID_MISSING
+            };
+            let user_data_len = user_data.len() as u32;
+            let user_data_len_raw = user_data_len.to_be_bytes();
+            verif_reporter
+                .start_failure(token, FailParams::new(time_stamp, err, &user_data_len_raw))
+                .expect("Sending start failure TM failed");
+            return Err(PusPacketHandlingError::NotEnoughAppData {
+                expected: 8,
+                found: 4,
+            });
+        }
+        let subservice = tc.subservice();
+        let target_id = TargetAndApidId::from_pus_tc(tc).expect("invalid tc format");
+        let unique_id = u32::from_be_bytes(tc.user_data()[4..8].try_into().unwrap());
+
+        let standard_subservice = hk::Subservice::try_from(subservice);
+        if standard_subservice.is_err() {
+            verif_reporter
+                .start_failure(
+                    token,
+                    FailParams::new(time_stamp, &tmtc_err::INVALID_PUS_SUBSERVICE, &[subservice]),
+                )
+                .expect("Sending start failure TM failed");
+            return Err(PusPacketHandlingError::InvalidSubservice(subservice));
+        }
+        Ok((
+            target_id.into(),
+            match standard_subservice.unwrap() {
+                hk::Subservice::TcEnableHkGeneration | hk::Subservice::TcEnableDiagGeneration => {
+                    HkRequest::Enable(unique_id)
+                }
+                hk::Subservice::TcDisableHkGeneration | hk::Subservice::TcDisableDiagGeneration => {
+                    HkRequest::Disable(unique_id)
+                }
+                hk::Subservice::TcReportHkReportStructures => todo!(),
+                hk::Subservice::TmHkPacket => todo!(),
+                hk::Subservice::TcGenerateOneShotHk | hk::Subservice::TcGenerateOneShotDiag => {
+                    HkRequest::OneShot(unique_id)
+                }
+                hk::Subservice::TcModifyDiagCollectionInterval
+                | hk::Subservice::TcModifyHkCollectionInterval => {
+                    if user_data.len() < 12 {
+                        verif_reporter
+                            .start_failure(
+                                token,
+                                FailParams::new_no_fail_data(
+                                    time_stamp,
+                                    &tmtc_err::NOT_ENOUGH_APP_DATA,
+                                ),
+                            )
+                            .expect("Sending start failure TM failed");
+                        return Err(PusPacketHandlingError::NotEnoughAppData {
+                            expected: 12,
+                            found: user_data.len(),
+                        });
+                    }
+                    HkRequest::ModifyCollectionInterval(
+                        unique_id,
+                        CollectionIntervalFactor::from_be_bytes(
+                            user_data[8..12].try_into().unwrap(),
+                        ),
+                    )
+                }
+                _ => {
+                    verif_reporter
+                        .start_failure(
+                            token,
+                            FailParams::new(
+                                time_stamp,
+                                &tmtc_err::PUS_SUBSERVICE_NOT_IMPLEMENTED,
+                                &[subservice],
+                            ),
+                        )
+                        .expect("Sending start failure TM failed");
+                    return Err(PusPacketHandlingError::InvalidSubservice(subservice));
+                }
+            },
+        ))
+    }
+}
 
 pub fn create_hk_service_static(
     shared_tm_store: SharedTmPool,
@@ -24,7 +147,7 @@ pub fn create_hk_service_static(
     verif_reporter: VerificationReporterWithSender,
     tc_pool: SharedStaticMemoryPool,
     pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
-    request_map: HashMap<TargetIdWithApid, mpsc::Sender<RequestWithToken>>,
+    request_router: GenericRequestRouter,
 ) -> Pus3Wrapper<EcssTcInSharedStoreConverter> {
     let hk_srv_tm_sender = MpscTmInSharedPoolSender::new(
         TmSenderId::PusHk as ChannelId,
@@ -35,12 +158,16 @@ pub fn create_hk_service_static(
     let hk_srv_receiver =
         MpscTcReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
     let pus_3_handler = PusService3HkHandler::new(
-        Box::new(hk_srv_receiver),
-        Box::new(hk_srv_tm_sender),
-        PUS_APID,
-        verif_reporter.clone(),
-        EcssTcInSharedStoreConverter::new(tc_pool, 2048),
-        request_map,
+        PusServiceHelper::new(
+            Box::new(hk_srv_receiver),
+            Box::new(hk_srv_tm_sender),
+            PUS_APID,
+            verif_reporter.clone(),
+            EcssTcInSharedStoreConverter::new(tc_pool, 2048),
+        ),
+        ExampleHkRequestConverter::default(),
+        request_router,
+        GenericRoutingErrorHandler::default(),
     );
     Pus3Wrapper { pus_3_handler }
 }
@@ -49,7 +176,7 @@ pub fn create_hk_service_dynamic(
     tm_funnel_tx: mpsc::Sender<Vec<u8>>,
     verif_reporter: VerificationReporterWithSender,
     pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
-    request_map: HashMap<TargetIdWithApid, mpsc::Sender<RequestWithToken>>,
+    request_router: GenericRequestRouter,
 ) -> Pus3Wrapper<EcssTcInVecConverter> {
     let hk_srv_tm_sender = MpscTmAsVecSender::new(
         TmSenderId::PusHk as ChannelId,
@@ -59,154 +186,28 @@ pub fn create_hk_service_dynamic(
     let hk_srv_receiver =
         MpscTcReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
     let pus_3_handler = PusService3HkHandler::new(
-        Box::new(hk_srv_receiver),
-        Box::new(hk_srv_tm_sender),
-        PUS_APID,
-        verif_reporter.clone(),
-        EcssTcInVecConverter::default(),
-        request_map,
+        PusServiceHelper::new(
+            Box::new(hk_srv_receiver),
+            Box::new(hk_srv_tm_sender),
+            PUS_APID,
+            verif_reporter.clone(),
+            EcssTcInVecConverter::default(),
+        ),
+        ExampleHkRequestConverter::default(),
+        request_router,
+        GenericRoutingErrorHandler::default(),
     );
     Pus3Wrapper { pus_3_handler }
 }
 
-pub struct PusService3HkHandler<TcInMemConverter: EcssTcInMemConverter> {
-    psb: PusServiceHelper<TcInMemConverter>,
-    request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
-}
-
-impl<TcInMemConverter: EcssTcInMemConverter> PusService3HkHandler<TcInMemConverter> {
-    pub fn new(
-        tc_receiver: Box<dyn EcssTcReceiver>,
-        tm_sender: Box<dyn EcssTmSender>,
-        tm_apid: u16,
-        verification_handler: StdVerifReporterWithSender,
-        tc_in_mem_converter: TcInMemConverter,
-        request_handlers: HashMap<TargetIdWithApid, Sender<RequestWithToken>>,
-    ) -> Self {
-        Self {
-            psb: PusServiceHelper::new(
-                tc_receiver,
-                tm_sender,
-                tm_apid,
-                verification_handler,
-                tc_in_mem_converter,
-            ),
-            request_handlers,
-        }
-    }
-
-    fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-        let possible_packet = self.psb.retrieve_and_accept_next_packet()?;
-        if possible_packet.is_none() {
-            return Ok(PusPacketHandlerResult::Empty);
-        }
-        let ecss_tc_and_token = possible_packet.unwrap();
-        let tc = self
-            .psb
-            .tc_in_mem_converter
-            .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
-        let subservice = tc.subservice();
-        let mut partial_error = None;
-        let time_stamp = PusServiceBase::get_current_timestamp(&mut partial_error);
-        let user_data = tc.user_data();
-        if user_data.is_empty() {
-            self.psb
-                .common
-                .verification_handler
-                .borrow_mut()
-                .start_failure(
-                    ecss_tc_and_token.token,
-                    FailParams::new(Some(&time_stamp), &tmtc_err::NOT_ENOUGH_APP_DATA, None),
-                )
-                .expect("Sending start failure TM failed");
-            return Err(PusPacketHandlingError::NotEnoughAppData(
-                "Expected at least 8 bytes of app data".into(),
-            ));
-        }
-        if user_data.len() < 8 {
-            let err = if user_data.len() < 4 {
-                &hk_err::TARGET_ID_MISSING
-            } else {
-                &hk_err::UNIQUE_ID_MISSING
-            };
-            self.psb
-                .common
-                .verification_handler
-                .borrow_mut()
-                .start_failure(
-                    ecss_tc_and_token.token,
-                    FailParams::new(Some(&time_stamp), err, None),
-                )
-                .expect("Sending start failure TM failed");
-            return Err(PusPacketHandlingError::NotEnoughAppData(
-                "Expected at least 8 bytes of app data".into(),
-            ));
-        }
-        let target_id = TargetIdWithApid::from_tc(&tc).expect("invalid tc format");
-        let unique_id = u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap());
-        if !self.request_handlers.contains_key(&target_id) {
-            self.psb
-                .common
-                .verification_handler
-                .borrow_mut()
-                .start_failure(
-                    ecss_tc_and_token.token,
-                    FailParams::new(Some(&time_stamp), &hk_err::UNKNOWN_TARGET_ID, None),
-                )
-                .expect("Sending start failure TM failed");
-            return Err(PusPacketHandlingError::NotEnoughAppData(format!(
-                "Unknown target ID {target_id}"
-            )));
-        }
-        let send_request = |target: TargetIdWithApid, request: HkRequest| {
-            let sender = self.request_handlers.get(&target).unwrap();
-            sender
-                .send(RequestWithToken::new(
-                    target,
-                    Request::Hk(request),
-                    ecss_tc_and_token.token,
-                ))
-                .unwrap_or_else(|_| panic!("Sending HK request {request:?} failed"));
-        };
-        if subservice == hk::Subservice::TcEnableHkGeneration as u8 {
-            send_request(target_id, HkRequest::Enable(unique_id));
-        } else if subservice == hk::Subservice::TcDisableHkGeneration as u8 {
-            send_request(target_id, HkRequest::Disable(unique_id));
-        } else if subservice == hk::Subservice::TcGenerateOneShotHk as u8 {
-            send_request(target_id, HkRequest::OneShot(unique_id));
-        } else if subservice == hk::Subservice::TcModifyHkCollectionInterval as u8 {
-            if user_data.len() < 12 {
-                self.psb
-                    .common
-                    .verification_handler
-                    .borrow_mut()
-                    .start_failure(
-                        ecss_tc_and_token.token,
-                        FailParams::new(
-                            Some(&time_stamp),
-                            &hk_err::COLLECTION_INTERVAL_MISSING,
-                            None,
-                        ),
-                    )
-                    .expect("Sending start failure TM failed");
-                return Err(PusPacketHandlingError::NotEnoughAppData(
-                    "Collection interval missing".into(),
-                ));
-            }
-            send_request(
-                target_id,
-                HkRequest::ModifyCollectionInterval(
-                    unique_id,
-                    CollectionIntervalFactor::from_be_bytes(user_data[8..12].try_into().unwrap()),
-                ),
-            );
-        }
-        Ok(PusPacketHandlerResult::RequestHandled)
-    }
-}
-
 pub struct Pus3Wrapper<TcInMemConverter: EcssTcInMemConverter> {
-    pub(crate) pus_3_handler: PusService3HkHandler<TcInMemConverter>,
+    pub(crate) pus_3_handler: PusService3HkHandler<
+        TcInMemConverter,
+        VerificationReporterWithSender,
+        ExampleHkRequestConverter,
+        GenericRequestRouter,
+        GenericRoutingErrorHandler<3>,
+    >,
 }
 
 impl<TcInMemConverter: EcssTcInMemConverter> Pus3Wrapper<TcInMemConverter> {

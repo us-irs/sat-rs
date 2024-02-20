@@ -76,7 +76,7 @@ pub fn create_event_service_dynamic(
 }
 
 pub struct Pus5Wrapper<TcInMemConverter: EcssTcInMemConverter> {
-    pub pus_5_handler: PusService5EventHandler<TcInMemConverter>,
+    pub pus_5_handler: PusService5EventHandler<TcInMemConverter, VerificationReporterWithSender>,
 }
 
 impl<TcInMemConverter: EcssTcInMemConverter> Pus5Wrapper<TcInMemConverter> {

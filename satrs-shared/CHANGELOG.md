@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.1.2] 2024-02-17
+
+- Bumped `spacepackets` to v0.10.0 for `UnsignedEnum` trait change.
+
 # [v0.1.1] 2024-02-12
 
 - Added missing `#![no_std]` attribute for library

@@ -1,4 +1,6 @@
-pub use spacepackets::ecss::hk::*;
+use crate::{action::ActionRequest, TargetId};
+
+use super::verification::{TcStateAccepted, VerificationToken};
 
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
@@ -8,18 +10,14 @@ pub use std_mod::*;
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub use alloc_mod::*;
 
-use crate::{hk::HkRequest, TargetId};
-
-use super::verification::{TcStateAccepted, VerificationToken};
-
-/// This trait is an abstraction for the routing of PUS service 3 housekeeping requests to a
-/// dedicated recipient using the generic [TargetId].
-pub trait PusHkRequestRouter {
+/// This trait is an abstraction for the routing of PUS service 8 action requests to a dedicated
+/// recipient using the generic [TargetId].
+pub trait PusActionRequestRouter {
     type Error;
     fn route(
         &self,
         target_id: TargetId,
-        hk_request: HkRequest,
+        hk_request: ActionRequest,
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<(), Self::Error>;
 }
@@ -34,10 +32,10 @@ pub mod alloc_mod {
     use super::*;
 
     /// This trait is an abstraction for the conversion of a PUS service 8 action telecommand into
-    /// a [HkRequest].
+    /// an [ActionRequest].
     ///
     /// Having a dedicated trait for this allows maximum flexiblity and tailoring of the standard.
-    /// The only requirement is that a valid [TargetId] and a [HkRequest] are returned by the
+    /// The only requirement is that a valid [TargetId] and an [ActionRequest] are returned by the
     /// core conversion function.
     ///
     /// The user should take care of performing the error handling as well. Some of the following
@@ -48,7 +46,7 @@ pub mod alloc_mod {
     ///
     /// A [VerificationReporterWithSender] instance is passed to the user to also allow handling
     /// of the verification process as part of the PUS standard requirements.
-    pub trait PusHkToRequestConverter {
+    pub trait PusActionToRequestConverter {
         type Error;
         fn convert(
             &mut self,
@@ -56,7 +54,7 @@ pub mod alloc_mod {
             tc: &PusTcReader,
             time_stamp: &[u8],
             verif_reporter: &impl VerificationReportingProvider,
-        ) -> Result<(TargetId, HkRequest), Self::Error>;
+        ) -> Result<(TargetId, ActionRequest), Self::Error>;
     }
 }
 
@@ -71,7 +69,7 @@ pub mod std_mod {
 
     use super::*;
 
-    /// This is a generic high-level handler for the PUS service 3 housekeeping service.
+    /// This is a high-level handler for the PUS service 8 action service.
     ///
     /// It performs the following handling steps:
     ///
@@ -79,16 +77,14 @@ pub mod std_mod {
     ///    allows to configure the used telecommand memory backend.
     /// 2. Convert the TC to a targeted action request using the provided
     ///    [PusActionToRequestConverter]. The generic error type is constrained to the
-    ///    [PusPacketHandlerResult] for the concrete implementation which offers a packet handler.
-    /// 3. Route the action request using the provided [PusActionRequestRouter]. The generic error
-    ///    type is constrained to the [GenericRoutingError] for the concrete implementation.
-    /// 4. Handle all routing errors using the provided [PusRoutingErrorHandler]. The generic error
-    ///    type is constrained to the [GenericRoutingError] for the concrete implementation.
-    pub struct PusService3HkHandler<
+    ///    [PusPacketHandlingError] for the concrete implementation which offers a packet handler.
+    /// 3. Route the action request using the provided [PusActionRequestRouter].
+    /// 4. Handle all routing errors using the provided [PusRoutingErrorHandler].
+    pub struct PusService8ActionHandler<
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
-        RequestConverter: PusHkToRequestConverter,
-        RequestRouter: PusHkRequestRouter<Error = RoutingError>,
+        RequestConverter: PusActionToRequestConverter,
+        RequestRouter: PusActionRequestRouter<Error = RoutingError>,
         RoutingErrorHandler: PusRoutingErrorHandler<Error = RoutingError>,
         RoutingError = GenericRoutingError,
     > {
@@ -101,12 +97,12 @@ pub mod std_mod {
     impl<
             TcInMemConverter: EcssTcInMemConverter,
             VerificationReporter: VerificationReportingProvider,
-            RequestConverter: PusHkToRequestConverter<Error = PusPacketHandlingError>,
-            RequestRouter: PusHkRequestRouter<Error = RoutingError>,
+            RequestConverter: PusActionToRequestConverter<Error = PusPacketHandlingError>,
+            RequestRouter: PusActionRequestRouter<Error = RoutingError>,
             RoutingErrorHandler: PusRoutingErrorHandler<Error = RoutingError>,
             RoutingError: Clone,
         >
-        PusService3HkHandler<
+        PusService8ActionHandler<
             TcInMemConverter,
             VerificationReporter,
             RequestConverter,
@@ -131,6 +127,7 @@ pub mod std_mod {
             }
         }
 
+        /// Core function to poll the next TC packet and try to handle it.
         pub fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
             let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
             if possible_packet.is_none() {
@@ -146,7 +143,7 @@ pub mod std_mod {
                 PusServiceBase::<VerificationReporter>::get_current_cds_short_timestamp(
                     &mut partial_error,
                 );
-            let (target_id, hk_request) = self.request_converter.convert(
+            let (target_id, action_request) = self.request_converter.convert(
                 ecss_tc_and_token.token,
                 &tc,
                 &time_stamp,
@@ -154,7 +151,7 @@ pub mod std_mod {
             )?;
             if let Err(e) =
                 self.request_router
-                    .route(target_id, hk_request, ecss_tc_and_token.token)
+                    .route(target_id, action_request, ecss_tc_and_token.token)
             {
                 self.routing_error_handler.handle_error(
                     target_id,
@@ -174,7 +171,6 @@ pub mod std_mod {
 #[cfg(test)]
 mod tests {
     use delegate::delegate;
-    use spacepackets::ecss::hk::Subservice;
 
     use spacepackets::{
         ecss::{
@@ -185,32 +181,26 @@ mod tests {
         CcsdsPacket, SequenceFlags, SpHeader,
     };
 
-    use crate::{
-        hk::HkRequest,
-        pus::{
-            tests::{
-                PusServiceHandlerWithVecCommon, PusTestHarness, SimplePusPacketHandler,
-                TestConverter, TestRouter, TestRoutingErrorHandler, APP_DATA_TOO_SHORT, TEST_APID,
-            },
-            verification::{
-                tests::TestVerificationReporter, FailParams, RequestId, TcStateAccepted,
-                VerificationReportingProvider, VerificationToken,
-            },
-            EcssTcInVecConverter, GenericRoutingError, PusPacketHandlerResult,
-            PusPacketHandlingError,
+    use crate::pus::{
+        tests::{
+            PusServiceHandlerWithVecCommon, PusTestHarness, SimplePusPacketHandler, TestConverter,
+            TestRouter, TestRoutingErrorHandler, APP_DATA_TOO_SHORT, TEST_APID,
         },
-        TargetId,
+        verification::{
+            tests::TestVerificationReporter, FailParams, RequestId, VerificationReportingProvider,
+        },
+        EcssTcInVecConverter, GenericRoutingError, PusPacketHandlerResult, PusPacketHandlingError,
     };
 
-    use super::{PusHkRequestRouter, PusHkToRequestConverter, PusService3HkHandler};
+    use super::*;
 
-    impl PusHkRequestRouter for TestRouter<HkRequest> {
+    impl PusActionRequestRouter for TestRouter<ActionRequest> {
         type Error = GenericRoutingError;
 
         fn route(
             &self,
             target_id: TargetId,
-            hk_request: HkRequest,
+            hk_request: ActionRequest,
             _token: VerificationToken<TcStateAccepted>,
         ) -> Result<(), Self::Error> {
             self.routing_requests
@@ -220,7 +210,7 @@ mod tests {
         }
     }
 
-    impl PusHkToRequestConverter for TestConverter<3> {
+    impl PusActionToRequestConverter for TestConverter<8> {
         type Error = PusPacketHandlingError;
         fn convert(
             &mut self,
@@ -228,7 +218,7 @@ mod tests {
             tc: &PusTcReader,
             time_stamp: &[u8],
             verif_reporter: &impl VerificationReportingProvider,
-        ) -> Result<(TargetId, HkRequest), Self::Error> {
+        ) -> Result<(TargetId, ActionRequest), Self::Error> {
             self.conversion_request.push_back(tc.raw_data().to_vec());
             self.check_service(tc)?;
             let target_id = tc.apid();
@@ -248,15 +238,16 @@ mod tests {
                     found: tc.user_data().len(),
                 });
             }
-            if tc.subservice() == Subservice::TcGenerateOneShotHk as u8 {
+            if tc.subservice() == 1 {
                 verif_reporter
                     .start_success(token, time_stamp)
                     .expect("start success failure");
                 return Ok((
                     target_id.into(),
-                    HkRequest::OneShot(u32::from_be_bytes(
-                        tc.user_data()[0..4].try_into().unwrap(),
-                    )),
+                    ActionRequest::UnsignedIdAndVecData {
+                        action_id: u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap()),
+                        data: tc.user_data()[4..].to_vec(),
+                    },
                 ));
             }
             Err(PusPacketHandlingError::InvalidAppData(
@@ -265,24 +256,24 @@ mod tests {
         }
     }
 
-    struct Pus3HandlerWithVecTester {
+    struct Pus8HandlerWithVecTester {
         common: PusServiceHandlerWithVecCommon<TestVerificationReporter>,
-        handler: PusService3HkHandler<
+        handler: PusService8ActionHandler<
             EcssTcInVecConverter,
             TestVerificationReporter,
-            TestConverter<3>,
-            TestRouter<HkRequest>,
+            TestConverter<8>,
+            TestRouter<ActionRequest>,
             TestRoutingErrorHandler,
         >,
     }
 
-    impl Pus3HandlerWithVecTester {
+    impl Pus8HandlerWithVecTester {
         pub fn new() -> Self {
             let (common, srv_handler) =
                 PusServiceHandlerWithVecCommon::new_with_test_verif_sender();
             Self {
                 common,
-                handler: PusService3HkHandler::new(
+                handler: PusService8ActionHandler::new(
                     srv_handler,
                     TestConverter::default(),
                     TestRouter::default(),
@@ -298,7 +289,7 @@ mod tests {
         }
         delegate! {
             to self.handler.request_router {
-                pub fn retrieve_next_request(&mut self) -> (TargetId, HkRequest);
+                pub fn retrieve_next_request(&mut self) -> (TargetId, ActionRequest);
             }
         }
         delegate! {
@@ -308,7 +299,7 @@ mod tests {
         }
     }
 
-    impl PusTestHarness for Pus3HandlerWithVecTester {
+    impl PusTestHarness for Pus8HandlerWithVecTester {
         delegate! {
             to self.common {
                 fn send_tc(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted>;
@@ -322,7 +313,7 @@ mod tests {
             }
         }
     }
-    impl SimplePusPacketHandler for Pus3HandlerWithVecTester {
+    impl SimplePusPacketHandler for Pus8HandlerWithVecTester {
         delegate! {
             to self.handler {
                 fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
@@ -332,40 +323,39 @@ mod tests {
 
     #[test]
     fn basic_test() {
-        let mut hk_handler = Pus3HandlerWithVecTester::new();
+        let mut action_handler = Pus8HandlerWithVecTester::new();
         let mut sp_header = SpHeader::tc(TEST_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
-        let sec_header = PusTcSecondaryHeader::new_simple(3, Subservice::TcGenerateOneShotHk as u8);
-        let unique_id: u32 = 1;
-        let unique_id_raw = unique_id.to_be_bytes();
-        let tc = PusTcCreator::new(&mut sp_header, sec_header, unique_id_raw.as_ref(), true);
-        hk_handler.send_tc(&tc);
-        let result = hk_handler.handle_one_tc();
+        let sec_header = PusTcSecondaryHeader::new_simple(8, 1);
+        let action_id: u32 = 1;
+        let action_id_raw = action_id.to_be_bytes();
+        let tc = PusTcCreator::new(&mut sp_header, sec_header, action_id_raw.as_ref(), true);
+        action_handler.send_tc(&tc);
+        let result = action_handler.handle_one_tc();
         assert!(result.is_ok());
-        hk_handler.check_next_conversion(&tc);
-        let (target_id, hk_request) = hk_handler.retrieve_next_request();
+        action_handler.check_next_conversion(&tc);
+        let (target_id, action_req) = action_handler.retrieve_next_request();
         assert_eq!(target_id, TEST_APID.into());
-        if let HkRequest::OneShot(id) = hk_request {
-            assert_eq!(id, unique_id);
-        } else {
-            panic!("unexpected request");
+        if let ActionRequest::UnsignedIdAndVecData { action_id, data } = action_req {
+            assert_eq!(action_id, 1);
+            assert_eq!(data, &[]);
         }
     }
 
     #[test]
     fn test_routing_error() {
-        let mut hk_handler = Pus3HandlerWithVecTester::new();
+        let mut action_handler = Pus8HandlerWithVecTester::new();
         let mut sp_header = SpHeader::tc(TEST_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
-        let sec_header = PusTcSecondaryHeader::new_simple(3, Subservice::TcGenerateOneShotHk as u8);
-        let unique_id: u32 = 1;
-        let unique_id_raw = unique_id.to_be_bytes();
-        let tc = PusTcCreator::new(&mut sp_header, sec_header, unique_id_raw.as_ref(), true);
+        let sec_header = PusTcSecondaryHeader::new_simple(8, 1);
+        let action_id: u32 = 1;
+        let action_id_raw = action_id.to_be_bytes();
+        let tc = PusTcCreator::new(&mut sp_header, sec_header, action_id_raw.as_ref(), true);
         let error = GenericRoutingError::UnknownTargetId(25);
-        hk_handler
+        action_handler
             .handler
             .request_router
             .inject_routing_error(error);
-        hk_handler.send_tc(&tc);
-        let result = hk_handler.handle_one_tc();
+        action_handler.send_tc(&tc);
+        let result = action_handler.handle_one_tc();
         assert!(result.is_err());
         let check_error = |routing_error: GenericRoutingError| {
             if let GenericRoutingError::UnknownTargetId(id) = routing_error {
@@ -380,14 +370,15 @@ mod tests {
             panic!("unexpected error type");
         }
 
-        hk_handler.check_next_conversion(&tc);
-        let (target_id, hk_req) = hk_handler.retrieve_next_request();
+        action_handler.check_next_conversion(&tc);
+        let (target_id, action_req) = action_handler.retrieve_next_request();
         assert_eq!(target_id, TEST_APID.into());
-        if let HkRequest::OneShot(unique_id) = hk_req {
-            assert_eq!(unique_id, 1);
+        if let ActionRequest::UnsignedIdAndVecData { action_id, data } = action_req {
+            assert_eq!(action_id, 1);
+            assert_eq!(data, &[]);
         }
 
-        let (target_id, found_error) = hk_handler.retrieve_next_error();
+        let (target_id, found_error) = action_handler.retrieve_next_error();
         assert_eq!(target_id, TEST_APID.into());
         check_error(found_error);
     }

@@ -2,6 +2,7 @@
 //!
 //! This module contains structures to make working with the PUS C standard easier.
 //! The satrs-example application contains various usage examples of these components.
+use crate::queue::{GenericRecvError, GenericSendError};
 use crate::ChannelId;
 use core::fmt::{Display, Formatter};
 #[cfg(feature = "alloc")]
@@ -16,6 +17,7 @@ use spacepackets::ecss::tm::PusTmCreator;
 use spacepackets::ecss::PusError;
 use spacepackets::{ByteConversionError, SpHeader};
 
+pub mod action;
 pub mod event;
 pub mod event_man;
 #[cfg(feature = "std")]
@@ -54,52 +56,6 @@ impl<'tm> From<PusTmCreator<'tm>> for PusTmWrapper<'tm> {
         Self::Direct(value)
     }
 }
-
-/// Generic error type for sending something via a message queue.
-#[derive(Debug, Copy, Clone)]
-pub enum GenericSendError {
-    RxDisconnected,
-    QueueFull(Option<u32>),
-}
-
-impl Display for GenericSendError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            GenericSendError::RxDisconnected => {
-                write!(f, "rx side has disconnected")
-            }
-            GenericSendError::QueueFull(max_cap) => {
-                write!(f, "queue with max capacity of {max_cap:?} is full")
-            }
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl Error for GenericSendError {}
-
-/// Generic error type for sending something via a message queue.
-#[derive(Debug, Copy, Clone)]
-pub enum GenericRecvError {
-    Empty,
-    TxDisconnected,
-}
-
-impl Display for GenericRecvError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::TxDisconnected => {
-                write!(f, "tx side has disconnected")
-            }
-            Self::Empty => {
-                write!(f, "nothing to receive")
-            }
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl Error for GenericRecvError {}
 
 #[derive(Debug, Clone)]
 pub enum EcssTmtcError {
@@ -304,7 +260,11 @@ pub trait ReceivesEcssPusTc {
 
 #[cfg(feature = "alloc")]
 mod alloc_mod {
+    use crate::TargetId;
+
     use super::*;
+
+    use crate::pus::verification::VerificationReportingProvider;
 
     /// Extension trait for [EcssTmSenderCore].
     ///
@@ -385,22 +345,33 @@ mod alloc_mod {
     impl<T> EcssTcReceiver for T where T: EcssTcReceiverCore + 'static {}
 
     impl_downcast!(EcssTcReceiver);
+
+    pub trait PusRoutingErrorHandler {
+        type Error;
+        fn handle_error(
+            &self,
+            target_id: TargetId,
+            token: VerificationToken<TcStateAccepted>,
+            tc: &PusTcReader,
+            error: Self::Error,
+            time_stamp: &[u8],
+            verif_reporter: &impl VerificationReportingProvider,
+        );
+    }
 }
 
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod std_mod {
     use crate::pool::{PoolProvider, PoolProviderWithGuards, SharedStaticMemoryPool, StoreAddr};
-    use crate::pus::verification::{
-        StdVerifReporterWithSender, TcStateAccepted, VerificationToken,
-    };
+    use crate::pus::verification::{TcStateAccepted, VerificationToken};
     use crate::pus::{
         EcssChannel, EcssTcAndToken, EcssTcReceiver, EcssTcReceiverCore, EcssTmSender,
         EcssTmSenderCore, EcssTmtcError, GenericRecvError, GenericSendError, PusTmWrapper,
         TryRecvTmtcError,
     };
     use crate::tmtc::tm_helper::SharedTmPool;
-    use crate::ChannelId;
+    use crate::{ChannelId, TargetId};
     use alloc::boxed::Box;
     use alloc::vec::Vec;
     use crossbeam_channel as cb;
@@ -410,13 +381,12 @@ pub mod std_mod {
     use spacepackets::time::cds::TimeProvider;
     use spacepackets::time::StdTimestampError;
     use spacepackets::time::TimeWriter;
-    use std::cell::RefCell;
     use std::string::String;
     use std::sync::mpsc;
     use std::sync::mpsc::TryRecvError;
     use thiserror::Error;
 
-    use super::verification::VerificationReporterWithSender;
+    use super::verification::VerificationReportingProvider;
     use super::{AcceptedEcssTcAndToken, TcInMemory};
 
     impl From<mpsc::SendError<StoreAddr>> for EcssTmtcError {
@@ -662,6 +632,20 @@ pub mod std_mod {
         }
     }
 
+    // TODO: All these types could probably be no_std if we implemented error handling ourselves..
+    // but thiserror is really nice, so keep it like this for simplicity for now. Maybe thiserror
+    // will be no_std soon, see https://github.com/rust-lang/rust/issues/103765 .
+
+    #[derive(Debug, Clone, Error)]
+    pub enum GenericRoutingError {
+        #[error("not enough application data, expected at least {expected}, found {found}")]
+        NotEnoughAppData { expected: usize, found: usize },
+        #[error("Unknown target ID {0}")]
+        UnknownTargetId(TargetId),
+        #[error("Sending action request failed: {0}")]
+        SendError(GenericSendError),
+    }
+
     #[derive(Debug, Clone, Error)]
     pub enum PusPacketHandlingError {
         #[error("generic PUS error: {0}")]
@@ -670,8 +654,8 @@ pub mod std_mod {
         WrongService(u8),
         #[error("invalid subservice {0}")]
         InvalidSubservice(u8),
-        #[error("not enough application data available: {0}")]
-        NotEnoughAppData(String),
+        #[error("not enough application data, expected at least {expected}, found {found}")]
+        NotEnoughAppData { expected: usize, found: usize },
         #[error("PUS packet too large, does not fit in buffer: {0}")]
         PusPacketTooLarge(usize),
         #[error("invalid application data")]
@@ -682,6 +666,8 @@ pub mod std_mod {
         EcssTmtc(#[from] EcssTmtcError),
         #[error("invalid verification token")]
         InvalidVerificationToken,
+        #[error("request routing error: {0}")]
+        RequestRoutingError(#[from] GenericRoutingError),
         #[error("other error {0}")]
         Other(String),
     }
@@ -825,18 +811,18 @@ pub mod std_mod {
         }
     }
 
-    pub struct PusServiceBase {
+    pub struct PusServiceBase<VerificationReporter: VerificationReportingProvider> {
         pub tc_receiver: Box<dyn EcssTcReceiver>,
         pub tm_sender: Box<dyn EcssTmSender>,
         pub tm_apid: u16,
         /// The verification handler is wrapped in a [RefCell] to allow the interior mutability
         /// pattern. This makes writing methods which are not mutable a lot easier.
-        pub verification_handler: RefCell<StdVerifReporterWithSender>,
+        pub verification_handler: VerificationReporter,
     }
 
-    impl PusServiceBase {
+    impl<VerificationReporter: VerificationReportingProvider> PusServiceBase<VerificationReporter> {
         #[cfg(feature = "std")]
-        pub fn get_current_timestamp(
+        pub fn get_current_cds_short_timestamp(
             partial_error: &mut Option<PartialPusHandlingError>,
         ) -> [u8; 7] {
             let mut time_stamp: [u8; 7] = [0; 7];
@@ -850,11 +836,10 @@ pub mod std_mod {
             }
             time_stamp
         }
-
         #[cfg(feature = "std")]
         pub fn get_current_timestamp_ignore_error() -> [u8; 7] {
             let mut dummy = None;
-            Self::get_current_timestamp(&mut dummy)
+            Self::get_current_cds_short_timestamp(&mut dummy)
         }
     }
 
@@ -867,17 +852,24 @@ pub mod std_mod {
     /// This base class can handle PUS telecommands backed by different memory storage machanisms
     /// by using the [EcssTcInMemConverter] abstraction. This object provides some convenience
     /// methods to make the generic parts of TC handling easier.
-    pub struct PusServiceHelper<TcInMemConverter: EcssTcInMemConverter> {
-        pub common: PusServiceBase,
+    pub struct PusServiceHelper<
+        TcInMemConverter: EcssTcInMemConverter,
+        VerificationReporter: VerificationReportingProvider,
+    > {
+        pub common: PusServiceBase<VerificationReporter>,
         pub tc_in_mem_converter: TcInMemConverter,
     }
 
-    impl<TcInMemConverter: EcssTcInMemConverter> PusServiceHelper<TcInMemConverter> {
+    impl<
+            TcInMemConverter: EcssTcInMemConverter,
+            VerificationReporter: VerificationReportingProvider,
+        > PusServiceHelper<TcInMemConverter, VerificationReporter>
+    {
         pub fn new(
             tc_receiver: Box<dyn EcssTcReceiver>,
             tm_sender: Box<dyn EcssTmSender>,
             tm_apid: u16,
-            verification_handler: VerificationReporterWithSender,
+            verification_handler: VerificationReporter,
             tc_in_mem_converter: TcInMemConverter,
         ) -> Self {
             Self {
@@ -885,7 +877,7 @@ pub mod std_mod {
                     tc_receiver,
                     tm_sender,
                     tm_apid,
-                    verification_handler: RefCell::new(verification_handler),
+                    verification_handler,
                 },
                 tc_in_mem_converter,
             }
@@ -939,12 +931,15 @@ pub(crate) fn source_buffer_large_enough(cap: usize, len: usize) -> Result<(), E
 
 #[cfg(test)]
 pub mod tests {
+    use core::cell::RefCell;
     use std::sync::mpsc::TryRecvError;
     use std::sync::{mpsc, RwLock};
 
     use alloc::boxed::Box;
-    use alloc::vec;
-    use spacepackets::ecss::tc::PusTcCreator;
+    use alloc::collections::VecDeque;
+    use alloc::vec::Vec;
+    use satrs_shared::res_code::ResultU16;
+    use spacepackets::ecss::tc::{PusTcCreator, PusTcReader};
     use spacepackets::ecss::tm::{GenericPusTmSecondaryHeader, PusTmCreator, PusTmReader};
     use spacepackets::ecss::{PusPacket, WritablePusPacket};
     use spacepackets::CcsdsPacket;
@@ -954,14 +949,17 @@ pub mod tests {
     };
     use crate::pus::verification::RequestId;
     use crate::tmtc::tm_helper::SharedTmPool;
+    use crate::TargetId;
 
+    use super::verification::tests::{SharedVerificationMap, TestVerificationReporter};
     use super::verification::{
-        TcStateAccepted, VerificationReporterCfg, VerificationReporterWithSender, VerificationToken,
+        TcStateAccepted, VerificationReporterCfg, VerificationReporterWithSender,
+        VerificationReportingProvider, VerificationToken,
     };
     use super::{
-        EcssTcAndToken, EcssTcInSharedStoreConverter, EcssTcInVecConverter, MpscTcReceiver,
-        MpscTmAsVecSender, MpscTmInSharedPoolSender, PusPacketHandlerResult,
-        PusPacketHandlingError, PusServiceHelper, TcInMemory,
+        EcssTcAndToken, EcssTcInSharedStoreConverter, EcssTcInVecConverter, GenericRoutingError,
+        MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSender, PusPacketHandlerResult,
+        PusPacketHandlingError, PusRoutingErrorHandler, PusServiceHelper, TcInMemory,
     };
 
     pub const TEST_APID: u16 = 0x101;
@@ -1016,8 +1014,11 @@ pub mod tests {
         /// [PusServiceHandler] which might be required for a specific PUS service handler.
         ///
         /// The PUS service handler is instantiated with a [EcssTcInStoreConverter].
-        pub fn new() -> (Self, PusServiceHelper<EcssTcInSharedStoreConverter>) {
-            let pool_cfg = StaticPoolConfig::new(vec![(16, 16), (8, 32), (4, 64)], false);
+        pub fn new() -> (
+            Self,
+            PusServiceHelper<EcssTcInSharedStoreConverter, VerificationReporterWithSender>,
+        ) {
+            let pool_cfg = StaticPoolConfig::new(alloc::vec![(16, 16), (8, 32), (4, 64)], false);
             let tc_pool = StaticMemoryPool::new(pool_cfg.clone());
             let tm_pool = StaticMemoryPool::new(pool_cfg);
             let shared_tc_pool = SharedStaticMemoryPool::new(RwLock::new(tc_pool));
@@ -1062,7 +1063,7 @@ pub mod tests {
             let token = self.verification_handler.add_tc(tc);
             let token = self
                 .verification_handler
-                .acceptance_success(token, Some(&[0; 7]))
+                .acceptance_success(token, &[0; 7])
                 .unwrap();
             let tc_size = tc.write_to_bytes(&mut self.pus_buf).unwrap();
             let mut tc_pool = self.tc_pool.write().unwrap();
@@ -1109,15 +1110,18 @@ pub mod tests {
         }
     }
 
-    pub struct PusServiceHandlerWithVecCommon {
+    pub struct PusServiceHandlerWithVecCommon<VerificationReporter: VerificationReportingProvider> {
         current_tm: Option<alloc::vec::Vec<u8>>,
         tc_sender: mpsc::Sender<EcssTcAndToken>,
         tm_receiver: mpsc::Receiver<alloc::vec::Vec<u8>>,
-        verification_handler: VerificationReporterWithSender,
+        pub verification_handler: VerificationReporter,
     }
 
-    impl PusServiceHandlerWithVecCommon {
-        pub fn new() -> (Self, PusServiceHelper<EcssTcInVecConverter>) {
+    impl PusServiceHandlerWithVecCommon<VerificationReporterWithSender> {
+        pub fn new_with_standard_verif_reporter() -> (
+            Self,
+            PusServiceHelper<EcssTcInVecConverter, VerificationReporterWithSender>,
+        ) {
             let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::channel();
             let (tm_tx, tm_rx) = mpsc::channel();
 
@@ -1125,6 +1129,7 @@ pub mod tests {
             let verif_cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
             let verification_handler =
                 VerificationReporterWithSender::new(&verif_cfg, Box::new(verif_sender));
+
             let test_srv_tm_sender = MpscTmAsVecSender::new(0, "test-sender", tm_tx);
             let test_srv_tc_receiver = MpscTcReceiver::new(0, "test-receiver", test_srv_tc_rx);
             let in_store_converter = EcssTcInVecConverter::default();
@@ -1144,12 +1149,47 @@ pub mod tests {
                 ),
             )
         }
+    }
 
+    impl PusServiceHandlerWithVecCommon<TestVerificationReporter> {
+        pub fn new_with_test_verif_sender() -> (
+            Self,
+            PusServiceHelper<EcssTcInVecConverter, TestVerificationReporter>,
+        ) {
+            let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::channel();
+            let (tm_tx, tm_rx) = mpsc::channel();
+
+            let test_srv_tm_sender = MpscTmAsVecSender::new(0, "test-sender", tm_tx);
+            let test_srv_tc_receiver = MpscTcReceiver::new(0, "test-receiver", test_srv_tc_rx);
+            let in_store_converter = EcssTcInVecConverter::default();
+            let shared_verif_map = SharedVerificationMap::default();
+            let verification_handler = TestVerificationReporter::new(shared_verif_map);
+            (
+                Self {
+                    current_tm: None,
+                    tc_sender: test_srv_tc_tx,
+                    tm_receiver: tm_rx,
+                    verification_handler: verification_handler.clone(),
+                },
+                PusServiceHelper::new(
+                    Box::new(test_srv_tc_receiver),
+                    Box::new(test_srv_tm_sender),
+                    TEST_APID,
+                    verification_handler,
+                    in_store_converter,
+                ),
+            )
+        }
+    }
+
+    impl<VerificationReporter: VerificationReportingProvider>
+        PusServiceHandlerWithVecCommon<VerificationReporter>
+    {
         pub fn send_tc(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted> {
             let token = self.verification_handler.add_tc(tc);
             let token = self
                 .verification_handler
-                .acceptance_success(token, Some(&[0; 7]))
+                .acceptance_success(token, &[0; 7])
                 .unwrap();
             // Send accepted TC to test service handler.
             self.tc_sender
@@ -1189,6 +1229,108 @@ pub mod tests {
             let req_id =
                 RequestId::from_bytes(tm.user_data()).expect("generating request ID failed");
             assert_eq!(req_id, expected_request_id);
+        }
+    }
+
+    pub const APP_DATA_TOO_SHORT: ResultU16 = ResultU16::new(1, 1);
+
+    #[derive(Default)]
+    pub struct TestConverter<const SERVICE: u8> {
+        pub conversion_request: VecDeque<Vec<u8>>,
+    }
+
+    impl<const SERVICE: u8> TestConverter<SERVICE> {
+        pub fn check_service(&self, tc: &PusTcReader) -> Result<(), PusPacketHandlingError> {
+            if tc.service() != SERVICE {
+                return Err(PusPacketHandlingError::WrongService(tc.service()));
+            }
+            Ok(())
+        }
+
+        pub fn is_empty(&self) {
+            self.conversion_request.is_empty();
+        }
+
+        pub fn check_next_conversion(&mut self, tc: &PusTcCreator) {
+            assert!(!self.conversion_request.is_empty());
+            assert_eq!(
+                self.conversion_request.pop_front().unwrap(),
+                tc.to_vec().unwrap()
+            );
+        }
+    }
+
+    #[derive(Default)]
+    pub struct TestRoutingErrorHandler {
+        pub routing_errors: RefCell<VecDeque<(TargetId, GenericRoutingError)>>,
+    }
+
+    impl PusRoutingErrorHandler for TestRoutingErrorHandler {
+        type Error = GenericRoutingError;
+
+        fn handle_error(
+            &self,
+            target_id: TargetId,
+            _token: VerificationToken<TcStateAccepted>,
+            _tc: &PusTcReader,
+            error: Self::Error,
+            _time_stamp: &[u8],
+            _verif_reporter: &impl VerificationReportingProvider,
+        ) {
+            self.routing_errors
+                .borrow_mut()
+                .push_back((target_id, error));
+        }
+    }
+
+    impl TestRoutingErrorHandler {
+        pub fn is_empty(&self) -> bool {
+            self.routing_errors.borrow().is_empty()
+        }
+
+        pub fn retrieve_next_error(&mut self) -> (TargetId, GenericRoutingError) {
+            if self.routing_errors.borrow().is_empty() {
+                panic!("no routing request available");
+            }
+            self.routing_errors.borrow_mut().pop_front().unwrap()
+        }
+    }
+
+    pub struct TestRouter<REQUEST> {
+        pub routing_requests: RefCell<VecDeque<(TargetId, REQUEST)>>,
+        pub injected_routing_failure: RefCell<Option<GenericRoutingError>>,
+    }
+
+    impl<REQUEST> Default for TestRouter<REQUEST> {
+        fn default() -> Self {
+            Self {
+                routing_requests: Default::default(),
+                injected_routing_failure: Default::default(),
+            }
+        }
+    }
+
+    impl<REQUEST> TestRouter<REQUEST> {
+        pub fn check_for_injected_error(&self) -> Result<(), GenericRoutingError> {
+            if self.injected_routing_failure.borrow().is_some() {
+                return Err(self.injected_routing_failure.borrow_mut().take().unwrap());
+            }
+            Ok(())
+        }
+
+        pub fn inject_routing_error(&mut self, error: GenericRoutingError) {
+            *self.injected_routing_failure.borrow_mut() = Some(error);
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.routing_requests.borrow().is_empty()
+        }
+
+        pub fn retrieve_next_request(&mut self) -> (TargetId, REQUEST) {
+            if self.routing_requests.borrow().is_empty() {
+                panic!("no routing request available");
+            }
+            self.routing_requests.borrow_mut().pop_front().unwrap()
         }
     }
 }

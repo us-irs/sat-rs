@@ -2,7 +2,9 @@ use log::{info, warn};
 use satrs::params::Params;
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
 use satrs::pus::test::PusService17TestHandler;
-use satrs::pus::verification::{FailParams, VerificationReporterWithSender};
+use satrs::pus::verification::{
+    FailParams, VerificationReporterWithSender, VerificationReportingProvider,
+};
 use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter, MpscTcReceiver, MpscTmAsVecSender,
     MpscTmInSharedPoolSender, PusPacketHandlerResult, PusServiceHelper,
@@ -79,7 +81,7 @@ pub fn create_test_service_dynamic(
 }
 
 pub struct Service17CustomWrapper<TcInMemConverter: EcssTcInMemConverter> {
-    pub pus17_handler: PusService17TestHandler<TcInMemConverter>,
+    pub pus17_handler: PusService17TestHandler<TcInMemConverter, VerificationReporterWithSender>,
     pub test_srv_event_sender: Sender<(EventU32, Option<Params>)>,
 }
 
@@ -125,15 +127,13 @@ impl<TcInMemConverter: EcssTcInMemConverter> Service17CustomWrapper<TcInMemConve
                         .service_helper
                         .common
                         .verification_handler
-                        .get_mut()
-                        .start_success(token, Some(&stamp_buf))
+                        .start_success(token, &stamp_buf)
                         .expect("Error sending start success");
                     self.pus17_handler
                         .service_helper
                         .common
                         .verification_handler
-                        .get_mut()
-                        .completion_success(start_token, Some(&stamp_buf))
+                        .completion_success(start_token, &stamp_buf)
                         .expect("Error sending completion success");
                 } else {
                     let fail_data = [tc.subservice()];
@@ -141,13 +141,12 @@ impl<TcInMemConverter: EcssTcInMemConverter> Service17CustomWrapper<TcInMemConve
                         .service_helper
                         .common
                         .verification_handler
-                        .get_mut()
                         .start_failure(
                             token,
                             FailParams::new(
-                                Some(&stamp_buf),
+                                &stamp_buf,
                                 &tmtc_err::INVALID_PUS_SUBSERVICE,
-                                Some(&fail_data),
+                                &fail_data,
                             ),
                         )
                         .expect("Sending start failure verification failed");

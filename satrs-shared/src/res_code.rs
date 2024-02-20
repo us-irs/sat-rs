@@ -52,6 +52,10 @@ impl UnsignedEnum for ResultU16 {
         buf[1] = self.unique_id;
         Ok(self.size())
     }
+
+    fn value(&self) -> u64 {
+        self.raw() as u64
+    }
 }
 
 impl EcssEnumeration for ResultU16 {

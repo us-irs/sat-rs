@@ -52,7 +52,8 @@ impl TcReleaser for mpsc::Sender<Vec<u8>> {
 }
 
 pub struct Pus11Wrapper<TcInMemConverter: EcssTcInMemConverter> {
-    pub pus_11_handler: PusService11SchedHandler<TcInMemConverter, PusScheduler>,
+    pub pus_11_handler:
+        PusService11SchedHandler<TcInMemConverter, VerificationReporterWithSender, PusScheduler>,
     pub sched_tc_pool: StaticMemoryPool,
     pub releaser_buf: [u8; 4096],
     pub tc_releaser: Box<dyn TcReleaser + Send>,

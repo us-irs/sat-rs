@@ -412,6 +412,10 @@ impl UnsignedEnum for EventU32 {
     fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
         self.base.write_to_bytes(self.raw(), buf, self.size())
     }
+
+    fn value(&self) -> u64 {
+        self.raw().into()
+    }
 }
 
 impl EcssEnumeration for EventU32 {
@@ -425,6 +429,7 @@ impl<SEVERITY: HasSeverity> UnsignedEnum for EventU32TypedSev<SEVERITY> {
     delegate!(to self.event {
         fn size(&self) -> usize;
         fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError>;
+        fn value(&self) -> u64;
     });
 }
 
@@ -560,6 +565,10 @@ impl UnsignedEnum for EventU16 {
     fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
         self.base.write_to_bytes(self.raw(), buf, self.size())
     }
+
+    fn value(&self) -> u64 {
+        self.raw().into()
+    }
 }
 impl EcssEnumeration for EventU16 {
     #[inline]
@@ -573,6 +582,7 @@ impl<SEVERITY: HasSeverity> UnsignedEnum for EventU16TypedSev<SEVERITY> {
     delegate!(to self.event {
         fn size(&self) -> usize;
         fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError>;
+        fn value(&self) -> u64;
     });
 }
 

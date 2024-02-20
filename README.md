@@ -1,5 +1,8 @@
 <p align="center"> <img src="misc/satrs-logo.png" width="40%"> </p>
 
+[![Crates.io](https://img.shields.io/crates/v/satrs)](https://crates.io/crates/satrs)
+[![docs.rs](https://img.shields.io/docsrs/satrs)](https://docs.rs/satrs)
+
 sat-rs
 =========
 

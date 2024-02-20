@@ -9,7 +9,7 @@ use spacepackets::{
         pdu::{FileDirectiveType, PduError, PduHeader},
         ChecksumType, ConditionCode, FaultHandlerCode, PduType, TransmissionMode,
     },
-    util::UnsignedByteField,
+    util::{UnsignedByteField, UnsignedEnum},
 };
 
 #[cfg(feature = "alloc")]

@@ -5,16 +5,24 @@ use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
 use spacepackets::ecss::PusPacket;
 use spacepackets::SpHeader;
 
+use super::verification::VerificationReportingProvider;
 use super::{EcssTcInMemConverter, PusServiceBase, PusServiceHelper};
 
 /// This is a helper class for [std] environments to handle generic PUS 17 (test service) packets.
 /// This handler only processes ping requests and generates a ping reply for them accordingly.
-pub struct PusService17TestHandler<TcInMemConverter: EcssTcInMemConverter> {
-    pub service_helper: PusServiceHelper<TcInMemConverter>,
+pub struct PusService17TestHandler<
+    TcInMemConverter: EcssTcInMemConverter,
+    VerificationReporter: VerificationReportingProvider,
+> {
+    pub service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
 }
 
-impl<TcInMemConverter: EcssTcInMemConverter> PusService17TestHandler<TcInMemConverter> {
-    pub fn new(service_helper: PusServiceHelper<TcInMemConverter>) -> Self {
+impl<
+        TcInMemConverter: EcssTcInMemConverter,
+        VerificationReporter: VerificationReportingProvider,
+    > PusService17TestHandler<TcInMemConverter, VerificationReporter>
+{
+    pub fn new(service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>) -> Self {
         Self { service_helper }
     }
 
@@ -33,13 +41,15 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService17TestHandler<TcInMemConv
         }
         if tc.subservice() == 1 {
             let mut partial_error = None;
-            let time_stamp = PusServiceBase::get_current_timestamp(&mut partial_error);
+            let time_stamp =
+                PusServiceBase::<VerificationReporter>::get_current_cds_short_timestamp(
+                    &mut partial_error,
+                );
             let result = self
                 .service_helper
                 .common
                 .verification_handler
-                .get_mut()
-                .start_success(ecss_tc_and_token.token, Some(&time_stamp))
+                .start_success(ecss_tc_and_token.token, &time_stamp)
                 .map_err(|_| PartialPusHandlingError::Verification);
             let start_token = if let Ok(result) = result {
                 Some(result)
@@ -67,8 +77,7 @@ impl<TcInMemConverter: EcssTcInMemConverter> PusService17TestHandler<TcInMemConv
                     .service_helper
                     .common
                     .verification_handler
-                    .get_mut()
-                    .completion_success(start_token, Some(&time_stamp))
+                    .completion_success(start_token, &time_stamp)
                     .is_err()
                 {
                     partial_error = Some(PartialPusHandlingError::Verification)
@@ -95,7 +104,7 @@ mod tests {
         PusServiceHandlerWithSharedStoreCommon, PusServiceHandlerWithVecCommon, PusTestHarness,
         SimplePusPacketHandler, TEST_APID,
     };
-    use crate::pus::verification::RequestId;
+    use crate::pus::verification::{RequestId, VerificationReporterWithSender};
     use crate::pus::verification::{TcStateAccepted, VerificationToken};
     use crate::pus::{
         EcssTcInSharedStoreConverter, EcssTcInVecConverter, PusPacketHandlerResult,
@@ -111,7 +120,8 @@ mod tests {
 
     struct Pus17HandlerWithStoreTester {
         common: PusServiceHandlerWithSharedStoreCommon,
-        handler: PusService17TestHandler<EcssTcInSharedStoreConverter>,
+        handler:
+            PusService17TestHandler<EcssTcInSharedStoreConverter, VerificationReporterWithSender>,
     }
 
     impl Pus17HandlerWithStoreTester {
@@ -148,13 +158,14 @@ mod tests {
     }
 
     struct Pus17HandlerWithVecTester {
-        common: PusServiceHandlerWithVecCommon,
-        handler: PusService17TestHandler<EcssTcInVecConverter>,
+        common: PusServiceHandlerWithVecCommon<VerificationReporterWithSender>,
+        handler: PusService17TestHandler<EcssTcInVecConverter, VerificationReporterWithSender>,
     }
 
     impl Pus17HandlerWithVecTester {
         pub fn new() -> Self {
-            let (common, srv_handler) = PusServiceHandlerWithVecCommon::new();
+            let (common, srv_handler) =
+                PusServiceHandlerWithVecCommon::new_with_standard_verif_reporter();
             Self {
                 common,
                 handler: PusService17TestHandler::new(srv_handler),
