@@ -2,6 +2,9 @@ use core::fmt::{Display, Formatter};
 #[cfg(feature = "std")]
 use std::error::Error;
 
+/// Generic channel ID type.
+pub type ChannelId = u32;
+
 /// Generic error type for sending something via a message queue.
 #[derive(Debug, Copy, Clone)]
 pub enum GenericSendError {

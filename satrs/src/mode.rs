@@ -5,19 +5,22 @@ use spacepackets::ByteConversionError;
 
 use crate::TargetId;
 
+pub type Mode = u32;
+pub type Submode = u16;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ModeAndSubmode {
-    mode: u32,
-    submode: u16,
+    mode: Mode,
+    submode: Submode,
 }
 
 impl ModeAndSubmode {
-    pub const fn new_mode_only(mode: u32) -> Self {
+    pub const fn new_mode_only(mode: Mode) -> Self {
         Self { mode, submode: 0 }
     }
 
-    pub const fn new(mode: u32, submode: u16) -> Self {
+    pub const fn new(mode: Mode, submode: Submode) -> Self {
         Self { mode, submode }
     }
 
@@ -33,16 +36,20 @@ impl ModeAndSubmode {
             });
         }
         Ok(Self {
-            mode: u32::from_be_bytes(buf[0..4].try_into().unwrap()),
-            submode: u16::from_be_bytes(buf[4..6].try_into().unwrap()),
+            mode: Mode::from_be_bytes(buf[0..size_of::<Mode>()].try_into().unwrap()),
+            submode: Submode::from_be_bytes(
+                buf[size_of::<Mode>()..size_of::<Mode>() + size_of::<Submode>()]
+                    .try_into()
+                    .unwrap(),
+            ),
         })
     }
 
-    pub fn mode(&self) -> u32 {
+    pub fn mode(&self) -> Mode {
         self.mode
     }
 
-    pub fn submode(&self) -> u16 {
+    pub fn submode(&self) -> Submode {
         self.submode
     }
 }
@@ -85,6 +92,20 @@ pub enum ModeRequest {
     ReadMode,
     AnnounceMode,
     AnnounceModeRecursive,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ModeReply {
+    /// Unrequest mode information. Can be used to notify other components of changed modes.
+    ModeInfo(ModeAndSubmode),
+    /// Reply to a mode request to confirm the commanded mode was reached.
+    ModeReply(ModeAndSubmode),
+    CantReachMode(ModeAndSubmode),
+    WrongMode {
+        expected: ModeAndSubmode,
+        reached: ModeAndSubmode,
+    },
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
