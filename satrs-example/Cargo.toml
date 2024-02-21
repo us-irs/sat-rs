@@ -1,6 +1,6 @@
 [package]
 name = "satrs-example"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
 default-run = "satrs-example"
