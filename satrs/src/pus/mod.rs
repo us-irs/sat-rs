@@ -2,7 +2,7 @@
 //!
 //! This module contains structures to make working with the PUS C standard easier.
 //! The satrs-example application contains various usage examples of these components.
-use crate::queue::{GenericRecvError, GenericSendError};
+use crate::queue::{GenericReceiveError, GenericSendError};
 use crate::ChannelId;
 use core::fmt::{Display, Formatter};
 #[cfg(feature = "alloc")]
@@ -64,7 +64,7 @@ pub enum EcssTmtcError {
     Pus(PusError),
     CantSendAddr(StoreAddr),
     Send(GenericSendError),
-    Recv(GenericRecvError),
+    Recv(GenericReceiveError),
 }
 
 impl Display for EcssTmtcError {
@@ -110,8 +110,8 @@ impl From<GenericSendError> for EcssTmtcError {
     }
 }
 
-impl From<GenericRecvError> for EcssTmtcError {
-    fn from(value: GenericRecvError) -> Self {
+impl From<GenericReceiveError> for EcssTmtcError {
+    fn from(value: GenericReceiveError) -> Self {
         Self::Recv(value)
     }
 }
@@ -367,7 +367,7 @@ pub mod std_mod {
     use crate::pus::verification::{TcStateAccepted, VerificationToken};
     use crate::pus::{
         EcssChannel, EcssTcAndToken, EcssTcReceiver, EcssTcReceiverCore, EcssTmSender,
-        EcssTmSenderCore, EcssTmtcError, GenericRecvError, GenericSendError, PusTmWrapper,
+        EcssTmSenderCore, EcssTmtcError, GenericReceiveError, GenericSendError, PusTmWrapper,
         TryRecvTmtcError,
     };
     use crate::tmtc::tm_helper::SharedTmPool;
@@ -486,7 +486,7 @@ pub mod std_mod {
             self.receiver.try_recv().map_err(|e| match e {
                 TryRecvError::Empty => TryRecvTmtcError::Empty,
                 TryRecvError::Disconnected => {
-                    TryRecvTmtcError::Error(EcssTmtcError::from(GenericRecvError::TxDisconnected))
+                    TryRecvTmtcError::Error(EcssTmtcError::from(GenericReceiveError::TxDisconnected(Some(self.id()))))
                 }
             })
         }
@@ -626,7 +626,7 @@ pub mod std_mod {
             self.receiver.try_recv().map_err(|e| match e {
                 cb::TryRecvError::Empty => TryRecvTmtcError::Empty,
                 cb::TryRecvError::Disconnected => {
-                    TryRecvTmtcError::Error(EcssTmtcError::from(GenericRecvError::TxDisconnected))
+                    TryRecvTmtcError::Error(EcssTmtcError::from(GenericReceiveError::TxDisconnected(Some(self.id()))))
                 }
             })
         }

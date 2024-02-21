@@ -30,16 +30,16 @@ impl Error for GenericSendError {}
 
 /// Generic error type for sending something via a message queue.
 #[derive(Debug, Copy, Clone)]
-pub enum GenericRecvError {
+pub enum GenericReceiveError {
     Empty,
-    TxDisconnected,
+    TxDisconnected(Option<ChannelId>)
 }
 
-impl Display for GenericRecvError {
+impl Display for GenericReceiveError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::TxDisconnected => {
-                write!(f, "tx side has disconnected")
+            Self::TxDisconnected(channel_id) => {
+                write!(f, "tx side with id {channel_id:?} has disconnected")
             }
             Self::Empty => {
                 write!(f, "nothing to receive")
@@ -49,4 +49,4 @@ impl Display for GenericRecvError {
 }
 
 #[cfg(feature = "std")]
-impl Error for GenericRecvError {}
+impl Error for GenericReceiveError {}
