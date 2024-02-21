@@ -32,7 +32,7 @@ impl Error for GenericSendError {}
 #[derive(Debug, Copy, Clone)]
 pub enum GenericReceiveError {
     Empty,
-    TxDisconnected(Option<ChannelId>)
+    TxDisconnected(Option<ChannelId>),
 }
 
 impl Display for GenericReceiveError {

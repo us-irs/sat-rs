@@ -485,9 +485,9 @@ pub mod std_mod {
         fn recv_tc(&self) -> Result<EcssTcAndToken, TryRecvTmtcError> {
             self.receiver.try_recv().map_err(|e| match e {
                 TryRecvError::Empty => TryRecvTmtcError::Empty,
-                TryRecvError::Disconnected => {
-                    TryRecvTmtcError::Error(EcssTmtcError::from(GenericReceiveError::TxDisconnected(Some(self.id()))))
-                }
+                TryRecvError::Disconnected => TryRecvTmtcError::Error(EcssTmtcError::from(
+                    GenericReceiveError::TxDisconnected(Some(self.id())),
+                )),
             })
         }
     }
@@ -625,9 +625,9 @@ pub mod std_mod {
         fn recv_tc(&self) -> Result<EcssTcAndToken, TryRecvTmtcError> {
             self.receiver.try_recv().map_err(|e| match e {
                 cb::TryRecvError::Empty => TryRecvTmtcError::Empty,
-                cb::TryRecvError::Disconnected => {
-                    TryRecvTmtcError::Error(EcssTmtcError::from(GenericReceiveError::TxDisconnected(Some(self.id()))))
-                }
+                cb::TryRecvError::Disconnected => TryRecvTmtcError::Error(EcssTmtcError::from(
+                    GenericReceiveError::TxDisconnected(Some(self.id())),
+                )),
             })
         }
     }
