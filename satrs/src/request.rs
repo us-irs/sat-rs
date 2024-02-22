@@ -138,32 +138,22 @@ mod std_mod {
 
     use super::MessageWithSenderId;
 
-    pub trait TargetedMessageSendProvider {
-        type Message;
-        fn send_message(
-            &self,
-            local_channel_id: ChannelId,
-            target_channel_id: ChannelId,
-            message: Self::Message,
-        ) -> Result<(), GenericTargetedMessagingError>;
-    }
-
-    pub struct MpscMessageSenderMap<Message, SendProvider: TargetedMessageSendProvider<Message = Message>>(
-        pub HashMap<ChannelId, SendProvider>,
+    pub struct MpscMessageSenderMap<MESSAGE>(
+        pub HashMap<ChannelId, mpsc::Sender<MessageWithSenderId<MESSAGE>>>,
     );
 
-    impl<Message, SendProvider> Default for MpscMessageSenderMap<Message, SendProvider> {
+    impl<MESSAGE> Default for MpscMessageSenderMap<MESSAGE> {
         fn default() -> Self {
             Self(Default::default())
         }
     }
 
-    impl<Message, SendProvider> MpscMessageSenderMap<Message, SendProvider> {
+    impl<MESSAGE> MpscMessageSenderMap<MESSAGE> {
         pub fn send_message(
             &self,
             local_channel_id: ChannelId,
             target_channel_id: ChannelId,
-            message: Message,
+            message: MESSAGE,
         ) -> Result<(), GenericTargetedMessagingError> {
             if self.0.contains_key(&target_channel_id) {
                 self.0
@@ -181,18 +171,18 @@ mod std_mod {
         pub fn add_message_target(
             &mut self,
             target_id: ChannelId,
-            message_sender: mpsc::Sender<MessageWithSenderId<Message>>,
+            message_sender: mpsc::Sender<MessageWithSenderId<MESSAGE>>,
         ) {
             self.0.insert(target_id, message_sender);
         }
     }
 
-    pub struct MpscMessageSenderWithId<Message, SendProvider> {
+    pub struct MpscMessageSenderWithId<MESSAGE> {
         pub local_channel_id: ChannelId,
-        pub message_sender_map: MpscMessageSenderMap<Message, SendProvider>,
+        pub message_sender_map: MpscMessageSenderMap<MESSAGE>,
     }
 
-    impl<Message> MpscMessageSenderWithId<Message> {
+    impl<MESSAGE> MpscMessageSenderWithId<MESSAGE> {
         pub fn new(local_channel_id: ChannelId) -> Self {
             Self {
                 local_channel_id,
