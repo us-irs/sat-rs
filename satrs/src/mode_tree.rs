@@ -7,8 +7,9 @@ use crate::{
     mode::{Mode, ModeAndSubmode, ModeReply, ModeRequest, Submode},
     queue::GenericTargetedMessagingError,
     request::{
-        MessageWithSenderId, MpscMessageReceiverWithIds, MpscMessageSenderAndReceiver,
-        MpscMessageSenderMap, MpscMessageSenderWithId, MpscRequestAndReplySenderAndReceiver,
+        MessageReceiver, MessageReceiverWithId, MessageSender, MessageSenderAndReceiver,
+        MessageSenderMap, MessageSenderMapWithId, MessageWithSenderId,
+        RequestAndReplySenderAndReceiver,
     },
     ChannelId,
 };
@@ -71,7 +72,7 @@ pub trait ModeReplyReceiver {
     ) -> Result<Option<MessageWithSenderId<ModeReply>>, GenericTargetedMessagingError>;
 }
 
-impl MpscMessageSenderMap<ModeRequest> {
+impl<S: MessageSender<ModeRequest>> MessageSenderMap<ModeRequest, S> {
     pub fn send_mode_request(
         &self,
         local_id: ChannelId,
@@ -81,16 +82,12 @@ impl MpscMessageSenderMap<ModeRequest> {
         self.send_message(local_id, target_id, request)
     }
 
-    pub fn add_request_target(
-        &mut self,
-        target_id: ChannelId,
-        request_sender: mpsc::Sender<MessageWithSenderId<ModeRequest>>,
-    ) {
+    pub fn add_request_target(&mut self, target_id: ChannelId, request_sender: S) {
         self.add_message_target(target_id, request_sender)
     }
 }
 
-impl MpscMessageSenderMap<ModeReply> {
+impl<S: MessageSender<ModeReply>> MessageSenderMap<ModeReply, S> {
     pub fn send_mode_reply(
         &self,
         local_id: ChannelId,
@@ -100,16 +97,12 @@ impl MpscMessageSenderMap<ModeReply> {
         self.send_message(local_id, target_id, request)
     }
 
-    pub fn add_reply_target(
-        &mut self,
-        target_id: ChannelId,
-        request_sender: mpsc::Sender<MessageWithSenderId<ModeReply>>,
-    ) {
+    pub fn add_reply_target(&mut self, target_id: ChannelId, request_sender: S) {
         self.add_message_target(target_id, request_sender)
     }
 }
 
-impl ModeReplySender for MpscMessageSenderWithId<ModeReply> {
+impl<S: MessageSender<ModeReply>> ModeReplySender for MessageSenderMapWithId<ModeReply, S> {
     fn send_mode_reply(
         &self,
         target_channel_id: ChannelId,
@@ -123,7 +116,7 @@ impl ModeReplySender for MpscMessageSenderWithId<ModeReply> {
     }
 }
 
-impl ModeRequestSender for MpscMessageSenderWithId<ModeRequest> {
+impl<S: MessageSender<ModeRequest>> ModeRequestSender for MessageSenderMapWithId<ModeRequest, S> {
     fn local_channel_id(&self) -> ChannelId {
         self.local_channel_id
     }
@@ -137,14 +130,16 @@ impl ModeRequestSender for MpscMessageSenderWithId<ModeRequest> {
     }
 }
 
-impl ModeReplyReceiver for MpscMessageReceiverWithIds<ModeReply> {
+impl<R: MessageReceiver<ModeReply>> ModeReplyReceiver for MessageReceiverWithId<ModeReply, R> {
     fn try_recv_mode_reply(
         &self,
     ) -> Result<Option<MessageWithSenderId<ModeReply>>, GenericTargetedMessagingError> {
         self.try_recv_message()
     }
 }
-impl ModeRequestReceiver for MpscMessageReceiverWithIds<ModeRequest> {
+impl<R: MessageReceiver<ModeRequest>> ModeRequestReceiver
+    for MessageReceiverWithId<ModeRequest, R>
+{
     fn try_recv_mode_request(
         &self,
     ) -> Result<Option<MessageWithSenderId<ModeRequest>>, GenericTargetedMessagingError> {
@@ -152,7 +147,9 @@ impl ModeRequestReceiver for MpscMessageReceiverWithIds<ModeRequest> {
     }
 }
 
-impl<FROM> ModeRequestSender for MpscMessageSenderAndReceiver<ModeRequest, FROM> {
+impl<FROM, S: MessageSender<ModeRequest>, R: MessageReceiver<FROM>> ModeRequestSender
+    for MessageSenderAndReceiver<ModeRequest, FROM, S, R>
+{
     fn local_channel_id(&self) -> ChannelId {
         self.local_channel_id_generic()
     }
@@ -167,7 +164,9 @@ impl<FROM> ModeRequestSender for MpscMessageSenderAndReceiver<ModeRequest, FROM>
     }
 }
 
-impl<FROM> ModeReplySender for MpscMessageSenderAndReceiver<ModeReply, FROM> {
+impl<FROM, S: MessageSender<ModeReply>, R: MessageReceiver<FROM>> ModeReplySender
+    for MessageSenderAndReceiver<ModeReply, FROM, S, R>
+{
     fn local_channel_id(&self) -> ChannelId {
         self.local_channel_id_generic()
     }
@@ -182,7 +181,9 @@ impl<FROM> ModeReplySender for MpscMessageSenderAndReceiver<ModeReply, FROM> {
     }
 }
 
-impl<TO> ModeReplyReceiver for MpscMessageSenderAndReceiver<TO, ModeReply> {
+impl<TO, S: MessageSender<TO>, R: MessageReceiver<ModeReply>> ModeReplyReceiver
+    for MessageSenderAndReceiver<TO, ModeReply, S, R>
+{
     fn try_recv_mode_reply(
         &self,
     ) -> Result<Option<MessageWithSenderId<ModeReply>>, GenericTargetedMessagingError> {
@@ -190,7 +191,9 @@ impl<TO> ModeReplyReceiver for MpscMessageSenderAndReceiver<TO, ModeReply> {
             .try_recv_message(self.local_channel_id_generic())
     }
 }
-impl<TO> ModeRequestReceiver for MpscMessageSenderAndReceiver<TO, ModeRequest> {
+impl<TO, S: MessageSender<TO>, R: MessageReceiver<ModeRequest>> ModeRequestReceiver
+    for MessageSenderAndReceiver<TO, ModeRequest, S, R>
+{
     fn try_recv_mode_request(
         &self,
     ) -> Result<Option<MessageWithSenderId<ModeRequest>>, GenericTargetedMessagingError> {
@@ -199,33 +202,63 @@ impl<TO> ModeRequestReceiver for MpscMessageSenderAndReceiver<TO, ModeRequest> {
     }
 }
 
-pub type MpscModeRequestHandlerConnector = MpscMessageSenderAndReceiver<ModeReply, ModeRequest>;
-pub type MpscModeRequestorConnector = MpscMessageSenderAndReceiver<ModeRequest, ModeReply>;
-pub type MpscModeConnector = MpscRequestAndReplySenderAndReceiver<ModeRequest, ModeReply>;
+pub type ModeRequestHandlerConnector<S, R> = MessageSenderAndReceiver<ModeReply, ModeRequest, S, R>;
+pub type MpscModeRequestHandlerConnector = ModeRequestHandlerConnector<
+    mpsc::Sender<MessageWithSenderId<ModeReply>>,
+    mpsc::Receiver<MessageWithSenderId<ModeRequest>>,
+>;
 
-impl<REPLY> MpscRequestAndReplySenderAndReceiver<ModeRequest, REPLY> {
-    pub fn add_request_target(
-        &mut self,
-        target_id: ChannelId,
-        request_sender: mpsc::Sender<MessageWithSenderId<ModeRequest>>,
-    ) {
+pub type ModeRequestorConnector<S, R> = MessageSenderAndReceiver<ModeRequest, ModeReply, S, R>;
+pub type MpscModeRequestorConnector = ModeRequestorConnector<
+    mpsc::Sender<MessageWithSenderId<ModeRequest>>,
+    mpsc::Receiver<MessageWithSenderId<ModeReply>>,
+>;
+
+pub type ModeConnector<S0, R0, S1, R1> =
+    RequestAndReplySenderAndReceiver<ModeRequest, ModeReply, S0, R0, S1, R1>;
+pub type MpscModeConnector = ModeConnector<
+    mpsc::Sender<MessageWithSenderId<ModeRequest>>,
+    mpsc::Receiver<MessageWithSenderId<ModeReply>>,
+    mpsc::Sender<MessageWithSenderId<ModeReply>>,
+    mpsc::Receiver<MessageWithSenderId<ModeRequest>>,
+>;
+
+impl<
+        REPLY,
+        S0: MessageSender<ModeRequest>,
+        R0: MessageReceiver<REPLY>,
+        S1: MessageSender<REPLY>,
+        R1: MessageReceiver<ModeRequest>,
+    > RequestAndReplySenderAndReceiver<ModeRequest, REPLY, S0, R0, S1, R1>
+{
+    pub fn add_request_target(&mut self, target_id: ChannelId, request_sender: S0) {
         self.request_sender_map
             .add_message_target(target_id, request_sender)
     }
 }
 
-impl<REQUEST> MpscRequestAndReplySenderAndReceiver<REQUEST, ModeReply> {
-    pub fn add_reply_target(
-        &mut self,
-        target_id: ChannelId,
-        reply_sender: mpsc::Sender<MessageWithSenderId<ModeReply>>,
-    ) {
+impl<
+        REQUEST,
+        S0: MessageSender<REQUEST>,
+        R0: MessageReceiver<ModeReply>,
+        S1: MessageSender<ModeReply>,
+        R1: MessageReceiver<REQUEST>,
+    > RequestAndReplySenderAndReceiver<REQUEST, ModeReply, S0, R0, S1, R1>
+{
+    pub fn add_reply_target(&mut self, target_id: ChannelId, reply_sender: S1) {
         self.reply_sender_map
             .add_message_target(target_id, reply_sender)
     }
 }
 
-impl<REPLY> ModeRequestSender for MpscRequestAndReplySenderAndReceiver<ModeRequest, REPLY> {
+impl<
+        REPLY,
+        S0: MessageSender<ModeRequest>,
+        R0: MessageReceiver<REPLY>,
+        S1: MessageSender<REPLY>,
+        R1: MessageReceiver<ModeRequest>,
+    > ModeRequestSender for RequestAndReplySenderAndReceiver<ModeRequest, REPLY, S0, R0, S1, R1>
+{
     fn local_channel_id(&self) -> ChannelId {
         self.local_channel_id_generic()
     }
@@ -240,7 +273,14 @@ impl<REPLY> ModeRequestSender for MpscRequestAndReplySenderAndReceiver<ModeReque
     }
 }
 
-impl<REQUEST> ModeReplySender for MpscRequestAndReplySenderAndReceiver<REQUEST, ModeReply> {
+impl<
+        REQUEST,
+        S0: MessageSender<REQUEST>,
+        R0: MessageReceiver<ModeReply>,
+        S1: MessageSender<ModeReply>,
+        R1: MessageReceiver<REQUEST>,
+    > ModeReplySender for RequestAndReplySenderAndReceiver<REQUEST, ModeReply, S0, R0, S1, R1>
+{
     fn local_channel_id(&self) -> ChannelId {
         self.local_channel_id_generic()
     }
@@ -255,7 +295,14 @@ impl<REQUEST> ModeReplySender for MpscRequestAndReplySenderAndReceiver<REQUEST, 
     }
 }
 
-impl<REQUEST> ModeReplyReceiver for MpscRequestAndReplySenderAndReceiver<REQUEST, ModeReply> {
+impl<
+        REQUEST,
+        S0: MessageSender<REQUEST>,
+        R0: MessageReceiver<ModeReply>,
+        S1: MessageSender<ModeReply>,
+        R1: MessageReceiver<REQUEST>,
+    > ModeReplyReceiver for RequestAndReplySenderAndReceiver<REQUEST, ModeReply, S0, R0, S1, R1>
+{
     fn try_recv_mode_reply(
         &self,
     ) -> Result<Option<MessageWithSenderId<ModeReply>>, GenericTargetedMessagingError> {
@@ -264,7 +311,14 @@ impl<REQUEST> ModeReplyReceiver for MpscRequestAndReplySenderAndReceiver<REQUEST
     }
 }
 
-impl<REPLY> ModeRequestReceiver for MpscRequestAndReplySenderAndReceiver<ModeRequest, REPLY> {
+impl<
+        REPLY,
+        S0: MessageSender<ModeRequest>,
+        R0: MessageReceiver<REPLY>,
+        S1: MessageSender<REPLY>,
+        R1: MessageReceiver<ModeRequest>,
+    > ModeRequestReceiver for RequestAndReplySenderAndReceiver<ModeRequest, REPLY, S0, R0, S1, R1>
+{
     fn try_recv_mode_request(
         &self,
     ) -> Result<Option<MessageWithSenderId<ModeRequest>>, GenericTargetedMessagingError> {
