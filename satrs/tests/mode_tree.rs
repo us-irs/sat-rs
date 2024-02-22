@@ -125,7 +125,6 @@ impl TestAssembly {
                     self.mode_req_commander = Some(request_and_id.sender_id);
                 }
                 ModeRequest::ReadMode => {
-                    // self.handle_read_mode_request(0, self.mode_and_submode, &mut self.mode_reply_sender).unwrap()
                     self.mode_node
                         .send_mode_reply(
                             request_and_id.sender_id,
@@ -139,6 +138,7 @@ impl TestAssembly {
         }
         Ok(())
     }
+
     pub fn check_mode_replies(&mut self) -> Result<(), GenericTargetedMessagingError> {
         if let Some(reply_and_id) = self.mode_node.try_recv_mode_reply()? {
             match reply_and_id.message {
