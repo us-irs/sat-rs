@@ -5,20 +5,13 @@ use hashbrown::HashMap;
 
 use crate::{
     mode::{Mode, ModeAndSubmode, ModeReply, ModeRequest, Submode},
-    queue::{GenericReceiveError, GenericSendError},
+    queue::GenericTargetedMessagingError,
+    request::{
+        MessageWithSenderId, MpscMessageReceiverWithIds, MpscMessageSenderAndReceiver,
+        MpscMessageSenderMap, MpscMessageSenderWithId, MpscRequestAndReplySenderAndReceiver,
+    },
     ChannelId,
 };
-
-pub struct ModeRequestWithSenderId {
-    pub sender_id: ChannelId,
-    pub request: ModeRequest,
-}
-
-impl ModeRequestWithSenderId {
-    pub fn new(sender_id: ChannelId, request: ModeRequest) -> Self {
-        Self { sender_id, request }
-    }
-}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TableEntryType {
@@ -47,228 +40,236 @@ pub struct ModeTableMapValue {
 
 pub type ModeTable = HashMap<Mode, ModeTableMapValue>;
 
-#[derive(Debug, Clone)]
-pub enum ModeMessagingError {
-    TargetDoesNotExist(ChannelId),
-    Send(GenericSendError),
-    Receive(GenericReceiveError),
-}
-impl From<GenericSendError> for ModeMessagingError {
-    fn from(value: GenericSendError) -> Self {
-        Self::Send(value)
-    }
+pub trait ModeRequestSender {
+    fn local_channel_id(&self) -> ChannelId;
+    fn send_mode_request(
+        &self,
+        target_id: ChannelId,
+        request: ModeRequest,
+    ) -> Result<(), GenericTargetedMessagingError>;
 }
 
-impl From<GenericReceiveError> for ModeMessagingError {
-    fn from(value: GenericReceiveError) -> Self {
-        Self::Receive(value)
-    }
-}
-
-pub trait ModeReplySendProvider {
+pub trait ModeReplySender {
     fn local_channel_id(&self) -> ChannelId;
 
     fn send_mode_reply(
-        &mut self,
+        &self,
         target_id: ChannelId,
         reply: ModeReply,
-    ) -> Result<(), ModeMessagingError>;
-}
-
-pub struct MpscModeReplyRouter {
-    pub local_id: ChannelId,
-    pub reply_sender_map: HashMap<ChannelId, mpsc::Sender<ModeReplyWithSenderId>>,
-}
-
-impl ModeReplySendProvider for MpscModeReplyRouter {
-    fn send_mode_reply(
-        &mut self,
-        target_channel_id: ChannelId,
-        reply: ModeReply,
-    ) -> Result<(), ModeMessagingError> {
-        if self.reply_sender_map.contains_key(&target_channel_id) {
-            self.reply_sender_map
-                .get(&target_channel_id)
-                .unwrap()
-                .send(ModeReplyWithSenderId {
-                    sender_id: self.local_channel_id(),
-                    reply,
-                })
-                .map_err(|_| GenericSendError::RxDisconnected)?;
-            return Ok(());
-        }
-        Err(ModeMessagingError::TargetDoesNotExist(target_channel_id))
-    }
-
-    fn local_channel_id(&self) -> ChannelId {
-        self.local_id
-    }
-}
-
-impl MpscModeReplyRouter {
-    pub fn new(local_id: ChannelId) -> Self {
-        Self {
-            local_id,
-            reply_sender_map: HashMap::new(),
-        }
-    }
-
-    pub fn add_reply_target(
-        &mut self,
-        target_id: ChannelId,
-        reply_sender: mpsc::Sender<ModeReplyWithSenderId>,
-    ) {
-        self.reply_sender_map.insert(target_id, reply_sender);
-    }
-}
-
-pub struct ModeReplyWithSenderId {
-    pub sender_id: ChannelId,
-    pub reply: ModeReply,
-}
-
-pub trait ModeReplyReceiver {
-    fn try_recv_mode_reply(&self) -> Result<Option<ModeReplyWithSenderId>, ModeMessagingError>;
-}
-
-pub struct MpscModeReplyReceiver {
-    local_channel_id: ChannelId,
-    reply_receiver: mpsc::Receiver<ModeReplyWithSenderId>,
-}
-
-impl MpscModeReplyReceiver {
-    pub fn new(
-        local_channel_id: ChannelId,
-        reply_receiver: mpsc::Receiver<ModeReplyWithSenderId>,
-    ) -> Self {
-        Self {
-            local_channel_id,
-            reply_receiver,
-        }
-    }
-
-    pub fn local_channel_id(&self) -> ChannelId {
-        self.local_channel_id
-    }
-}
-
-impl ModeReplyReceiver for MpscModeReplyReceiver {
-    fn try_recv_mode_reply(&self) -> Result<Option<ModeReplyWithSenderId>, ModeMessagingError> {
-        match self.reply_receiver.try_recv() {
-            Ok(reply) => {
-                return Ok(Some(reply));
-            }
-            Err(e) => {
-                if e == mpsc::TryRecvError::Disconnected {
-                    return Err(
-                        GenericReceiveError::TxDisconnected(Some(self.local_channel_id())).into(),
-                    );
-                }
-            }
-        }
-        Ok(None)
-    }
+    ) -> Result<(), GenericTargetedMessagingError>;
 }
 
 pub trait ModeRequestReceiver {
-    fn try_recv_mode_reply(&self) -> Result<Option<ModeRequestWithSenderId>, ModeMessagingError>;
-}
-
-pub struct MpscModeRequestReceiver {
-    local_channel_id: ChannelId,
-    receiver: mpsc::Receiver<ModeRequestWithSenderId>,
-}
-
-impl MpscModeRequestReceiver {
-    pub fn new(
-        local_channel_id: ChannelId,
-        receiver: mpsc::Receiver<ModeRequestWithSenderId>,
-    ) -> Self {
-        Self {
-            local_channel_id,
-            receiver,
-        }
-    }
-
-    pub fn local_channel_id(&self) -> ChannelId {
-        self.local_channel_id
-    }
-}
-
-impl ModeRequestReceiver for MpscModeRequestReceiver {
-    fn try_recv_mode_reply(&self) -> Result<Option<ModeRequestWithSenderId>, ModeMessagingError> {
-        match self.receiver.try_recv() {
-            Ok(request_and_sender) => {
-                return Ok(Some(ModeRequestWithSenderId {
-                    sender_id: request_and_sender.sender_id,
-                    request: request_and_sender.request,
-                }))
-            }
-            Err(e) => {
-                if e == mpsc::TryRecvError::Disconnected {
-                    return Err(
-                        GenericReceiveError::TxDisconnected(Some(self.local_channel_id)).into(),
-                    );
-                }
-            }
-        }
-        Ok(None)
-    }
-}
-
-pub trait ModeRequestSendProvider {
-    fn local_channel_id(&self) -> Option<ChannelId>;
-    fn send_mode_request(
+    fn try_recv_mode_request(
         &self,
+    ) -> Result<Option<MessageWithSenderId<ModeRequest>>, GenericTargetedMessagingError>;
+}
+
+pub trait ModeReplyReceiver {
+    fn try_recv_mode_reply(
+        &self,
+    ) -> Result<Option<MessageWithSenderId<ModeReply>>, GenericTargetedMessagingError>;
+}
+
+impl MpscMessageSenderMap<ModeRequest> {
+    pub fn send_mode_request(
+        &self,
+        local_id: ChannelId,
         target_id: ChannelId,
         request: ModeRequest,
-    ) -> Result<(), ModeMessagingError>;
-}
-
-pub struct MpscModeRequestRouter {
-    pub local_channel_id: ChannelId,
-    pub request_sender_map: HashMap<ChannelId, mpsc::Sender<ModeRequestWithSenderId>>,
-}
-
-impl ModeRequestSendProvider for MpscModeRequestRouter {
-    fn send_mode_request(
-        &self,
-        target_id: ChannelId,
-        request: ModeRequest,
-    ) -> Result<(), ModeMessagingError> {
-        if self.request_sender_map.contains_key(&target_id) {
-            self.request_sender_map
-                .get(&target_id)
-                .unwrap()
-                .send(ModeRequestWithSenderId::new(
-                    self.local_channel_id().unwrap(),
-                    request,
-                ))
-                .map_err(|_| GenericSendError::RxDisconnected)?;
-            return Ok(());
-        }
-        Err(ModeMessagingError::TargetDoesNotExist(target_id))
-    }
-
-    fn local_channel_id(&self) -> Option<ChannelId> {
-        Some(self.local_channel_id)
-    }
-}
-
-impl MpscModeRequestRouter {
-    pub fn new(local_channel_id: ChannelId) -> Self {
-        Self {
-            local_channel_id,
-            request_sender_map: HashMap::new(),
-        }
+    ) -> Result<(), GenericTargetedMessagingError> {
+        self.send_message(local_id, target_id, request)
     }
 
     pub fn add_request_target(
         &mut self,
         target_id: ChannelId,
-        request_sender: mpsc::Sender<ModeRequestWithSenderId>,
+        request_sender: mpsc::Sender<MessageWithSenderId<ModeRequest>>,
     ) {
-        self.request_sender_map.insert(target_id, request_sender);
+        self.add_message_target(target_id, request_sender)
+    }
+}
+
+impl MpscMessageSenderMap<ModeReply> {
+    pub fn send_mode_reply(
+        &self,
+        local_id: ChannelId,
+        target_id: ChannelId,
+        request: ModeReply,
+    ) -> Result<(), GenericTargetedMessagingError> {
+        self.send_message(local_id, target_id, request)
+    }
+
+    pub fn add_reply_target(
+        &mut self,
+        target_id: ChannelId,
+        request_sender: mpsc::Sender<MessageWithSenderId<ModeReply>>,
+    ) {
+        self.add_message_target(target_id, request_sender)
+    }
+}
+
+impl ModeReplySender for MpscMessageSenderWithId<ModeReply> {
+    fn send_mode_reply(
+        &self,
+        target_channel_id: ChannelId,
+        reply: ModeReply,
+    ) -> Result<(), GenericTargetedMessagingError> {
+        self.send_message(target_channel_id, reply)
+    }
+
+    fn local_channel_id(&self) -> ChannelId {
+        self.local_channel_id
+    }
+}
+
+impl ModeRequestSender for MpscMessageSenderWithId<ModeRequest> {
+    fn local_channel_id(&self) -> ChannelId {
+        self.local_channel_id
+    }
+
+    fn send_mode_request(
+        &self,
+        target_id: ChannelId,
+        request: ModeRequest,
+    ) -> Result<(), GenericTargetedMessagingError> {
+        self.send_message(target_id, request)
+    }
+}
+
+impl ModeReplyReceiver for MpscMessageReceiverWithIds<ModeReply> {
+    fn try_recv_mode_reply(
+        &self,
+    ) -> Result<Option<MessageWithSenderId<ModeReply>>, GenericTargetedMessagingError> {
+        self.try_recv_message()
+    }
+}
+impl ModeRequestReceiver for MpscMessageReceiverWithIds<ModeRequest> {
+    fn try_recv_mode_request(
+        &self,
+    ) -> Result<Option<MessageWithSenderId<ModeRequest>>, GenericTargetedMessagingError> {
+        self.try_recv_message()
+    }
+}
+
+impl<FROM> ModeRequestSender for MpscMessageSenderAndReceiver<ModeRequest, FROM> {
+    fn local_channel_id(&self) -> ChannelId {
+        self.local_channel_id_generic()
+    }
+
+    fn send_mode_request(
+        &self,
+        target_id: ChannelId,
+        request: ModeRequest,
+    ) -> Result<(), GenericTargetedMessagingError> {
+        self.message_sender_map
+            .send_mode_request(self.local_channel_id(), target_id, request)
+    }
+}
+
+impl<FROM> ModeReplySender for MpscMessageSenderAndReceiver<ModeReply, FROM> {
+    fn local_channel_id(&self) -> ChannelId {
+        self.local_channel_id_generic()
+    }
+
+    fn send_mode_reply(
+        &self,
+        target_id: ChannelId,
+        request: ModeReply,
+    ) -> Result<(), GenericTargetedMessagingError> {
+        self.message_sender_map
+            .send_mode_reply(self.local_channel_id(), target_id, request)
+    }
+}
+
+impl<TO> ModeReplyReceiver for MpscMessageSenderAndReceiver<TO, ModeReply> {
+    fn try_recv_mode_reply(
+        &self,
+    ) -> Result<Option<MessageWithSenderId<ModeReply>>, GenericTargetedMessagingError> {
+        self.message_receiver
+            .try_recv_message(self.local_channel_id_generic())
+    }
+}
+impl<TO> ModeRequestReceiver for MpscMessageSenderAndReceiver<TO, ModeRequest> {
+    fn try_recv_mode_request(
+        &self,
+    ) -> Result<Option<MessageWithSenderId<ModeRequest>>, GenericTargetedMessagingError> {
+        self.message_receiver
+            .try_recv_message(self.local_channel_id_generic())
+    }
+}
+
+pub type MpscModeRequestHandlerConnector = MpscMessageSenderAndReceiver<ModeReply, ModeRequest>;
+pub type MpscModeRequestorConnector = MpscMessageSenderAndReceiver<ModeRequest, ModeReply>;
+pub type MpscModeConnector = MpscRequestAndReplySenderAndReceiver<ModeRequest, ModeReply>;
+
+impl<REPLY> MpscRequestAndReplySenderAndReceiver<ModeRequest, REPLY> {
+    pub fn add_request_target(
+        &mut self,
+        target_id: ChannelId,
+        request_sender: mpsc::Sender<MessageWithSenderId<ModeRequest>>,
+    ) {
+        self.request_sender_map
+            .add_message_target(target_id, request_sender)
+    }
+}
+
+impl<REQUEST> MpscRequestAndReplySenderAndReceiver<REQUEST, ModeReply> {
+    pub fn add_reply_target(
+        &mut self,
+        target_id: ChannelId,
+        reply_sender: mpsc::Sender<MessageWithSenderId<ModeReply>>,
+    ) {
+        self.reply_sender_map
+            .add_message_target(target_id, reply_sender)
+    }
+}
+
+impl<REPLY> ModeRequestSender for MpscRequestAndReplySenderAndReceiver<ModeRequest, REPLY> {
+    fn local_channel_id(&self) -> ChannelId {
+        self.local_channel_id_generic()
+    }
+
+    fn send_mode_request(
+        &self,
+        target_id: ChannelId,
+        request: ModeRequest,
+    ) -> Result<(), GenericTargetedMessagingError> {
+        self.request_sender_map
+            .send_mode_request(self.local_channel_id(), target_id, request)
+    }
+}
+
+impl<REQUEST> ModeReplySender for MpscRequestAndReplySenderAndReceiver<REQUEST, ModeReply> {
+    fn local_channel_id(&self) -> ChannelId {
+        self.local_channel_id_generic()
+    }
+
+    fn send_mode_reply(
+        &self,
+        target_id: ChannelId,
+        request: ModeReply,
+    ) -> Result<(), GenericTargetedMessagingError> {
+        self.reply_sender_map
+            .send_mode_reply(self.local_channel_id(), target_id, request)
+    }
+}
+
+impl<REQUEST> ModeReplyReceiver for MpscRequestAndReplySenderAndReceiver<REQUEST, ModeReply> {
+    fn try_recv_mode_reply(
+        &self,
+    ) -> Result<Option<MessageWithSenderId<ModeReply>>, GenericTargetedMessagingError> {
+        self.reply_receiver
+            .try_recv_message(self.local_channel_id_generic())
+    }
+}
+
+impl<REPLY> ModeRequestReceiver for MpscRequestAndReplySenderAndReceiver<ModeRequest, REPLY> {
+    fn try_recv_mode_request(
+        &self,
+    ) -> Result<Option<MessageWithSenderId<ModeRequest>>, GenericTargetedMessagingError> {
+        self.request_receiver
+            .try_recv_message(self.local_channel_id_generic())
     }
 }
 
@@ -278,24 +279,32 @@ pub trait ModeProvider {
 
 #[derive(Debug, Clone)]
 pub enum ModeError {
-    Messaging(ModeMessagingError),
+    Messaging(GenericTargetedMessagingError),
+}
+
+impl From<GenericTargetedMessagingError> for ModeError {
+    fn from(value: GenericTargetedMessagingError) -> Self {
+        Self::Messaging(value)
+    }
 }
 
 pub trait ModeRequestHandler: ModeProvider {
     fn start_transition(&mut self, mode_and_submode: ModeAndSubmode) -> Result<(), ModeError>;
 
     fn announce_mode(&self, recursive: bool);
-    fn handle_mode_reached(&mut self) -> Result<(), ModeMessagingError>;
+    fn handle_mode_reached(&mut self) -> Result<(), GenericTargetedMessagingError>;
 }
 
 #[cfg(test)]
 mod tests {
     use std::{println, sync::mpsc};
 
+    use alloc::string::{String, ToString};
+
     use super::*;
     use crate::{
         mode::{ModeAndSubmode, ModeReply, ModeRequest},
-        mode_tree::ModeRequestSendProvider,
+        mode_tree::ModeRequestSender,
         ChannelId,
     };
 
@@ -307,15 +316,12 @@ mod tests {
     }
 
     struct PusModeService {
-        // This contains ALL objects which are able to process mode requests.
-        pub mode_request_recipients: MpscModeRequestRouter,
-        // This contains all reply receivers for request recipients.
-        pub mode_reply_receiver_list: MpscModeReplyReceiver,
+        pub mode_node: MpscModeRequestorConnector,
     }
 
     impl PusModeService {
         pub fn send_announce_mode_cmd_to_assy(&self) {
-            self.mode_request_recipients
+            self.mode_node
                 .send_mode_request(
                     TestChannelId::Assembly as u32,
                     ModeRequest::AnnounceModeRecursive,
@@ -325,27 +331,70 @@ mod tests {
     }
 
     struct TestDevice {
-        // This object is used to receive all mode requests, for example by the PUS Mode service
-        // or by the parent assembly.
-        pub mode_request_receiver: MpscModeRequestReceiver,
-        // This structure contains all handles to send mode replies back to the senders.
-        pub mode_reply_router: MpscModeReplyRouter,
-        // Used to cache the receiver for mode replies.
-        pub mode_reply_receiver: Option<ChannelId>,
+        pub name: String,
+        pub mode_node: MpscModeRequestHandlerConnector,
         pub mode_and_submode: ModeAndSubmode,
-        pub target_mode_and_submode: Option<ModeAndSubmode>,
+        pub mode_req_commander: Option<ChannelId>,
+    }
+
+    impl TestDevice {
+        pub fn run(&mut self) {
+            self.check_mode_requests().expect("mode messaging error");
+        }
+
+        pub fn check_mode_requests(&mut self) -> Result<(), GenericTargetedMessagingError> {
+            if let Some(request_and_id) = self.mode_node.try_recv_mode_request()? {
+                match request_and_id.message {
+                    ModeRequest::SetMode(mode_and_submode) => {
+                        self.start_transition(mode_and_submode).unwrap();
+                        self.mode_req_commander = Some(request_and_id.sender_id);
+                    }
+                    ModeRequest::ReadMode => self
+                        .mode_node
+                        .send_mode_reply(
+                            request_and_id.sender_id,
+                            ModeReply::ModeReply(self.mode_and_submode),
+                        )
+                        .unwrap(),
+                    ModeRequest::AnnounceMode => self.announce_mode(false),
+                    ModeRequest::AnnounceModeRecursive => self.announce_mode(true),
+                }
+            }
+            Ok(())
+        }
+    }
+
+    impl ModeProvider for TestDevice {
+        fn mode_and_submode(&self) -> ModeAndSubmode {
+            self.mode_and_submode
+        }
+    }
+    impl ModeRequestHandler for TestDevice {
+        fn start_transition(&mut self, mode_and_submode: ModeAndSubmode) -> Result<(), ModeError> {
+            self.mode_and_submode = mode_and_submode;
+            self.handle_mode_reached()?;
+            Ok(())
+        }
+
+        fn announce_mode(&self, _recursive: bool) {
+            println!(
+                "{}: announcing mode: {:?}",
+                self.name, self.mode_and_submode
+            );
+        }
+
+        fn handle_mode_reached(&mut self) -> Result<(), GenericTargetedMessagingError> {
+            self.mode_node.send_mode_reply(
+                self.mode_req_commander.unwrap(),
+                ModeReply::ModeReply(self.mode_and_submode),
+            )?;
+            Ok(())
+        }
     }
 
     struct TestAssembly {
-        // This object is used to receive all mode requests, for example by the PUS Mode service
-        // or by the parent subsystem.
-        pub mode_request_receiver: MpscModeRequestReceiver,
-        pub mode_reply_receiver: MpscModeReplyReceiver,
-        // This structure contains all handles to send mode replies.
-        pub mode_reply_senders: MpscModeReplyRouter,
-        // This structure contains all handles to send mode requests to its children.
-        pub mode_request_senders: MpscModeRequestRouter,
-        pub last_mode_sender: Option<ChannelId>,
+        pub mode_node: MpscModeConnector,
+        pub mode_req_commander: Option<ChannelId>,
         pub mode_and_submode: ModeAndSubmode,
         pub target_mode_and_submode: Option<ModeAndSubmode>,
     }
@@ -358,40 +407,53 @@ mod tests {
 
     impl TestAssembly {
         pub fn run(&mut self) {
-            // self.check_mode_requests()
+            self.check_mode_requests().expect("mode messaging error");
+            self.check_mode_replies().expect("mode messaging error");
         }
 
-        /*
-        pub fn check_mode_requests(&mut self) -> Result<(), ModeMessagingError> {
-            match self.mode_request_receiver_list.try_recv_mode_reply()? {
-                Some(request_and_id) => {
-                    match request_and_id {
-
+        pub fn check_mode_requests(&mut self) -> Result<(), GenericTargetedMessagingError> {
+            if let Some(request_and_id) = self.mode_node.try_recv_mode_request()? {
+                match request_and_id.message {
+                    ModeRequest::SetMode(mode_and_submode) => {
+                        self.start_transition(mode_and_submode).unwrap();
+                        self.mode_req_commander = Some(request_and_id.sender_id);
                     }
-
+                    ModeRequest::ReadMode => {
+                        // self.handle_read_mode_request(0, self.mode_and_submode, &mut self.mode_reply_sender).unwrap()
+                        self.mode_node
+                            .send_mode_reply(
+                                request_and_id.sender_id,
+                                ModeReply::ModeReply(self.mode_and_submode),
+                            )
+                            .unwrap()
+                    }
+                    ModeRequest::AnnounceMode => self.announce_mode(false),
+                    ModeRequest::AnnounceModeRecursive => self.announce_mode(true),
                 }
-                Ok(ModeRequestWithSenderId { sender_id, request }) => {
-                    match request {
-                        ModeRequest::SetMode(mode_and_submode) => {
-                            self.start_transition(mode_and_submode).unwrap();
-                            self.last_mode_sender = Some(sender_id);
-                        }
-                        ModeRequest::ReadMode => {
-                            // self.handle_read_mode_request(0, self.mode_and_submode, &mut self.mode_reply_sender).unwrap()
-                            self.mode_reply_sender
-                                .send_mode_reply(
-                                    sender_id,
-                                    ModeReply::ModeReply(self.mode_and_submode),
-                                )
-                                .unwrap()
-                        }
-                        ModeRequest::AnnounceMode => self.announce_mode(false),
-                        ModeRequest::AnnounceModeRecursive => self.announce_mode(true),
+            }
+            Ok(())
+        }
+        pub fn check_mode_replies(&mut self) -> Result<(), GenericTargetedMessagingError> {
+            if let Some(reply_and_id) = self.mode_node.try_recv_mode_reply()? {
+                match reply_and_id.message {
+                    ModeReply::ModeInfo(_) => todo!(),
+                    ModeReply::ModeReply(reply) => {
+                        println!(
+                            "TestAssembly: Received mode reply from {:?}, reached: {:?}",
+                            reply_and_id.sender_id, reply
+                        );
+                    }
+                    ModeReply::CantReachMode(_) => todo!(),
+                    ModeReply::WrongMode { expected, reached } => {
+                        println!(
+                            "TestAssembly: Wrong mode reply from {:?}, reached {:?}, expected {:?}",
+                            reply_and_id.sender_id, reached, expected
+                        );
                     }
                 }
-                Err(_) => todo!(),
-            };
-        } */
+            }
+            Ok(())
+        }
     }
 
     impl ModeRequestHandler for TestAssembly {
@@ -405,29 +467,30 @@ mod tests {
 
         fn announce_mode(&self, recursive: bool) {
             println!(
-                "Announcing mode (recursively: {}): {:?}",
+                "TestAssembly: Announcing mode (recursively: {}): {:?}",
                 recursive, self.mode_and_submode
             );
             let mut mode_request = ModeRequest::AnnounceMode;
             if recursive {
                 mode_request = ModeRequest::AnnounceModeRecursive;
             }
-            self.mode_request_senders
+            self.mode_node
                 .request_sender_map
+                .0
                 .iter()
                 .for_each(|(_, sender)| {
                     sender
-                        .send(ModeRequestWithSenderId::new(
-                            self.mode_request_senders.local_channel_id().unwrap(),
+                        .send(MessageWithSenderId::new(
+                            self.mode_node.local_channel_id_generic(),
                             mode_request,
                         ))
                         .expect("sending mode request failed");
                 });
         }
 
-        fn handle_mode_reached(&mut self) -> Result<(), ModeMessagingError> {
-            self.mode_reply_senders.send_mode_reply(
-                self.last_mode_sender.unwrap(),
+        fn handle_mode_reached(&mut self) -> Result<(), GenericTargetedMessagingError> {
+            self.mode_node.send_mode_reply(
+                self.mode_req_commander.unwrap(),
                 ModeReply::ModeReply(self.mode_and_submode),
             )?;
             Ok(())
@@ -445,94 +508,81 @@ mod tests {
         let (reply_sender_to_assy, reply_receiver_assy) = mpsc::channel();
         let (reply_sender_to_pus, reply_receiver_pus) = mpsc::channel();
 
-        // All request routers.
-        let mut mode_request_router_assy =
-            MpscModeRequestRouter::new(TestChannelId::Assembly as u32);
-        let mut mode_request_router_pus_mode =
-            MpscModeRequestRouter::new(TestChannelId::PusModeService as u32);
+        // Mode requestors and handlers.
+        let mut mode_node_assy = MpscModeConnector::new(
+            TestChannelId::Assembly as u32,
+            request_receiver_assy,
+            reply_receiver_assy,
+        );
+        // Mode requestors only.
+        let mut mode_node_pus = MpscModeRequestorConnector::new(
+            TestChannelId::PusModeService as u32,
+            reply_receiver_pus,
+        );
 
-        // All request receivers.
-        let mode_request_receiver_dev1 =
-            MpscModeRequestReceiver::new(TestChannelId::Device1 as u32, request_receiver_dev1);
-        let mode_request_receiver_dev2 =
-            MpscModeRequestReceiver::new(TestChannelId::Device2 as u32, request_receiver_dev2);
-        let mode_request_receiver_assy =
-            MpscModeRequestReceiver::new(TestChannelId::Assembly as u32, request_receiver_assy);
-
-        // All reply senders.
-        let mut mode_reply_senders_dev1 = MpscModeReplyRouter::new(TestChannelId::Device1 as u32);
-        let mut mode_reply_senders_dev2 = MpscModeReplyRouter::new(TestChannelId::Device2 as u32);
-        let mut mode_reply_senders_assy = MpscModeReplyRouter::new(TestChannelId::Assembly as u32);
-
-        // All reply receivers.
-        let mode_reply_receiver_list_assy =
-            MpscModeReplyReceiver::new(TestChannelId::Assembly as u32, reply_receiver_assy);
-        let mode_reply_receiver_pus_service =
-            MpscModeReplyReceiver::new(TestChannelId::PusModeService as u32, reply_receiver_pus);
+        // Request handlers only.
+        let mut mode_node_dev1 = MpscModeRequestHandlerConnector::new(
+            TestChannelId::Device1 as u32,
+            request_receiver_dev1,
+        );
+        let mut mode_node_dev2 = MpscModeRequestHandlerConnector::new(
+            TestChannelId::Device2 as u32,
+            request_receiver_dev2,
+        );
 
         // Set up mode request senders first.
-        mode_request_router_pus_mode
-            .add_request_target(TestChannelId::Assembly as u32, request_sender_to_assy);
-        mode_request_router_pus_mode.add_request_target(
+        mode_node_pus.add_message_target(TestChannelId::Assembly as u32, request_sender_to_assy);
+        mode_node_pus.add_message_target(
             TestChannelId::Device1 as u32,
             request_sender_to_dev1.clone(),
         );
-        mode_request_router_pus_mode.add_request_target(
+        mode_node_pus.add_message_target(
             TestChannelId::Device2 as u32,
             request_sender_to_dev2.clone(),
         );
-        mode_request_router_assy
-            .add_request_target(TestChannelId::Device1 as u32, request_sender_to_dev1);
-        mode_request_router_assy
-            .add_request_target(TestChannelId::Device2 as u32, request_sender_to_dev2);
+        mode_node_assy.add_request_target(TestChannelId::Device1 as u32, request_sender_to_dev1);
+        mode_node_assy.add_request_target(TestChannelId::Device2 as u32, request_sender_to_dev2);
 
         // Set up mode reply senders.
-        mode_reply_senders_dev1
-            .add_reply_target(TestChannelId::Assembly as u32, reply_sender_to_assy.clone());
-        mode_reply_senders_dev1.add_reply_target(
+        mode_node_dev1
+            .add_message_target(TestChannelId::Assembly as u32, reply_sender_to_assy.clone());
+        mode_node_dev1.add_message_target(
             TestChannelId::PusModeService as u32,
             reply_sender_to_pus.clone(),
         );
-        mode_reply_senders_dev2
-            .add_reply_target(TestChannelId::Assembly as u32, reply_sender_to_assy);
-        mode_reply_senders_dev2.add_reply_target(
+        mode_node_dev2.add_message_target(TestChannelId::Assembly as u32, reply_sender_to_assy);
+        mode_node_dev2.add_message_target(
             TestChannelId::PusModeService as u32,
             reply_sender_to_pus.clone(),
         );
-        mode_reply_senders_assy
-            .add_reply_target(TestChannelId::PusModeService as u32, reply_sender_to_pus);
+        mode_node_assy.add_reply_target(TestChannelId::PusModeService as u32, reply_sender_to_pus);
 
-        let device1 = TestDevice {
-            mode_request_receiver: mode_request_receiver_dev1,
-            mode_reply_router: mode_reply_senders_dev1,
-            mode_reply_receiver: None,
+        let mut device1 = TestDevice {
+            name: "Test Device 1".to_string(),
+            mode_node: mode_node_dev1,
+            mode_req_commander: None,
             mode_and_submode: ModeAndSubmode::new(0, 0),
-            target_mode_and_submode: None,
         };
-        let device2 = TestDevice {
-            mode_request_receiver: mode_request_receiver_dev2,
-            mode_reply_router: mode_reply_senders_dev2,
-            mode_reply_receiver: None,
+        let mut device2 = TestDevice {
+            name: "Test Device 2".to_string(),
+            mode_node: mode_node_dev2,
+            mode_req_commander: None,
             mode_and_submode: ModeAndSubmode::new(0, 0),
-            target_mode_and_submode: None,
         };
-        let assy = TestAssembly {
-            mode_request_receiver: mode_request_receiver_assy,
-            mode_reply_senders: mode_reply_senders_assy,
-            mode_request_senders: mode_request_router_assy,
-            mode_reply_receiver: mode_reply_receiver_list_assy,
-            last_mode_sender: None,
+        let mut assy = TestAssembly {
+            mode_node: mode_node_assy,
+            mode_req_commander: None,
             mode_and_submode: ModeAndSubmode::new(0, 0),
             target_mode_and_submode: None,
         };
         let pus_service = PusModeService {
-            mode_request_recipients: mode_request_router_pus_mode,
-            mode_reply_receiver_list: mode_reply_receiver_pus_service,
+            mode_node: mode_node_pus,
         };
 
         pus_service.send_announce_mode_cmd_to_assy();
-        // assy.run();
-        // device1.run();
-        // device2.run();
+        assy.run();
+        device1.run();
+        device2.run();
+        assy.run();
     }
 }

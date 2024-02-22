@@ -2,12 +2,16 @@ use core::fmt;
 #[cfg(feature = "std")]
 use std::error::Error;
 
+#[cfg(feature = "std")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
+pub use std_mod::*;
+
 use spacepackets::{
     ecss::{tc::IsPusTelecommand, PusPacket},
     ByteConversionError, CcsdsPacket,
 };
 
-use crate::TargetId;
+use crate::{ChannelId, TargetId};
 
 pub type Apid = u16;
 
@@ -106,5 +110,245 @@ impl From<TargetAndApidId> for u64 {
 impl fmt::Display for TargetAndApidId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}, {}", self.apid, self.target)
+    }
+}
+
+pub struct MessageWithSenderId<MESSAGE> {
+    pub sender_id: ChannelId,
+    pub message: MESSAGE,
+}
+
+impl<MESSAGE> MessageWithSenderId<MESSAGE> {
+    pub fn new(sender_id: ChannelId, message: MESSAGE) -> Self {
+        Self { sender_id, message }
+    }
+}
+
+#[cfg(feature = "std")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
+mod std_mod {
+    use std::sync::mpsc;
+
+    use hashbrown::HashMap;
+
+    use crate::{
+        queue::{GenericReceiveError, GenericSendError, GenericTargetedMessagingError},
+        ChannelId,
+    };
+
+    use super::MessageWithSenderId;
+
+    pub trait TargetedMessageSendProvider {
+        type Message;
+        fn send_message(
+            &self,
+            local_channel_id: ChannelId,
+            target_channel_id: ChannelId,
+            message: Self::Message,
+        ) -> Result<(), GenericTargetedMessagingError>;
+    }
+
+    pub struct MpscMessageSenderMap<Message, SendProvider: TargetedMessageSendProvider<Message = Message>>(
+        pub HashMap<ChannelId, SendProvider>,
+    );
+
+    impl<Message, SendProvider> Default for MpscMessageSenderMap<Message, SendProvider> {
+        fn default() -> Self {
+            Self(Default::default())
+        }
+    }
+
+    impl<Message, SendProvider> MpscMessageSenderMap<Message, SendProvider> {
+        pub fn send_message(
+            &self,
+            local_channel_id: ChannelId,
+            target_channel_id: ChannelId,
+            message: Message,
+        ) -> Result<(), GenericTargetedMessagingError> {
+            if self.0.contains_key(&target_channel_id) {
+                self.0
+                    .get(&target_channel_id)
+                    .unwrap()
+                    .send(MessageWithSenderId::new(local_channel_id, message))
+                    .map_err(|_| GenericSendError::RxDisconnected)?;
+                return Ok(());
+            }
+            Err(GenericTargetedMessagingError::TargetDoesNotExist(
+                target_channel_id,
+            ))
+        }
+
+        pub fn add_message_target(
+            &mut self,
+            target_id: ChannelId,
+            message_sender: mpsc::Sender<MessageWithSenderId<Message>>,
+        ) {
+            self.0.insert(target_id, message_sender);
+        }
+    }
+
+    pub struct MpscMessageSenderWithId<Message, SendProvider> {
+        pub local_channel_id: ChannelId,
+        pub message_sender_map: MpscMessageSenderMap<Message, SendProvider>,
+    }
+
+    impl<Message> MpscMessageSenderWithId<Message> {
+        pub fn new(local_channel_id: ChannelId) -> Self {
+            Self {
+                local_channel_id,
+                message_sender_map: Default::default(),
+            }
+        }
+
+        pub fn send_message(
+            &self,
+            target_channel_id: ChannelId,
+            message: MESSAGE,
+        ) -> Result<(), GenericTargetedMessagingError> {
+            self.message_sender_map
+                .send_message(self.local_channel_id, target_channel_id, message)
+        }
+
+        pub fn add_message_target(
+            &mut self,
+            target_id: ChannelId,
+            message_sender: mpsc::Sender<MessageWithSenderId<MESSAGE>>,
+        ) {
+            self.message_sender_map
+                .add_message_target(target_id, message_sender)
+        }
+    }
+
+    pub struct MpscMessageWithSenderReceiver<MESSAGE>(
+        pub mpsc::Receiver<MessageWithSenderId<MESSAGE>>,
+    );
+
+    impl<MESSAGE> From<mpsc::Receiver<MessageWithSenderId<MESSAGE>>>
+        for MpscMessageWithSenderReceiver<MESSAGE>
+    {
+        fn from(value: mpsc::Receiver<MessageWithSenderId<MESSAGE>>) -> Self {
+            Self(value)
+        }
+    }
+
+    impl<MESSAGE> MpscMessageWithSenderReceiver<MESSAGE> {
+        pub fn try_recv_message(
+            &self,
+            local_id: ChannelId,
+        ) -> Result<Option<MessageWithSenderId<MESSAGE>>, GenericTargetedMessagingError> {
+            match self.0.try_recv() {
+                Ok(reply) => {
+                    return Ok(Some(reply));
+                }
+                Err(e) => {
+                    if e == mpsc::TryRecvError::Disconnected {
+                        return Err(GenericReceiveError::TxDisconnected(Some(local_id)).into());
+                    }
+                }
+            }
+            Ok(None)
+        }
+    }
+
+    pub struct MpscMessageReceiverWithIds<MESSAGE> {
+        local_channel_id: ChannelId,
+        reply_receiver: MpscMessageWithSenderReceiver<MESSAGE>,
+    }
+
+    impl<MESSAGE> MpscMessageReceiverWithIds<MESSAGE> {
+        pub fn new(
+            local_channel_id: ChannelId,
+            reply_receiver: MpscMessageWithSenderReceiver<MESSAGE>,
+        ) -> Self {
+            Self {
+                local_channel_id,
+                reply_receiver,
+            }
+        }
+
+        pub fn local_channel_id(&self) -> ChannelId {
+            self.local_channel_id
+        }
+
+        pub fn try_recv_message(
+            &self,
+        ) -> Result<Option<MessageWithSenderId<MESSAGE>>, GenericTargetedMessagingError> {
+            match self.reply_receiver.0.try_recv() {
+                Ok(reply) => {
+                    return Ok(Some(reply));
+                }
+                Err(e) => {
+                    if e == mpsc::TryRecvError::Disconnected {
+                        return Err(GenericReceiveError::TxDisconnected(Some(
+                            self.local_channel_id(),
+                        ))
+                        .into());
+                    }
+                }
+            }
+            Ok(None)
+        }
+    }
+
+    pub struct MpscMessageSenderAndReceiver<TO, FROM> {
+        pub local_channel_id: ChannelId,
+        pub message_sender_map: MpscMessageSenderMap<TO>,
+        pub message_receiver: MpscMessageWithSenderReceiver<FROM>,
+    }
+
+    impl<TO, FROM> MpscMessageSenderAndReceiver<TO, FROM> {
+        pub fn new(
+            local_channel_id: ChannelId,
+            message_receiver: mpsc::Receiver<MessageWithSenderId<FROM>>,
+        ) -> Self {
+            Self {
+                local_channel_id,
+                message_sender_map: Default::default(),
+                message_receiver: MpscMessageWithSenderReceiver::from(message_receiver),
+            }
+        }
+
+        pub fn add_message_target(
+            &mut self,
+            target_id: ChannelId,
+            message_sender: mpsc::Sender<MessageWithSenderId<TO>>,
+        ) {
+            self.message_sender_map
+                .add_message_target(target_id, message_sender)
+        }
+
+        pub fn local_channel_id_generic(&self) -> ChannelId {
+            self.local_channel_id
+        }
+    }
+
+    pub struct MpscRequestAndReplySenderAndReceiver<REQUEST, REPLY> {
+        pub local_channel_id: ChannelId,
+        // These 2 are a functional group.
+        pub request_sender_map: MpscMessageSenderMap<REQUEST>,
+        pub reply_receiver: MpscMessageWithSenderReceiver<REPLY>,
+        // These 2 are a functional group.
+        pub request_receiver: MpscMessageWithSenderReceiver<REQUEST>,
+        pub reply_sender_map: MpscMessageSenderMap<REPLY>,
+    }
+
+    impl<REQUEST, REPLY> MpscRequestAndReplySenderAndReceiver<REQUEST, REPLY> {
+        pub fn new(
+            local_channel_id: ChannelId,
+            request_receiver: mpsc::Receiver<MessageWithSenderId<REQUEST>>,
+            reply_receiver: mpsc::Receiver<MessageWithSenderId<REPLY>>,
+        ) -> Self {
+            Self {
+                local_channel_id,
+                request_receiver: request_receiver.into(),
+                reply_receiver: reply_receiver.into(),
+                request_sender_map: Default::default(),
+                reply_sender_map: Default::default(),
+            }
+        }
+
+        pub fn local_channel_id_generic(&self) -> ChannelId {
+            self.local_channel_id
+        }
     }
 }

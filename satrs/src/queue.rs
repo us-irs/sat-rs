@@ -50,3 +50,21 @@ impl Display for GenericReceiveError {
 
 #[cfg(feature = "std")]
 impl Error for GenericReceiveError {}
+
+#[derive(Debug, Clone)]
+pub enum GenericTargetedMessagingError {
+    TargetDoesNotExist(ChannelId),
+    Send(GenericSendError),
+    Receive(GenericReceiveError),
+}
+impl From<GenericSendError> for GenericTargetedMessagingError {
+    fn from(value: GenericSendError) -> Self {
+        Self::Send(value)
+    }
+}
+
+impl From<GenericReceiveError> for GenericTargetedMessagingError {
+    fn from(value: GenericReceiveError) -> Self {
+        Self::Receive(value)
+    }
+}
