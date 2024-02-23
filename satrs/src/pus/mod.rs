@@ -815,8 +815,6 @@ pub mod std_mod {
         pub tc_receiver: Box<dyn EcssTcReceiver>,
         pub tm_sender: Box<dyn EcssTmSender>,
         pub tm_apid: u16,
-        /// The verification handler is wrapped in a [RefCell] to allow the interior mutability
-        /// pattern. This makes writing methods which are not mutable a lot easier.
         pub verification_handler: VerificationReporter,
     }
 
@@ -886,7 +884,7 @@ pub mod std_mod {
         /// This function can be used to poll the internal [EcssTcReceiver] object for the next
         /// telecommand packet. It will return `Ok(None)` if there are not packets available.
         /// In any other case, it will perform the acceptance of the ECSS TC packet using the
-        /// internal [VerificationReporterWithSender] object. It will then return the telecommand
+        /// internal [VerificationReportingProvider] object. It will then return the telecommand
         /// and the according accepted token.
         pub fn retrieve_and_accept_next_packet(
             &mut self,

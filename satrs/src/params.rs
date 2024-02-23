@@ -43,22 +43,19 @@
 //! This includes the [ParamsHeapless] enumeration for contained values which do not require heap
 //! allocation, and the [Params] which enumerates [ParamsHeapless] and some additional types which
 //! require [alloc] support but allow for more flexbility.
-#[cfg(feature = "alloc")]
 use crate::pool::StoreAddr;
-#[cfg(feature = "alloc")]
-use alloc::string::{String, ToString};
-#[cfg(feature = "alloc")]
-use alloc::vec::Vec;
 use core::fmt::Debug;
 use core::mem::size_of;
 use paste::paste;
 use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU64, EcssEnumU8};
+pub use spacepackets::util::ToBeBytes;
 use spacepackets::util::UnsignedEnum;
 use spacepackets::ByteConversionError;
 
 #[cfg(feature = "alloc")]
-pub use alloc_mod::*;
-pub use spacepackets::util::ToBeBytes;
+use alloc::string::{String, ToString};
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
 
 /// Generic trait which is used for objects which can be converted into a raw network (big) endian
 /// byte format.
@@ -560,56 +557,64 @@ from_conversions_for_raw!(
     (f64, Self::F64),
 );
 
-#[cfg(feature = "alloc")]
-mod alloc_mod {
-    use super::*;
-    /// Generic enumeration for additional parameters, including parameters which rely on heap
-    /// allocations.
+/// Generic enumeration for additional parameters, including parameters which rely on heap
+/// allocations.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum Params {
+    Heapless(ParamsHeapless),
+    Store(StoreAddr),
+    #[cfg(feature = "alloc")]
     #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
-    #[derive(Debug, Clone)]
-    pub enum Params {
-        Heapless(ParamsHeapless),
-        Store(StoreAddr),
-        Vec(Vec<u8>),
-        String(String),
-    }
+    Vec(Vec<u8>),
+    #[cfg(feature = "alloc")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+    String(String),
+}
 
-    impl From<StoreAddr> for Params {
-        fn from(x: StoreAddr) -> Self {
-            Self::Store(x)
-        }
+impl From<StoreAddr> for Params {
+    fn from(x: StoreAddr) -> Self {
+        Self::Store(x)
     }
+}
 
-    impl From<ParamsHeapless> for Params {
-        fn from(x: ParamsHeapless) -> Self {
-            Self::Heapless(x)
-        }
+impl From<ParamsHeapless> for Params {
+    fn from(x: ParamsHeapless) -> Self {
+        Self::Heapless(x)
     }
+}
 
-    impl From<Vec<u8>> for Params {
-        fn from(val: Vec<u8>) -> Self {
-            Self::Vec(val)
-        }
+#[cfg(feature = "alloc")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+impl From<Vec<u8>> for Params {
+    fn from(val: Vec<u8>) -> Self {
+        Self::Vec(val)
     }
+}
 
-    /// Converts a byte slice into the [Params::Vec] variant
-    impl From<&[u8]> for Params {
-        fn from(val: &[u8]) -> Self {
-            Self::Vec(val.to_vec())
-        }
+/// Converts a byte slice into the [Params::Vec] variant
+#[cfg(feature = "alloc")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+impl From<&[u8]> for Params {
+    fn from(val: &[u8]) -> Self {
+        Self::Vec(val.to_vec())
     }
+}
 
-    impl From<String> for Params {
-        fn from(val: String) -> Self {
-            Self::String(val)
-        }
+#[cfg(feature = "alloc")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+impl From<String> for Params {
+    fn from(val: String) -> Self {
+        Self::String(val)
     }
+}
 
-    /// Converts a string slice into the [Params::String] variant
-    impl From<&str> for Params {
-        fn from(val: &str) -> Self {
-            Self::String(val.to_string())
-        }
+#[cfg(feature = "alloc")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+/// Converts a string slice into the [Params::String] variant
+impl From<&str> for Params {
+    fn from(val: &str) -> Self {
+        Self::String(val.to_string())
     }
 }
 
