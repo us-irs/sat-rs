@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+## Changed
+
+- Refactored `EventManager` to heavily use generics instead of trait objects.
+  - `SendEventProvider` -> `EventSendProvider`. `id` trait method renamed to `channel_id`.
+  - `ListenerTable` -> `ListenerMapProvider`
+  - `SenderTable` -> `SenderMapProvider`
+  - There is an `EventManagerWithMpsc` and a `EventManagerWithBoundedMpsc` helper type now.
+
 # [v0.2.0-rc.0] 2024-02-21
 
 ## Added

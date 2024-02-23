@@ -20,8 +20,8 @@ thiserror = "1"
 derive-new = "0.5"
 
 [dependencies.satrs]
-version = "0.2.0-rc.0"
-# path = "../satrs"
+# version = "0.2.0-rc.0"
+path = "../satrs"
 
 [dependencies.satrs-mib]
 version = "0.1.1"
