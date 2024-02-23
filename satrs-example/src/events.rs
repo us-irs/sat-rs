@@ -1,16 +1,15 @@
-use std::sync::mpsc::{self, SendError};
+use std::sync::mpsc::{self};
 
 use satrs::{
     event_man::{
-        EventManager, EventManagerWithMpscQueue, MpscEventReceiver, MpscEventU32SendProvider,
-        SendEventProvider,
+        EventManagerWithBoundedMpsc, EventSendProvider, EventU32SenderMpscBounded,
+        MpscEventReceiver,
     },
     events::EventU32,
     params::Params,
     pus::{
         event_man::{
-            DefaultPusMgmtBackendProvider, EventReporter, EventRequest, EventRequestWithToken,
-            PusEventDispatcher,
+            DefaultPusEventU32Dispatcher, EventReporter, EventRequest, EventRequestWithToken,
         },
         verification::{
             TcStateStarted, VerificationReporterWithSender, VerificationReportingProvider,
@@ -24,11 +23,9 @@ use satrs_example::config::PUS_APID;
 
 use crate::update_time;
 
-pub type MpscEventManager = EventManager<SendError<(EventU32, Option<Params>)>>;
-
 pub struct PusEventHandler {
     event_request_rx: mpsc::Receiver<EventRequestWithToken>,
-    pus_event_dispatcher: PusEventDispatcher<(), EventU32>,
+    pus_event_dispatcher: DefaultPusEventU32Dispatcher<()>,
     pus_event_man_rx: mpsc::Receiver<(EventU32, Option<Params>)>,
     tm_sender: Box<dyn EcssTmSender>,
     time_provider: TimeProvider,
@@ -41,21 +38,22 @@ pub struct PusEventHandler {
 impl PusEventHandler {
     pub fn new(
         verif_handler: VerificationReporterWithSender,
-        event_manager: &mut MpscEventManager,
+        event_manager: &mut EventManagerWithBoundedMpsc,
         event_request_rx: mpsc::Receiver<EventRequestWithToken>,
         tm_sender: impl EcssTmSender,
     ) -> Self {
-        let (pus_event_man_tx, pus_event_man_rx) = mpsc::channel();
+        let event_queue_cap = 30;
+        let (pus_event_man_tx, pus_event_man_rx) = mpsc::sync_channel(event_queue_cap);
 
         // All events sent to the manager are routed to the PUS event manager, which generates PUS event
         // telemetry for each event.
         let event_reporter = EventReporter::new(PUS_APID, 128).unwrap();
-        let pus_tm_backend = DefaultPusMgmtBackendProvider::<EventU32>::default();
         let pus_event_dispatcher =
-            PusEventDispatcher::new(event_reporter, Box::new(pus_tm_backend));
-        let pus_event_man_send_provider = MpscEventU32SendProvider::new(1, pus_event_man_tx);
+            DefaultPusEventU32Dispatcher::new_with_default_backend(event_reporter);
+        let pus_event_man_send_provider =
+            EventU32SenderMpscBounded::new(1, pus_event_man_tx, event_queue_cap);
 
-        event_manager.subscribe_all(pus_event_man_send_provider.id());
+        event_manager.subscribe_all(pus_event_man_send_provider.channel_id());
         event_manager.add_sender(pus_event_man_send_provider);
 
         Self {
@@ -117,7 +115,7 @@ impl PusEventHandler {
 }
 
 pub struct EventManagerWrapper {
-    event_manager: MpscEventManager,
+    event_manager: EventManagerWithBoundedMpsc,
     event_sender: mpsc::Sender<(EventU32, Option<Params>)>,
 }
 
@@ -128,7 +126,7 @@ impl EventManagerWrapper {
         let (event_sender, event_man_rx) = mpsc::channel();
         let event_recv = MpscEventReceiver::<EventU32>::new(event_man_rx);
         Self {
-            event_manager: EventManagerWithMpscQueue::new(Box::new(event_recv)),
+            event_manager: EventManagerWithBoundedMpsc::new(event_recv),
             event_sender,
         }
     }
@@ -137,7 +135,7 @@ impl EventManagerWrapper {
         self.event_sender.clone()
     }
 
-    pub fn event_manager(&mut self) -> &mut MpscEventManager {
+    pub fn event_manager(&mut self) -> &mut EventManagerWithBoundedMpsc {
         &mut self.event_manager
     }
 
@@ -178,7 +176,7 @@ impl EventHandler {
     }
 
     #[allow(dead_code)]
-    pub fn event_manager(&mut self) -> &mut MpscEventManager {
+    pub fn event_manager(&mut self) -> &mut EventManagerWithBoundedMpsc {
         self.event_man_wrapper.event_manager()
     }
 

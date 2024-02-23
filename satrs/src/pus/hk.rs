@@ -46,7 +46,7 @@ pub mod alloc_mod {
     /// - Checking the validity of the APID, service ID, subservice ID.
     /// - Checking the validity of the user data.
     ///
-    /// A [VerificationReporterWithSender] instance is passed to the user to also allow handling
+    /// A [VerificationReportingProvider] is passed to the user to also allow handling
     /// of the verification process as part of the PUS standard requirements.
     pub trait PusHkToRequestConverter {
         type Error;
@@ -78,9 +78,9 @@ pub mod std_mod {
     /// 1. Retrieve the next TC packet from the [PusServiceHelper]. The [EcssTcInMemConverter]
     ///    allows to configure the used telecommand memory backend.
     /// 2. Convert the TC to a targeted action request using the provided
-    ///    [PusActionToRequestConverter]. The generic error type is constrained to the
+    ///    [PusHkToRequestConverter]. The generic error type is constrained to the
     ///    [PusPacketHandlerResult] for the concrete implementation which offers a packet handler.
-    /// 3. Route the action request using the provided [PusActionRequestRouter]. The generic error
+    /// 3. Route the action request using the provided [PusHkRequestRouter]. The generic error
     ///    type is constrained to the [GenericRoutingError] for the concrete implementation.
     /// 4. Handle all routing errors using the provided [PusRoutingErrorHandler]. The generic error
     ///    type is constrained to the [GenericRoutingError] for the concrete implementation.

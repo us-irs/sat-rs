@@ -1,10 +1,10 @@
 use satrs::event_man::{
-    EventManagerWithMpscQueue, MpscEventU32Receiver, MpscEventU32SendProvider, SendEventProvider,
+    EventManagerWithMpsc, EventSendProvider, EventU32SenderMpsc, MpscEventU32Receiver,
 };
 use satrs::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
 use satrs::params::U32Pair;
 use satrs::params::{Params, ParamsHeapless, WritableToBeBytes};
-use satrs::pus::event_man::{DefaultPusMgmtBackendProvider, EventReporter, PusEventDispatcher};
+use satrs::pus::event_man::{DefaultPusEventMgmtBackend, EventReporter, PusEventDispatcher};
 use satrs::pus::MpscTmAsVecSender;
 use spacepackets::ecss::tm::PusTmReader;
 use spacepackets::ecss::{PusError, PusPacket};
@@ -26,16 +26,16 @@ pub enum CustomTmSenderError {
 fn test_threaded_usage() {
     let (event_sender, event_man_receiver) = channel();
     let event_receiver = MpscEventU32Receiver::new(event_man_receiver);
-    let mut event_man = EventManagerWithMpscQueue::new(Box::new(event_receiver));
+    let mut event_man = EventManagerWithMpsc::new(event_receiver);
 
     let (pus_event_man_tx, pus_event_man_rx) = channel();
-    let pus_event_man_send_provider = MpscEventU32SendProvider::new(1, pus_event_man_tx);
-    event_man.subscribe_all(pus_event_man_send_provider.id());
+    let pus_event_man_send_provider = EventU32SenderMpsc::new(1, pus_event_man_tx);
+    event_man.subscribe_all(pus_event_man_send_provider.channel_id());
     event_man.add_sender(pus_event_man_send_provider);
     let (event_tx, event_rx) = channel();
     let reporter = EventReporter::new(0x02, 128).expect("Creating event reporter failed");
-    let backend = DefaultPusMgmtBackendProvider::<EventU32>::default();
-    let mut pus_event_man = PusEventDispatcher::new(reporter, Box::new(backend));
+    let mut pus_event_man =
+        PusEventDispatcher::new(reporter, DefaultPusEventMgmtBackend::default());
     // PUS + Generic event manager thread
     let jh0 = thread::spawn(move || {
         let mut sender = MpscTmAsVecSender::new(0, "event_sender", event_tx);
@@ -71,6 +71,7 @@ fn test_threaded_usage() {
                             Params::Vec(vec) => gen_event(Some(vec.as_slice())),
                             Params::String(str) => gen_event(Some(str.as_bytes())),
                             Params::Store(_) => gen_event(None),
+                            _ => panic!("unsupported parameter type"),
                         }
                     } else {
                         gen_event(None)
@@ -120,10 +121,7 @@ fn test_threaded_usage() {
             }
         }
         event_sender
-            .send((
-                LOW_SEV_EVENT.into(),
-                Some(Params::Heapless((2_u32, 3_u32).into())),
-            ))
+            .send((LOW_SEV_EVENT, Some(Params::Heapless((2_u32, 3_u32).into()))))
             .expect("Sending low severity event failed");
         loop {
             match event_rx.try_recv() {

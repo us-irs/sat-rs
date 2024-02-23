@@ -10,27 +10,27 @@
 //! [sat-rs book chapter](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/book/events.html)
 //! about events first:
 //!
-//! The event manager has a listener table abstracted by the [ListenerTable], which maps
+//! The event manager has a listener table abstracted by the [ListenerMapProvider], which maps
 //! listener groups identified by [ListenerKey]s to a [sender ID][ChannelId].
-//! It also contains a sender table abstracted by the [SenderTable] which maps these sender IDs
-//! to a concrete [SendEventProvider]s. A simple approach would be to use one send event provider
+//! It also contains a sender table abstracted by the [SenderMapProvider] which maps these sender
+//! IDs to concrete [EventSendProvider]s. A simple approach would be to use one send event provider
 //! for each OBSW thread and then subscribe for all interesting events for a particular thread
 //! using the send event provider ID.
 //!
 //! This can be done with the [EventManager] like this:
 //!
-//!  1. Provide a concrete [EventReceiver] implementation. This abstraction allow to use different
+//!  1. Provide a concrete [EventReceiveProvider] implementation. This abstraction allow to use different
 //!     message queue backends. A straightforward implementation where dynamic memory allocation is
 //!     not a big concern could use [std::sync::mpsc::channel] to do this and is provided in
 //!     form of the [MpscEventReceiver].
 //!  2. To set up event creators, create channel pairs using some message queue implementation.
 //!     Each event creator gets a (cloned) sender component which allows it to send events to the
 //!     manager.
-//!  3. The event manager receives the receiver component as part of a [EventReceiver]
+//!  3. The event manager receives the receiver component as part of a [EventReceiveProvider]
 //!     implementation so all events are routed to the manager.
-//!  4. Create the [send event providers][SendEventProvider]s which allow routing events to
-//!     subscribers. You can now use their [sender IDs][SendEventProvider::id] to subscribe for
-//!     event groups, for example by using the [EventManager::subscribe_single] method.
+//!  4. Create the [send event providers][EventSendProvider]s which allow routing events to
+//!     subscribers. You can now use their [sender IDs][EventSendProvider::channel_id] to subscribe
+//!     for event groups, for example by using the [EventManager::subscribe_single] method.
 //!  5. Add the send provider as well using the [EventManager::add_sender] call so the event
 //!     manager can route listener groups to a the send provider.
 //!
@@ -41,24 +41,22 @@
 //!
 //! # Examples
 //!
-//! You can check [integration test](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-core/tests/pus_events.rs)
+//! You can check [integration test](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs/tests/pus_events.rs)
 //! for a concrete example using multi-threading where events are routed to
 //! different threads.
 use crate::events::{EventU16, EventU32, GenericEvent, LargestEventRaw, LargestGroupIdRaw};
 use crate::params::{Params, ParamsHeapless};
-#[cfg(feature = "alloc")]
-use alloc::boxed::Box;
-#[cfg(feature = "alloc")]
-use alloc::vec;
-#[cfg(feature = "alloc")]
-use alloc::vec::Vec;
+use crate::queue::GenericSendError;
+use core::marker::PhantomData;
 use core::slice::Iter;
-#[cfg(feature = "alloc")]
-use hashbrown::HashMap;
 
 use crate::ChannelId;
+
+#[cfg(feature = "alloc")]
+pub use alloc_mod::*;
+
 #[cfg(feature = "std")]
-pub use stdmod::*;
+pub use std_mod::*;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub enum ListenerKey {
@@ -75,108 +73,114 @@ pub type EventWithAuxData<Event> = (Event, Option<Params>);
 pub type EventU32WithAuxData = EventWithAuxData<EventU32>;
 pub type EventU16WithAuxData = EventWithAuxData<EventU16>;
 
-pub trait SendEventProvider<Provider: GenericEvent, AuxDataProvider = Params> {
-    type Error;
+pub trait EventSendProvider<EV: GenericEvent, AuxDataProvider = Params> {
+    fn channel_id(&self) -> ChannelId;
 
-    fn id(&self) -> ChannelId;
-    fn send_no_data(&self, event: Provider) -> Result<(), Self::Error> {
+    fn send_no_data(&self, event: EV) -> Result<(), GenericSendError> {
         self.send(event, None)
     }
-    fn send(&self, event: Provider, aux_data: Option<AuxDataProvider>) -> Result<(), Self::Error>;
+
+    fn send(&self, event: EV, aux_data: Option<AuxDataProvider>) -> Result<(), GenericSendError>;
 }
 
 /// Generic abstraction for an event receiver.
-pub trait EventReceiver<Event: GenericEvent, AuxDataProvider = Params> {
+pub trait EventReceiveProvider<Event: GenericEvent, AuxDataProvider = Params> {
     /// This function has to be provided by any event receiver. A receive call may or may not return
     /// an event.
     ///
     /// To allow returning arbitrary additional auxiliary data, a mutable slice is passed to the
     /// [Self::receive] call as well. Receivers can write data to this slice, but care must be taken
     /// to avoid panics due to size missmatches or out of bound writes.
-    fn receive(&self) -> Option<(Event, Option<AuxDataProvider>)>;
+    fn try_recv_event(&self) -> Option<(Event, Option<AuxDataProvider>)>;
 }
 
-pub trait ListenerTable {
-    fn get_listeners(&self) -> Vec<ListenerKey>;
+pub trait ListenerMapProvider {
+    #[cfg(feature = "alloc")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+    fn get_listeners(&self) -> alloc::vec::Vec<ListenerKey>;
     fn contains_listener(&self, key: &ListenerKey) -> bool;
     fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<ChannelId>>;
     fn add_listener(&mut self, key: ListenerKey, sender_id: ChannelId) -> bool;
     fn remove_duplicates(&mut self, key: &ListenerKey);
 }
 
-pub trait SenderTable<SendProviderError, Event: GenericEvent = EventU32, AuxDataProvider = Params> {
+pub trait SenderMapProvider<
+    SP: EventSendProvider<EV, AUX>,
+    EV: GenericEvent = EventU32,
+    AUX = Params,
+>
+{
     fn contains_send_event_provider(&self, id: &ChannelId) -> bool;
-    fn get_send_event_provider(
-        &self,
-        id: &ChannelId,
-    ) -> Option<&dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>;
-    fn add_send_event_provider(
-        &mut self,
-        send_provider: Box<
-            dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>,
-        >,
-    ) -> bool;
+
+    fn get_send_event_provider(&self, id: &ChannelId) -> Option<&SP>;
+    fn add_send_event_provider(&mut self, send_provider: SP) -> bool;
 }
 
 /// Generic event manager implementation.
 ///
 /// # Generics
 ///
-///  * `SendProviderError`: [SendEventProvider] error type
-///  * `Event`: Concrete event provider, currently either [EventU32] or [EventU16]
-///  * `AuxDataProvider`: Concrete auxiliary data provider, currently either [Params] or
-///     [ParamsHeapless]
-pub struct EventManager<SendProviderError, Event: GenericEvent = EventU32, AuxDataProvider = Params>
-{
-    listener_table: Box<dyn ListenerTable>,
-    sender_table: Box<dyn SenderTable<SendProviderError, Event, AuxDataProvider>>,
-    event_receiver: Box<dyn EventReceiver<Event, AuxDataProvider>>,
+///  * `ERP`: [EventReceiveProvider] used to receive all events.
+///  * `SMP`: [SenderMapProvider]  which maps channel IDs to send providers.
+///  * `LTR`: [ListenerMapProvider] which maps listener keys to channel IDs.
+///  * `SP`: [EventSendProvider] contained within the sender map which sends the events.
+///  * `EV`: The event type. This type must implement the [GenericEvent]. Currently only [EventU32]
+///     and [EventU16] are supported.
+///  * `AUX`: Auxiliary data which is sent with the event to provide optional context information
+pub struct EventManager<
+    ERP: EventReceiveProvider<EV, AUX>,
+    SMP: SenderMapProvider<SP, EV, AUX>,
+    LTR: ListenerMapProvider,
+    SP: EventSendProvider<EV, AUX>,
+    EV: GenericEvent = EventU32,
+    AUX = Params,
+> {
+    event_receiver: ERP,
+    sender_map: SMP,
+    listener_map: LTR,
+    phantom: core::marker::PhantomData<(SP, EV, AUX)>,
 }
-
-/// Safety: It is safe to implement [Send] because all fields in the [EventManager] are [Send]
-/// as well
-#[cfg(feature = "std")]
-unsafe impl<E, Event: GenericEvent + Send, AuxDataProvider: Send> Send
-    for EventManager<E, Event, AuxDataProvider>
-{
-}
-
-#[cfg(feature = "std")]
-pub type EventManagerWithMpscQueue<Event, AuxDataProvider> = EventManager<
-    std::sync::mpsc::SendError<(Event, Option<AuxDataProvider>)>,
-    Event,
-    AuxDataProvider,
->;
 
 #[derive(Debug)]
-pub enum EventRoutingResult<Event: GenericEvent, AuxDataProvider> {
+pub enum EventRoutingResult<EV: GenericEvent, AUX> {
     /// No event was received
     Empty,
-    /// An event was received and routed.
-    /// The first tuple entry will contain the number of recipients.
-    Handled(u32, Event, Option<AuxDataProvider>),
+    /// An event was received and routed to listeners.
+    Handled {
+        num_recipients: u32,
+        event: EV,
+        aux_data: Option<AUX>,
+    },
 }
 
 #[derive(Debug)]
-pub enum EventRoutingError<E> {
-    SendError(E),
+pub enum EventRoutingError {
+    Send(GenericSendError),
     NoSendersForKey(ListenerKey),
     NoSenderForId(ChannelId),
 }
 
 #[derive(Debug)]
-pub struct EventRoutingErrorsWithResult<Event: GenericEvent, AuxDataProvider, E> {
-    pub result: EventRoutingResult<Event, AuxDataProvider>,
-    pub errors: [Option<EventRoutingError<E>>; 3],
+pub struct EventRoutingErrorsWithResult<EV: GenericEvent, AUX> {
+    pub result: EventRoutingResult<EV, AUX>,
+    pub errors: [Option<EventRoutingError>; 3],
 }
 
-impl<E, Event: GenericEvent + Copy> EventManager<E, Event> {
+impl<
+        ER: EventReceiveProvider<EV, AUX>,
+        S: SenderMapProvider<SP, EV, AUX>,
+        L: ListenerMapProvider,
+        SP: EventSendProvider<EV, AUX>,
+        EV: GenericEvent + Copy,
+        AUX: Clone,
+    > EventManager<ER, S, L, SP, EV, AUX>
+{
     pub fn remove_duplicates(&mut self, key: &ListenerKey) {
-        self.listener_table.remove_duplicates(key)
+        self.listener_map.remove_duplicates(key)
     }
 
     /// Subscribe for a unique event.
-    pub fn subscribe_single(&mut self, event: &Event, sender_id: ChannelId) {
+    pub fn subscribe_single(&mut self, event: &EV, sender_id: ChannelId) {
         self.update_listeners(ListenerKey::Single(event.raw_as_largest_type()), sender_id);
     }
 
@@ -194,49 +198,37 @@ impl<E, Event: GenericEvent + Copy> EventManager<E, Event> {
     }
 }
 
-impl<E: 'static, Event: GenericEvent + Copy + 'static, AuxDataProvider: Clone + 'static>
-    EventManager<E, Event, AuxDataProvider>
+impl<
+        ERP: EventReceiveProvider<EV, AUX>,
+        SMP: SenderMapProvider<SP, EV, AUX>,
+        LTR: ListenerMapProvider,
+        SP: EventSendProvider<EV, AUX>,
+        EV: GenericEvent + Copy,
+        AUX: Clone,
+    > EventManager<ERP, SMP, LTR, SP, EV, AUX>
 {
-    /// Create an event manager where the sender table will be the [DefaultSenderTableProvider]
-    /// and the listener table will be the [DefaultListenerTableProvider].
-    pub fn new(event_receiver: Box<dyn EventReceiver<Event, AuxDataProvider>>) -> Self {
-        let listener_table: Box<DefaultListenerTableProvider> = Box::default();
-        let sender_table: Box<DefaultSenderTableProvider<E, Event, AuxDataProvider>> =
-            Box::default();
-        Self::new_custom_tables(listener_table, sender_table, event_receiver)
-    }
-}
-
-impl<E, Event: GenericEvent + Copy, AuxDataProvider: Clone>
-    EventManager<E, Event, AuxDataProvider>
-{
-    pub fn new_custom_tables(
-        listener_table: Box<dyn ListenerTable>,
-        sender_table: Box<dyn SenderTable<E, Event, AuxDataProvider>>,
-        event_receiver: Box<dyn EventReceiver<Event, AuxDataProvider>>,
-    ) -> Self {
+    pub fn new_with_custom_maps(event_receiver: ERP, sender_map: SMP, listener_map: LTR) -> Self {
         EventManager {
-            listener_table,
-            sender_table,
+            listener_map,
+            sender_map,
             event_receiver,
+            phantom: PhantomData,
         }
     }
 
-    pub fn add_sender(
-        &mut self,
-        send_provider: impl SendEventProvider<Event, AuxDataProvider, Error = E> + 'static,
-    ) {
+    /// Add a new sender component which can be used to send events to subscribers.
+    pub fn add_sender(&mut self, send_provider: SP) {
         if !self
-            .sender_table
-            .contains_send_event_provider(&send_provider.id())
+            .sender_map
+            .contains_send_event_provider(&send_provider.channel_id())
         {
-            self.sender_table
-                .add_send_event_provider(Box::new(send_provider));
+            self.sender_map.add_send_event_provider(send_provider);
         }
     }
 
+    /// Generic function to update the event subscribers.
     fn update_listeners(&mut self, key: ListenerKey, sender_id: ChannelId) {
-        self.listener_table.add_listener(key, sender_id);
+        self.listener_map.add_listener(key, sender_id);
     }
 
     /// This function will use the cached event receiver and try to receive one event.
@@ -248,40 +240,36 @@ impl<E, Event: GenericEvent + Copy, AuxDataProvider: Clone>
     /// [EventRoutingErrorsWithResult] error struct.
     pub fn try_event_handling(
         &self,
-    ) -> Result<
-        EventRoutingResult<Event, AuxDataProvider>,
-        EventRoutingErrorsWithResult<Event, AuxDataProvider, E>,
-    > {
+    ) -> Result<EventRoutingResult<EV, AUX>, EventRoutingErrorsWithResult<EV, AUX>> {
         let mut err_idx = 0;
         let mut err_slice = [None, None, None];
         let mut num_recipients = 0;
-        let mut add_error = |error: EventRoutingError<E>| {
+        let mut add_error = |error: EventRoutingError| {
             if err_idx < 3 {
                 err_slice[err_idx] = Some(error);
                 err_idx += 1;
             }
         };
-        let mut send_handler =
-            |key: &ListenerKey, event: Event, aux_data: &Option<AuxDataProvider>| {
-                if self.listener_table.contains_listener(key) {
-                    if let Some(ids) = self.listener_table.get_listener_ids(key) {
-                        for id in ids {
-                            if let Some(sender) = self.sender_table.get_send_event_provider(id) {
-                                if let Err(e) = sender.send(event, aux_data.clone()) {
-                                    add_error(EventRoutingError::SendError(e));
-                                } else {
-                                    num_recipients += 1;
-                                }
+        let mut send_handler = |key: &ListenerKey, event: EV, aux_data: &Option<AUX>| {
+            if self.listener_map.contains_listener(key) {
+                if let Some(ids) = self.listener_map.get_listener_ids(key) {
+                    for id in ids {
+                        if let Some(sender) = self.sender_map.get_send_event_provider(id) {
+                            if let Err(e) = sender.send(event, aux_data.clone()) {
+                                add_error(EventRoutingError::Send(e));
                             } else {
-                                add_error(EventRoutingError::NoSenderForId(*id));
+                                num_recipients += 1;
                             }
+                        } else {
+                            add_error(EventRoutingError::NoSenderForId(*id));
                         }
-                    } else {
-                        add_error(EventRoutingError::NoSendersForKey(*key));
                     }
+                } else {
+                    add_error(EventRoutingError::NoSendersForKey(*key));
                 }
-            };
-        if let Some((event, aux_data)) = self.event_receiver.receive() {
+            }
+        };
+        if let Some((event, aux_data)) = self.event_receiver.try_recv_event() {
             let single_key = ListenerKey::Single(event.raw_as_largest_type());
             send_handler(&single_key, event, &aux_data);
             let group_key = ListenerKey::Group(event.group_id_as_largest_type());
@@ -289,130 +277,180 @@ impl<E, Event: GenericEvent + Copy, AuxDataProvider: Clone>
             send_handler(&ListenerKey::All, event, &aux_data);
             if err_idx > 0 {
                 return Err(EventRoutingErrorsWithResult {
-                    result: EventRoutingResult::Handled(num_recipients, event, aux_data),
+                    result: EventRoutingResult::Handled {
+                        num_recipients,
+                        event,
+                        aux_data,
+                    },
                     errors: err_slice,
                 });
             }
-            return Ok(EventRoutingResult::Handled(num_recipients, event, aux_data));
+            return Ok(EventRoutingResult::Handled {
+                num_recipients,
+                event,
+                aux_data,
+            });
         }
         Ok(EventRoutingResult::Empty)
     }
 }
 
-#[derive(Default)]
-pub struct DefaultListenerTableProvider {
-    listeners: HashMap<ListenerKey, Vec<ChannelId>>,
-}
+#[cfg(feature = "alloc")]
+pub mod alloc_mod {
+    use alloc::vec::Vec;
+    use hashbrown::HashMap;
 
-pub struct DefaultSenderTableProvider<
-    SendProviderError,
-    Event: GenericEvent = EventU32,
-    AuxDataProvider = Params,
-> {
-    senders: HashMap<
-        ChannelId,
-        Box<dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>>,
-    >,
-}
+    use super::*;
 
-impl<SendProviderError, Event: GenericEvent, AuxDataProvider> Default
-    for DefaultSenderTableProvider<SendProviderError, Event, AuxDataProvider>
-{
-    fn default() -> Self {
-        Self {
-            senders: HashMap::new(),
+    /// Helper type which constrains the sender map and listener map generics to the [DefaultSenderMap]
+    /// and the [DefaultListenerMap]. It uses regular mpsc channels as the message queue backend.
+    pub type EventManagerWithMpsc<EV = EventU32, AUX = Params> = EventManager<
+        MpscEventReceiver,
+        DefaultSenderMap<EventSenderMpsc<EV>, EV, AUX>,
+        DefaultListenerMap,
+        EventSenderMpsc<EV>,
+    >;
+
+    /// Helper type which constrains the sender map and listener map generics to the [DefaultSenderMap]
+    /// and the [DefaultListenerMap]. It uses
+    /// [bounded mpsc senders](https://doc.rust-lang.org/std/sync/mpsc/struct.SyncSender.html) as the
+    /// message queue backend.
+    pub type EventManagerWithBoundedMpsc<EV = EventU32, AUX = Params> = EventManager<
+        MpscEventReceiver,
+        DefaultSenderMap<EventSenderMpscBounded<EV>, EV, AUX>,
+        DefaultListenerMap,
+        EventSenderMpscBounded<EV>,
+    >;
+
+    impl<
+            ER: EventReceiveProvider<EV, AUX>,
+            SP: EventSendProvider<EV, AUX>,
+            EV: GenericEvent + Copy,
+            AUX: 'static,
+        > EventManager<ER, DefaultSenderMap<SP, EV, AUX>, DefaultListenerMap, SP, EV, AUX>
+    {
+        /// Create an event manager where the sender table will be the [DefaultSenderMap]
+        /// and the listener table will be the [DefaultListenerMap].
+        pub fn new(event_receiver: ER) -> Self {
+            Self {
+                listener_map: DefaultListenerMap::default(),
+                sender_map: DefaultSenderMap::default(),
+                event_receiver,
+                phantom: PhantomData,
+            }
         }
     }
-}
 
-impl ListenerTable for DefaultListenerTableProvider {
-    fn get_listeners(&self) -> Vec<ListenerKey> {
-        let mut key_list = Vec::new();
-        for key in self.listeners.keys() {
-            key_list.push(*key);
+    /// Default listener map.
+    ///
+    /// Simple implementation which uses a [HashMap] and a [Vec] internally.
+    #[derive(Default)]
+    pub struct DefaultListenerMap {
+        listeners: HashMap<ListenerKey, Vec<ChannelId>>,
+    }
+
+    impl ListenerMapProvider for DefaultListenerMap {
+        fn get_listeners(&self) -> Vec<ListenerKey> {
+            let mut key_list = Vec::new();
+            for key in self.listeners.keys() {
+                key_list.push(*key);
+            }
+            key_list
         }
-        key_list
-    }
 
-    fn contains_listener(&self, key: &ListenerKey) -> bool {
-        self.listeners.contains_key(key)
-    }
-
-    fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<ChannelId>> {
-        self.listeners.get(key).map(|vec| vec.iter())
-    }
-
-    fn add_listener(&mut self, key: ListenerKey, sender_id: ChannelId) -> bool {
-        if let Some(existing_list) = self.listeners.get_mut(&key) {
-            existing_list.push(sender_id);
-        } else {
-            let new_list = vec![sender_id];
-            self.listeners.insert(key, new_list);
+        fn contains_listener(&self, key: &ListenerKey) -> bool {
+            self.listeners.contains_key(key)
         }
-        true
-    }
 
-    fn remove_duplicates(&mut self, key: &ListenerKey) {
-        if let Some(list) = self.listeners.get_mut(key) {
-            list.sort_unstable();
-            list.dedup();
+        fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<ChannelId>> {
+            self.listeners.get(key).map(|vec| vec.iter())
+        }
+
+        fn add_listener(&mut self, key: ListenerKey, sender_id: ChannelId) -> bool {
+            if let Some(existing_list) = self.listeners.get_mut(&key) {
+                existing_list.push(sender_id);
+            } else {
+                let new_list = alloc::vec![sender_id];
+                self.listeners.insert(key, new_list);
+            }
+            true
+        }
+
+        fn remove_duplicates(&mut self, key: &ListenerKey) {
+            if let Some(list) = self.listeners.get_mut(key) {
+                list.sort_unstable();
+                list.dedup();
+            }
         }
     }
-}
 
-impl<SendProviderError, Event: GenericEvent, AuxDataProvider>
-    SenderTable<SendProviderError, Event, AuxDataProvider>
-    for DefaultSenderTableProvider<SendProviderError, Event, AuxDataProvider>
-{
-    fn contains_send_event_provider(&self, id: &ChannelId) -> bool {
-        self.senders.contains_key(id)
+    /// Default sender map.
+    ///
+    /// Simple implementation which uses a [HashMap] internally.
+    pub struct DefaultSenderMap<
+        SP: EventSendProvider<EV, AUX>,
+        EV: GenericEvent = EventU32,
+        AUX = Params,
+    > {
+        senders: HashMap<ChannelId, SP>,
+        phantom: PhantomData<(EV, AUX)>,
     }
 
-    fn get_send_event_provider(
-        &self,
-        id: &ChannelId,
-    ) -> Option<&dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>> {
-        self.senders
-            .get(id)
-            .filter(|sender| sender.id() == *id)
-            .map(|v| v.as_ref())
-    }
-
-    fn add_send_event_provider(
-        &mut self,
-        send_provider: Box<
-            dyn SendEventProvider<Event, AuxDataProvider, Error = SendProviderError>,
-        >,
-    ) -> bool {
-        let id = send_provider.id();
-        if self.senders.contains_key(&id) {
-            return false;
+    impl<SP: EventSendProvider<EV, AUX>, EV: GenericEvent, AUX> Default
+        for DefaultSenderMap<SP, EV, AUX>
+    {
+        fn default() -> Self {
+            Self {
+                senders: Default::default(),
+                phantom: Default::default(),
+            }
         }
-        self.senders.insert(id, send_provider).is_none()
+    }
+
+    impl<SP: EventSendProvider<EV, AUX>, EV: GenericEvent, AUX> SenderMapProvider<SP, EV, AUX>
+        for DefaultSenderMap<SP, EV, AUX>
+    {
+        fn contains_send_event_provider(&self, id: &ChannelId) -> bool {
+            self.senders.contains_key(id)
+        }
+
+        fn get_send_event_provider(&self, id: &ChannelId) -> Option<&SP> {
+            self.senders
+                .get(id)
+                .filter(|sender| sender.channel_id() == *id)
+        }
+
+        fn add_send_event_provider(&mut self, send_provider: SP) -> bool {
+            let id = send_provider.channel_id();
+            if self.senders.contains_key(&id) {
+                return false;
+            }
+            self.senders.insert(id, send_provider).is_none()
+        }
     }
 }
 
 #[cfg(feature = "std")]
-pub mod stdmod {
+pub mod std_mod {
     use super::*;
-    use crate::event_man::{EventReceiver, EventWithAuxData};
+    use crate::event_man::{EventReceiveProvider, EventWithAuxData};
     use crate::events::{EventU16, EventU32, GenericEvent};
     use crate::params::Params;
-    use std::sync::mpsc::{Receiver, SendError, Sender};
+    use std::sync::mpsc::{self};
 
     pub struct MpscEventReceiver<Event: GenericEvent + Send = EventU32> {
-        mpsc_receiver: Receiver<(Event, Option<Params>)>,
+        mpsc_receiver: mpsc::Receiver<(Event, Option<Params>)>,
     }
 
     impl<Event: GenericEvent + Send> MpscEventReceiver<Event> {
-        pub fn new(receiver: Receiver<(Event, Option<Params>)>) -> Self {
+        pub fn new(receiver: mpsc::Receiver<(Event, Option<Params>)>) -> Self {
             Self {
                 mpsc_receiver: receiver,
             }
         }
     }
-    impl<Event: GenericEvent + Send> EventReceiver<Event> for MpscEventReceiver<Event> {
-        fn receive(&self) -> Option<EventWithAuxData<Event>> {
+    impl<Event: GenericEvent + Send> EventReceiveProvider<Event> for MpscEventReceiver<Event> {
+        fn try_recv_event(&self) -> Option<EventWithAuxData<Event>> {
             if let Ok(event_and_data) = self.mpsc_receiver.try_recv() {
                 return Some(event_and_data);
             }
@@ -423,31 +461,75 @@ pub mod stdmod {
     pub type MpscEventU32Receiver = MpscEventReceiver<EventU32>;
     pub type MpscEventU16Receiver = MpscEventReceiver<EventU16>;
 
+    /// Generic event sender which uses a regular [mpsc::Sender] as the messaging backend to
+    /// send events.
     #[derive(Clone)]
-    pub struct MpscEventSendProvider<Event: GenericEvent + Send> {
+    pub struct EventSenderMpsc<Event: GenericEvent + Send> {
         id: u32,
-        sender: Sender<(Event, Option<Params>)>,
+        sender: mpsc::Sender<(Event, Option<Params>)>,
     }
 
-    impl<Event: GenericEvent + Send> MpscEventSendProvider<Event> {
-        pub fn new(id: u32, sender: Sender<(Event, Option<Params>)>) -> Self {
+    impl<Event: GenericEvent + Send> EventSenderMpsc<Event> {
+        pub fn new(id: u32, sender: mpsc::Sender<(Event, Option<Params>)>) -> Self {
             Self { id, sender }
         }
     }
 
-    impl<Event: GenericEvent + Send> SendEventProvider<Event> for MpscEventSendProvider<Event> {
-        type Error = SendError<(Event, Option<Params>)>;
-
-        fn id(&self) -> u32 {
+    impl<Event: GenericEvent + Send> EventSendProvider<Event> for EventSenderMpsc<Event> {
+        fn channel_id(&self) -> u32 {
             self.id
         }
-        fn send(&self, event: Event, aux_data: Option<Params>) -> Result<(), Self::Error> {
-            self.sender.send((event, aux_data))
+        fn send(&self, event: Event, aux_data: Option<Params>) -> Result<(), GenericSendError> {
+            self.sender
+                .send((event, aux_data))
+                .map_err(|_| GenericSendError::RxDisconnected)
         }
     }
 
-    pub type MpscEventU32SendProvider = MpscEventSendProvider<EventU32>;
-    pub type MpscEventU16SendProvider = MpscEventSendProvider<EventU16>;
+    /// Generic event sender which uses the [mpsc::SyncSender] as the messaging backend to send
+    /// events. This has the advantage that the channel is bounded and thus more deterministic.
+    #[derive(Clone)]
+    pub struct EventSenderMpscBounded<Event: GenericEvent + Send> {
+        channel_id: u32,
+        sender: mpsc::SyncSender<(Event, Option<Params>)>,
+        capacity: usize,
+    }
+
+    impl<Event: GenericEvent + Send> EventSenderMpscBounded<Event> {
+        pub fn new(
+            channel_id: u32,
+            sender: mpsc::SyncSender<(Event, Option<Params>)>,
+            capacity: usize,
+        ) -> Self {
+            Self {
+                channel_id,
+                sender,
+                capacity,
+            }
+        }
+    }
+
+    impl<Event: GenericEvent + Send> EventSendProvider<Event> for EventSenderMpscBounded<Event> {
+        fn channel_id(&self) -> u32 {
+            self.channel_id
+        }
+        fn send(&self, event: Event, aux_data: Option<Params>) -> Result<(), GenericSendError> {
+            if let Err(e) = self.sender.try_send((event, aux_data)) {
+                return match e {
+                    mpsc::TrySendError::Full(_) => {
+                        Err(GenericSendError::QueueFull(Some(self.capacity as u32)))
+                    }
+                    mpsc::TrySendError::Disconnected(_) => Err(GenericSendError::RxDisconnected),
+                };
+            }
+            Ok(())
+        }
+    }
+
+    pub type EventU32SenderMpsc = EventSenderMpsc<EventU32>;
+    pub type EventU16SenderMpsc = EventSenderMpsc<EventU16>;
+    pub type EventU32SenderMpscBounded = EventSenderMpscBounded<EventU32>;
+    pub type EventU16SenderMpscBounded = EventSenderMpscBounded<EventU16>;
 }
 
 #[cfg(test)]
@@ -456,32 +538,10 @@ mod tests {
     use crate::event_man::EventManager;
     use crate::events::{EventU32, GenericEvent, Severity};
     use crate::params::ParamsRaw;
-    use alloc::boxed::Box;
     use std::format;
-    use std::sync::mpsc::{channel, Receiver, SendError, Sender};
+    use std::sync::mpsc::{self, channel, Receiver, Sender};
 
-    #[derive(Clone)]
-    struct MpscEventSenderQueue {
-        id: u32,
-        mpsc_sender: Sender<EventU32WithAuxData>,
-    }
-
-    impl MpscEventSenderQueue {
-        fn new(id: u32, mpsc_sender: Sender<EventU32WithAuxData>) -> Self {
-            Self { id, mpsc_sender }
-        }
-    }
-
-    impl SendEventProvider<EventU32> for MpscEventSenderQueue {
-        type Error = SendError<EventU32WithAuxData>;
-
-        fn id(&self) -> u32 {
-            self.id
-        }
-        fn send(&self, event: EventU32, aux_data: Option<Params>) -> Result<(), Self::Error> {
-            self.mpsc_sender.send((event, aux_data))
-        }
-    }
+    const TEST_EVENT: EventU32 = EventU32::const_new(Severity::INFO, 0, 5);
 
     fn check_next_event(
         expected: EventU32,
@@ -500,22 +560,21 @@ mod tests {
         expected_num_sent: u32,
     ) {
         assert!(matches!(res, EventRoutingResult::Handled { .. }));
-        if let EventRoutingResult::Handled(num_recipients, event, _aux_data) = res {
+        if let EventRoutingResult::Handled {
+            num_recipients,
+            event,
+            ..
+        } = res
+        {
             assert_eq!(event, expected);
             assert_eq!(num_recipients, expected_num_sent);
         }
     }
 
-    fn generic_event_man() -> (
-        Sender<EventU32WithAuxData>,
-        EventManager<SendError<EventU32WithAuxData>>,
-    ) {
+    fn generic_event_man() -> (Sender<EventU32WithAuxData>, EventManagerWithMpsc) {
         let (event_sender, manager_queue) = channel();
         let event_man_receiver = MpscEventReceiver::new(manager_queue);
-        (
-            event_sender,
-            EventManager::new(Box::new(event_man_receiver)),
-        )
+        (event_sender, EventManager::new(event_man_receiver))
     }
 
     #[test]
@@ -524,15 +583,12 @@ mod tests {
         let event_grp_0 = EventU32::new(Severity::INFO, 0, 0).unwrap();
         let event_grp_1_0 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
         let (single_event_sender, single_event_receiver) = channel();
-        let single_event_listener = MpscEventSenderQueue::new(0, single_event_sender);
-        event_man.subscribe_single(&event_grp_0, single_event_listener.id());
+        let single_event_listener = EventSenderMpsc::new(0, single_event_sender);
+        event_man.subscribe_single(&event_grp_0, single_event_listener.channel_id());
         event_man.add_sender(single_event_listener);
         let (group_event_sender_0, group_event_receiver_0) = channel();
-        let group_event_listener = MpscEventSenderQueue {
-            id: 1,
-            mpsc_sender: group_event_sender_0,
-        };
-        event_man.subscribe_group(event_grp_1_0.group_id(), group_event_listener.id());
+        let group_event_listener = EventU32SenderMpsc::new(1, group_event_sender_0);
+        event_man.subscribe_group(event_grp_1_0.group_id(), group_event_listener.channel_id());
         event_man.add_sender(group_event_listener);
 
         // Test event with one listener
@@ -559,8 +615,8 @@ mod tests {
         let (event_sender, mut event_man) = generic_event_man();
         let event_grp_0 = EventU32::new(Severity::INFO, 0, 0).unwrap();
         let (single_event_sender, single_event_receiver) = channel();
-        let single_event_listener = MpscEventSenderQueue::new(0, single_event_sender);
-        event_man.subscribe_single(&event_grp_0, single_event_listener.id());
+        let single_event_listener = EventSenderMpsc::new(0, single_event_sender);
+        event_man.subscribe_single(&event_grp_0, single_event_listener.channel_id());
         event_man.add_sender(single_event_listener);
         event_sender
             .send((event_grp_0, Some(Params::Heapless((2_u32, 3_u32).into()))))
@@ -591,12 +647,15 @@ mod tests {
         let event_grp_0 = EventU32::new(Severity::INFO, 0, 0).unwrap();
         let event_grp_1_0 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
         let (event_grp_0_sender, event_grp_0_receiver) = channel();
-        let event_grp_0_and_1_listener = MpscEventSenderQueue {
-            id: 0,
-            mpsc_sender: event_grp_0_sender,
-        };
-        event_man.subscribe_group(event_grp_0.group_id(), event_grp_0_and_1_listener.id());
-        event_man.subscribe_group(event_grp_1_0.group_id(), event_grp_0_and_1_listener.id());
+        let event_grp_0_and_1_listener = EventU32SenderMpsc::new(0, event_grp_0_sender);
+        event_man.subscribe_group(
+            event_grp_0.group_id(),
+            event_grp_0_and_1_listener.channel_id(),
+        );
+        event_man.subscribe_group(
+            event_grp_1_0.group_id(),
+            event_grp_0_and_1_listener.channel_id(),
+        );
         event_man.add_sender(event_grp_0_and_1_listener);
 
         event_sender
@@ -625,18 +684,12 @@ mod tests {
         let event_1 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
         let (event_0_tx_0, event_0_rx_0) = channel();
         let (event_0_tx_1, event_0_rx_1) = channel();
-        let event_listener_0 = MpscEventSenderQueue {
-            id: 0,
-            mpsc_sender: event_0_tx_0,
-        };
-        let event_listener_1 = MpscEventSenderQueue {
-            id: 1,
-            mpsc_sender: event_0_tx_1,
-        };
-        let event_listener_0_sender_id = event_listener_0.id();
+        let event_listener_0 = EventU32SenderMpsc::new(0, event_0_tx_0);
+        let event_listener_1 = EventU32SenderMpsc::new(1, event_0_tx_1);
+        let event_listener_0_sender_id = event_listener_0.channel_id();
         event_man.subscribe_single(&event_0, event_listener_0_sender_id);
         event_man.add_sender(event_listener_0);
-        let event_listener_1_sender_id = event_listener_1.id();
+        let event_listener_1_sender_id = event_listener_1.channel_id();
         event_man.subscribe_single(&event_0, event_listener_1_sender_id);
         event_man.add_sender(event_listener_1);
         event_sender
@@ -681,16 +734,12 @@ mod tests {
     fn test_all_events_listener() {
         let (event_sender, manager_queue) = channel();
         let event_man_receiver = MpscEventReceiver::new(manager_queue);
-        let mut event_man: EventManager<SendError<EventU32WithAuxData>> =
-            EventManager::new(Box::new(event_man_receiver));
+        let mut event_man = EventManagerWithMpsc::new(event_man_receiver);
         let event_0 = EventU32::new(Severity::INFO, 0, 5).unwrap();
         let event_1 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
         let (event_0_tx_0, all_events_rx) = channel();
-        let all_events_listener = MpscEventSenderQueue {
-            id: 0,
-            mpsc_sender: event_0_tx_0,
-        };
-        event_man.subscribe_all(all_events_listener.id());
+        let all_events_listener = EventU32SenderMpsc::new(0, event_0_tx_0);
+        event_man.subscribe_all(all_events_listener.channel_id());
         event_man.add_sender(all_events_listener);
         event_sender
             .send((event_0, None))
@@ -706,5 +755,37 @@ mod tests {
         check_handled_event(res.unwrap(), event_1, 1);
         check_next_event(event_0, &all_events_rx);
         check_next_event(event_1, &all_events_rx);
+    }
+
+    #[test]
+    fn test_bounded_event_sender_queue_full() {
+        let (event_sender, _event_receiver) = mpsc::sync_channel(3);
+        let event_sender = EventU32SenderMpscBounded::new(1, event_sender, 3);
+        event_sender
+            .send_no_data(TEST_EVENT)
+            .expect("sending test event failed");
+        event_sender
+            .send_no_data(TEST_EVENT)
+            .expect("sending test event failed");
+        event_sender
+            .send_no_data(TEST_EVENT)
+            .expect("sending test event failed");
+        let error = event_sender.send_no_data(TEST_EVENT);
+        if let Err(e) = error {
+            assert!(matches!(e, GenericSendError::QueueFull(Some(3))));
+        } else {
+            panic!("unexpected error {error:?}");
+        }
+    }
+    #[test]
+    fn test_bounded_event_sender_rx_dropped() {
+        let (event_sender, event_receiver) = mpsc::sync_channel(3);
+        let event_sender = EventU32SenderMpscBounded::new(1, event_sender, 3);
+        drop(event_receiver);
+        if let Err(e) = event_sender.send_no_data(TEST_EVENT) {
+            assert!(matches!(e, GenericSendError::RxDisconnected));
+        } else {
+            panic!("Expected error");
+        }
     }
 }

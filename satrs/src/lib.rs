@@ -26,8 +26,6 @@ extern crate std;
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub mod cfdp;
 pub mod encoding;
-#[cfg(feature = "alloc")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub mod event_man;
 pub mod events;
 #[cfg(feature = "std")]

@@ -2,8 +2,6 @@ use crate::events::{EventU32, GenericEvent, Severity};
 #[cfg(feature = "alloc")]
 use crate::events::{EventU32TypedSev, HasSeverity};
 #[cfg(feature = "alloc")]
-use alloc::boxed::Box;
-#[cfg(feature = "alloc")]
 use core::hash::Hash;
 #[cfg(feature = "alloc")]
 use hashbrown::HashSet;
@@ -32,12 +30,12 @@ pub use heapless_mod::*;
 /// structure to track disabled events. A more primitive and embedded friendly
 /// solution could track this information in a static or pre-allocated list which contains
 /// the disabled events.
-pub trait PusEventMgmtBackendProvider<Provider: GenericEvent> {
+pub trait PusEventMgmtBackendProvider<Event: GenericEvent> {
     type Error;
 
-    fn event_enabled(&self, event: &Provider) -> bool;
-    fn enable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error>;
-    fn disable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error>;
+    fn event_enabled(&self, event: &Event) -> bool;
+    fn enable_event_reporting(&mut self, event: &Event) -> Result<bool, Self::Error>;
+    fn disable_event_reporting(&mut self, event: &Event) -> Result<bool, Self::Error>;
 }
 
 #[cfg(feature = "heapless")]
@@ -108,6 +106,10 @@ impl From<EcssTmtcError> for EventManError {
 
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
+    use core::marker::PhantomData;
+
+    use crate::events::EventU16;
+
     use super::*;
 
     /// Default backend provider which uses a hash set as the event reporting status container
@@ -115,14 +117,11 @@ pub mod alloc_mod {
     ///
     /// This provider is a good option for host systems or larger embedded systems where
     /// the expected occasional memory allocation performed by the [HashSet] is not an issue.
-    pub struct DefaultPusMgmtBackendProvider<Event: GenericEvent = EventU32> {
+    pub struct DefaultPusEventMgmtBackend<Event: GenericEvent = EventU32> {
         disabled: HashSet<Event>,
     }
 
-    /// Safety: All contained field are [Send] as well
-    unsafe impl<Event: GenericEvent + Send> Send for DefaultPusMgmtBackendProvider<Event> {}
-
-    impl<Event: GenericEvent> Default for DefaultPusMgmtBackendProvider<Event> {
+    impl<Event: GenericEvent> Default for DefaultPusEventMgmtBackend<Event> {
         fn default() -> Self {
             Self {
                 disabled: HashSet::default(),
@@ -130,46 +129,50 @@ pub mod alloc_mod {
         }
     }
 
-    impl<Provider: GenericEvent + PartialEq + Eq + Hash + Copy + Clone>
-        PusEventMgmtBackendProvider<Provider> for DefaultPusMgmtBackendProvider<Provider>
+    impl<EV: GenericEvent + PartialEq + Eq + Hash + Copy + Clone> PusEventMgmtBackendProvider<EV>
+        for DefaultPusEventMgmtBackend<EV>
     {
         type Error = ();
-        fn event_enabled(&self, event: &Provider) -> bool {
+
+        fn event_enabled(&self, event: &EV) -> bool {
             !self.disabled.contains(event)
         }
 
-        fn enable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error> {
+        fn enable_event_reporting(&mut self, event: &EV) -> Result<bool, Self::Error> {
             Ok(self.disabled.remove(event))
         }
 
-        fn disable_event_reporting(&mut self, event: &Provider) -> Result<bool, Self::Error> {
+        fn disable_event_reporting(&mut self, event: &EV) -> Result<bool, Self::Error> {
             Ok(self.disabled.insert(*event))
         }
     }
 
-    pub struct PusEventDispatcher<BackendError, Provider: GenericEvent> {
+    pub struct PusEventDispatcher<
+        B: PusEventMgmtBackendProvider<EV, Error = E>,
+        EV: GenericEvent,
+        E,
+    > {
         reporter: EventReporter,
-        backend: Box<dyn PusEventMgmtBackendProvider<Provider, Error = BackendError>>,
+        backend: B,
+        phantom: PhantomData<(E, EV)>,
     }
 
-    /// Safety: All contained fields are send as well.
-    unsafe impl<E: Send, Event: GenericEvent + Send> Send for PusEventDispatcher<E, Event> {}
-
-    impl<BackendError, Provider: GenericEvent> PusEventDispatcher<BackendError, Provider> {
-        pub fn new(
-            reporter: EventReporter,
-            backend: Box<dyn PusEventMgmtBackendProvider<Provider, Error = BackendError>>,
-        ) -> Self {
-            Self { reporter, backend }
+    impl<B: PusEventMgmtBackendProvider<EV, Error = E>, EV: GenericEvent, E>
+        PusEventDispatcher<B, EV, E>
+    {
+        pub fn new(reporter: EventReporter, backend: B) -> Self {
+            Self {
+                reporter,
+                backend,
+                phantom: PhantomData,
+            }
         }
-    }
 
-    impl<BackendError, Event: GenericEvent> PusEventDispatcher<BackendError, Event> {
-        pub fn enable_tm_for_event(&mut self, event: &Event) -> Result<bool, BackendError> {
+        pub fn enable_tm_for_event(&mut self, event: &EV) -> Result<bool, E> {
             self.backend.enable_event_reporting(event)
         }
 
-        pub fn disable_tm_for_event(&mut self, event: &Event) -> Result<bool, BackendError> {
+        pub fn disable_tm_for_event(&mut self, event: &EV) -> Result<bool, E> {
             self.backend.disable_event_reporting(event)
         }
 
@@ -177,7 +180,7 @@ pub mod alloc_mod {
             &mut self,
             sender: &mut (impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
-            event: Event,
+            event: EV,
             aux_data: Option<&[u8]>,
         ) -> Result<bool, EventManError> {
             if !self.backend.event_enabled(&event) {
@@ -208,18 +211,30 @@ pub mod alloc_mod {
         }
     }
 
-    impl<BackendError> PusEventDispatcher<BackendError, EventU32> {
+    impl<EV: GenericEvent + Copy + PartialEq + Eq + Hash>
+        PusEventDispatcher<DefaultPusEventMgmtBackend<EV>, EV, ()>
+    {
+        pub fn new_with_default_backend(reporter: EventReporter) -> Self {
+            Self {
+                reporter,
+                backend: DefaultPusEventMgmtBackend::default(),
+                phantom: PhantomData,
+            }
+        }
+    }
+
+    impl<B: PusEventMgmtBackendProvider<EventU32, Error = E>, E> PusEventDispatcher<B, EventU32, E> {
         pub fn enable_tm_for_event_with_sev<Severity: HasSeverity>(
             &mut self,
             event: &EventU32TypedSev<Severity>,
-        ) -> Result<bool, BackendError> {
+        ) -> Result<bool, E> {
             self.backend.enable_event_reporting(event.as_ref())
         }
 
         pub fn disable_tm_for_event_with_sev<Severity: HasSeverity>(
             &mut self,
             event: &EventU32TypedSev<Severity>,
-        ) -> Result<bool, BackendError> {
+        ) -> Result<bool, E> {
             self.backend.disable_event_reporting(event.as_ref())
         }
 
@@ -233,6 +248,11 @@ pub mod alloc_mod {
             self.generate_pus_event_tm_generic(sender, time_stamp, event.into(), aux_data)
         }
     }
+
+    pub type DefaultPusEventU16Dispatcher<E> =
+        PusEventDispatcher<DefaultPusEventMgmtBackend<EventU16>, EventU16, E>;
+    pub type DefaultPusEventU32Dispatcher<E> =
+        PusEventDispatcher<DefaultPusEventMgmtBackend<EventU32>, EventU32, E>;
 }
 #[cfg(test)]
 mod tests {
@@ -246,15 +266,19 @@ mod tests {
     const LOW_SEV_EVENT: EventU32 = EventU32::const_new(Severity::LOW, 1, 5);
     const EMPTY_STAMP: [u8; 7] = [0; 7];
 
-    fn create_basic_man() -> PusEventDispatcher<(), EventU32> {
+    fn create_basic_man_1() -> DefaultPusEventU32Dispatcher<()> {
         let reporter = EventReporter::new(0x02, 128).expect("Creating event repoter failed");
-        let backend = DefaultPusMgmtBackendProvider::<EventU32>::default();
-        PusEventDispatcher::new(reporter, Box::new(backend))
+        PusEventDispatcher::new_with_default_backend(reporter)
+    }
+    fn create_basic_man_2() -> DefaultPusEventU32Dispatcher<()> {
+        let reporter = EventReporter::new(0x02, 128).expect("Creating event repoter failed");
+        let backend = DefaultPusEventMgmtBackend::default();
+        PusEventDispatcher::new(reporter, backend)
     }
 
     #[test]
     fn test_basic() {
-        let mut event_man = create_basic_man();
+        let mut event_man = create_basic_man_1();
         let (event_tx, event_rx) = channel();
         let mut sender = MpscTmAsVecSender::new(0, "test_sender", event_tx);
         let event_sent = event_man
@@ -268,7 +292,7 @@ mod tests {
 
     #[test]
     fn test_disable_event() {
-        let mut event_man = create_basic_man();
+        let mut event_man = create_basic_man_2();
         let (event_tx, event_rx) = channel();
         let mut sender = MpscTmAsVecSender::new(0, "test", event_tx);
         let res = event_man.disable_tm_for_event(&LOW_SEV_EVENT);
@@ -291,7 +315,7 @@ mod tests {
 
     #[test]
     fn test_reenable_event() {
-        let mut event_man = create_basic_man();
+        let mut event_man = create_basic_man_1();
         let (event_tx, event_rx) = channel();
         let mut sender = MpscTmAsVecSender::new(0, "test", event_tx);
         let mut res = event_man.disable_tm_for_event_with_sev(&INFO_EVENT);

@@ -107,7 +107,7 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
 ///
 /// ## Example
 ///
-/// The [TCP integration tests](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-core/tests/tcp_servers.rs)
+/// The [TCP integration tests](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs/tests/tcp_servers.rs)
 /// test also serves as the example application for this module.
 pub struct TcpTmtcInCobsServer<
     TmError,

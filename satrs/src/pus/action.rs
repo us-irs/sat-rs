@@ -44,7 +44,7 @@ pub mod alloc_mod {
     /// - Checking the validity of the APID, service ID, subservice ID.
     /// - Checking the validity of the user data.
     ///
-    /// A [VerificationReporterWithSender] instance is passed to the user to also allow handling
+    /// A [VerificationReportingProvider] instance is passed to the user to also allow handling
     /// of the verification process as part of the PUS standard requirements.
     pub trait PusActionToRequestConverter {
         type Error;
