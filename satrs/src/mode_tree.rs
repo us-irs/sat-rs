@@ -365,5 +365,4 @@ pub trait ModeRequestHandler: ModeProvider {
 }
 
 #[cfg(test)]
-mod tests {
-}
+mod tests {}

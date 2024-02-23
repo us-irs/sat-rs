@@ -124,14 +124,13 @@ impl TestAssembly {
                     self.start_transition(mode_and_submode).unwrap();
                     self.mode_req_commander = Some(request_and_id.sender_id);
                 }
-                ModeRequest::ReadMode => {
-                    self.mode_node
-                        .send_mode_reply(
-                            request_and_id.sender_id,
-                            ModeReply::ModeReply(self.mode_and_submode),
-                        )
-                        .unwrap()
-                }
+                ModeRequest::ReadMode => self
+                    .mode_node
+                    .send_mode_reply(
+                        request_and_id.sender_id,
+                        ModeReply::ModeReply(self.mode_and_submode),
+                    )
+                    .unwrap(),
                 ModeRequest::AnnounceMode => self.announce_mode(false),
                 ModeRequest::AnnounceModeRecursive => self.announce_mode(true),
             }
