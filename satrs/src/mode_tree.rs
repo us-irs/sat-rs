@@ -1,6 +1,6 @@
-use std::sync::mpsc;
 use alloc::vec::Vec;
 use hashbrown::HashMap;
+use std::sync::mpsc;
 
 use crate::{
     mode::{Mode, ModeAndSubmode, ModeReply, ModeRequest, Submode},
