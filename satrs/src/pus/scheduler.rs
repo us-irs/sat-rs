@@ -340,18 +340,18 @@ pub fn generate_insert_telecommand_app_data(
 
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
+    use alloc::{
+        collections::{
+            btree_map::{Entry, Range},
+            BTreeMap,
+        },
+        vec::Vec,
+    };
+    use spacepackets::time::cds::{self, DaysLen24Bits};
+
+    use crate::pool::StoreAddr;
+
     use super::*;
-    use crate::pool::{PoolProvider, StoreAddr, StoreError};
-    use alloc::collections::btree_map::{Entry, Range};
-    use alloc::collections::BTreeMap;
-    use alloc::vec;
-    use alloc::vec::Vec;
-    use core::time::Duration;
-    use spacepackets::ecss::scheduling::TimeWindowType;
-    use spacepackets::ecss::tc::{PusTc, PusTcReader};
-    use spacepackets::ecss::PusPacket;
-    use spacepackets::time::cds::DaysLen24Bits;
-    use spacepackets::time::{cds, CcsdsTimeProvider, UnixTimestamp};
 
     #[cfg(feature = "std")]
     use std::time::SystemTimeError;
@@ -461,7 +461,7 @@ pub mod alloc_mod {
             }
             match self.tc_map.entry(time_stamp) {
                 Entry::Vacant(e) => {
-                    e.insert(vec![info]);
+                    e.insert(alloc::vec![info]);
                 }
                 Entry::Occupied(mut v) => {
                     v.get_mut().push(info);
@@ -498,7 +498,7 @@ pub mod alloc_mod {
         /// short timestamp with 16-bit length of days field.
         pub fn insert_wrapped_tc_cds_short(
             &mut self,
-            pus_tc: &PusTc,
+            pus_tc: &(impl IsPusTelecommand + PusPacket + GenericPusTcSecondaryHeader),
             pool: &mut (impl PoolProvider + ?Sized),
         ) -> Result<TcInfo, ScheduleError> {
             self.insert_wrapped_tc::<cds::TimeProvider>(pus_tc, pool)
@@ -508,7 +508,7 @@ pub mod alloc_mod {
         /// long timestamp with a 24-bit length of days field.
         pub fn insert_wrapped_tc_cds_long(
             &mut self,
-            pus_tc: &PusTc,
+            pus_tc: &(impl IsPusTelecommand + PusPacket + GenericPusTcSecondaryHeader),
             pool: &mut (impl PoolProvider + ?Sized),
         ) -> Result<TcInfo, ScheduleError> {
             self.insert_wrapped_tc::<cds::TimeProvider<DaysLen24Bits>>(pus_tc, pool)
@@ -530,7 +530,7 @@ pub mod alloc_mod {
             let range = self.retrieve_by_time_filter(time_window);
             let mut del_packets = 0;
             let mut res_if_fails = None;
-            let mut keys_to_delete = Vec::new();
+            let mut keys_to_delete = alloc::vec::Vec::new();
             for time_bucket in range {
                 for tc in time_bucket.1 {
                     match pool.delete(tc.addr) {
@@ -561,7 +561,10 @@ pub mod alloc_mod {
         }
 
         /// Retrieve a range over all scheduled commands.
-        pub fn retrieve_all(&mut self) -> Range<'_, UnixTimestamp, Vec<TcInfo>> {
+        pub fn retrieve_all(
+            &mut self,
+        ) -> alloc::collections::btree_map::Range<'_, UnixTimestamp, alloc::vec::Vec<TcInfo>>
+        {
             self.tc_map.range(..)
         }
 
@@ -572,7 +575,7 @@ pub mod alloc_mod {
         pub fn retrieve_by_time_filter<TimeProvider: CcsdsTimeProvider>(
             &mut self,
             time_window: TimeWindow<TimeProvider>,
-        ) -> Range<'_, UnixTimestamp, Vec<TcInfo>> {
+        ) -> Range<'_, UnixTimestamp, alloc::vec::Vec<TcInfo>> {
             match time_window.time_window_type() {
                 TimeWindowType::SelectAll => self.tc_map.range(..),
                 TimeWindowType::TimeTagToTimeTag => {
@@ -761,9 +764,9 @@ pub mod alloc_mod {
             mut releaser: R,
             tc_store: &(impl PoolProvider + ?Sized),
             tc_buf: &mut [u8],
-        ) -> Result<Vec<TcInfo>, (Vec<TcInfo>, StoreError)> {
+        ) -> Result<alloc::vec::Vec<TcInfo>, (alloc::vec::Vec<TcInfo>, StoreError)> {
             let tcs_to_release = self.telecommands_to_release();
-            let mut released_tcs = Vec::new();
+            let mut released_tcs = alloc::vec::Vec::new();
             for tc in tcs_to_release {
                 for info in tc.1 {
                     tc_store
@@ -835,7 +838,7 @@ pub mod alloc_mod {
             }
             match self.tc_map.entry(time_stamp) {
                 Entry::Vacant(e) => {
-                    e.insert(vec![info]);
+                    e.insert(alloc::vec![info]);
                 }
                 Entry::Occupied(mut v) => {
                     v.get_mut().push(info);

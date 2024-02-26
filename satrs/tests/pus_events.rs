@@ -5,10 +5,10 @@ use satrs::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
 use satrs::params::U32Pair;
 use satrs::params::{Params, ParamsHeapless, WritableToBeBytes};
 use satrs::pus::event_man::{DefaultPusEventMgmtBackend, EventReporter, PusEventDispatcher};
-use satrs::pus::MpscTmAsVecSender;
+use satrs::pus::TmAsVecSenderWithMpsc;
 use spacepackets::ecss::tm::PusTmReader;
 use spacepackets::ecss::{PusError, PusPacket};
-use std::sync::mpsc::{channel, SendError, TryRecvError};
+use std::sync::mpsc::{self, SendError, TryRecvError};
 use std::thread;
 
 const INFO_EVENT: EventU32TypedSev<SeverityInfo> =
@@ -24,21 +24,21 @@ pub enum CustomTmSenderError {
 
 #[test]
 fn test_threaded_usage() {
-    let (event_sender, event_man_receiver) = channel();
+    let (event_sender, event_man_receiver) = mpsc::channel();
     let event_receiver = MpscEventU32Receiver::new(event_man_receiver);
     let mut event_man = EventManagerWithMpsc::new(event_receiver);
 
-    let (pus_event_man_tx, pus_event_man_rx) = channel();
+    let (pus_event_man_tx, pus_event_man_rx) = mpsc::channel();
     let pus_event_man_send_provider = EventU32SenderMpsc::new(1, pus_event_man_tx);
     event_man.subscribe_all(pus_event_man_send_provider.channel_id());
     event_man.add_sender(pus_event_man_send_provider);
-    let (event_tx, event_rx) = channel();
+    let (event_tx, event_rx) = mpsc::channel();
     let reporter = EventReporter::new(0x02, 128).expect("Creating event reporter failed");
     let mut pus_event_man =
         PusEventDispatcher::new(reporter, DefaultPusEventMgmtBackend::default());
     // PUS + Generic event manager thread
     let jh0 = thread::spawn(move || {
-        let mut sender = MpscTmAsVecSender::new(0, "event_sender", event_tx);
+        let mut sender = TmAsVecSenderWithMpsc::new(0, "event_sender", event_tx);
         let mut event_cnt = 0;
         let mut params_array: [u8; 128] = [0; 128];
         loop {

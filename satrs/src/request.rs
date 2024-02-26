@@ -209,9 +209,7 @@ mod std_mod {
                     .map_err(|_| GenericSendError::RxDisconnected)?;
                 return Ok(());
             }
-            Err(GenericTargetedMessagingError::TargetDoesNotExist(
-                target_channel_id,
-            ))
+            Err(GenericSendError::TargetDoesNotExist(target_channel_id).into())
         }
     }
 

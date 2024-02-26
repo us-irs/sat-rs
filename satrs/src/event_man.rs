@@ -85,12 +85,8 @@ pub trait EventSendProvider<EV: GenericEvent, AuxDataProvider = Params> {
 
 /// Generic abstraction for an event receiver.
 pub trait EventReceiveProvider<Event: GenericEvent, AuxDataProvider = Params> {
-    /// This function has to be provided by any event receiver. A receive call may or may not return
-    /// an event.
-    ///
-    /// To allow returning arbitrary additional auxiliary data, a mutable slice is passed to the
-    /// [Self::receive] call as well. Receivers can write data to this slice, but care must be taken
-    /// to avoid panics due to size missmatches or out of bound writes.
+    /// This function has to be provided by any event receiver. A call may or may not return
+    /// an event and optional auxiliary data.
     fn try_recv_event(&self) -> Option<(Event, Option<AuxDataProvider>)>;
 }
 
@@ -433,10 +429,7 @@ pub mod alloc_mod {
 #[cfg(feature = "std")]
 pub mod std_mod {
     use super::*;
-    use crate::event_man::{EventReceiveProvider, EventWithAuxData};
-    use crate::events::{EventU16, EventU32, GenericEvent};
-    use crate::params::Params;
-    use std::sync::mpsc::{self};
+    use std::sync::mpsc;
 
     pub struct MpscEventReceiver<Event: GenericEvent + Send = EventU32> {
         mpsc_receiver: mpsc::Receiver<(Event, Option<Params>)>,

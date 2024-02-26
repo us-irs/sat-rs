@@ -7,7 +7,7 @@ use spacepackets::ByteConversionError;
 use std::error::Error;
 use std::path::Path;
 #[cfg(feature = "std")]
-pub use stdmod::*;
+pub use std_mod::*;
 
 pub const CRC_32: Crc<u32> = Crc::<u32>::new(&CRC_32_CKSUM);
 
@@ -148,12 +148,11 @@ pub trait VirtualFilestore {
 }
 
 #[cfg(feature = "std")]
-pub mod stdmod {
+pub mod std_mod {
     use super::*;
     use std::{
         fs::{self, File, OpenOptions},
         io::{BufReader, Read, Seek, SeekFrom, Write},
-        path::Path,
     };
 
     #[derive(Default)]

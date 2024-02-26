@@ -1,6 +1,8 @@
 use core::fmt::{Display, Formatter};
 #[cfg(feature = "std")]
 use std::error::Error;
+#[cfg(feature = "std")]
+use std::sync::mpsc;
 
 /// Generic channel ID type.
 pub type ChannelId = u32;
@@ -10,6 +12,7 @@ pub type ChannelId = u32;
 pub enum GenericSendError {
     RxDisconnected,
     QueueFull(Option<u32>),
+    TargetDoesNotExist(ChannelId),
 }
 
 impl Display for GenericSendError {
@@ -20,6 +23,9 @@ impl Display for GenericSendError {
             }
             GenericSendError::QueueFull(max_cap) => {
                 write!(f, "queue with max capacity of {max_cap:?} is full")
+            }
+            GenericSendError::TargetDoesNotExist(target) => {
+                write!(f, "target queue with ID {target} does not exist")
             }
         }
     }
@@ -53,7 +59,6 @@ impl Error for GenericReceiveError {}
 
 #[derive(Debug, Clone)]
 pub enum GenericTargetedMessagingError {
-    TargetDoesNotExist(ChannelId),
     Send(GenericSendError),
     Receive(GenericReceiveError),
 }
@@ -66,5 +71,39 @@ impl From<GenericSendError> for GenericTargetedMessagingError {
 impl From<GenericReceiveError> for GenericTargetedMessagingError {
     fn from(value: GenericReceiveError) -> Self {
         Self::Receive(value)
+    }
+}
+
+#[cfg(feature = "std")]
+impl<T> From<mpsc::SendError<T>> for GenericSendError {
+    fn from(_: mpsc::SendError<T>) -> Self {
+        GenericSendError::RxDisconnected
+    }
+}
+
+#[cfg(feature = "std")]
+impl<T> From<mpsc::TrySendError<T>> for GenericSendError {
+    fn from(err: mpsc::TrySendError<T>) -> Self {
+        match err {
+            mpsc::TrySendError::Full(_) => GenericSendError::QueueFull(None),
+            mpsc::TrySendError::Disconnected(_) => GenericSendError::RxDisconnected,
+        }
+    }
+}
+
+#[cfg(feature = "crossbeam")]
+impl<T> From<crossbeam_channel::SendError<T>> for GenericSendError {
+    fn from(_: crossbeam_channel::SendError<T>) -> Self {
+        GenericSendError::RxDisconnected
+    }
+}
+
+#[cfg(feature = "crossbeam")]
+impl<T> From<crossbeam_channel::TrySendError<T>> for GenericSendError {
+    fn from(err: crossbeam_channel::TrySendError<T>) -> Self {
+        match err {
+            crossbeam_channel::TrySendError::Full(_) => GenericSendError::QueueFull(None),
+            crossbeam_channel::TrySendError::Disconnected(_) => GenericSendError::RxDisconnected,
+        }
     }
 }

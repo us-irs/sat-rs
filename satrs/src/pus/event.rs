@@ -269,7 +269,7 @@ mod tests {
     }
 
     impl EcssChannel for TestSender {
-        fn id(&self) -> ChannelId {
+        fn channel_id(&self) -> ChannelId {
             0
         }
     }

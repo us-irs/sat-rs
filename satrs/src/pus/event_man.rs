@@ -41,8 +41,8 @@ pub trait PusEventMgmtBackendProvider<Event: GenericEvent> {
 #[cfg(feature = "heapless")]
 pub mod heapless_mod {
     use super::*;
-    use crate::events::{GenericEvent, LargestEventRaw};
-    use std::marker::PhantomData;
+    use crate::events::LargestEventRaw;
+    use core::marker::PhantomData;
 
     #[cfg_attr(doc_cfg, doc(cfg(feature = "heapless")))]
     // TODO: After a new version of heapless is released which uses hash32 version 0.3, try using
@@ -257,9 +257,8 @@ pub mod alloc_mod {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::SeverityInfo;
-    use crate::pus::MpscTmAsVecSender;
-    use std::sync::mpsc::{channel, TryRecvError};
+    use crate::{events::SeverityInfo, pus::TmAsVecSenderWithMpsc};
+    use std::sync::mpsc::{self, TryRecvError};
 
     const INFO_EVENT: EventU32TypedSev<SeverityInfo> =
         EventU32TypedSev::<SeverityInfo>::const_new(1, 0);
@@ -279,8 +278,8 @@ mod tests {
     #[test]
     fn test_basic() {
         let mut event_man = create_basic_man_1();
-        let (event_tx, event_rx) = channel();
-        let mut sender = MpscTmAsVecSender::new(0, "test_sender", event_tx);
+        let (event_tx, event_rx) = mpsc::channel();
+        let mut sender = TmAsVecSenderWithMpsc::new(0, "test_sender", event_tx);
         let event_sent = event_man
             .generate_pus_event_tm(&mut sender, &EMPTY_STAMP, INFO_EVENT, None)
             .expect("Sending info event failed");
@@ -293,8 +292,8 @@ mod tests {
     #[test]
     fn test_disable_event() {
         let mut event_man = create_basic_man_2();
-        let (event_tx, event_rx) = channel();
-        let mut sender = MpscTmAsVecSender::new(0, "test", event_tx);
+        let (event_tx, event_rx) = mpsc::channel();
+        let mut sender = TmAsVecSenderWithMpsc::new(0, "test", event_tx);
         let res = event_man.disable_tm_for_event(&LOW_SEV_EVENT);
         assert!(res.is_ok());
         assert!(res.unwrap());
@@ -316,8 +315,8 @@ mod tests {
     #[test]
     fn test_reenable_event() {
         let mut event_man = create_basic_man_1();
-        let (event_tx, event_rx) = channel();
-        let mut sender = MpscTmAsVecSender::new(0, "test", event_tx);
+        let (event_tx, event_rx) = mpsc::channel();
+        let mut sender = TmAsVecSenderWithMpsc::new(0, "test", event_tx);
         let mut res = event_man.disable_tm_for_event_with_sev(&INFO_EVENT);
         assert!(res.is_ok());
         assert!(res.unwrap());

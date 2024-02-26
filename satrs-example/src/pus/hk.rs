@@ -2,14 +2,16 @@ use log::{error, warn};
 use satrs::hk::{CollectionIntervalFactor, HkRequest};
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
 use satrs::pus::hk::{PusHkToRequestConverter, PusService3HkHandler};
+use satrs::pus::verification::std_mod::{
+    VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
+};
 use satrs::pus::verification::{
-    FailParams, TcStateAccepted, VerificationReporterWithSender, VerificationReportingProvider,
-    VerificationToken,
+    FailParams, TcStateAccepted, VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSender, PusPacketHandlerResult,
-    PusPacketHandlingError, PusServiceHelper,
+    MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError, PusServiceHelper,
+    TmAsVecSenderWithId, TmInSharedPoolSenderWithId,
 };
 use satrs::request::TargetAndApidId;
 use satrs::spacepackets::ecss::tc::PusTcReader;
@@ -143,13 +145,14 @@ impl PusHkToRequestConverter for ExampleHkRequestConverter {
 
 pub fn create_hk_service_static(
     shared_tm_store: SharedTmPool,
-    tm_funnel_tx: mpsc::Sender<StoreAddr>,
-    verif_reporter: VerificationReporterWithSender,
+    tm_funnel_tx: mpsc::SyncSender<StoreAddr>,
+    verif_reporter: VerificationReporterWithSharedPoolMpscBoundedSender,
     tc_pool: SharedStaticMemoryPool,
     pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
     request_router: GenericRequestRouter,
-) -> Pus3Wrapper<EcssTcInSharedStoreConverter> {
-    let hk_srv_tm_sender = MpscTmInSharedPoolSender::new(
+) -> Pus3Wrapper<EcssTcInSharedStoreConverter, VerificationReporterWithSharedPoolMpscBoundedSender>
+{
+    let hk_srv_tm_sender = TmInSharedPoolSenderWithId::new(
         TmSenderId::PusHk as ChannelId,
         "PUS_3_TM_SENDER",
         shared_tm_store.clone(),
@@ -174,11 +177,11 @@ pub fn create_hk_service_static(
 
 pub fn create_hk_service_dynamic(
     tm_funnel_tx: mpsc::Sender<Vec<u8>>,
-    verif_reporter: VerificationReporterWithSender,
+    verif_reporter: VerificationReporterWithVecMpscSender,
     pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
     request_router: GenericRequestRouter,
-) -> Pus3Wrapper<EcssTcInVecConverter> {
-    let hk_srv_tm_sender = MpscTmAsVecSender::new(
+) -> Pus3Wrapper<EcssTcInVecConverter, VerificationReporterWithVecMpscSender> {
+    let hk_srv_tm_sender = TmAsVecSenderWithId::new(
         TmSenderId::PusHk as ChannelId,
         "PUS_3_TM_SENDER",
         tm_funnel_tx.clone(),
@@ -200,17 +203,24 @@ pub fn create_hk_service_dynamic(
     Pus3Wrapper { pus_3_handler }
 }
 
-pub struct Pus3Wrapper<TcInMemConverter: EcssTcInMemConverter> {
+pub struct Pus3Wrapper<
+    TcInMemConverter: EcssTcInMemConverter,
+    VerificationReporter: VerificationReportingProvider,
+> {
     pub(crate) pus_3_handler: PusService3HkHandler<
         TcInMemConverter,
-        VerificationReporterWithSender,
+        VerificationReporter,
         ExampleHkRequestConverter,
         GenericRequestRouter,
         GenericRoutingErrorHandler<3>,
     >,
 }
 
-impl<TcInMemConverter: EcssTcInMemConverter> Pus3Wrapper<TcInMemConverter> {
+impl<
+        TcInMemConverter: EcssTcInMemConverter,
+        VerificationReporter: VerificationReportingProvider,
+    > Pus3Wrapper<TcInMemConverter, VerificationReporter>
+{
     pub fn handle_next_packet(&mut self) -> bool {
         match self.pus_3_handler.handle_one_tc() {
             Ok(result) => match result {

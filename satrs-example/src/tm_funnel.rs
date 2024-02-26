@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::mpsc::{Receiver, Sender},
+    sync::mpsc::{self},
 };
 
 use log::info;
@@ -77,16 +77,16 @@ impl TmFunnelCommon {
 pub struct TmFunnelStatic {
     common: TmFunnelCommon,
     shared_tm_store: SharedTmPool,
-    tm_funnel_rx: Receiver<StoreAddr>,
-    tm_server_tx: Sender<StoreAddr>,
+    tm_funnel_rx: mpsc::Receiver<StoreAddr>,
+    tm_server_tx: mpsc::SyncSender<StoreAddr>,
 }
 
 impl TmFunnelStatic {
     pub fn new(
         shared_tm_store: SharedTmPool,
         sync_tm_tcp_source: SyncTcpTmSource,
-        tm_funnel_rx: Receiver<StoreAddr>,
-        tm_server_tx: Sender<StoreAddr>,
+        tm_funnel_rx: mpsc::Receiver<StoreAddr>,
+        tm_server_tx: mpsc::SyncSender<StoreAddr>,
     ) -> Self {
         Self {
             common: TmFunnelCommon::new(sync_tm_tcp_source),
@@ -123,15 +123,15 @@ impl TmFunnelStatic {
 
 pub struct TmFunnelDynamic {
     common: TmFunnelCommon,
-    tm_funnel_rx: Receiver<Vec<u8>>,
-    tm_server_tx: Sender<Vec<u8>>,
+    tm_funnel_rx: mpsc::Receiver<Vec<u8>>,
+    tm_server_tx: mpsc::Sender<Vec<u8>>,
 }
 
 impl TmFunnelDynamic {
     pub fn new(
         sync_tm_tcp_source: SyncTcpTmSource,
-        tm_funnel_rx: Receiver<Vec<u8>>,
-        tm_server_tx: Sender<Vec<u8>>,
+        tm_funnel_rx: mpsc::Receiver<Vec<u8>>,
+        tm_server_tx: mpsc::Sender<Vec<u8>>,
     ) -> Self {
         Self {
             common: TmFunnelCommon::new(sync_tm_tcp_source),

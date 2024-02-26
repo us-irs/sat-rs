@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   - `ListenerTable` -> `ListenerMapProvider`
   - `SenderTable` -> `SenderMapProvider`
   - There is an `EventManagerWithMpsc` and a `EventManagerWithBoundedMpsc` helper type now.
+- Refactored ECSS TM sender abstractions to be generic over different message queue backends.
+- Refactored Verification Reporter abstractions and implementation to be generic over the sender
+  instead of using trait objects.
+
+## Fixed
+
+- Update deprecated API for `PusScheduler::insert_wrapped_tc_cds_short`
+  and `PusScheduler::insert_wrapped_tc_cds_long`.
 
 # [v0.2.0-rc.0] 2024-02-21
 

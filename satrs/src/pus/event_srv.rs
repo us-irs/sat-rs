@@ -23,11 +23,11 @@ impl<
     > PusService5EventHandler<TcInMemConverter, VerificationReporter>
 {
     pub fn new(
-        service_handler: PusServiceHelper<TcInMemConverter, VerificationReporter>,
+        service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
         event_request_tx: Sender<EventRequestWithToken>,
     ) -> Self {
         Self {
-            service_helper: service_handler,
+            service_helper,
             event_request_tx,
         }
     }
@@ -138,7 +138,9 @@ mod tests {
 
     use crate::pus::event_man::EventRequest;
     use crate::pus::tests::SimplePusPacketHandler;
-    use crate::pus::verification::{RequestId, VerificationReporterWithSender};
+    use crate::pus::verification::{
+        RequestId, VerificationReporterWithSharedPoolMpscBoundedSender,
+    };
     use crate::{
         events::EventU32,
         pus::{
@@ -155,8 +157,10 @@ mod tests {
 
     struct Pus5HandlerWithStoreTester {
         common: PusServiceHandlerWithSharedStoreCommon,
-        handler:
-            PusService5EventHandler<EcssTcInSharedStoreConverter, VerificationReporterWithSender>,
+        handler: PusService5EventHandler<
+            EcssTcInSharedStoreConverter,
+            VerificationReporterWithSharedPoolMpscBoundedSender,
+        >,
     }
 
     impl Pus5HandlerWithStoreTester {
