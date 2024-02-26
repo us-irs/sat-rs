@@ -1,4 +1,7 @@
-use satrs::pus::{verification::VerificationReportingProvider, EcssTcInMemConverter};
+use satrs::pus::{
+    verification::VerificationReportingProvider, EcssTcInMemConverter, EcssTcReceiverCore,
+    EcssTmSenderCore,
+};
 
 use super::{
     action::Pus8Wrapper, event::Pus5Wrapper, hk::Pus3Wrapper, scheduler::Pus11Wrapper,
@@ -6,27 +9,36 @@ use super::{
 };
 
 pub struct PusStack<
+    TcReceiver: EcssTcReceiverCore,
+    TmSender: EcssTmSenderCore,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
-    event_srv: Pus5Wrapper<TcInMemConverter, VerificationReporter>,
-    hk_srv: Pus3Wrapper<TcInMemConverter, VerificationReporter>,
-    action_srv: Pus8Wrapper<TcInMemConverter, VerificationReporter>,
-    schedule_srv: Pus11Wrapper<TcInMemConverter, VerificationReporter>,
-    test_srv: Service17CustomWrapper<TcInMemConverter, VerificationReporter>,
+    event_srv: Pus5Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+    hk_srv: Pus3Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+    action_srv: Pus8Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+    schedule_srv: Pus11Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+    test_srv: Service17CustomWrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
 }
 
 impl<
+        TcReceiver: EcssTcReceiverCore,
+        TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
-    > PusStack<TcInMemConverter, VerificationReporter>
+    > PusStack<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
     pub fn new(
-        hk_srv: Pus3Wrapper<TcInMemConverter, VerificationReporter>,
-        event_srv: Pus5Wrapper<TcInMemConverter, VerificationReporter>,
-        action_srv: Pus8Wrapper<TcInMemConverter, VerificationReporter>,
-        schedule_srv: Pus11Wrapper<TcInMemConverter, VerificationReporter>,
-        test_srv: Service17CustomWrapper<TcInMemConverter, VerificationReporter>,
+        hk_srv: Pus3Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+        event_srv: Pus5Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+        action_srv: Pus8Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+        schedule_srv: Pus11Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+        test_srv: Service17CustomWrapper<
+            TcReceiver,
+            TmSender,
+            TcInMemConverter,
+            VerificationReporter,
+        >,
     ) -> Self {
         Self {
             event_srv,

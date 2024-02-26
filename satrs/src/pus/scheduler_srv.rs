@@ -1,6 +1,15 @@
 use super::scheduler::PusSchedulerProvider;
-use super::verification::VerificationReportingProvider;
-use super::{EcssTcInMemConverter, PusServiceBase, PusServiceHelper};
+use super::verification::{
+    VerificationReporterWithSharedPoolMpscBoundedSender,
+    VerificationReporterWithSharedPoolMpscSender, VerificationReporterWithVecMpscBoundedSender,
+    VerificationReporterWithVecMpscSender, VerificationReportingProvider,
+};
+use super::{
+    get_current_cds_short_timestamp, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
+    EcssTcInVecConverter, EcssTcReceiverCore, EcssTmSenderCore, MpscTcReceiver, PusServiceHelper,
+    TmAsVecSenderWithBoundedMpsc, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
+    TmInSharedPoolSenderWithMpsc,
+};
 use crate::pool::PoolProvider;
 use crate::pus::{PusPacketHandlerResult, PusPacketHandlingError};
 use alloc::string::ToString;
@@ -16,22 +25,39 @@ use spacepackets::time::cds::TimeProvider;
 /// [Self::scheduler] and [Self::scheduler_mut] function and then use the scheduler API to release
 /// telecommands when applicable.
 pub struct PusService11SchedHandler<
+    TcReceiver: EcssTcReceiverCore,
+    TmSender: EcssTmSenderCore,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
     PusScheduler: PusSchedulerProvider,
 > {
-    pub service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
+    pub service_helper:
+        PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
     scheduler: PusScheduler,
 }
 
 impl<
+        TcReceiver: EcssTcReceiverCore,
+        TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
         Scheduler: PusSchedulerProvider,
-    > PusService11SchedHandler<TcInMemConverter, VerificationReporter, Scheduler>
+    >
+    PusService11SchedHandler<
+        TcReceiver,
+        TmSender,
+        TcInMemConverter,
+        VerificationReporter,
+        Scheduler,
+    >
 {
     pub fn new(
-        service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
+        service_helper: PusServiceHelper<
+            TcReceiver,
+            TmSender,
+            TcInMemConverter,
+            VerificationReporter,
+        >,
         scheduler: Scheduler,
     ) -> Self {
         Self {
@@ -70,9 +96,7 @@ impl<
             ));
         }
         let mut partial_error = None;
-        let time_stamp = PusServiceBase::<VerificationReporter>::get_current_cds_short_timestamp(
-            &mut partial_error,
-        );
+        let time_stamp = get_current_cds_short_timestamp(&mut partial_error);
         match standard_subservice.unwrap() {
             scheduling::Subservice::TcEnableScheduling => {
                 let start_token = self
@@ -169,6 +193,42 @@ impl<
         Ok(PusPacketHandlerResult::RequestHandled)
     }
 }
+/// Helper type definition for a PUS 11 handler with a dynamic TMTC memory backend and regular
+/// mpsc queues.
+pub type PusService11SchedHandlerDynWithMpsc<PusScheduler> = PusService11SchedHandler<
+    MpscTcReceiver,
+    TmAsVecSenderWithMpsc,
+    EcssTcInVecConverter,
+    VerificationReporterWithVecMpscSender,
+    PusScheduler,
+>;
+/// Helper type definition for a PUS 11 handler with a dynamic TMTC memory backend and bounded MPSC
+/// queues.
+pub type PusService11SchedHandlerDynWithBoundedMpsc<PusScheduler> = PusService11SchedHandler<
+    MpscTcReceiver,
+    TmAsVecSenderWithBoundedMpsc,
+    EcssTcInVecConverter,
+    VerificationReporterWithVecMpscBoundedSender,
+    PusScheduler,
+>;
+/// Helper type definition for a PUS 11 handler with a shared store TMTC memory backend and regular
+/// mpsc queues.
+pub type PusService11SchedHandlerStaticWithMpsc<PusScheduler> = PusService11SchedHandler<
+    MpscTcReceiver,
+    TmInSharedPoolSenderWithMpsc,
+    EcssTcInSharedStoreConverter,
+    VerificationReporterWithSharedPoolMpscSender,
+    PusScheduler,
+>;
+/// Helper type definition for a PUS 11 handler with a shared store TMTC memory backend and bounded
+/// mpsc queues.
+pub type PusService11SchedHandlerStaticWithBoundedMpsc<PusScheduler> = PusService11SchedHandler<
+    MpscTcReceiver,
+    TmInSharedPoolSenderWithBoundedMpsc,
+    EcssTcInSharedStoreConverter,
+    VerificationReporterWithSharedPoolMpscBoundedSender,
+    PusScheduler,
+>;
 
 #[cfg(test)]
 mod tests {
@@ -181,6 +241,7 @@ mod tests {
         verification::{RequestId, TcStateAccepted, VerificationToken},
         EcssTcInSharedStoreConverter,
     };
+    use crate::pus::{MpscTcReceiver, TmInSharedPoolSenderWithBoundedMpsc};
     use alloc::collections::VecDeque;
     use delegate::delegate;
     use spacepackets::ecss::scheduling::Subservice;
@@ -198,6 +259,8 @@ mod tests {
     struct Pus11HandlerWithStoreTester {
         common: PusServiceHandlerWithSharedStoreCommon,
         handler: PusService11SchedHandler<
+            MpscTcReceiver,
+            TmInSharedPoolSenderWithBoundedMpsc,
             EcssTcInSharedStoreConverter,
             VerificationReporterWithSharedPoolMpscBoundedSender,
             TestScheduler,
