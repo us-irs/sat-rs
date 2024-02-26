@@ -340,7 +340,13 @@ pub fn generate_insert_telecommand_app_data(
 
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
-    use alloc::{collections::{btree_map::{Entry, Range}, BTreeMap}, vec::Vec};
+    use alloc::{
+        collections::{
+            btree_map::{Entry, Range},
+            BTreeMap,
+        },
+        vec::Vec,
+    };
     use spacepackets::time::cds::{self, DaysLen24Bits};
 
     use crate::pool::StoreAddr;
@@ -569,8 +575,7 @@ pub mod alloc_mod {
         pub fn retrieve_by_time_filter<TimeProvider: CcsdsTimeProvider>(
             &mut self,
             time_window: TimeWindow<TimeProvider>,
-        ) -> Range<'_, UnixTimestamp, alloc::vec::Vec<TcInfo>>
-        {
+        ) -> Range<'_, UnixTimestamp, alloc::vec::Vec<TcInfo>> {
             match time_window.time_window_type() {
                 TimeWindowType::SelectAll => self.tc_map.range(..),
                 TimeWindowType::TimeTagToTimeTag => {
@@ -776,10 +781,7 @@ pub mod alloc_mod {
         }
 
         /// Retrieve all telecommands which should be release based on the current time.
-        pub fn telecommands_to_release(
-            &self,
-        ) -> Range<'_, UnixTimestamp, Vec<TcInfo>>
-        {
+        pub fn telecommands_to_release(&self) -> Range<'_, UnixTimestamp, Vec<TcInfo>> {
             self.tc_map.range(..=self.current_time)
         }
     }
