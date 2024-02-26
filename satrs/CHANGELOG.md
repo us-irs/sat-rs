@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   - `SenderTable` -> `SenderMapProvider`
   - There is an `EventManagerWithMpsc` and a `EventManagerWithBoundedMpsc` helper type now.
 
+## Fixed
+
+- Update deprecated API for `PusScheduler::insert_wrapped_tc_cds_short`
+  and `PusScheduler::insert_wrapped_tc_cds_long`.
+
 # [v0.2.0-rc.0] 2024-02-21
 
 ## Added
