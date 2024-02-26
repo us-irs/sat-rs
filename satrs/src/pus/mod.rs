@@ -371,13 +371,11 @@ pub mod std_mod {
     use crate::pool::{PoolProvider, PoolProviderWithGuards, SharedStaticMemoryPool, StoreAddr};
     use crate::pus::verification::{TcStateAccepted, VerificationToken};
     use crate::pus::{
-        EcssChannel, EcssTcAndToken, EcssTcReceiver, EcssTcReceiverCore, EcssTmSender,
-        EcssTmSenderCore, EcssTmtcError, GenericRecvError, GenericSendError, PusTmWrapper,
-        TryRecvTmtcError,
+        EcssChannel, EcssTcAndToken, EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError,
+        GenericRecvError, GenericSendError, PusTmWrapper, TryRecvTmtcError,
     };
     use crate::tmtc::tm_helper::SharedTmPool;
     use crate::{ChannelId, TargetId};
-    use alloc::boxed::Box;
     use alloc::vec::Vec;
     use spacepackets::ecss::tc::PusTcReader;
     use spacepackets::ecss::tm::PusTmCreator;
@@ -847,34 +845,35 @@ pub mod std_mod {
         }
     }
 
-    pub struct PusServiceBase<VerificationReporter: VerificationReportingProvider> {
-        pub tc_receiver: Box<dyn EcssTcReceiver>,
-        pub tm_sender: Box<dyn EcssTmSender>,
+    pub struct PusServiceBase<
+        TcReceiver: EcssTcReceiverCore,
+        TmSender: EcssTmSenderCore,
+        VerificationReporter: VerificationReportingProvider,
+    > {
+        pub tc_receiver: TcReceiver,
+        pub tm_sender: TmSender,
         pub tm_apid: u16,
         pub verification_handler: VerificationReporter,
     }
-
-    impl<VerificationReporter: VerificationReportingProvider> PusServiceBase<VerificationReporter> {
-        #[cfg(feature = "std")]
-        pub fn get_current_cds_short_timestamp(
-            partial_error: &mut Option<PartialPusHandlingError>,
-        ) -> [u8; 7] {
-            let mut time_stamp: [u8; 7] = [0; 7];
-            let time_provider =
-                TimeProvider::from_now_with_u16_days().map_err(PartialPusHandlingError::Time);
-            if let Ok(time_provider) = time_provider {
-                // Can't fail, we have a buffer with the exact required size.
-                time_provider.write_to_bytes(&mut time_stamp).unwrap();
-            } else {
-                *partial_error = Some(time_provider.unwrap_err());
-            }
-            time_stamp
+    #[cfg(feature = "std")]
+    pub fn get_current_cds_short_timestamp(
+        partial_error: &mut Option<PartialPusHandlingError>,
+    ) -> [u8; 7] {
+        let mut time_stamp: [u8; 7] = [0; 7];
+        let time_provider =
+            TimeProvider::from_now_with_u16_days().map_err(PartialPusHandlingError::Time);
+        if let Ok(time_provider) = time_provider {
+            // Can't fail, we have a buffer with the exact required size.
+            time_provider.write_to_bytes(&mut time_stamp).unwrap();
+        } else {
+            *partial_error = Some(time_provider.unwrap_err());
         }
-        #[cfg(feature = "std")]
-        pub fn get_current_timestamp_ignore_error() -> [u8; 7] {
-            let mut dummy = None;
-            Self::get_current_cds_short_timestamp(&mut dummy)
-        }
+        time_stamp
+    }
+    #[cfg(feature = "std")]
+    pub fn get_current_timestamp_ignore_error() -> [u8; 7] {
+        let mut dummy = None;
+        get_current_cds_short_timestamp(&mut dummy)
     }
 
     /// This is a high-level PUS packet handler helper.
@@ -887,21 +886,25 @@ pub mod std_mod {
     /// by using the [EcssTcInMemConverter] abstraction. This object provides some convenience
     /// methods to make the generic parts of TC handling easier.
     pub struct PusServiceHelper<
+        TcReceiver: EcssTcReceiverCore,
+        TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
     > {
-        pub common: PusServiceBase<VerificationReporter>,
+        pub common: PusServiceBase<TcReceiver, TmSender, VerificationReporter>,
         pub tc_in_mem_converter: TcInMemConverter,
     }
 
     impl<
+            TcReceiver: EcssTcReceiverCore,
+            TmSender: EcssTmSenderCore,
             TcInMemConverter: EcssTcInMemConverter,
             VerificationReporter: VerificationReportingProvider,
-        > PusServiceHelper<TcInMemConverter, VerificationReporter>
+        > PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
     {
         pub fn new(
-            tc_receiver: Box<dyn EcssTcReceiver>,
-            tm_sender: Box<dyn EcssTmSender>,
+            tc_receiver: TcReceiver,
+            tm_sender: TmSender,
             tm_apid: u16,
             verification_handler: VerificationReporter,
             tc_in_mem_converter: TcInMemConverter,
@@ -948,6 +951,34 @@ pub mod std_mod {
             }
         }
     }
+
+    pub type PusServiceHelperDynWithMpsc<TcInMemConverter, VerificationReporter> = PusServiceHelper<
+        MpscTcReceiver,
+        TmAsVecSenderWithMpsc,
+        TcInMemConverter,
+        VerificationReporter,
+    >;
+    pub type PusServiceHelperDynWithBoundedMpsc<TcInMemConverter, VerificationReporter> =
+        PusServiceHelper<
+            MpscTcReceiver,
+            TmAsVecSenderWithBoundedMpsc,
+            TcInMemConverter,
+            VerificationReporter,
+        >;
+    pub type PusServiceHelperStaticWithMpsc<TcInMemConverter, VerificationReporter> =
+        PusServiceHelper<
+            MpscTcReceiver,
+            TmInSharedPoolSenderWithMpsc,
+            TcInMemConverter,
+            VerificationReporter,
+        >;
+    pub type PusServiceHelperStaticWithBoundedMpsc<TcInMemConverter, VerificationReporter> =
+        PusServiceHelper<
+            MpscTcReceiver,
+            TmInSharedPoolSenderWithBoundedMpsc,
+            TcInMemConverter,
+            VerificationReporter,
+        >;
 }
 
 pub(crate) fn source_buffer_large_enough(cap: usize, len: usize) -> Result<(), EcssTmtcError> {
@@ -969,7 +1000,6 @@ pub mod tests {
     use std::sync::mpsc::TryRecvError;
     use std::sync::{mpsc, RwLock};
 
-    use alloc::boxed::Box;
     use alloc::collections::VecDeque;
     use alloc::vec::Vec;
     use satrs_shared::res_code::ResultU16;
@@ -996,8 +1026,8 @@ pub mod tests {
     use super::{
         EcssTcAndToken, EcssTcInSharedStoreConverter, EcssTcInVecConverter, GenericRoutingError,
         MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError, PusRoutingErrorHandler,
-        PusServiceHelper, TcInMemory, TmAsVecSenderWithId, TmInSharedPoolSenderWithBoundedMpsc,
-        TmInSharedPoolSenderWithId,
+        PusServiceHelper, TcInMemory, TmAsVecSenderWithId, TmAsVecSenderWithMpsc,
+        TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
     };
 
     pub const TEST_APID: u16 = 0x101;
@@ -1047,18 +1077,19 @@ pub mod tests {
         verification_handler: VerificationReporterWithSharedPoolMpscBoundedSender,
     }
 
+    pub type PusServiceHelperStatic = PusServiceHelper<
+        MpscTcReceiver,
+        TmInSharedPoolSenderWithBoundedMpsc,
+        EcssTcInSharedStoreConverter,
+        VerificationReporterWithSharedPoolMpscBoundedSender,
+    >;
+
     impl PusServiceHandlerWithSharedStoreCommon {
         /// This function generates the structure in addition to the PUS service handler
         /// [PusServiceHandler] which might be required for a specific PUS service handler.
         ///
         /// The PUS service handler is instantiated with a [EcssTcInStoreConverter].
-        pub fn new() -> (
-            Self,
-            PusServiceHelper<
-                EcssTcInSharedStoreConverter,
-                VerificationReporterWithSharedPoolMpscBoundedSender,
-            >,
-        ) {
+        pub fn new() -> (Self, PusServiceHelperStatic) {
             let pool_cfg = StaticPoolConfig::new(alloc::vec![(16, 16), (8, 32), (4, 64)], false);
             let tc_pool = StaticMemoryPool::new(pool_cfg.clone());
             let tm_pool = StaticMemoryPool::new(pool_cfg);
@@ -1092,8 +1123,8 @@ pub mod tests {
                     verification_handler: verification_handler.clone(),
                 },
                 PusServiceHelper::new(
-                    Box::new(test_srv_tc_receiver),
-                    Box::new(test_srv_tm_sender),
+                    test_srv_tc_receiver,
+                    test_srv_tm_sender,
                     TEST_APID,
                     verification_handler,
                     in_store_converter,
@@ -1157,12 +1188,15 @@ pub mod tests {
         tm_receiver: mpsc::Receiver<alloc::vec::Vec<u8>>,
         pub verification_handler: VerificationReporter,
     }
+    pub type PusServiceHelperDynamic = PusServiceHelper<
+        MpscTcReceiver,
+        TmAsVecSenderWithMpsc,
+        EcssTcInVecConverter,
+        VerificationReporterWithVecMpscSender,
+    >;
 
     impl PusServiceHandlerWithVecCommon<VerificationReporterWithVecMpscSender> {
-        pub fn new_with_standard_verif_reporter() -> (
-            Self,
-            PusServiceHelper<EcssTcInVecConverter, VerificationReporterWithVecMpscSender>,
-        ) {
+        pub fn new_with_standard_verif_reporter() -> (Self, PusServiceHelperDynamic) {
             let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::channel();
             let (tm_tx, tm_rx) = mpsc::channel();
 
@@ -1182,8 +1216,8 @@ pub mod tests {
                     verification_handler: verification_handler.clone(),
                 },
                 PusServiceHelper::new(
-                    Box::new(test_srv_tc_receiver),
-                    Box::new(test_srv_tm_sender),
+                    test_srv_tc_receiver,
+                    test_srv_tm_sender,
                     TEST_APID,
                     verification_handler,
                     in_store_converter,
@@ -1195,7 +1229,12 @@ pub mod tests {
     impl PusServiceHandlerWithVecCommon<TestVerificationReporter> {
         pub fn new_with_test_verif_sender() -> (
             Self,
-            PusServiceHelper<EcssTcInVecConverter, TestVerificationReporter>,
+            PusServiceHelper<
+                MpscTcReceiver,
+                TmAsVecSenderWithMpsc,
+                EcssTcInVecConverter,
+                TestVerificationReporter,
+            >,
         ) {
             let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::channel();
             let (tm_tx, tm_rx) = mpsc::channel();
@@ -1213,8 +1252,8 @@ pub mod tests {
                     verification_handler: verification_handler.clone(),
                 },
                 PusServiceHelper::new(
-                    Box::new(test_srv_tc_receiver),
-                    Box::new(test_srv_tm_sender),
+                    test_srv_tc_receiver,
+                    test_srv_tm_sender,
                     TEST_APID,
                     verification_handler,
                     in_store_converter,

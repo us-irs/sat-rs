@@ -62,9 +62,9 @@ pub mod alloc_mod {
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod std_mod {
     use crate::pus::{
-        verification::VerificationReportingProvider, EcssTcInMemConverter, GenericRoutingError,
-        PusPacketHandlerResult, PusPacketHandlingError, PusRoutingErrorHandler, PusServiceBase,
-        PusServiceHelper,
+        get_current_cds_short_timestamp, verification::VerificationReportingProvider,
+        EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore, GenericRoutingError,
+        PusPacketHandlerResult, PusPacketHandlingError, PusRoutingErrorHandler, PusServiceHelper,
     };
 
     use super::*;
@@ -81,6 +81,8 @@ pub mod std_mod {
     /// 3. Route the action request using the provided [PusActionRequestRouter].
     /// 4. Handle all routing errors using the provided [PusRoutingErrorHandler].
     pub struct PusService8ActionHandler<
+        TcReceiver: EcssTcReceiverCore,
+        TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
         RequestConverter: PusActionToRequestConverter,
@@ -88,13 +90,16 @@ pub mod std_mod {
         RoutingErrorHandler: PusRoutingErrorHandler<Error = RoutingError>,
         RoutingError = GenericRoutingError,
     > {
-        service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
+        service_helper:
+            PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
         pub request_converter: RequestConverter,
         pub request_router: RequestRouter,
         pub routing_error_handler: RoutingErrorHandler,
     }
 
     impl<
+            TcReceiver: EcssTcReceiverCore,
+            TmSender: EcssTmSenderCore,
             TcInMemConverter: EcssTcInMemConverter,
             VerificationReporter: VerificationReportingProvider,
             RequestConverter: PusActionToRequestConverter<Error = PusPacketHandlingError>,
@@ -103,6 +108,8 @@ pub mod std_mod {
             RoutingError: Clone,
         >
         PusService8ActionHandler<
+            TcReceiver,
+            TmSender,
             TcInMemConverter,
             VerificationReporter,
             RequestConverter,
@@ -114,7 +121,12 @@ pub mod std_mod {
         PusPacketHandlingError: From<RoutingError>,
     {
         pub fn new(
-            service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
+            service_helper: PusServiceHelper<
+                TcReceiver,
+                TmSender,
+                TcInMemConverter,
+                VerificationReporter,
+            >,
             request_converter: RequestConverter,
             request_router: RequestRouter,
             routing_error_handler: RoutingErrorHandler,
@@ -139,10 +151,7 @@ pub mod std_mod {
                 .tc_in_mem_converter
                 .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
             let mut partial_error = None;
-            let time_stamp =
-                PusServiceBase::<VerificationReporter>::get_current_cds_short_timestamp(
-                    &mut partial_error,
-                );
+            let time_stamp = get_current_cds_short_timestamp(&mut partial_error);
             let (target_id, action_request) = self.request_converter.convert(
                 ecss_tc_and_token.token,
                 &tc,
@@ -189,7 +198,8 @@ mod tests {
         verification::{
             tests::TestVerificationReporter, FailParams, RequestId, VerificationReportingProvider,
         },
-        EcssTcInVecConverter, GenericRoutingError, PusPacketHandlerResult, PusPacketHandlingError,
+        EcssTcInVecConverter, GenericRoutingError, MpscTcReceiver, PusPacketHandlerResult,
+        PusPacketHandlingError, TmAsVecSenderWithMpsc,
     };
 
     use super::*;
@@ -259,6 +269,8 @@ mod tests {
     struct Pus8HandlerWithVecTester {
         common: PusServiceHandlerWithVecCommon<TestVerificationReporter>,
         handler: PusService8ActionHandler<
+            MpscTcReceiver,
+            TmAsVecSenderWithMpsc,
             EcssTcInVecConverter,
             TestVerificationReporter,
             TestConverter<8>,

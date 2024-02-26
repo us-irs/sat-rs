@@ -1,6 +1,9 @@
 use super::scheduler::PusSchedulerProvider;
 use super::verification::VerificationReportingProvider;
-use super::{EcssTcInMemConverter, PusServiceBase, PusServiceHelper};
+use super::{
+    get_current_cds_short_timestamp, EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore,
+    PusServiceHelper,
+};
 use crate::pool::PoolProvider;
 use crate::pus::{PusPacketHandlerResult, PusPacketHandlingError};
 use alloc::string::ToString;
@@ -16,22 +19,39 @@ use spacepackets::time::cds::TimeProvider;
 /// [Self::scheduler] and [Self::scheduler_mut] function and then use the scheduler API to release
 /// telecommands when applicable.
 pub struct PusService11SchedHandler<
+    TcReceiver: EcssTcReceiverCore,
+    TmSender: EcssTmSenderCore,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
     PusScheduler: PusSchedulerProvider,
 > {
-    pub service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
+    pub service_helper:
+        PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
     scheduler: PusScheduler,
 }
 
 impl<
+        TcReceiver: EcssTcReceiverCore,
+        TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
         Scheduler: PusSchedulerProvider,
-    > PusService11SchedHandler<TcInMemConverter, VerificationReporter, Scheduler>
+    >
+    PusService11SchedHandler<
+        TcReceiver,
+        TmSender,
+        TcInMemConverter,
+        VerificationReporter,
+        Scheduler,
+    >
 {
     pub fn new(
-        service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
+        service_helper: PusServiceHelper<
+            TcReceiver,
+            TmSender,
+            TcInMemConverter,
+            VerificationReporter,
+        >,
         scheduler: Scheduler,
     ) -> Self {
         Self {
@@ -70,9 +90,7 @@ impl<
             ));
         }
         let mut partial_error = None;
-        let time_stamp = PusServiceBase::<VerificationReporter>::get_current_cds_short_timestamp(
-            &mut partial_error,
-        );
+        let time_stamp = get_current_cds_short_timestamp(&mut partial_error);
         match standard_subservice.unwrap() {
             scheduling::Subservice::TcEnableScheduling => {
                 let start_token = self
@@ -181,6 +199,7 @@ mod tests {
         verification::{RequestId, TcStateAccepted, VerificationToken},
         EcssTcInSharedStoreConverter,
     };
+    use crate::pus::{MpscTcReceiver, TmInSharedPoolSenderWithBoundedMpsc};
     use alloc::collections::VecDeque;
     use delegate::delegate;
     use spacepackets::ecss::scheduling::Subservice;
@@ -198,6 +217,8 @@ mod tests {
     struct Pus11HandlerWithStoreTester {
         common: PusServiceHandlerWithSharedStoreCommon,
         handler: PusService11SchedHandler<
+            MpscTcReceiver,
+            TmInSharedPoolSenderWithBoundedMpsc,
             EcssTcInSharedStoreConverter,
             VerificationReporterWithSharedPoolMpscBoundedSender,
             TestScheduler,

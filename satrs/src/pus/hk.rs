@@ -64,9 +64,9 @@ pub mod alloc_mod {
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod std_mod {
     use crate::pus::{
-        verification::VerificationReportingProvider, EcssTcInMemConverter, GenericRoutingError,
-        PusPacketHandlerResult, PusPacketHandlingError, PusRoutingErrorHandler, PusServiceBase,
-        PusServiceHelper,
+        get_current_cds_short_timestamp, verification::VerificationReportingProvider,
+        EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore, GenericRoutingError,
+        PusPacketHandlerResult, PusPacketHandlingError, PusRoutingErrorHandler, PusServiceHelper,
     };
 
     use super::*;
@@ -85,6 +85,8 @@ pub mod std_mod {
     /// 4. Handle all routing errors using the provided [PusRoutingErrorHandler]. The generic error
     ///    type is constrained to the [GenericRoutingError] for the concrete implementation.
     pub struct PusService3HkHandler<
+        TcReceiver: EcssTcReceiverCore,
+        TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
         RequestConverter: PusHkToRequestConverter,
@@ -92,13 +94,16 @@ pub mod std_mod {
         RoutingErrorHandler: PusRoutingErrorHandler<Error = RoutingError>,
         RoutingError = GenericRoutingError,
     > {
-        service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
+        service_helper:
+            PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
         pub request_converter: RequestConverter,
         pub request_router: RequestRouter,
         pub routing_error_handler: RoutingErrorHandler,
     }
 
     impl<
+            TcReceiver: EcssTcReceiverCore,
+            TmSender: EcssTmSenderCore,
             TcInMemConverter: EcssTcInMemConverter,
             VerificationReporter: VerificationReportingProvider,
             RequestConverter: PusHkToRequestConverter<Error = PusPacketHandlingError>,
@@ -107,6 +112,8 @@ pub mod std_mod {
             RoutingError: Clone,
         >
         PusService3HkHandler<
+            TcReceiver,
+            TmSender,
             TcInMemConverter,
             VerificationReporter,
             RequestConverter,
@@ -118,7 +125,12 @@ pub mod std_mod {
         PusPacketHandlingError: From<RoutingError>,
     {
         pub fn new(
-            service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
+            service_helper: PusServiceHelper<
+                TcReceiver,
+                TmSender,
+                TcInMemConverter,
+                VerificationReporter,
+            >,
             request_converter: RequestConverter,
             request_router: RequestRouter,
             routing_error_handler: RoutingErrorHandler,
@@ -142,10 +154,7 @@ pub mod std_mod {
                 .tc_in_mem_converter
                 .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
             let mut partial_error = None;
-            let time_stamp =
-                PusServiceBase::<VerificationReporter>::get_current_cds_short_timestamp(
-                    &mut partial_error,
-                );
+            let time_stamp = get_current_cds_short_timestamp(&mut partial_error);
             let (target_id, hk_request) = self.request_converter.convert(
                 ecss_tc_and_token.token,
                 &tc,
@@ -185,6 +194,7 @@ mod tests {
         CcsdsPacket, SequenceFlags, SpHeader,
     };
 
+    use crate::pus::{MpscTcReceiver, TmAsVecSenderWithMpsc};
     use crate::{
         hk::HkRequest,
         pus::{
@@ -268,6 +278,8 @@ mod tests {
     struct Pus3HandlerWithVecTester {
         common: PusServiceHandlerWithVecCommon<TestVerificationReporter>,
         handler: PusService3HkHandler<
+            MpscTcReceiver,
+            TmAsVecSenderWithMpsc,
             EcssTcInVecConverter,
             TestVerificationReporter,
             TestConverter<3>,
