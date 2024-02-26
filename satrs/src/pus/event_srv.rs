@@ -7,23 +7,36 @@ use spacepackets::ecss::PusPacket;
 use std::sync::mpsc::Sender;
 
 use super::verification::VerificationReportingProvider;
-use super::{EcssTcInMemConverter, PusServiceBase, PusServiceHelper};
+use super::{
+    get_current_cds_short_timestamp, EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore,
+    PusServiceHelper,
+};
 
 pub struct PusService5EventHandler<
+    TcReceiver: EcssTcReceiverCore,
+    TmSender: EcssTmSenderCore,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
-    pub service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
+    pub service_helper:
+        PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
     event_request_tx: Sender<EventRequestWithToken>,
 }
 
 impl<
+        TcReceiver: EcssTcReceiverCore,
+        TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
-    > PusService5EventHandler<TcInMemConverter, VerificationReporter>
+    > PusService5EventHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
     pub fn new(
-        service_helper: PusServiceHelper<TcInMemConverter, VerificationReporter>,
+        service_helper: PusServiceHelper<
+            TcReceiver,
+            TmSender,
+            TcInMemConverter,
+            VerificationReporter,
+        >,
         event_request_tx: Sender<EventRequestWithToken>,
     ) -> Self {
         Self {
@@ -94,9 +107,7 @@ impl<
             Ok(PusPacketHandlerResult::RequestHandled)
         };
         let mut partial_error = None;
-        let time_stamp = PusServiceBase::<VerificationReporter>::get_current_cds_short_timestamp(
-            &mut partial_error,
-        );
+        let time_stamp = get_current_cds_short_timestamp(&mut partial_error);
         match srv.unwrap() {
             Subservice::TmInfoReport
             | Subservice::TmLowSeverityReport
@@ -141,6 +152,7 @@ mod tests {
     use crate::pus::verification::{
         RequestId, VerificationReporterWithSharedPoolMpscBoundedSender,
     };
+    use crate::pus::{MpscTcReceiver, TmInSharedPoolSenderWithBoundedMpsc};
     use crate::{
         events::EventU32,
         pus::{
@@ -158,6 +170,8 @@ mod tests {
     struct Pus5HandlerWithStoreTester {
         common: PusServiceHandlerWithSharedStoreCommon,
         handler: PusService5EventHandler<
+            MpscTcReceiver,
+            TmInSharedPoolSenderWithBoundedMpsc,
             EcssTcInSharedStoreConverter,
             VerificationReporterWithSharedPoolMpscBoundedSender,
         >,

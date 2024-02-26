@@ -10,8 +10,9 @@ use satrs::pus::verification::{
 };
 use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError, PusServiceHelper,
-    TmAsVecSenderWithId, TmInSharedPoolSenderWithId,
+    EcssTcReceiverCore, EcssTmSenderCore, MpscTcReceiver, PusPacketHandlerResult,
+    PusPacketHandlingError, PusServiceHelper, TmAsVecSenderWithId, TmAsVecSenderWithMpsc,
+    TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
 };
 use satrs::request::TargetAndApidId;
 use satrs::spacepackets::ecss::tc::PusTcReader;
@@ -81,8 +82,12 @@ pub fn create_action_service_static(
     tc_pool: SharedStaticMemoryPool,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     action_router: GenericRequestRouter,
-) -> Pus8Wrapper<EcssTcInSharedStoreConverter, VerificationReporterWithSharedPoolMpscBoundedSender>
-{
+) -> Pus8Wrapper<
+    MpscTcReceiver,
+    TmInSharedPoolSenderWithBoundedMpsc,
+    EcssTcInSharedStoreConverter,
+    VerificationReporterWithSharedPoolMpscBoundedSender,
+> {
     let action_srv_tm_sender = TmInSharedPoolSenderWithId::new(
         TmSenderId::PusAction as ChannelId,
         "PUS_8_TM_SENDER",
@@ -96,8 +101,8 @@ pub fn create_action_service_static(
     );
     let pus_8_handler = PusService8ActionHandler::new(
         PusServiceHelper::new(
-            Box::new(action_srv_receiver),
-            Box::new(action_srv_tm_sender),
+            action_srv_receiver,
+            action_srv_tm_sender,
             PUS_APID,
             verif_reporter.clone(),
             EcssTcInSharedStoreConverter::new(tc_pool.clone(), 2048),
@@ -114,7 +119,12 @@ pub fn create_action_service_dynamic(
     verif_reporter: VerificationReporterWithVecMpscSender,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     action_router: GenericRequestRouter,
-) -> Pus8Wrapper<EcssTcInVecConverter, VerificationReporterWithVecMpscSender> {
+) -> Pus8Wrapper<
+    MpscTcReceiver,
+    TmAsVecSenderWithMpsc,
+    EcssTcInVecConverter,
+    VerificationReporterWithVecMpscSender,
+> {
     let action_srv_tm_sender = TmAsVecSenderWithId::new(
         TmSenderId::PusAction as ChannelId,
         "PUS_8_TM_SENDER",
@@ -127,8 +137,8 @@ pub fn create_action_service_dynamic(
     );
     let pus_8_handler = PusService8ActionHandler::new(
         PusServiceHelper::new(
-            Box::new(action_srv_receiver),
-            Box::new(action_srv_tm_sender),
+            action_srv_receiver,
+            action_srv_tm_sender,
             PUS_APID,
             verif_reporter.clone(),
             EcssTcInVecConverter::default(),
@@ -141,10 +151,14 @@ pub fn create_action_service_dynamic(
 }
 
 pub struct Pus8Wrapper<
+    TcReceiver: EcssTcReceiverCore,
+    TmSender: EcssTmSenderCore,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
     pub(crate) pus_8_handler: PusService8ActionHandler<
+        TcReceiver,
+        TmSender,
         TcInMemConverter,
         VerificationReporter,
         ExampleActionRequestConverter,
@@ -154,9 +168,11 @@ pub struct Pus8Wrapper<
 }
 
 impl<
+        TcReceiver: EcssTcReceiverCore,
+        TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
-    > Pus8Wrapper<TcInMemConverter, VerificationReporter>
+    > Pus8Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
     pub fn handle_next_packet(&mut self) -> bool {
         match self.pus_8_handler.handle_one_tc() {

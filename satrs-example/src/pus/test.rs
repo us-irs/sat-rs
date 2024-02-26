@@ -7,8 +7,10 @@ use satrs::pus::verification::{
     VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
 };
 use satrs::pus::{
-    EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter, MpscTcReceiver,
-    PusPacketHandlerResult, PusServiceHelper, TmAsVecSenderWithId, TmInSharedPoolSenderWithId,
+    EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter, EcssTcReceiverCore,
+    EcssTmSenderCore, MpscTcReceiver, PusPacketHandlerResult, PusServiceHelper,
+    TmAsVecSenderWithId, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
+    TmInSharedPoolSenderWithId,
 };
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusPacket;
@@ -28,6 +30,8 @@ pub fn create_test_service_static(
     event_sender: mpsc::Sender<(EventU32, Option<Params>)>,
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
 ) -> Service17CustomWrapper<
+    MpscTcReceiver,
+    TmInSharedPoolSenderWithBoundedMpsc,
     EcssTcInSharedStoreConverter,
     VerificationReporterWithSharedPoolMpscBoundedSender,
 > {
@@ -43,8 +47,8 @@ pub fn create_test_service_static(
         pus_test_rx,
     );
     let pus17_handler = PusService17TestHandler::new(PusServiceHelper::new(
-        Box::new(test_srv_receiver),
-        Box::new(test_srv_tm_sender),
+        test_srv_receiver,
+        test_srv_tm_sender,
         PUS_APID,
         verif_reporter.clone(),
         EcssTcInSharedStoreConverter::new(tc_pool, 2048),
@@ -60,7 +64,12 @@ pub fn create_test_service_dynamic(
     verif_reporter: VerificationReporterWithVecMpscSender,
     event_sender: mpsc::Sender<(EventU32, Option<Params>)>,
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
-) -> Service17CustomWrapper<EcssTcInVecConverter, VerificationReporterWithVecMpscSender> {
+) -> Service17CustomWrapper<
+    MpscTcReceiver,
+    TmAsVecSenderWithMpsc,
+    EcssTcInVecConverter,
+    VerificationReporterWithVecMpscSender,
+> {
     let test_srv_tm_sender = TmAsVecSenderWithId::new(
         TmSenderId::PusTest as ChannelId,
         "PUS_17_TM_SENDER",
@@ -72,8 +81,8 @@ pub fn create_test_service_dynamic(
         pus_test_rx,
     );
     let pus17_handler = PusService17TestHandler::new(PusServiceHelper::new(
-        Box::new(test_srv_receiver),
-        Box::new(test_srv_tm_sender),
+        test_srv_receiver,
+        test_srv_tm_sender,
         PUS_APID,
         verif_reporter.clone(),
         EcssTcInVecConverter::default(),
@@ -85,17 +94,22 @@ pub fn create_test_service_dynamic(
 }
 
 pub struct Service17CustomWrapper<
+    TcReceiver: EcssTcReceiverCore,
+    TmSender: EcssTmSenderCore,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
-    pub pus17_handler: PusService17TestHandler<TcInMemConverter, VerificationReporter>,
+    pub pus17_handler:
+        PusService17TestHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
     pub test_srv_event_sender: Sender<(EventU32, Option<Params>)>,
 }
 
 impl<
+        TcReceiver: EcssTcReceiverCore,
+        TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
-    > Service17CustomWrapper<TcInMemConverter, VerificationReporter>
+    > Service17CustomWrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
     pub fn handle_next_packet(&mut self) -> bool {
         let res = self.pus17_handler.handle_one_tc();
