@@ -174,7 +174,7 @@ impl<
 mod tests {
     use crate::pool::{StaticMemoryPool, StaticPoolConfig};
     use crate::pus::tests::TEST_APID;
-    use crate::pus::verification::VerificationReporterWithSender;
+    use crate::pus::verification::VerificationReporterWithSharedPoolMpscBoundedSender;
     use crate::pus::{
         scheduler::{self, PusSchedulerProvider, TcInfo},
         tests::{PusServiceHandlerWithSharedStoreCommon, PusTestHarness},
@@ -199,7 +199,7 @@ mod tests {
         common: PusServiceHandlerWithSharedStoreCommon,
         handler: PusService11SchedHandler<
             EcssTcInSharedStoreConverter,
-            VerificationReporterWithSender,
+            VerificationReporterWithSharedPoolMpscBoundedSender,
             TestScheduler,
         >,
         sched_tc_pool: StaticMemoryPool,

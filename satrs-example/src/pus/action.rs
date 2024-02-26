@@ -2,14 +2,16 @@ use log::{error, warn};
 use satrs::action::ActionRequest;
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
 use satrs::pus::action::{PusActionToRequestConverter, PusService8ActionHandler};
+use satrs::pus::verification::std_mod::{
+    VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
+};
 use satrs::pus::verification::{
-    FailParams, TcStateAccepted, VerificationReporterWithSender, VerificationReportingProvider,
-    VerificationToken,
+    FailParams, TcStateAccepted, VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSender, PusPacketHandlerResult,
-    PusPacketHandlingError, PusServiceHelper,
+    MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError, PusServiceHelper,
+    TmAsVecSenderWithId, TmInSharedPoolSenderWithId,
 };
 use satrs::request::TargetAndApidId;
 use satrs::spacepackets::ecss::tc::PusTcReader;
@@ -74,13 +76,14 @@ impl PusActionToRequestConverter for ExampleActionRequestConverter {
 
 pub fn create_action_service_static(
     shared_tm_store: SharedTmPool,
-    tm_funnel_tx: mpsc::Sender<StoreAddr>,
-    verif_reporter: VerificationReporterWithSender,
+    tm_funnel_tx: mpsc::SyncSender<StoreAddr>,
+    verif_reporter: VerificationReporterWithSharedPoolMpscBoundedSender,
     tc_pool: SharedStaticMemoryPool,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     action_router: GenericRequestRouter,
-) -> Pus8Wrapper<EcssTcInSharedStoreConverter> {
-    let action_srv_tm_sender = MpscTmInSharedPoolSender::new(
+) -> Pus8Wrapper<EcssTcInSharedStoreConverter, VerificationReporterWithSharedPoolMpscBoundedSender>
+{
+    let action_srv_tm_sender = TmInSharedPoolSenderWithId::new(
         TmSenderId::PusAction as ChannelId,
         "PUS_8_TM_SENDER",
         shared_tm_store.clone(),
@@ -108,11 +111,11 @@ pub fn create_action_service_static(
 
 pub fn create_action_service_dynamic(
     tm_funnel_tx: mpsc::Sender<Vec<u8>>,
-    verif_reporter: VerificationReporterWithSender,
+    verif_reporter: VerificationReporterWithVecMpscSender,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     action_router: GenericRequestRouter,
-) -> Pus8Wrapper<EcssTcInVecConverter> {
-    let action_srv_tm_sender = MpscTmAsVecSender::new(
+) -> Pus8Wrapper<EcssTcInVecConverter, VerificationReporterWithVecMpscSender> {
+    let action_srv_tm_sender = TmAsVecSenderWithId::new(
         TmSenderId::PusAction as ChannelId,
         "PUS_8_TM_SENDER",
         tm_funnel_tx.clone(),
@@ -137,17 +140,24 @@ pub fn create_action_service_dynamic(
     Pus8Wrapper { pus_8_handler }
 }
 
-pub struct Pus8Wrapper<TcInMemConverter: EcssTcInMemConverter> {
+pub struct Pus8Wrapper<
+    TcInMemConverter: EcssTcInMemConverter,
+    VerificationReporter: VerificationReportingProvider,
+> {
     pub(crate) pus_8_handler: PusService8ActionHandler<
         TcInMemConverter,
-        VerificationReporterWithSender,
+        VerificationReporter,
         ExampleActionRequestConverter,
         GenericRequestRouter,
         GenericRoutingErrorHandler<8>,
     >,
 }
 
-impl<TcInMemConverter: EcssTcInMemConverter> Pus8Wrapper<TcInMemConverter> {
+impl<
+        TcInMemConverter: EcssTcInMemConverter,
+        VerificationReporter: VerificationReportingProvider,
+    > Pus8Wrapper<TcInMemConverter, VerificationReporter>
+{
     pub fn handle_next_packet(&mut self) -> bool {
         match self.pus_8_handler.handle_one_tc() {
             Ok(result) => match result {

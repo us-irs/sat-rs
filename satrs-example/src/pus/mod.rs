@@ -1,8 +1,6 @@
 use crate::tmtc::MpscStoreAndSendError;
 use log::warn;
-use satrs::pus::verification::{
-    FailParams, StdVerifReporterWithSender, VerificationReportingProvider,
-};
+use satrs::pus::verification::{FailParams, VerificationReportingProvider};
 use satrs::pus::{
     EcssTcAndToken, GenericRoutingError, PusPacketHandlerResult, PusRoutingErrorHandler, TcInMemory,
 };
@@ -28,8 +26,8 @@ pub struct PusTcMpscRouter {
     pub action_service_receiver: Sender<EcssTcAndToken>,
 }
 
-pub struct PusReceiver {
-    pub verif_reporter: StdVerifReporterWithSender,
+pub struct PusReceiver<VerificationReporter: VerificationReportingProvider> {
+    pub verif_reporter: VerificationReporter,
     pub pus_router: PusTcMpscRouter,
     stamp_helper: TimeStampHelper,
 }
@@ -61,8 +59,8 @@ impl TimeStampHelper {
     }
 }
 
-impl PusReceiver {
-    pub fn new(verif_reporter: StdVerifReporterWithSender, pus_router: PusTcMpscRouter) -> Self {
+impl<VerificationReporter: VerificationReportingProvider> PusReceiver<VerificationReporter> {
+    pub fn new(verif_reporter: VerificationReporter, pus_router: PusTcMpscRouter) -> Self {
         Self {
             verif_reporter,
             pus_router,
@@ -71,7 +69,7 @@ impl PusReceiver {
     }
 }
 
-impl PusReceiver {
+impl<VerificationReporter: VerificationReportingProvider> PusReceiver<VerificationReporter> {
     pub fn handle_tc_packet(
         &mut self,
         tc_in_memory: TcInMemory,

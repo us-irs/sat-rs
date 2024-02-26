@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   - `ListenerTable` -> `ListenerMapProvider`
   - `SenderTable` -> `SenderMapProvider`
   - There is an `EventManagerWithMpsc` and a `EventManagerWithBoundedMpsc` helper type now.
+- Refactored ECSS TM sender abstractions to be generic over different message queue backends.
+- Refactored Verification Reporter abstractions and implementation to be generic over the sender
+  instead of using trait objects.
 
 ## Fixed
 

@@ -1,6 +1,8 @@
 use core::fmt::{Display, Formatter};
 #[cfg(feature = "std")]
 use std::error::Error;
+#[cfg(feature = "std")]
+use std::sync::mpsc;
 
 /// Generic error type for sending something via a message queue.
 #[derive(Debug, Copy, Clone)]
@@ -47,3 +49,37 @@ impl Display for GenericRecvError {
 
 #[cfg(feature = "std")]
 impl Error for GenericRecvError {}
+
+#[cfg(feature = "std")]
+impl<T> From<mpsc::SendError<T>> for GenericSendError {
+    fn from(_: mpsc::SendError<T>) -> Self {
+        GenericSendError::RxDisconnected
+    }
+}
+
+#[cfg(feature = "std")]
+impl<T> From<mpsc::TrySendError<T>> for GenericSendError {
+    fn from(err: mpsc::TrySendError<T>) -> Self {
+        match err {
+            mpsc::TrySendError::Full(_) => GenericSendError::QueueFull(None),
+            mpsc::TrySendError::Disconnected(_) => GenericSendError::RxDisconnected,
+        }
+    }
+}
+
+#[cfg(feature = "crossbeam")]
+impl<T> From<crossbeam_channel::SendError<T>> for GenericSendError {
+    fn from(_: crossbeam_channel::SendError<T>) -> Self {
+        GenericSendError::RxDisconnected
+    }
+}
+
+#[cfg(feature = "crossbeam")]
+impl<T> From<crossbeam_channel::TrySendError<T>> for GenericSendError {
+    fn from(err: crossbeam_channel::TrySendError<T>) -> Self {
+        match err {
+            crossbeam_channel::TrySendError::Full(_) => GenericSendError::QueueFull(None),
+            crossbeam_channel::TrySendError::Disconnected(_) => GenericSendError::RxDisconnected,
+        }
+    }
+}

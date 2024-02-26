@@ -2,12 +2,13 @@ use log::{info, warn};
 use satrs::params::Params;
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
 use satrs::pus::test::PusService17TestHandler;
+use satrs::pus::verification::{FailParams, VerificationReportingProvider};
 use satrs::pus::verification::{
-    FailParams, VerificationReporterWithSender, VerificationReportingProvider,
+    VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
 };
 use satrs::pus::{
-    EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter, MpscTcReceiver, MpscTmAsVecSender,
-    MpscTmInSharedPoolSender, PusPacketHandlerResult, PusServiceHelper,
+    EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter, MpscTcReceiver,
+    PusPacketHandlerResult, PusServiceHelper, TmAsVecSenderWithId, TmInSharedPoolSenderWithId,
 };
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusPacket;
@@ -21,13 +22,16 @@ use std::sync::mpsc::{self, Sender};
 
 pub fn create_test_service_static(
     shared_tm_store: SharedTmPool,
-    tm_funnel_tx: mpsc::Sender<StoreAddr>,
-    verif_reporter: VerificationReporterWithSender,
+    tm_funnel_tx: mpsc::SyncSender<StoreAddr>,
+    verif_reporter: VerificationReporterWithSharedPoolMpscBoundedSender,
     tc_pool: SharedStaticMemoryPool,
     event_sender: mpsc::Sender<(EventU32, Option<Params>)>,
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
-) -> Service17CustomWrapper<EcssTcInSharedStoreConverter> {
-    let test_srv_tm_sender = MpscTmInSharedPoolSender::new(
+) -> Service17CustomWrapper<
+    EcssTcInSharedStoreConverter,
+    VerificationReporterWithSharedPoolMpscBoundedSender,
+> {
+    let test_srv_tm_sender = TmInSharedPoolSenderWithId::new(
         TmSenderId::PusTest as ChannelId,
         "PUS_17_TM_SENDER",
         shared_tm_store.clone(),
@@ -53,11 +57,11 @@ pub fn create_test_service_static(
 
 pub fn create_test_service_dynamic(
     tm_funnel_tx: mpsc::Sender<Vec<u8>>,
-    verif_reporter: VerificationReporterWithSender,
+    verif_reporter: VerificationReporterWithVecMpscSender,
     event_sender: mpsc::Sender<(EventU32, Option<Params>)>,
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
-) -> Service17CustomWrapper<EcssTcInVecConverter> {
-    let test_srv_tm_sender = MpscTmAsVecSender::new(
+) -> Service17CustomWrapper<EcssTcInVecConverter, VerificationReporterWithVecMpscSender> {
+    let test_srv_tm_sender = TmAsVecSenderWithId::new(
         TmSenderId::PusTest as ChannelId,
         "PUS_17_TM_SENDER",
         tm_funnel_tx.clone(),
@@ -80,12 +84,19 @@ pub fn create_test_service_dynamic(
     }
 }
 
-pub struct Service17CustomWrapper<TcInMemConverter: EcssTcInMemConverter> {
-    pub pus17_handler: PusService17TestHandler<TcInMemConverter, VerificationReporterWithSender>,
+pub struct Service17CustomWrapper<
+    TcInMemConverter: EcssTcInMemConverter,
+    VerificationReporter: VerificationReportingProvider,
+> {
+    pub pus17_handler: PusService17TestHandler<TcInMemConverter, VerificationReporter>,
     pub test_srv_event_sender: Sender<(EventU32, Option<Params>)>,
 }
 
-impl<TcInMemConverter: EcssTcInMemConverter> Service17CustomWrapper<TcInMemConverter> {
+impl<
+        TcInMemConverter: EcssTcInMemConverter,
+        VerificationReporter: VerificationReportingProvider,
+    > Service17CustomWrapper<TcInMemConverter, VerificationReporter>
+{
     pub fn handle_next_packet(&mut self) -> bool {
         let res = self.pus17_handler.handle_one_tc();
         if res.is_err() {

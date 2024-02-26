@@ -2,6 +2,8 @@
 //!
 //! This module contains structures to make working with the PUS C standard easier.
 //! The satrs-example application contains various usage examples of these components.
+use crate::pool::{StoreAddr, StoreError};
+use crate::pus::verification::{TcStateAccepted, TcStateToken, VerificationToken};
 use crate::queue::{GenericRecvError, GenericSendError};
 use crate::ChannelId;
 use core::fmt::{Display, Formatter};
@@ -34,8 +36,6 @@ pub mod verification;
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
 
-use crate::pool::{StoreAddr, StoreError};
-use crate::pus::verification::{TcStateAccepted, TcStateToken, VerificationToken};
 #[cfg(feature = "std")]
 pub use std_mod::*;
 
@@ -63,6 +63,7 @@ pub enum EcssTmtcError {
     Store(StoreError),
     Pus(PusError),
     CantSendAddr(StoreAddr),
+    CantSendDirectTm,
     Send(GenericSendError),
     Recv(GenericRecvError),
 }
@@ -81,6 +82,9 @@ impl Display for EcssTmtcError {
             }
             EcssTmtcError::CantSendAddr(addr) => {
                 write!(f, "can not send address {addr}")
+            }
+            EcssTmtcError::CantSendDirectTm => {
+                write!(f, "can not send TM directly")
             }
             EcssTmtcError::Send(send_e) => {
                 write!(f, "send error {send_e}")
@@ -123,13 +127,14 @@ impl Error for EcssTmtcError {
             EcssTmtcError::Store(e) => Some(e),
             EcssTmtcError::Pus(e) => Some(e),
             EcssTmtcError::Send(e) => Some(e),
+            EcssTmtcError::Recv(e) => Some(e),
             _ => None,
         }
     }
 }
 pub trait EcssChannel: Send {
     /// Each sender can have an ID associated with it
-    fn id(&self) -> ChannelId;
+    fn channel_id(&self) -> ChannelId;
     fn name(&self) -> &'static str {
         "unset"
     }
@@ -138,7 +143,7 @@ pub trait EcssChannel: Send {
 /// Generic trait for a user supplied sender object.
 ///
 /// This sender object is responsible for sending PUS telemetry to a TM sink.
-pub trait EcssTmSenderCore: EcssChannel {
+pub trait EcssTmSenderCore: Send {
     fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError>;
 }
 
@@ -146,7 +151,7 @@ pub trait EcssTmSenderCore: EcssChannel {
 ///
 /// This sender object is responsible for sending PUS telecommands to a TC recipient. Each
 /// telecommand can optionally have a token which contains its verification state.
-pub trait EcssTcSenderCore: EcssChannel {
+pub trait EcssTcSenderCore {
     fn send_tc(&self, tc: PusTcCreator, token: Option<TcStateToken>) -> Result<(), EcssTmtcError>;
 }
 
@@ -221,25 +226,25 @@ impl TryFrom<EcssTcAndToken> for AcceptedEcssTcAndToken {
 
 #[derive(Debug, Clone)]
 pub enum TryRecvTmtcError {
-    Error(EcssTmtcError),
+    Tmtc(EcssTmtcError),
     Empty,
 }
 
 impl From<EcssTmtcError> for TryRecvTmtcError {
     fn from(value: EcssTmtcError) -> Self {
-        Self::Error(value)
+        Self::Tmtc(value)
     }
 }
 
 impl From<PusError> for TryRecvTmtcError {
     fn from(value: PusError) -> Self {
-        Self::Error(value.into())
+        Self::Tmtc(value.into())
     }
 }
 
 impl From<StoreError> for TryRecvTmtcError {
     fn from(value: StoreError) -> Self {
-        Self::Error(value.into())
+        Self::Tmtc(value.into())
     }
 }
 
@@ -374,10 +379,9 @@ pub mod std_mod {
     use crate::{ChannelId, TargetId};
     use alloc::boxed::Box;
     use alloc::vec::Vec;
-    use crossbeam_channel as cb;
     use spacepackets::ecss::tc::PusTcReader;
     use spacepackets::ecss::tm::PusTmCreator;
-    use spacepackets::ecss::PusError;
+    use spacepackets::ecss::{PusError, WritablePusPacket};
     use spacepackets::time::cds::TimeProvider;
     use spacepackets::time::StdTimestampError;
     use spacepackets::time::TimeWriter;
@@ -385,6 +389,9 @@ pub mod std_mod {
     use std::sync::mpsc;
     use std::sync::mpsc::TryRecvError;
     use thiserror::Error;
+
+    #[cfg(feature = "crossbeam")]
+    pub use cb_mod::*;
 
     use super::verification::VerificationReportingProvider;
     use super::{AcceptedEcssTcAndToken, TcInMemory};
@@ -395,32 +402,65 @@ pub mod std_mod {
         }
     }
 
-    impl From<cb::SendError<StoreAddr>> for EcssTmtcError {
-        fn from(_: cb::SendError<StoreAddr>) -> Self {
-            Self::Send(GenericSendError::RxDisconnected)
+    impl EcssTmSenderCore for mpsc::Sender<StoreAddr> {
+        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
+            match tm {
+                PusTmWrapper::InStore(addr) => self
+                    .send(addr)
+                    .map_err(|_| GenericSendError::RxDisconnected)?,
+                PusTmWrapper::Direct(_) => return Err(EcssTmtcError::CantSendDirectTm),
+            };
+            Ok(())
         }
     }
 
-    impl From<cb::TrySendError<StoreAddr>> for EcssTmtcError {
-        fn from(value: cb::TrySendError<StoreAddr>) -> Self {
-            match value {
-                cb::TrySendError::Full(_) => Self::Send(GenericSendError::QueueFull(None)),
-                cb::TrySendError::Disconnected(_) => Self::Send(GenericSendError::RxDisconnected),
-            }
+    impl EcssTmSenderCore for mpsc::SyncSender<StoreAddr> {
+        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
+            match tm {
+                PusTmWrapper::InStore(addr) => self
+                    .try_send(addr)
+                    .map_err(|e| EcssTmtcError::Send(e.into()))?,
+                PusTmWrapper::Direct(_) => return Err(EcssTmtcError::CantSendDirectTm),
+            };
+            Ok(())
+        }
+    }
+
+    impl EcssTmSenderCore for mpsc::Sender<Vec<u8>> {
+        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
+            match tm {
+                PusTmWrapper::InStore(addr) => return Err(EcssTmtcError::CantSendAddr(addr)),
+                PusTmWrapper::Direct(tm) => self
+                    .send(tm.to_vec()?)
+                    .map_err(|e| EcssTmtcError::Send(e.into()))?,
+            };
+            Ok(())
+        }
+    }
+
+    impl EcssTmSenderCore for mpsc::SyncSender<Vec<u8>> {
+        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
+            match tm {
+                PusTmWrapper::InStore(addr) => return Err(EcssTmtcError::CantSendAddr(addr)),
+                PusTmWrapper::Direct(tm) => self
+                    .send(tm.to_vec()?)
+                    .map_err(|e| EcssTmtcError::Send(e.into()))?,
+            };
+            Ok(())
         }
     }
 
     #[derive(Clone)]
-    pub struct MpscTmInSharedPoolSender {
-        id: ChannelId,
+    pub struct TmInSharedPoolSenderWithId<Sender: EcssTmSenderCore> {
+        channel_id: ChannelId,
         name: &'static str,
         shared_tm_store: SharedTmPool,
-        sender: mpsc::Sender<StoreAddr>,
+        sender: Sender,
     }
 
-    impl EcssChannel for MpscTmInSharedPoolSender {
-        fn id(&self) -> ChannelId {
-            self.id
+    impl<Sender: EcssTmSenderCore> EcssChannel for TmInSharedPoolSenderWithId<Sender> {
+        fn channel_id(&self) -> ChannelId {
+            self.channel_id
         }
 
         fn name(&self) -> &'static str {
@@ -428,42 +468,82 @@ pub mod std_mod {
         }
     }
 
-    impl MpscTmInSharedPoolSender {
+    impl<Sender: EcssTmSenderCore> TmInSharedPoolSenderWithId<Sender> {
         pub fn send_direct_tm(&self, tm: PusTmCreator) -> Result<(), EcssTmtcError> {
             let addr = self.shared_tm_store.add_pus_tm(&tm)?;
-            self.sender
-                .send(addr)
-                .map_err(|_| EcssTmtcError::Send(GenericSendError::RxDisconnected))
+            self.sender.send_tm(PusTmWrapper::InStore(addr))
         }
     }
 
-    impl EcssTmSenderCore for MpscTmInSharedPoolSender {
+    impl<Sender: EcssTmSenderCore> EcssTmSenderCore for TmInSharedPoolSenderWithId<Sender> {
         fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
-            match tm {
-                PusTmWrapper::InStore(addr) => {
-                    self.sender.send(addr)?;
-                    Ok(())
-                }
-                PusTmWrapper::Direct(tm) => self.send_direct_tm(tm),
+            if let PusTmWrapper::Direct(tm) = tm {
+                return self.send_direct_tm(tm);
             }
+            self.sender.send_tm(tm)
         }
     }
 
-    impl MpscTmInSharedPoolSender {
+    impl<Sender: EcssTmSenderCore> TmInSharedPoolSenderWithId<Sender> {
         pub fn new(
             id: ChannelId,
             name: &'static str,
             shared_tm_store: SharedTmPool,
-            sender: mpsc::Sender<StoreAddr>,
+            sender: Sender,
         ) -> Self {
             Self {
-                id,
+                channel_id: id,
                 name,
                 shared_tm_store,
                 sender,
             }
         }
     }
+
+    pub type TmInSharedPoolSenderWithMpsc = TmInSharedPoolSenderWithId<mpsc::Sender<StoreAddr>>;
+    pub type TmInSharedPoolSenderWithBoundedMpsc =
+        TmInSharedPoolSenderWithId<mpsc::SyncSender<StoreAddr>>;
+
+    /// This class can be used if frequent heap allocations during run-time are not an issue.
+    /// PUS TM packets will be sent around as [Vec]s. Please note that the current implementation
+    /// of this class can not deal with store addresses, so it is assumed that is is always
+    /// going to be called with direct packets.
+    #[derive(Clone)]
+    pub struct TmAsVecSenderWithId<Sender: EcssTmSenderCore> {
+        id: ChannelId,
+        name: &'static str,
+        sender: Sender,
+    }
+
+    impl From<mpsc::SendError<Vec<u8>>> for EcssTmtcError {
+        fn from(_: mpsc::SendError<Vec<u8>>) -> Self {
+            Self::Send(GenericSendError::RxDisconnected)
+        }
+    }
+
+    impl<Sender: EcssTmSenderCore> TmAsVecSenderWithId<Sender> {
+        pub fn new(id: u32, name: &'static str, sender: Sender) -> Self {
+            Self { id, sender, name }
+        }
+    }
+
+    impl<Sender: EcssTmSenderCore> EcssChannel for TmAsVecSenderWithId<Sender> {
+        fn channel_id(&self) -> ChannelId {
+            self.id
+        }
+        fn name(&self) -> &'static str {
+            self.name
+        }
+    }
+
+    impl<Sender: EcssTmSenderCore> EcssTmSenderCore for TmAsVecSenderWithId<Sender> {
+        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
+            self.sender.send_tm(tm)
+        }
+    }
+
+    pub type TmAsVecSenderWithMpsc = TmAsVecSenderWithId<mpsc::Sender<Vec<u8>>>;
+    pub type TmAsVecSenderWithBoundedMpsc = TmAsVecSenderWithId<mpsc::SyncSender<Vec<u8>>>;
 
     pub struct MpscTcReceiver {
         id: ChannelId,
@@ -472,7 +552,7 @@ pub mod std_mod {
     }
 
     impl EcssChannel for MpscTcReceiver {
-        fn id(&self) -> ChannelId {
+        fn channel_id(&self) -> ChannelId {
             self.id
         }
 
@@ -486,7 +566,7 @@ pub mod std_mod {
             self.receiver.try_recv().map_err(|e| match e {
                 TryRecvError::Empty => TryRecvTmtcError::Empty,
                 TryRecvError::Disconnected => {
-                    TryRecvTmtcError::Error(EcssTmtcError::from(GenericRecvError::TxDisconnected))
+                    TryRecvTmtcError::Tmtc(EcssTmtcError::from(GenericRecvError::TxDisconnected))
                 }
             })
         }
@@ -502,133 +582,89 @@ pub mod std_mod {
         }
     }
 
-    /// This class can be used if frequent heap allocations during run-time are not an issue.
-    /// PUS TM packets will be sent around as [Vec]s. Please note that the current implementation
-    /// of this class can not deal with store addresses, so it is assumed that is is always
-    /// going to be called with direct packets.
-    #[derive(Clone)]
-    pub struct MpscTmAsVecSender {
-        id: ChannelId,
-        name: &'static str,
-        sender: mpsc::Sender<Vec<u8>>,
-    }
+    #[cfg(feature = "crossbeam")]
+    pub mod cb_mod {
+        use super::*;
+        use crossbeam_channel as cb;
 
-    impl From<mpsc::SendError<Vec<u8>>> for EcssTmtcError {
-        fn from(_: mpsc::SendError<Vec<u8>>) -> Self {
-            Self::Send(GenericSendError::RxDisconnected)
-        }
-    }
+        pub type TmInSharedPoolSenderWithCrossbeam =
+            TmInSharedPoolSenderWithId<cb::Sender<StoreAddr>>;
 
-    impl MpscTmAsVecSender {
-        pub fn new(id: u32, name: &'static str, sender: mpsc::Sender<Vec<u8>>) -> Self {
-            Self { id, sender, name }
+        impl From<cb::SendError<StoreAddr>> for EcssTmtcError {
+            fn from(_: cb::SendError<StoreAddr>) -> Self {
+                Self::Send(GenericSendError::RxDisconnected)
+            }
         }
-    }
 
-    impl EcssChannel for MpscTmAsVecSender {
-        fn id(&self) -> ChannelId {
-            self.id
-        }
-        fn name(&self) -> &'static str {
-            self.name
-        }
-    }
-
-    impl EcssTmSenderCore for MpscTmAsVecSender {
-        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
-            match tm {
-                PusTmWrapper::InStore(addr) => Err(EcssTmtcError::CantSendAddr(addr)),
-                PusTmWrapper::Direct(tm) => {
-                    let mut vec = Vec::new();
-                    tm.append_to_vec(&mut vec).map_err(EcssTmtcError::Pus)?;
-                    self.sender.send(vec)?;
-                    Ok(())
+        impl From<cb::TrySendError<StoreAddr>> for EcssTmtcError {
+            fn from(value: cb::TrySendError<StoreAddr>) -> Self {
+                match value {
+                    cb::TrySendError::Full(_) => Self::Send(GenericSendError::QueueFull(None)),
+                    cb::TrySendError::Disconnected(_) => {
+                        Self::Send(GenericSendError::RxDisconnected)
+                    }
                 }
             }
         }
-    }
 
-    #[derive(Clone)]
-    pub struct CrossbeamTmInStoreSender {
-        id: ChannelId,
-        name: &'static str,
-        shared_tm_store: SharedTmPool,
-        sender: crossbeam_channel::Sender<StoreAddr>,
-    }
-
-    impl CrossbeamTmInStoreSender {
-        pub fn new(
-            id: ChannelId,
-            name: &'static str,
-            shared_tm_store: SharedTmPool,
-            sender: crossbeam_channel::Sender<StoreAddr>,
-        ) -> Self {
-            Self {
-                id,
-                name,
-                shared_tm_store,
-                sender,
+        impl EcssTmSenderCore for cb::Sender<StoreAddr> {
+            fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
+                match tm {
+                    PusTmWrapper::InStore(addr) => self
+                        .try_send(addr)
+                        .map_err(|e| EcssTmtcError::Send(e.into()))?,
+                    PusTmWrapper::Direct(_) => return Err(EcssTmtcError::CantSendDirectTm),
+                };
+                Ok(())
             }
         }
-    }
-
-    impl EcssChannel for CrossbeamTmInStoreSender {
-        fn id(&self) -> ChannelId {
-            self.id
-        }
-
-        fn name(&self) -> &'static str {
-            self.name
-        }
-    }
-
-    impl EcssTmSenderCore for CrossbeamTmInStoreSender {
-        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
-            match tm {
-                PusTmWrapper::InStore(addr) => self.sender.try_send(addr)?,
-                PusTmWrapper::Direct(tm) => {
-                    let addr = self.shared_tm_store.add_pus_tm(&tm)?;
-                    self.sender.try_send(addr)?;
-                }
+        impl EcssTmSenderCore for cb::Sender<Vec<u8>> {
+            fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
+                match tm {
+                    PusTmWrapper::InStore(addr) => return Err(EcssTmtcError::CantSendAddr(addr)),
+                    PusTmWrapper::Direct(tm) => self
+                        .send(tm.to_vec()?)
+                        .map_err(|e| EcssTmtcError::Send(e.into()))?,
+                };
+                Ok(())
             }
-            Ok(())
         }
-    }
 
-    pub struct CrossbeamTcReceiver {
-        id: ChannelId,
-        name: &'static str,
-        receiver: cb::Receiver<EcssTcAndToken>,
-    }
-
-    impl CrossbeamTcReceiver {
-        pub fn new(
+        pub struct CrossbeamTcReceiver {
             id: ChannelId,
             name: &'static str,
             receiver: cb::Receiver<EcssTcAndToken>,
-        ) -> Self {
-            Self { id, name, receiver }
-        }
-    }
-
-    impl EcssChannel for CrossbeamTcReceiver {
-        fn id(&self) -> ChannelId {
-            self.id
         }
 
-        fn name(&self) -> &'static str {
-            self.name
+        impl CrossbeamTcReceiver {
+            pub fn new(
+                id: ChannelId,
+                name: &'static str,
+                receiver: cb::Receiver<EcssTcAndToken>,
+            ) -> Self {
+                Self { id, name, receiver }
+            }
         }
-    }
 
-    impl EcssTcReceiverCore for CrossbeamTcReceiver {
-        fn recv_tc(&self) -> Result<EcssTcAndToken, TryRecvTmtcError> {
-            self.receiver.try_recv().map_err(|e| match e {
-                cb::TryRecvError::Empty => TryRecvTmtcError::Empty,
-                cb::TryRecvError::Disconnected => {
-                    TryRecvTmtcError::Error(EcssTmtcError::from(GenericRecvError::TxDisconnected))
-                }
-            })
+        impl EcssChannel for CrossbeamTcReceiver {
+            fn channel_id(&self) -> ChannelId {
+                self.id
+            }
+
+            fn name(&self) -> &'static str {
+                self.name
+            }
+        }
+
+        impl EcssTcReceiverCore for CrossbeamTcReceiver {
+            fn recv_tc(&self) -> Result<EcssTcAndToken, TryRecvTmtcError> {
+                self.receiver.try_recv().map_err(|e| match e {
+                    cb::TryRecvError::Empty => TryRecvTmtcError::Empty,
+                    cb::TryRecvError::Disconnected => TryRecvTmtcError::Tmtc(EcssTmtcError::from(
+                        GenericRecvError::TxDisconnected,
+                    )),
+                })
+            }
         }
     }
 
@@ -906,7 +942,7 @@ pub mod std_mod {
                     }))
                 }
                 Err(e) => match e {
-                    TryRecvTmtcError::Error(e) => Err(PusPacketHandlingError::EcssTmtc(e)),
+                    TryRecvTmtcError::Tmtc(e) => Err(PusPacketHandlingError::EcssTmtc(e)),
                     TryRecvTmtcError::Empty => Ok(None),
                 },
             }
@@ -949,6 +985,9 @@ pub mod tests {
     use crate::tmtc::tm_helper::SharedTmPool;
     use crate::TargetId;
 
+    use super::verification::std_mod::{
+        VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
+    };
     use super::verification::tests::{SharedVerificationMap, TestVerificationReporter};
     use super::verification::{
         TcStateAccepted, VerificationReporterCfg, VerificationReporterWithSender,
@@ -956,8 +995,9 @@ pub mod tests {
     };
     use super::{
         EcssTcAndToken, EcssTcInSharedStoreConverter, EcssTcInVecConverter, GenericRoutingError,
-        MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSender, PusPacketHandlerResult,
-        PusPacketHandlingError, PusRoutingErrorHandler, PusServiceHelper, TcInMemory,
+        MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError, PusRoutingErrorHandler,
+        PusServiceHelper, TcInMemory, TmAsVecSenderWithId, TmInSharedPoolSenderWithBoundedMpsc,
+        TmInSharedPoolSenderWithId,
     };
 
     pub const TEST_APID: u16 = 0x101;
@@ -1002,9 +1042,9 @@ pub mod tests {
         tm_buf: [u8; 2048],
         tc_pool: SharedStaticMemoryPool,
         tm_pool: SharedTmPool,
-        tc_sender: mpsc::Sender<EcssTcAndToken>,
+        tc_sender: mpsc::SyncSender<EcssTcAndToken>,
         tm_receiver: mpsc::Receiver<StoreAddr>,
-        verification_handler: VerificationReporterWithSender,
+        verification_handler: VerificationReporterWithSharedPoolMpscBoundedSender,
     }
 
     impl PusServiceHandlerWithSharedStoreCommon {
@@ -1014,17 +1054,20 @@ pub mod tests {
         /// The PUS service handler is instantiated with a [EcssTcInStoreConverter].
         pub fn new() -> (
             Self,
-            PusServiceHelper<EcssTcInSharedStoreConverter, VerificationReporterWithSender>,
+            PusServiceHelper<
+                EcssTcInSharedStoreConverter,
+                VerificationReporterWithSharedPoolMpscBoundedSender,
+            >,
         ) {
             let pool_cfg = StaticPoolConfig::new(alloc::vec![(16, 16), (8, 32), (4, 64)], false);
             let tc_pool = StaticMemoryPool::new(pool_cfg.clone());
             let tm_pool = StaticMemoryPool::new(pool_cfg);
             let shared_tc_pool = SharedStaticMemoryPool::new(RwLock::new(tc_pool));
             let shared_tm_pool = SharedTmPool::new(tm_pool);
-            let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::channel();
-            let (tm_tx, tm_rx) = mpsc::channel();
+            let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::sync_channel(10);
+            let (tm_tx, tm_rx) = mpsc::sync_channel(10);
 
-            let verif_sender = MpscTmInSharedPoolSender::new(
+            let verif_sender = TmInSharedPoolSenderWithBoundedMpsc::new(
                 0,
                 "verif_sender",
                 shared_tm_pool.clone(),
@@ -1032,9 +1075,9 @@ pub mod tests {
             );
             let verif_cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
             let verification_handler =
-                VerificationReporterWithSender::new(&verif_cfg, Box::new(verif_sender));
+                VerificationReporterWithSharedPoolMpscBoundedSender::new(&verif_cfg, verif_sender);
             let test_srv_tm_sender =
-                MpscTmInSharedPoolSender::new(0, "TEST_SENDER", shared_tm_pool.clone(), tm_tx);
+                TmInSharedPoolSenderWithId::new(0, "TEST_SENDER", shared_tm_pool.clone(), tm_tx);
             let test_srv_tc_receiver = MpscTcReceiver::new(0, "TEST_RECEIVER", test_srv_tc_rx);
             let in_store_converter =
                 EcssTcInSharedStoreConverter::new(shared_tc_pool.clone(), 2048);
@@ -1115,20 +1158,20 @@ pub mod tests {
         pub verification_handler: VerificationReporter,
     }
 
-    impl PusServiceHandlerWithVecCommon<VerificationReporterWithSender> {
+    impl PusServiceHandlerWithVecCommon<VerificationReporterWithVecMpscSender> {
         pub fn new_with_standard_verif_reporter() -> (
             Self,
-            PusServiceHelper<EcssTcInVecConverter, VerificationReporterWithSender>,
+            PusServiceHelper<EcssTcInVecConverter, VerificationReporterWithVecMpscSender>,
         ) {
             let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::channel();
             let (tm_tx, tm_rx) = mpsc::channel();
 
-            let verif_sender = MpscTmAsVecSender::new(0, "verififcatio-sender", tm_tx.clone());
+            let verif_sender = TmAsVecSenderWithId::new(0, "verififcatio-sender", tm_tx.clone());
             let verif_cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
             let verification_handler =
-                VerificationReporterWithSender::new(&verif_cfg, Box::new(verif_sender));
+                VerificationReporterWithSender::new(&verif_cfg, verif_sender);
 
-            let test_srv_tm_sender = MpscTmAsVecSender::new(0, "test-sender", tm_tx);
+            let test_srv_tm_sender = TmAsVecSenderWithId::new(0, "test-sender", tm_tx);
             let test_srv_tc_receiver = MpscTcReceiver::new(0, "test-receiver", test_srv_tc_rx);
             let in_store_converter = EcssTcInVecConverter::default();
             (
@@ -1157,7 +1200,7 @@ pub mod tests {
             let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::channel();
             let (tm_tx, tm_rx) = mpsc::channel();
 
-            let test_srv_tm_sender = MpscTmAsVecSender::new(0, "test-sender", tm_tx);
+            let test_srv_tm_sender = TmAsVecSenderWithId::new(0, "test-sender", tm_tx);
             let test_srv_tc_receiver = MpscTcReceiver::new(0, "test-receiver", test_srv_tc_rx);
             let in_store_converter = EcssTcInVecConverter::default();
             let shared_verif_map = SharedVerificationMap::default();
