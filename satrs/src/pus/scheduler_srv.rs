@@ -1,8 +1,14 @@
 use super::scheduler::PusSchedulerProvider;
-use super::verification::VerificationReportingProvider;
+use super::verification::{
+    VerificationReporterWithSharedPoolMpscBoundedSender,
+    VerificationReporterWithSharedPoolMpscSender, VerificationReporterWithVecMpscBoundedSender,
+    VerificationReporterWithVecMpscSender, VerificationReportingProvider,
+};
 use super::{
-    get_current_cds_short_timestamp, EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore,
-    PusServiceHelper,
+    get_current_cds_short_timestamp, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
+    EcssTcInVecConverter, EcssTcReceiverCore, EcssTmSenderCore, MpscTcReceiver, PusServiceHelper,
+    TmAsVecSenderWithBoundedMpsc, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
+    TmInSharedPoolSenderWithMpsc,
 };
 use crate::pool::PoolProvider;
 use crate::pus::{PusPacketHandlerResult, PusPacketHandlingError};
@@ -187,6 +193,42 @@ impl<
         Ok(PusPacketHandlerResult::RequestHandled)
     }
 }
+/// Helper type definition for a PUS 11 handler with a dynamic TMTC memory backend and regular
+/// mpsc queues.
+pub type PusService11SchedHandlerDynWithMpsc<PusScheduler> = PusService11SchedHandler<
+    MpscTcReceiver,
+    TmAsVecSenderWithMpsc,
+    EcssTcInVecConverter,
+    VerificationReporterWithVecMpscSender,
+    PusScheduler,
+>;
+/// Helper type definition for a PUS 11 handler with a dynamic TMTC memory backend and bounded MPSC
+/// queues.
+pub type PusService11SchedHandlerDynWithBoundedMpsc<PusScheduler> = PusService11SchedHandler<
+    MpscTcReceiver,
+    TmAsVecSenderWithBoundedMpsc,
+    EcssTcInVecConverter,
+    VerificationReporterWithVecMpscBoundedSender,
+    PusScheduler,
+>;
+/// Helper type definition for a PUS 11 handler with a shared store TMTC memory backend and regular
+/// mpsc queues.
+pub type PusService11SchedHandlerStaticWithMpsc<PusScheduler> = PusService11SchedHandler<
+    MpscTcReceiver,
+    TmInSharedPoolSenderWithMpsc,
+    EcssTcInSharedStoreConverter,
+    VerificationReporterWithSharedPoolMpscSender,
+    PusScheduler,
+>;
+/// Helper type definition for a PUS 11 handler with a shared store TMTC memory backend and bounded
+/// mpsc queues.
+pub type PusService11SchedHandlerStaticWithBoundedMpsc<PusScheduler> = PusService11SchedHandler<
+    MpscTcReceiver,
+    TmInSharedPoolSenderWithBoundedMpsc,
+    EcssTcInSharedStoreConverter,
+    VerificationReporterWithSharedPoolMpscBoundedSender,
+    PusScheduler,
+>;
 
 #[cfg(test)]
 mod tests {

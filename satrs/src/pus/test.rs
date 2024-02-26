@@ -5,11 +5,16 @@ use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
 use spacepackets::ecss::PusPacket;
 use spacepackets::SpHeader;
 
-use super::verification::VerificationReportingProvider;
+use super::verification::{
+    VerificationReporterWithSharedPoolMpscBoundedSender,
+    VerificationReporterWithSharedPoolMpscSender, VerificationReporterWithVecMpscBoundedSender,
+    VerificationReporterWithVecMpscSender, VerificationReportingProvider,
+};
 use super::{
-    get_current_cds_short_timestamp, EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore,
-    MpscTcReceiver, PusServiceHelper, TmAsVecSenderWithBoundedMpsc, TmAsVecSenderWithMpsc,
-    TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithMpsc,
+    get_current_cds_short_timestamp, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
+    EcssTcInVecConverter, EcssTcReceiverCore, EcssTmSenderCore, MpscTcReceiver, PusServiceHelper,
+    TmAsVecSenderWithBoundedMpsc, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
+    TmInSharedPoolSenderWithMpsc,
 };
 
 /// This is a helper class for [std] environments to handle generic PUS 17 (test service) packets.
@@ -111,34 +116,38 @@ impl<
     }
 }
 
-pub type PusService17TestHandlerDynWithMpsc<TcInMemConverter, VerificationReporter> =
-    PusService17TestHandler<
-        MpscTcReceiver,
-        TmAsVecSenderWithMpsc,
-        TcInMemConverter,
-        VerificationReporter,
-    >;
-pub type PusService17TestHandlerDynWithBoundedMpsc<TcInMemConverter, VerificationReporter> =
-    PusService17TestHandler<
-        MpscTcReceiver,
-        TmAsVecSenderWithBoundedMpsc,
-        TcInMemConverter,
-        VerificationReporter,
-    >;
-pub type PusService17TestHandlerStaticWithMpsc<TcInMemConverter, VerificationReporter> =
-    PusService17TestHandler<
-        MpscTcReceiver,
-        TmInSharedPoolSenderWithMpsc,
-        TcInMemConverter,
-        VerificationReporter,
-    >;
-pub type PusService17TestHandlerStaticWithBoundedMpsc<TcInMemConverter, VerificationReporter> =
-    PusService17TestHandler<
-        MpscTcReceiver,
-        TmInSharedPoolSenderWithBoundedMpsc,
-        TcInMemConverter,
-        VerificationReporter,
-    >;
+/// Helper type definition for a PUS 17 handler with a dynamic TMTC memory backend and regular
+/// mpsc queues.
+pub type PusService17TestHandlerDynWithMpsc = PusService17TestHandler<
+    MpscTcReceiver,
+    TmAsVecSenderWithMpsc,
+    EcssTcInVecConverter,
+    VerificationReporterWithVecMpscSender,
+>;
+/// Helper type definition for a PUS 17 handler with a dynamic TMTC memory backend and bounded MPSC
+/// queues.
+pub type PusService17TestHandlerDynWithBoundedMpsc = PusService17TestHandler<
+    MpscTcReceiver,
+    TmAsVecSenderWithBoundedMpsc,
+    EcssTcInVecConverter,
+    VerificationReporterWithVecMpscBoundedSender,
+>;
+/// Helper type definition for a PUS 17 handler with a shared store TMTC memory backend and regular
+/// mpsc queues.
+pub type PusService17TestHandlerStaticWithMpsc = PusService17TestHandler<
+    MpscTcReceiver,
+    TmInSharedPoolSenderWithMpsc,
+    EcssTcInSharedStoreConverter,
+    VerificationReporterWithSharedPoolMpscSender,
+>;
+/// Helper type definition for a PUS 17 handler with a shared store TMTC memory backend and bounded
+/// mpsc queues.
+pub type PusService17TestHandlerStaticWithBoundedMpsc = PusService17TestHandler<
+    MpscTcReceiver,
+    TmInSharedPoolSenderWithBoundedMpsc,
+    EcssTcInSharedStoreConverter,
+    VerificationReporterWithSharedPoolMpscBoundedSender,
+>;
 
 #[cfg(test)]
 mod tests {
