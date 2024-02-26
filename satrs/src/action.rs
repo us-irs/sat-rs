@@ -1,4 +1,8 @@
-use crate::{pool::StoreAddr, TargetId};
+use crate::{
+    params::{Params, ParamsHeapless},
+    pool::StoreAddr,
+    TargetId,
+};
 
 pub type ActionId = u32;
 
@@ -43,21 +47,29 @@ impl TargetedActionRequest {
 
 /// A reply to an action request.
 #[non_exhaustive]
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Debug)]
 pub enum ActionReply {
-    CompletionFailed(ActionId),
+    CompletionFailed {
+        id: ActionId,
+        reason: Params,
+    },
     StepFailed {
         id: ActionId,
         step: u32,
+        reason: Params,
     },
     Completed(ActionId),
     #[cfg(feature = "alloc")]
     CompletedStringId(alloc::string::String),
     #[cfg(feature = "alloc")]
-    CompletionFailedStringId(alloc::string::String),
+    CompletionFailedStringId {
+        id: alloc::string::String,
+        reason: Params,
+    },
     #[cfg(feature = "alloc")]
     StepFailedStringId {
         id: alloc::string::String,
         step: u32,
+        reason: Params,
     },
 }

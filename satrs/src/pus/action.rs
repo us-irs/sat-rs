@@ -1,4 +1,7 @@
-use crate::{action::ActionRequest, TargetId};
+use crate::{
+    action::{ActionId, ActionReply, ActionRequest},
+    TargetId,
+};
 
 use super::verification::{TcStateAccepted, VerificationToken};
 
@@ -61,10 +64,17 @@ pub mod alloc_mod {
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod std_mod {
-    use crate::pus::{
-        get_current_cds_short_timestamp, verification::VerificationReportingProvider,
-        EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore, GenericRoutingError,
-        PusPacketHandlerResult, PusPacketHandlingError, PusRoutingErrorHandler, PusServiceHelper,
+    use hashbrown::HashMap;
+
+    use crate::{
+        params::WritableToBeBytes,
+        pus::{
+            get_current_cds_short_timestamp,
+            verification::{FailParams, TcStateStarted, VerificationReportingProvider},
+            EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore, GenericRoutingError,
+            PusPacketHandlerResult, PusPacketHandlingError, PusRoutingErrorHandler,
+            PusServiceHelper,
+        },
     };
 
     use super::*;
@@ -173,6 +183,40 @@ pub mod std_mod {
                 return Err(e.into());
             }
             Ok(PusPacketHandlerResult::RequestHandled)
+        }
+    }
+    pub struct PusService8ReplyHandler<VerificationReporter: VerificationReportingProvider> {
+        active_requests: HashMap<TargetId, ActionId>,
+        verification_reporter: VerificationReporter,
+        fail_data_buf: alloc::vec::Vec<u8>,
+    }
+
+    impl<VerificationReporter: VerificationReportingProvider>
+        PusService8ReplyHandler<VerificationReporter>
+    {
+        pub fn add_routed_request(&mut self, target_id: TargetId, action_id: ActionId) {
+            self.active_requests.insert(target_id, action_id);
+        }
+        pub fn handle_action_reply(
+            &mut self,
+            reply: ActionReply,
+            token: VerificationToken<TcStateStarted>,
+            time_stamp: &[u8],
+        ) {
+            match reply {
+                ActionReply::CompletionFailed { id, reason } => {
+                    reason.write_to_be_bytes(self.fail_data_buf.as_mut_slice());
+                    self.verification_reporter.completion_failure(
+                        token,
+                        FailParams::new(time_stamp, failure_code, failure_data),
+                    );
+                }
+                ActionReply::StepFailed { id, step, reason } => {}
+                ActionReply::Completed(id) => {}
+                ActionReply::CompletedStringId(id) => {}
+                ActionReply::CompletionFailedStringId { id, reason } => {}
+                ActionReply::StepFailedStringId { id, step, reason } => {}
+            }
         }
     }
 }

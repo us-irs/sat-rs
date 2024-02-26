@@ -618,6 +618,42 @@ impl From<&str> for Params {
     }
 }
 
+/// Please note while [WritableToBeBytes] is implemented for [Params], the default implementation
+/// will not be able to process store parameters.
+impl WritableToBeBytes for Params {
+    fn raw_len(&self) -> usize {
+        match self {
+            Params::Heapless(p) => match p {
+                ParamsHeapless::Raw(raw) => raw.raw_len(),
+                ParamsHeapless::EcssEnum(enumeration) => enumeration.raw_len(),
+            },
+            Params::Store(_) => 0,
+            Params::Vec(vec) => vec.len(),
+            Params::String(string) => string.len(),
+        }
+    }
+
+    fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
+        match self {
+            Params::Heapless(p) => match p {
+                ParamsHeapless::Raw(raw) => raw.write_to_be_bytes(buf),
+                ParamsHeapless::EcssEnum(enumeration) => enumeration.write_to_be_bytes(buf),
+            },
+            Params::Store(_) => Ok(0),
+            Params::Vec(vec) => {
+                // TODO: size checks.
+                buf[0..vec.len()].copy_from_slice(vec);
+                Ok(vec.len())
+            }
+            Params::String(string) => {
+                // TODO: size checks
+                buf[0..string.len()].copy_from_slice(string.as_bytes());
+                Ok(string.len())
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
