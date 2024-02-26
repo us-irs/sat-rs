@@ -44,7 +44,7 @@ use crate::tmtc::{
 use crate::udp::{StaticUdpTmHandler, UdpTmtcServer};
 use satrs::pus::event_man::EventRequestWithToken;
 use satrs::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
-use satrs::pus::{EcssTmSender, MpscTmAsVecSender, MpscTmInSharedPoolSender};
+use satrs::pus::{EcssTmSender, TmAsVecSenderWithId, TmInSharedPoolSenderWithId};
 use satrs::spacepackets::{time::cds::TimeProvider, time::TimeWriter};
 use satrs::tmtc::CcsdsDistributor;
 use satrs::ChannelId;
@@ -54,11 +54,13 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
-fn create_verification_reporter(verif_sender: impl EcssTmSender) -> VerificationReporterWithSender {
+fn create_verification_reporter<Sender: EcssTmSender + Clone>(
+    verif_sender: Sender,
+) -> VerificationReporterWithSender<Sender> {
     let verif_cfg = VerificationReporterCfg::new(PUS_APID, 1, 2, 8).unwrap();
     // Every software component which needs to generate verification telemetry, gets a cloned
     // verification reporter.
-    VerificationReporterWithSender::new(&verif_cfg, Box::new(verif_sender))
+    VerificationReporterWithSender::new(&verif_cfg, verif_sender)
 }
 
 #[allow(dead_code)]
@@ -68,13 +70,13 @@ fn static_tmtc_pool_main() {
     let shared_tc_pool = SharedTcPool {
         pool: Arc::new(RwLock::new(tc_pool)),
     };
-    let (tc_source_tx, tc_source_rx) = channel();
-    let (tm_funnel_tx, tm_funnel_rx) = channel();
-    let (tm_server_tx, tm_server_rx) = channel();
+    let (tc_source_tx, tc_source_rx) = mpsc::sync_channel(50);
+    let (tm_funnel_tx, tm_funnel_rx) = mpsc::sync_channel(50);
+    let (tm_server_tx, tm_server_rx) = mpsc::sync_channel(50);
 
     // Every software component which needs to generate verification telemetry, receives a cloned
     // verification reporter.
-    let verif_reporter = create_verification_reporter(MpscTmInSharedPoolSender::new(
+    let verif_reporter = create_verification_reporter(TmInSharedPoolSenderWithId::new(
         TmSenderId::PusVerification as ChannelId,
         "verif_sender",
         shared_tm_pool.clone(),
@@ -102,7 +104,7 @@ fn static_tmtc_pool_main() {
     // The event task is the core handler to perform the event routing and TM handling as specified
     // in the sat-rs documentation.
     let mut event_handler = EventHandler::new(
-        MpscTmInSharedPoolSender::new(
+        TmInSharedPoolSenderWithId::new(
             TmSenderId::AllEvents as ChannelId,
             "ALL_EVENTS_TX",
             shared_tm_pool.clone(),
@@ -202,7 +204,7 @@ fn static_tmtc_pool_main() {
     .expect("tcp server creation failed");
 
     let mut acs_task = AcsTask::new(
-        MpscTmInSharedPoolSender::new(
+        TmInSharedPoolSenderWithId::new(
             TmSenderId::AcsSubsystem as ChannelId,
             "ACS_TASK_SENDER",
             shared_tm_pool.clone(),
@@ -303,7 +305,7 @@ fn dyn_tmtc_pool_main() {
     let (tm_server_tx, tm_server_rx) = channel();
     // Every software component which needs to generate verification telemetry, gets a cloned
     // verification reporter.
-    let verif_reporter = create_verification_reporter(MpscTmAsVecSender::new(
+    let verif_reporter = create_verification_reporter(TmAsVecSenderWithId::new(
         TmSenderId::PusVerification as ChannelId,
         "verif_sender",
         tm_funnel_tx.clone(),
@@ -324,7 +326,7 @@ fn dyn_tmtc_pool_main() {
     // The event task is the core handler to perform the event routing and TM handling as specified
     // in the sat-rs documentation.
     let mut event_handler = EventHandler::new(
-        MpscTmAsVecSender::new(
+        TmAsVecSenderWithId::new(
             TmSenderId::AllEvents as ChannelId,
             "ALL_EVENTS_TX",
             tm_funnel_tx.clone(),
@@ -415,7 +417,7 @@ fn dyn_tmtc_pool_main() {
     .expect("tcp server creation failed");
 
     let mut acs_task = AcsTask::new(
-        MpscTmAsVecSender::new(
+        TmAsVecSenderWithId::new(
             TmSenderId::AcsSubsystem as ChannelId,
             "ACS_TASK_SENDER",
             tm_funnel_tx.clone(),

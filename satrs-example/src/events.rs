@@ -11,10 +11,7 @@ use satrs::{
         event_man::{
             DefaultPusEventU32Dispatcher, EventReporter, EventRequest, EventRequestWithToken,
         },
-        verification::{
-            TcStateStarted, VerificationReporterWithSender, VerificationReportingProvider,
-            VerificationToken,
-        },
+        verification::{TcStateStarted, VerificationReportingProvider, VerificationToken},
         EcssTmSender,
     },
     spacepackets::time::cds::{self, TimeProvider},
@@ -23,21 +20,21 @@ use satrs_example::config::PUS_APID;
 
 use crate::update_time;
 
-pub struct PusEventHandler {
+pub struct PusEventHandler<VerificationReporter: VerificationReportingProvider> {
     event_request_rx: mpsc::Receiver<EventRequestWithToken>,
     pus_event_dispatcher: DefaultPusEventU32Dispatcher<()>,
     pus_event_man_rx: mpsc::Receiver<(EventU32, Option<Params>)>,
     tm_sender: Box<dyn EcssTmSender>,
     time_provider: TimeProvider,
     timestamp: [u8; 7],
-    verif_handler: VerificationReporterWithSender,
+    verif_handler: VerificationReporter,
 }
 /*
 */
 
-impl PusEventHandler {
+impl<VerificationReporter: VerificationReportingProvider> PusEventHandler<VerificationReporter> {
     pub fn new(
-        verif_handler: VerificationReporterWithSender,
+        verif_handler: VerificationReporter,
         event_manager: &mut EventManagerWithBoundedMpsc,
         event_request_rx: mpsc::Receiver<EventRequestWithToken>,
         tm_sender: impl EcssTmSender,
@@ -147,15 +144,15 @@ impl EventManagerWrapper {
     }
 }
 
-pub struct EventHandler {
+pub struct EventHandler<VerificationReporter: VerificationReportingProvider> {
     pub event_man_wrapper: EventManagerWrapper,
-    pub pus_event_handler: PusEventHandler,
+    pub pus_event_handler: PusEventHandler<VerificationReporter>,
 }
 
-impl EventHandler {
+impl<VerificationReporter: VerificationReportingProvider> EventHandler<VerificationReporter> {
     pub fn new(
         tm_sender: impl EcssTmSender,
-        verif_handler: VerificationReporterWithSender,
+        verif_handler: VerificationReporter,
         event_request_rx: mpsc::Receiver<EventRequestWithToken>,
     ) -> Self {
         let mut event_man_wrapper = EventManagerWrapper::new();

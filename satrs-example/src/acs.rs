@@ -1,7 +1,7 @@
 use std::sync::mpsc::{self, TryRecvError};
 
 use log::{info, warn};
-use satrs::pus::verification::{VerificationReporterWithSender, VerificationReportingProvider};
+use satrs::pus::verification::VerificationReportingProvider;
 use satrs::pus::{EcssTmSender, PusTmWrapper};
 use satrs::request::TargetAndApidId;
 use satrs::spacepackets::ecss::hk::Subservice as HkSubservice;
@@ -21,19 +21,19 @@ use crate::{
     update_time,
 };
 
-pub struct AcsTask {
+pub struct AcsTask<VerificationReporter: VerificationReportingProvider> {
     timestamp: [u8; 7],
     time_provider: TimeProvider<DaysLen16Bits>,
-    verif_reporter: VerificationReporterWithSender,
+    verif_reporter: VerificationReporter,
     tm_sender: Box<dyn EcssTmSender>,
     request_rx: mpsc::Receiver<RequestWithToken>,
 }
 
-impl AcsTask {
+impl<VerificationReporter: VerificationReportingProvider> AcsTask<VerificationReporter> {
     pub fn new(
         tm_sender: impl EcssTmSender,
         request_rx: mpsc::Receiver<RequestWithToken>,
-        verif_reporter: VerificationReporterWithSender,
+        verif_reporter: VerificationReporter,
     ) -> Self {
         Self {
             timestamp: [0; 7],

@@ -104,7 +104,10 @@ mod tests {
         PusServiceHandlerWithSharedStoreCommon, PusServiceHandlerWithVecCommon, PusTestHarness,
         SimplePusPacketHandler, TEST_APID,
     };
-    use crate::pus::verification::{RequestId, VerificationReporterWithSender};
+    use crate::pus::verification::std_mod::{
+        VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
+    };
+    use crate::pus::verification::RequestId;
     use crate::pus::verification::{TcStateAccepted, VerificationToken};
     use crate::pus::{
         EcssTcInSharedStoreConverter, EcssTcInVecConverter, PusPacketHandlerResult,
@@ -120,8 +123,10 @@ mod tests {
 
     struct Pus17HandlerWithStoreTester {
         common: PusServiceHandlerWithSharedStoreCommon,
-        handler:
-            PusService17TestHandler<EcssTcInSharedStoreConverter, VerificationReporterWithSender>,
+        handler: PusService17TestHandler<
+            EcssTcInSharedStoreConverter,
+            VerificationReporterWithSharedPoolMpscBoundedSender,
+        >,
     }
 
     impl Pus17HandlerWithStoreTester {
@@ -158,8 +163,9 @@ mod tests {
     }
 
     struct Pus17HandlerWithVecTester {
-        common: PusServiceHandlerWithVecCommon<VerificationReporterWithSender>,
-        handler: PusService17TestHandler<EcssTcInVecConverter, VerificationReporterWithSender>,
+        common: PusServiceHandlerWithVecCommon<VerificationReporterWithVecMpscSender>,
+        handler:
+            PusService17TestHandler<EcssTcInVecConverter, VerificationReporterWithVecMpscSender>,
     }
 
     impl Pus17HandlerWithVecTester {

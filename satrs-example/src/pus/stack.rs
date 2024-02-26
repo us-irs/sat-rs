@@ -1,25 +1,32 @@
-use satrs::pus::EcssTcInMemConverter;
+use satrs::pus::{verification::VerificationReportingProvider, EcssTcInMemConverter};
 
 use super::{
     action::Pus8Wrapper, event::Pus5Wrapper, hk::Pus3Wrapper, scheduler::Pus11Wrapper,
     test::Service17CustomWrapper,
 };
 
-pub struct PusStack<TcInMemConverter: EcssTcInMemConverter> {
-    event_srv: Pus5Wrapper<TcInMemConverter>,
-    hk_srv: Pus3Wrapper<TcInMemConverter>,
-    action_srv: Pus8Wrapper<TcInMemConverter>,
-    schedule_srv: Pus11Wrapper<TcInMemConverter>,
-    test_srv: Service17CustomWrapper<TcInMemConverter>,
+pub struct PusStack<
+    TcInMemConverter: EcssTcInMemConverter,
+    VerificationReporter: VerificationReportingProvider,
+> {
+    event_srv: Pus5Wrapper<TcInMemConverter, VerificationReporter>,
+    hk_srv: Pus3Wrapper<TcInMemConverter, VerificationReporter>,
+    action_srv: Pus8Wrapper<TcInMemConverter, VerificationReporter>,
+    schedule_srv: Pus11Wrapper<TcInMemConverter, VerificationReporter>,
+    test_srv: Service17CustomWrapper<TcInMemConverter, VerificationReporter>,
 }
 
-impl<TcInMemConverter: EcssTcInMemConverter> PusStack<TcInMemConverter> {
+impl<
+        TcInMemConverter: EcssTcInMemConverter,
+        VerificationReporter: VerificationReportingProvider,
+    > PusStack<TcInMemConverter, VerificationReporter>
+{
     pub fn new(
-        hk_srv: Pus3Wrapper<TcInMemConverter>,
-        event_srv: Pus5Wrapper<TcInMemConverter>,
-        action_srv: Pus8Wrapper<TcInMemConverter>,
-        schedule_srv: Pus11Wrapper<TcInMemConverter>,
-        test_srv: Service17CustomWrapper<TcInMemConverter>,
+        hk_srv: Pus3Wrapper<TcInMemConverter, VerificationReporter>,
+        event_srv: Pus5Wrapper<TcInMemConverter, VerificationReporter>,
+        action_srv: Pus8Wrapper<TcInMemConverter, VerificationReporter>,
+        schedule_srv: Pus11Wrapper<TcInMemConverter, VerificationReporter>,
+        test_srv: Service17CustomWrapper<TcInMemConverter, VerificationReporter>,
     ) -> Self {
         Self {
             event_srv,

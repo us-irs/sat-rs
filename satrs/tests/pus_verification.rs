@@ -6,7 +6,7 @@ pub mod crossbeam_test {
         FailParams, RequestId, VerificationReporterCfg, VerificationReporterWithSender,
         VerificationReportingProvider,
     };
-    use satrs::pus::CrossbeamTmInStoreSender;
+    use satrs::pus::TmInSharedPoolSenderWithCrossbeam;
     use satrs::tmtc::tm_helper::SharedTmPool;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTmReader;
@@ -40,10 +40,13 @@ pub mod crossbeam_test {
         let shared_tc_pool_0 = Arc::new(RwLock::new(StaticMemoryPool::new(pool_cfg)));
         let shared_tc_pool_1 = shared_tc_pool_0.clone();
         let (tx, rx) = crossbeam_channel::bounded(10);
-        let sender =
-            CrossbeamTmInStoreSender::new(0, "verif_sender", shared_tm_pool.clone(), tx.clone());
-        let mut reporter_with_sender_0 =
-            VerificationReporterWithSender::new(&cfg, Box::new(sender));
+        let sender = TmInSharedPoolSenderWithCrossbeam::new(
+            0,
+            "verif_sender",
+            shared_tm_pool.clone(),
+            tx.clone(),
+        );
+        let mut reporter_with_sender_0 = VerificationReporterWithSender::new(&cfg, sender);
         let mut reporter_with_sender_1 = reporter_with_sender_0.clone();
         // For test purposes, we retrieve the request ID from the TCs and pass them to the receiver
         // tread.
