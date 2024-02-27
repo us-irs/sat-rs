@@ -4,7 +4,7 @@ use crate::{
     TargetId,
 };
 
-use super::verification::{TcStateAccepted, VerificationToken};
+use super::verification::{RequestId, TcStateAccepted, VerificationToken};
 
 use satrs_shared::res_code::ResultU16;
 use spacepackets::ecss::EcssEnumU16;
@@ -17,22 +17,36 @@ pub use std_mod::*;
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub use alloc_mod::*;
 
+#[derive(Clone, Debug)]
+pub struct ActionRequestWithId {
+    pub req_id: RequestId,
+    pub request: ActionRequest,
+}
+
+#[derive(Clone, Debug)]
+pub struct ActionReplyPusWithIds {
+    pub action_id: ActionId,
+    pub req_id: RequestId,
+    pub reply: ActionReplyPus,
+}
+
 /// A reply to an action request, but tailored to the PUS standard verification process.
 #[non_exhaustive]
 #[derive(Clone, Debug)]
 pub enum ActionReplyPus {
+    Completed,
+    StepSuccess {
+        step: EcssEnumU16,
+    },
     CompletionFailed {
-        id: ActionId,
         error_code: ResultU16,
         params: Params,
     },
     StepFailed {
-        id: ActionId,
         error_code: ResultU16,
         step: EcssEnumU16,
         params: Params,
     },
-    Completed(ActionId),
 }
 
 /// This trait is an abstraction for the routing of PUS service 8 action requests to a dedicated
@@ -280,36 +294,34 @@ pub mod std_mod {
 
         pub fn handle_action_reply(
             &mut self,
-            reply: ActionReplyPus,
-            token: VerificationToken<TcStateStarted>,
+            action_reply_with_ids: ActionReplyPusWithIds,
             time_stamp: &[u8],
         ) -> Result<(), EcssTmtcError> {
-            match reply {
-                ActionReplyPus::CompletionFailed {
-                    id: _,
-                    error_code,
-                    params,
-                } => {
-                    self.active_requests.remove(&token.req_id());
+            let active_req = self.active_requests.get(&action_reply_with_ids.req_id);
+            if active_req.is_none() {
+                // TODO: This is an unexpected reply. We need to deal with this somehow.
+            }
+            let active_req = active_req.unwrap();
+            match action_reply_with_ids.reply {
+                ActionReplyPus::CompletionFailed { error_code, params } => {
                     params.write_to_be_bytes(&mut self.fail_data_buf)?;
                     self.verification_reporter
                         .completion_failure(
-                            token,
+                            active_req.token,
                             FailParams::new(time_stamp, &error_code, &self.fail_data_buf),
                         )
                         .map_err(|e| e.0)?;
+                    self.active_requests.remove(&action_reply_with_ids.req_id);
                 }
                 ActionReplyPus::StepFailed {
-                    id: _,
                     error_code,
                     step,
                     params,
                 } => {
-                    self.active_requests.remove(&token.req_id());
                     params.write_to_be_bytes(&mut self.fail_data_buf)?;
                     self.verification_reporter
                         .step_failure(
-                            token,
+                            active_req.token,
                             FailParamsWithStep::new(
                                 time_stamp,
                                 &step,
@@ -318,12 +330,17 @@ pub mod std_mod {
                             ),
                         )
                         .map_err(|e| e.0)?;
+                    self.active_requests.remove(&action_reply_with_ids.req_id);
                 }
-                ActionReplyPus::Completed(_id) => {
-                    self.active_requests.remove(&token.req_id());
+                ActionReplyPus::Completed => {
                     self.verification_reporter
-                        .completion_success(token, time_stamp)
+                        .completion_success(active_req.token, time_stamp)
                         .map_err(|e| e.0)?;
+                    self.active_requests.remove(&action_reply_with_ids.req_id);
+                }
+                ActionReplyPus::StepSuccess { step } => {
+                    self.verification_reporter
+                        .step_success(&active_req.token, time_stamp, step)?;
                 }
             }
             Ok(())
