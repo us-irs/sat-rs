@@ -1,8 +1,4 @@
-use crate::{
-    params::{Params, ParamsHeapless},
-    pool::StoreAddr,
-    TargetId,
-};
+use crate::{params::Params, pool::StoreAddr, TargetId};
 
 pub type ActionId = u32;
 

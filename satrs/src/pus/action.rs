@@ -1,9 +1,13 @@
 use crate::{
-    action::{ActionId, ActionReply, ActionRequest},
+    action::{ActionId, ActionRequest},
+    params::Params,
     TargetId,
 };
 
 use super::verification::{TcStateAccepted, VerificationToken};
+
+use satrs_shared::res_code::ResultU16;
+use spacepackets::ecss::EcssEnumU16;
 
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
@@ -12,6 +16,24 @@ pub use std_mod::*;
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub use alloc_mod::*;
+
+/// A reply to an action request, but tailored to the PUS standard verification process.
+#[non_exhaustive]
+#[derive(Clone, Debug)]
+pub enum ActionReplyPus {
+    CompletionFailed {
+        id: ActionId,
+        error_code: ResultU16,
+        params: Params,
+    },
+    StepFailed {
+        id: ActionId,
+        error_code: ResultU16,
+        step: EcssEnumU16,
+        params: Params,
+    },
+    Completed(ActionId),
+}
 
 /// This trait is an abstraction for the routing of PUS service 8 action requests to a dedicated
 /// recipient using the generic [TargetId].
@@ -65,15 +87,19 @@ pub mod alloc_mod {
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod std_mod {
     use hashbrown::HashMap;
+    use spacepackets::ByteConversionError;
 
     use crate::{
         params::WritableToBeBytes,
         pus::{
             get_current_cds_short_timestamp,
-            verification::{FailParams, TcStateStarted, VerificationReportingProvider},
-            EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore, GenericRoutingError,
-            PusPacketHandlerResult, PusPacketHandlingError, PusRoutingErrorHandler,
-            PusServiceHelper,
+            verification::{
+                FailParams, FailParamsWithStep, RequestId, TcStateStarted,
+                VerificationReportingProvider,
+            },
+            EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError,
+            GenericRoutingError, PusPacketHandlerResult, PusPacketHandlingError,
+            PusRoutingErrorHandler, PusServiceHelper,
         },
     };
 
@@ -185,8 +211,15 @@ pub mod std_mod {
             Ok(PusPacketHandlerResult::RequestHandled)
         }
     }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ActiveRequest {
+        action_id: ActionId,
+        target_id: TargetId,
+    }
+
     pub struct PusService8ReplyHandler<VerificationReporter: VerificationReportingProvider> {
-        active_requests: HashMap<TargetId, ActionId>,
+        active_requests: HashMap<RequestId, ActiveRequest>,
         verification_reporter: VerificationReporter,
         fail_data_buf: alloc::vec::Vec<u8>,
     }
@@ -194,29 +227,68 @@ pub mod std_mod {
     impl<VerificationReporter: VerificationReportingProvider>
         PusService8ReplyHandler<VerificationReporter>
     {
-        pub fn add_routed_request(&mut self, target_id: TargetId, action_id: ActionId) {
-            self.active_requests.insert(target_id, action_id);
+        pub fn add_routed_request(
+            &mut self,
+            request_id: RequestId,
+            target_id: TargetId,
+            action_id: ActionId,
+        ) {
+            self.active_requests.insert(
+                request_id,
+                ActiveRequest {
+                    target_id,
+                    action_id,
+                },
+            );
         }
+
         pub fn handle_action_reply(
             &mut self,
-            reply: ActionReply,
+            reply: ActionReplyPus,
             token: VerificationToken<TcStateStarted>,
             time_stamp: &[u8],
-        ) {
+        ) -> Result<(), EcssTmtcError> {
             match reply {
-                ActionReply::CompletionFailed { id, reason } => {
-                    reason.write_to_be_bytes(self.fail_data_buf.as_mut_slice());
-                    self.verification_reporter.completion_failure(
-                        token,
-                        FailParams::new(time_stamp, failure_code, failure_data),
-                    );
+                ActionReplyPus::CompletionFailed {
+                    id: _,
+                    error_code,
+                    params,
+                } => {
+                    params.write_to_be_bytes(&mut self.fail_data_buf)?;
+                    self.verification_reporter
+                        .completion_failure(
+                            token,
+                            FailParams::new(time_stamp, &error_code, &self.fail_data_buf),
+                        )
+                        .map_err(|e| e.0)?;
                 }
-                ActionReply::StepFailed { id, step, reason } => {}
-                ActionReply::Completed(id) => {}
-                ActionReply::CompletedStringId(id) => {}
-                ActionReply::CompletionFailedStringId { id, reason } => {}
-                ActionReply::StepFailedStringId { id, step, reason } => {}
+                ActionReplyPus::StepFailed {
+                    id: _,
+                    error_code,
+                    step,
+                    params,
+                } => {
+                    params.write_to_be_bytes(&mut self.fail_data_buf)?;
+                    self.verification_reporter
+                        .step_failure(
+                            token,
+                            FailParamsWithStep::new(
+                                time_stamp,
+                                &step,
+                                &error_code,
+                                &self.fail_data_buf,
+                            ),
+                        )
+                        .expect("step failure");
+                }
+                ActionReplyPus::Completed(id) => {
+                    self.active_requests.remove(&id);
+                    self.verification_reporter
+                        .completion_success(token, time_stamp)
+                        .expect("completion success");
+                }
             }
+            Ok(())
         }
     }
 }

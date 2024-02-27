@@ -4,7 +4,7 @@
 //! The satrs-example application contains various usage examples of these components.
 use crate::pool::{StoreAddr, StoreError};
 use crate::pus::verification::{TcStateAccepted, TcStateToken, VerificationToken};
-use crate::queue::{GenericRecvError, GenericSendError};
+use crate::queue::{GenericReceiveError, GenericSendError};
 use crate::ChannelId;
 use core::fmt::{Display, Formatter};
 #[cfg(feature = "alloc")]
@@ -59,26 +59,26 @@ impl<'tm> From<PusTmCreator<'tm>> for PusTmWrapper<'tm> {
 
 #[derive(Debug, Clone)]
 pub enum EcssTmtcError {
-    StoreLock,
     Store(StoreError),
+    ByteConversion(ByteConversionError),
     Pus(PusError),
     CantSendAddr(StoreAddr),
     CantSendDirectTm,
     Send(GenericSendError),
-    Recv(GenericRecvError),
+    Receive(GenericReceiveError),
 }
 
 impl Display for EcssTmtcError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
-            EcssTmtcError::StoreLock => {
-                write!(f, "store lock error")
-            }
             EcssTmtcError::Store(store) => {
-                write!(f, "store error: {store}")
+                write!(f, "ecss tmtc error: {store}")
             }
-            EcssTmtcError::Pus(pus_e) => {
-                write!(f, "PUS error: {pus_e}")
+            EcssTmtcError::ByteConversion(e) => {
+                write!(f, "ecss tmtc error: {e}")
+            }
+            EcssTmtcError::Pus(e) => {
+                write!(f, "ecss tmtc error: {e}")
             }
             EcssTmtcError::CantSendAddr(addr) => {
                 write!(f, "can not send address {addr}")
@@ -86,11 +86,11 @@ impl Display for EcssTmtcError {
             EcssTmtcError::CantSendDirectTm => {
                 write!(f, "can not send TM directly")
             }
-            EcssTmtcError::Send(send_e) => {
-                write!(f, "send error {send_e}")
+            EcssTmtcError::Send(e) => {
+                write!(f, "ecss tmtc error: {e}")
             }
-            EcssTmtcError::Recv(recv_e) => {
-                write!(f, "recv error {recv_e}")
+            EcssTmtcError::Receive(e) => {
+                write!(f, "ecss tmtc error {e}")
             }
         }
     }
@@ -114,9 +114,9 @@ impl From<GenericSendError> for EcssTmtcError {
     }
 }
 
-impl From<GenericRecvError> for EcssTmtcError {
-    fn from(value: GenericRecvError) -> Self {
-        Self::Recv(value)
+impl From<GenericReceiveError> for EcssTmtcError {
+    fn from(value: GenericReceiveError) -> Self {
+        Self::Receive(value)
     }
 }
 
@@ -125,9 +125,10 @@ impl Error for EcssTmtcError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             EcssTmtcError::Store(e) => Some(e),
+            EcssTmtcError::ByteConversion(e) => Some(e),
             EcssTmtcError::Pus(e) => Some(e),
             EcssTmtcError::Send(e) => Some(e),
-            EcssTmtcError::Recv(e) => Some(e),
+            EcssTmtcError::Receive(e) => Some(e),
             _ => None,
         }
     }
@@ -368,11 +369,13 @@ mod alloc_mod {
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod std_mod {
-    use crate::pool::{PoolProvider, PoolProviderWithGuards, SharedStaticMemoryPool, StoreAddr};
+    use crate::pool::{
+        PoolProvider, PoolProviderWithGuards, SharedStaticMemoryPool, StoreAddr, StoreError,
+    };
     use crate::pus::verification::{TcStateAccepted, VerificationToken};
     use crate::pus::{
         EcssChannel, EcssTcAndToken, EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError,
-        GenericRecvError, GenericSendError, PusTmWrapper, TryRecvTmtcError,
+        GenericReceiveError, GenericSendError, PusTmWrapper, TryRecvTmtcError,
     };
     use crate::tmtc::tm_helper::SharedTmPool;
     use crate::{ChannelId, TargetId};
@@ -564,7 +567,7 @@ pub mod std_mod {
             self.receiver.try_recv().map_err(|e| match e {
                 TryRecvError::Empty => TryRecvTmtcError::Empty,
                 TryRecvError::Disconnected => {
-                    TryRecvTmtcError::Tmtc(EcssTmtcError::from(GenericRecvError::TxDisconnected))
+                    TryRecvTmtcError::Tmtc(EcssTmtcError::from(GenericReceiveError::TxDisconnected))
                 }
             })
         }
@@ -659,7 +662,7 @@ pub mod std_mod {
                 self.receiver.try_recv().map_err(|e| match e {
                     cb::TryRecvError::Empty => TryRecvTmtcError::Empty,
                     cb::TryRecvError::Disconnected => TryRecvTmtcError::Tmtc(EcssTmtcError::from(
-                        GenericRecvError::TxDisconnected,
+                        GenericReceiveError::TxDisconnected,
                     )),
                 })
             }
@@ -805,10 +808,9 @@ pub mod std_mod {
 
         pub fn copy_tc_to_buf(&mut self, addr: StoreAddr) -> Result<(), PusPacketHandlingError> {
             // Keep locked section as short as possible.
-            let mut tc_pool = self
-                .shared_tc_store
-                .write()
-                .map_err(|_| PusPacketHandlingError::EcssTmtc(EcssTmtcError::StoreLock))?;
+            let mut tc_pool = self.shared_tc_store.write().map_err(|_| {
+                PusPacketHandlingError::EcssTmtc(EcssTmtcError::Store(StoreError::LockError))
+            })?;
             let tc_size = tc_pool
                 .len_of_data(&addr)
                 .map_err(|e| PusPacketHandlingError::EcssTmtc(EcssTmtcError::Store(e)))?;

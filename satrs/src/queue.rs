@@ -29,12 +29,12 @@ impl Error for GenericSendError {}
 
 /// Generic error type for sending something via a message queue.
 #[derive(Debug, Copy, Clone)]
-pub enum GenericRecvError {
+pub enum GenericReceiveError {
     Empty,
     TxDisconnected,
 }
 
-impl Display for GenericRecvError {
+impl Display for GenericReceiveError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::TxDisconnected => {
@@ -48,7 +48,7 @@ impl Display for GenericRecvError {
 }
 
 #[cfg(feature = "std")]
-impl Error for GenericRecvError {}
+impl Error for GenericReceiveError {}
 
 #[cfg(feature = "std")]
 impl<T> From<mpsc::SendError<T>> for GenericSendError {
