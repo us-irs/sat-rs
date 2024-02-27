@@ -1,3 +1,6 @@
+use satrs_shared::res_code::ResultU16;
+use spacepackets::util::UnsignedByteField;
+
 use crate::{pool::StoreAddr, TargetId};
 
 pub type ActionId = u32;
@@ -41,23 +44,18 @@ impl TargetedActionRequest {
     }
 }
 
-/// A reply to an action request.
+/// A reply to an action request specific to PUS.
 #[non_exhaustive]
 #[derive(Clone, Eq, PartialEq, Debug)]
-pub enum ActionReply {
-    CompletionFailed(ActionId),
+pub enum ActionReplyPus {
+    CompletionFailed {
+        action_id: ActionId,
+        error_code: ResultU16,
+    },
     StepFailed {
         id: ActionId,
-        step: u32,
+        error_code: ResultU16,
+        step: UnsignedByteField,
     },
     Completed(ActionId),
-    #[cfg(feature = "alloc")]
-    CompletedStringId(alloc::string::String),
-    #[cfg(feature = "alloc")]
-    CompletionFailedStringId(alloc::string::String),
-    #[cfg(feature = "alloc")]
-    StepFailedStringId {
-        id: alloc::string::String,
-        step: u32,
-    },
 }
