@@ -86,9 +86,6 @@ pub mod alloc_mod {
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod std_mod {
-    use hashbrown::HashMap;
-    use spacepackets::ByteConversionError;
-
     use crate::{
         params::WritableToBeBytes,
         pus::{
@@ -102,6 +99,9 @@ pub mod std_mod {
             PusRoutingErrorHandler, PusServiceHelper,
         },
     };
+    use hashbrown::HashMap;
+    use spacepackets::time::UnixTimestamp;
+    use std::time::SystemTimeError;
 
     use super::*;
 
@@ -214,14 +214,16 @@ pub mod std_mod {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ActiveRequest {
-        action_id: ActionId,
-        target_id: TargetId,
+        token: VerificationToken<TcStateStarted>,
+        start_time: UnixTimestamp,
+        timeout_seconds: u32,
     }
 
     pub struct PusService8ReplyHandler<VerificationReporter: VerificationReportingProvider> {
         active_requests: HashMap<RequestId, ActiveRequest>,
         verification_reporter: VerificationReporter,
         fail_data_buf: alloc::vec::Vec<u8>,
+        current_time: UnixTimestamp,
     }
 
     impl<VerificationReporter: VerificationReportingProvider>
@@ -230,16 +232,50 @@ pub mod std_mod {
         pub fn add_routed_request(
             &mut self,
             request_id: RequestId,
-            target_id: TargetId,
-            action_id: ActionId,
+            token: VerificationToken<TcStateStarted>,
+            timeout_seconds: u32,
         ) {
             self.active_requests.insert(
                 request_id,
                 ActiveRequest {
-                    target_id,
-                    action_id,
+                    token,
+                    start_time: self.current_time,
+                    timeout_seconds,
                 },
             );
+        }
+
+        #[cfg(feature = "std")]
+        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
+        pub fn update_time_from_now(&mut self) -> Result<(), SystemTimeError> {
+            self.current_time = UnixTimestamp::from_now()?;
+            Ok(())
+        }
+
+        pub fn check_for_timeouts(&mut self, time_stamp: &[u8]) -> Result<(), EcssTmtcError> {
+            for (_req_id, active_req) in self.active_requests.iter() {
+                // TODO: Simplified until spacepackets update.
+                let diff =
+                    (self.current_time.unix_seconds - active_req.start_time.unix_seconds) as u32;
+                if diff > active_req.timeout_seconds {
+                    self.handle_timeout(active_req, time_stamp);
+                }
+            }
+            Ok(())
+        }
+
+        pub fn handle_timeout(&self, active_request: &ActiveRequest, time_stamp: &[u8]) {
+            self.verification_reporter
+                .completion_failure(
+                    active_request.token,
+                    FailParams::new(
+                        time_stamp,
+                        // WTF, what failure code?
+                        &ResultU16::new(0, 0),
+                        &[],
+                    ),
+                )
+                .unwrap();
         }
 
         pub fn handle_action_reply(
@@ -254,6 +290,7 @@ pub mod std_mod {
                     error_code,
                     params,
                 } => {
+                    self.active_requests.remove(&token.req_id());
                     params.write_to_be_bytes(&mut self.fail_data_buf)?;
                     self.verification_reporter
                         .completion_failure(
@@ -268,6 +305,7 @@ pub mod std_mod {
                     step,
                     params,
                 } => {
+                    self.active_requests.remove(&token.req_id());
                     params.write_to_be_bytes(&mut self.fail_data_buf)?;
                     self.verification_reporter
                         .step_failure(
@@ -279,13 +317,13 @@ pub mod std_mod {
                                 &self.fail_data_buf,
                             ),
                         )
-                        .expect("step failure");
+                        .map_err(|e| e.0)?;
                 }
-                ActionReplyPus::Completed(id) => {
-                    self.active_requests.remove(&id);
+                ActionReplyPus::Completed(_id) => {
+                    self.active_requests.remove(&token.req_id());
                     self.verification_reporter
                         .completion_success(token, time_stamp)
-                        .expect("completion success");
+                        .map_err(|e| e.0)?;
                 }
             }
             Ok(())

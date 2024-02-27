@@ -114,6 +114,12 @@ impl From<GenericSendError> for EcssTmtcError {
     }
 }
 
+impl From<ByteConversionError> for EcssTmtcError {
+    fn from(value: ByteConversionError) -> Self {
+        Self::ByteConversion(value)
+    }
+}
+
 impl From<GenericReceiveError> for EcssTmtcError {
     fn from(value: GenericReceiveError) -> Self {
         Self::Receive(value)
