@@ -41,7 +41,7 @@ impl TargetedActionRequest {
     }
 }
 
-/// A reply to an action request.
+/// A reply to an action request specific to PUS.
 #[non_exhaustive]
 #[derive(Clone, Debug)]
 pub enum ActionReply {
