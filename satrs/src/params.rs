@@ -619,7 +619,7 @@ impl From<&str> for Params {
 }
 
 /// Please note while [WritableToBeBytes] is implemented for [Params], the default implementation
-/// will not be able to process store parameters.
+/// will not be able to process the [Params::Store] parameter variant.
 impl WritableToBeBytes for Params {
     fn raw_len(&self) -> usize {
         match self {
@@ -640,13 +640,25 @@ impl WritableToBeBytes for Params {
                 ParamsHeapless::EcssEnum(enumeration) => enumeration.write_to_be_bytes(buf),
             },
             Params::Store(_) => Ok(0),
+            #[cfg(feature = "alloc")]
             Params::Vec(vec) => {
-                // TODO: size checks.
+                if buf.len() < vec.len() {
+                    return Err(ByteConversionError::ToSliceTooSmall {
+                        found: buf.len(),
+                        expected: vec.len(),
+                    });
+                }
                 buf[0..vec.len()].copy_from_slice(vec);
                 Ok(vec.len())
             }
+            #[cfg(feature = "alloc")]
             Params::String(string) => {
-                // TODO: size checks
+                if buf.len() < string.len() {
+                    return Err(ByteConversionError::ToSliceTooSmall {
+                        found: buf.len(),
+                        expected: string.len(),
+                    });
+                }
                 buf[0..string.len()].copy_from_slice(string.as_bytes());
                 Ok(string.len())
             }
