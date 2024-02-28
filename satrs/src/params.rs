@@ -628,7 +628,9 @@ impl WritableToBeBytes for Params {
                 ParamsHeapless::EcssEnum(enumeration) => enumeration.raw_len(),
             },
             Params::Store(_) => 0,
+            #[cfg(feature = "alloc")]
             Params::Vec(vec) => vec.len(),
+            #[cfg(feature = "alloc")]
             Params::String(string) => string.len(),
         }
     }
