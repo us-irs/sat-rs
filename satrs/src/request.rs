@@ -35,35 +35,29 @@ impl TargetAndApidId {
         Self { apid, target }
     }
 
-    pub fn apid(&self) -> Apid {
-        self.apid
-    }
-
-    pub fn target(&self) -> u32 {
-        self.target
-    }
-
     pub fn raw(&self) -> TargetId {
         ((self.apid as u64) << 32) | (self.target as u64)
     }
 
-    pub fn target_id(&self) -> TargetId {
+    pub fn full_target_id(&self) -> TargetId {
         self.raw()
     }
 
+    /// This function attempts to build the ID from a PUS telecommand by extracting the APID
+    /// and the first four bytes of the application data field as the target field.
     pub fn from_pus_tc(
         tc: &(impl CcsdsPacket + PusPacket + IsPusTelecommand),
     ) -> Result<Self, ByteConversionError> {
         if tc.user_data().len() < 4 {
             return Err(ByteConversionError::FromSliceTooSmall {
                 found: tc.user_data().len(),
-                expected: 8,
+                expected: 4,
             });
         }
-        Ok(Self {
-            apid: tc.apid(),
-            target: u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap()),
-        })
+        Ok(Self::new(
+            tc.apid(),
+            u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap()),
+        ))
     }
 }
 
@@ -134,14 +128,16 @@ impl<MSG, R: MessageReceiver<MSG>> MessageWithSenderIdReceiver<MSG, R> {
     }
 }
 
+pub struct MessageReceiverWithId<MSG, R: MessageReceiver<MSG>> {
+    local_channel_id: ChannelId,
+    reply_receiver: MessageWithSenderIdReceiver<MSG, R>,
+}
+
 impl<MSG, R: MessageReceiver<MSG>> MessageReceiverWithId<MSG, R> {
-    pub fn new(
-        local_channel_id: ChannelId,
-        reply_receiver: MessageWithSenderIdReceiver<MSG, R>,
-    ) -> Self {
+    pub fn new(local_channel_id: ChannelId, reply_receiver: R) -> Self {
         Self {
             local_channel_id,
-            reply_receiver,
+            reply_receiver: MessageWithSenderIdReceiver::from(reply_receiver),
         }
     }
 
@@ -156,11 +152,6 @@ impl<MSG, R: MessageReceiver<MSG>> MessageReceiverWithId<MSG, R> {
     ) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
         self.reply_receiver.0.try_recv()
     }
-}
-
-pub struct MessageReceiverWithId<MSG, R: MessageReceiver<MSG>> {
-    local_channel_id: ChannelId,
-    reply_receiver: MessageWithSenderIdReceiver<MSG, R>,
 }
 
 #[cfg(feature = "alloc")]
@@ -383,4 +374,73 @@ pub mod std_mod {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use std::sync::mpsc;
+
+    use spacepackets::{
+        ecss::tc::{PusTcCreator, PusTcSecondaryHeader},
+        ByteConversionError, SpHeader,
+    };
+
+    use super::{GenericMessage, MessageReceiverWithId, TargetAndApidId};
+
+    const TEST_CHANNEL_ID_0: u32 = 1;
+    const TEST_CHANNEL_ID_1: u32 = 2;
+
+    #[test]
+    fn test_basic_target_id_with_apid() {
+        let id = TargetAndApidId::new(0x111, 0x01);
+        assert_eq!(id.apid, 0x111);
+        assert_eq!(id.target, 0x01);
+        assert_eq!(id.full_target_id(), id.raw());
+        assert_eq!(u64::from(id), id.raw());
+        let id_raw = id.raw();
+        let id_from_raw = TargetAndApidId::from(id_raw);
+        assert_eq!(id_from_raw, id);
+        assert_eq!(id.full_target_id(), (0x111 << 32) | 0x01);
+    }
+
+    #[test]
+    fn test_basic_target_id_with_apid_from_pus_tc() {
+        let mut sp_header = SpHeader::tc_unseg(0x111, 5, 0).unwrap();
+        let app_data = 1_u32.to_be_bytes();
+        let pus_tc = PusTcCreator::new_simple(&mut sp_header, 17, 1, Some(&app_data), true);
+        let id = TargetAndApidId::from_pus_tc(&pus_tc).unwrap();
+        assert_eq!(id.apid, 0x111);
+        assert_eq!(id.target, 1);
+    }
+
+    #[test]
+    fn test_basic_target_id_with_apid_from_pus_tc_invalid_app_data() {
+        let mut sp_header = SpHeader::tc_unseg(0x111, 5, 0).unwrap();
+        let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let pus_tc = PusTcCreator::new_no_app_data(&mut sp_header, sec_header, true);
+        let error = TargetAndApidId::from_pus_tc(&pus_tc);
+        assert!(error.is_err());
+        let error = error.unwrap_err();
+        if let ByteConversionError::FromSliceTooSmall { found, expected } = error {
+            assert_eq!(found, 0);
+            assert_eq!(expected, 4);
+        } else {
+            panic!("Unexpected error type");
+        }
+    }
+
+    #[test]
+    fn test_receiver_only() {
+        let (sender, receiver) = mpsc::channel();
+        // Test structure with only a receiver which has a channel ID.
+        let receiver = MessageReceiverWithId::new(TEST_CHANNEL_ID_0, receiver);
+        let request_id = 5;
+        sender
+            .send(GenericMessage::new(request_id, TEST_CHANNEL_ID_1, ()))
+            .unwrap();
+        let reply = receiver.try_recv_message().unwrap();
+        assert!(reply.is_some());
+        assert_eq!(receiver.local_channel_id(), TEST_CHANNEL_ID_0);
+        let reply = reply.unwrap();
+        assert_eq!(reply.request_id, request_id);
+        assert_eq!(reply.sender_id, TEST_CHANNEL_ID_1);
+        assert_eq!(reply.message, ());
+    }
+}

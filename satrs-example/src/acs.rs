@@ -75,7 +75,7 @@ impl<VerificationReporter: VerificationReportingProvider> AcsTask<VerificationRe
                 match request.targeted_request.request {
                     Request::Hk(hk_req) => match hk_req {
                         HkRequest::OneShot(unique_id) => {
-                            self.handle_hk_request(target_and_apid_id.target(), unique_id)
+                            self.handle_hk_request(target_and_apid_id.target, unique_id)
                         }
                         HkRequest::Enable(_) => {}
                         HkRequest::Disable(_) => {}
