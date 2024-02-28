@@ -668,7 +668,7 @@ pub mod std_mod {
                 self.receiver.try_recv().map_err(|e| match e {
                     cb::TryRecvError::Empty => TryRecvTmtcError::Empty,
                     cb::TryRecvError::Disconnected => TryRecvTmtcError::Tmtc(EcssTmtcError::from(
-                        GenericReceiveError::TxDisconnected(Some(self.id())),
+                        GenericReceiveError::TxDisconnected(Some(self.channel_id())),
                     )),
                 })
             }
