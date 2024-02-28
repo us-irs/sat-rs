@@ -1,10 +1,11 @@
 use crate::{
     action::{ActionId, ActionRequest},
     params::Params,
+    request::RequestId,
     TargetId,
 };
 
-use super::verification::{RequestId, TcStateAccepted, VerificationToken};
+use super::verification::{TcStateAccepted, VerificationToken};
 
 use satrs_shared::res_code::ResultU16;
 use spacepackets::ecss::EcssEnumU16;
@@ -19,14 +20,14 @@ pub use alloc_mod::*;
 
 #[derive(Clone, Debug)]
 pub struct ActionRequestWithId {
-    pub req_id: RequestId,
+    pub request_id: RequestId,
     pub request: ActionRequest,
 }
 
 #[derive(Clone, Debug)]
 pub struct ActionReplyPusWithIds {
+    pub request_id: RequestId,
     pub action_id: ActionId,
-    pub req_id: RequestId,
     pub reply: ActionReplyPus,
 }
 
@@ -105,13 +106,13 @@ pub mod std_mod {
         pus::{
             get_current_cds_short_timestamp,
             verification::{
-                FailParams, FailParamsWithStep, RequestId, TcStateStarted,
-                VerificationReportingProvider,
+                self, FailParams, FailParamsWithStep, TcStateStarted, VerificationReportingProvider,
             },
             EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError,
             GenericRoutingError, PusPacketHandlerResult, PusPacketHandlingError,
             PusRoutingErrorHandler, PusServiceHelper,
         },
+        request::RequestId,
     };
     use hashbrown::HashMap;
     use spacepackets::time::UnixTimestamp;
@@ -245,12 +246,12 @@ pub mod std_mod {
     {
         pub fn add_routed_request(
             &mut self,
-            request_id: RequestId,
+            request_id: verification::RequestId,
             token: VerificationToken<TcStateStarted>,
             timeout_seconds: u32,
         ) {
             self.active_requests.insert(
-                request_id,
+                request_id.into(),
                 ActiveRequest {
                     token,
                     start_time: self.current_time,
@@ -297,7 +298,7 @@ pub mod std_mod {
             action_reply_with_ids: ActionReplyPusWithIds,
             time_stamp: &[u8],
         ) -> Result<(), EcssTmtcError> {
-            let active_req = self.active_requests.get(&action_reply_with_ids.req_id);
+            let active_req = self.active_requests.get(&action_reply_with_ids.request_id);
             if active_req.is_none() {
                 // TODO: This is an unexpected reply. We need to deal with this somehow.
             }
@@ -311,7 +312,8 @@ pub mod std_mod {
                             FailParams::new(time_stamp, &error_code, &self.fail_data_buf),
                         )
                         .map_err(|e| e.0)?;
-                    self.active_requests.remove(&action_reply_with_ids.req_id);
+                    self.active_requests
+                        .remove(&action_reply_with_ids.request_id);
                 }
                 ActionReplyPus::StepFailed {
                     error_code,
@@ -330,13 +332,15 @@ pub mod std_mod {
                             ),
                         )
                         .map_err(|e| e.0)?;
-                    self.active_requests.remove(&action_reply_with_ids.req_id);
+                    self.active_requests
+                        .remove(&action_reply_with_ids.request_id);
                 }
                 ActionReplyPus::Completed => {
                     self.verification_reporter
                         .completion_success(active_req.token, time_stamp)
                         .map_err(|e| e.0)?;
-                    self.active_requests.remove(&action_reply_with_ids.req_id);
+                    self.active_requests
+                        .remove(&action_reply_with_ids.request_id);
                 }
                 ActionReplyPus::StepSuccess { step } => {
                     self.verification_reporter

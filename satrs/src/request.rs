@@ -13,6 +13,11 @@ use spacepackets::{
 
 use crate::{queue::GenericTargetedMessagingError, ChannelId, TargetId};
 
+/// Generic request ID type. Requests can be associated with an ID to have a unique identifier
+/// for them. This can be useful for tasks like tracking their progress.
+pub type RequestId = u32;
+
+/// CCSDS APID type definition. Please note that the APID is a 14 bit value.
 pub type Apid = u16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

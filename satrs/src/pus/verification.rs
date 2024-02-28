@@ -173,6 +173,22 @@ impl RequestId {
     }
 }
 
+impl From<u32> for RequestId {
+    fn from(value: u32) -> Self {
+        Self {
+            version_number: ((value >> 29) & 0b111) as u8,
+            packet_id: PacketId::from(((value >> 16) & 0xffff) as u16),
+            psc: PacketSequenceCtrl::from((value & 0xffff) as u16),
+        }
+    }
+}
+
+impl From<RequestId> for u32 {
+    fn from(value: RequestId) -> Self {
+        value.raw()
+    }
+}
+
 /// If a verification operation fails, the passed token will be returned as well. This allows
 /// re-trying the operation at a later point.
 #[derive(Debug, Clone)]
