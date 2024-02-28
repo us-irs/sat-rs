@@ -200,7 +200,9 @@ pub trait ModeRequestHandler: ModeProvider {
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub mod alloc_mod {
-    use crate::request::{MessageSenderAndReceiver, RequestAndReplySenderAndReceiver};
+    use crate::request::{
+        MessageSender, MessageSenderAndReceiver, RequestAndReplySenderAndReceiver,
+    };
 
     use super::*;
 
@@ -350,7 +352,7 @@ pub mod std_mod {
     use std::sync::mpsc;
 
     use crate::request::{
-        MessageSenderAndReceiver, MessageSenderMap, MessageSenderMapWithId,
+        MessageSender, MessageSenderAndReceiver, MessageSenderMap, MessageSenderMapWithId,
         RequestAndReplySenderAndReceiver,
     };
 
@@ -499,4 +501,8 @@ pub mod std_mod {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+
+    #[test]
+    fn test_request_sender() {}
+}
