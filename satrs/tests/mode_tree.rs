@@ -1,15 +1,17 @@
 use core::cell::Cell;
 use std::{println, sync::mpsc};
 
-use satrs::mode_tree::ModeRequestSender;
+use satrs::mode::std_mod::{
+    MpscBoundedModeConnector, MpscBoundedModeRequestHandlerConnector,
+    MpscBoundedModeRequestorConnector,
+};
+use satrs::mode::{
+    ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler,
+    ModeRequestReceiver, ModeRequestSender,
+};
 use satrs::request::RequestId;
 use satrs::{
     mode::{ModeAndSubmode, ModeReply, ModeRequest},
-    mode_tree::{
-        ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler,
-        ModeRequestReceiver, MpscBoundedModeConnector, MpscBoundedModeRequestHandlerConnector,
-        MpscBoundedModeRequestorConnector,
-    },
     queue::GenericTargetedMessagingError,
     request::GenericMessage,
     ChannelId,
