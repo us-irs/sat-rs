@@ -1,8 +1,6 @@
 use core::{fmt, marker::PhantomData};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "std")]
-use std::error::Error;
 
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
@@ -25,39 +23,6 @@ pub type RequestId = u32;
 
 /// CCSDS APID type definition. Please note that the APID is a 14 bit value.
 pub type Apid = u16;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TargetIdCreationError {
-    ByteConversion(ByteConversionError),
-    NotEnoughAppData(usize),
-}
-
-impl From<ByteConversionError> for TargetIdCreationError {
-    fn from(e: ByteConversionError) -> Self {
-        Self::ByteConversion(e)
-    }
-}
-
-impl fmt::Display for TargetIdCreationError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::ByteConversion(e) => write!(f, "target ID creation: {}", e),
-            Self::NotEnoughAppData(len) => {
-                write!(f, "not enough app data to generate target ID: {}", len)
-            }
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl Error for TargetIdCreationError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        if let Self::ByteConversion(e) = self {
-            return Some(e);
-        }
-        None
-    }
-}
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct TargetAndApidId {
@@ -88,13 +53,12 @@ impl TargetAndApidId {
 
     pub fn from_pus_tc(
         tc: &(impl CcsdsPacket + PusPacket + IsPusTelecommand),
-    ) -> Result<Self, TargetIdCreationError> {
+    ) -> Result<Self, ByteConversionError> {
         if tc.user_data().len() < 4 {
             return Err(ByteConversionError::FromSliceTooSmall {
                 found: tc.user_data().len(),
                 expected: 8,
-            }
-            .into());
+            });
         }
         Ok(Self {
             apid: tc.apid(),
@@ -417,3 +381,6 @@ pub mod std_mod {
 
     pub type MessageReceiverWithIdMpsc<MSG> = MessageReceiverWithId<MSG, mpsc::Receiver<MSG>>;
 }
+
+#[cfg(test)]
+mod tests {}

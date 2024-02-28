@@ -3,7 +3,7 @@ use std::{println, sync::mpsc};
 
 use satrs::mode::{
     ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler,
-    ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestSender,
+    ModeRequestHandlerMpscBounded, ModeRequestReceiver,
     ModeRequestorAndHandlerMpscBounded, ModeRequestorBoundedMpsc,
 };
 use satrs::request::RequestId;
