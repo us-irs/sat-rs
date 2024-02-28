@@ -559,7 +559,7 @@ from_conversions_for_raw!(
 
 /// Generic enumeration for additional parameters, including parameters which rely on heap
 /// allocations.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Params {
     Heapless(ParamsHeapless),

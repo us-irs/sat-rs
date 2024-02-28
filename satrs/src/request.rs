@@ -1,6 +1,12 @@
-use core::fmt;
+use core::{fmt, marker::PhantomData};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "std")]
 use std::error::Error;
+
+#[cfg(feature = "alloc")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+pub use alloc_mod::*;
 
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
@@ -120,6 +126,8 @@ impl fmt::Display for TargetAndApidId {
 
 /// Generic message type which is associated with a sender using a [ChannelId] and associated
 /// with a request using a [RequestId].
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GenericMessage<MSG> {
     pub sender_id: ChannelId,
     pub request_id: RequestId,
@@ -146,49 +154,66 @@ pub trait MessageReceiver<MSG> {
     fn try_recv(&self) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError>;
 }
 
-#[cfg(feature = "std")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
-mod std_mod {
+pub struct MessageWithSenderIdReceiver<MSG, R: MessageReceiver<MSG>>(pub R, PhantomData<MSG>);
+
+impl<MSG, R: MessageReceiver<MSG>> From<R> for MessageWithSenderIdReceiver<MSG, R> {
+    fn from(receiver: R) -> Self {
+        MessageWithSenderIdReceiver(receiver, PhantomData)
+    }
+}
+
+impl<MSG, R: MessageReceiver<MSG>> MessageWithSenderIdReceiver<MSG, R> {
+    pub fn try_recv_message(
+        &self,
+        _local_id: ChannelId,
+    ) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
+        self.0.try_recv()
+    }
+}
+
+impl<MSG, R: MessageReceiver<MSG>> MessageReceiverWithId<MSG, R> {
+    pub fn new(
+        local_channel_id: ChannelId,
+        reply_receiver: MessageWithSenderIdReceiver<MSG, R>,
+    ) -> Self {
+        Self {
+            local_channel_id,
+            reply_receiver,
+        }
+    }
+
+    pub fn local_channel_id(&self) -> ChannelId {
+        self.local_channel_id
+    }
+}
+
+impl<MSG, R: MessageReceiver<MSG>> MessageReceiverWithId<MSG, R> {
+    pub fn try_recv_message(
+        &self,
+    ) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
+        self.reply_receiver.0.try_recv()
+    }
+}
+
+pub struct MessageReceiverWithId<MSG, R: MessageReceiver<MSG>> {
+    local_channel_id: ChannelId,
+    reply_receiver: MessageWithSenderIdReceiver<MSG, R>,
+}
+
+#[cfg(feature = "alloc")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+pub mod alloc_mod {
     use core::marker::PhantomData;
-    use std::sync::mpsc;
 
+    use crate::queue::GenericSendError;
+
+    use super::*;
     use hashbrown::HashMap;
-
-    use crate::{
-        queue::{GenericReceiveError, GenericSendError, GenericTargetedMessagingError},
-        ChannelId,
-    };
-
-    use super::{GenericMessage, MessageReceiver, MessageSender, RequestId};
-
-    impl<MSG: Send> MessageSender<MSG> for mpsc::Sender<GenericMessage<MSG>> {
-        fn send(&self, message: GenericMessage<MSG>) -> Result<(), GenericTargetedMessagingError> {
-            self.send(message)
-                .map_err(|_| GenericSendError::RxDisconnected)?;
-            Ok(())
-        }
-    }
-    impl<MSG: Send> MessageSender<MSG> for mpsc::SyncSender<GenericMessage<MSG>> {
-        fn send(&self, message: GenericMessage<MSG>) -> Result<(), GenericTargetedMessagingError> {
-            if let Err(e) = self.try_send(message) {
-                match e {
-                    mpsc::TrySendError::Full(_) => {
-                        return Err(GenericSendError::QueueFull(None).into());
-                    }
-                    mpsc::TrySendError::Disconnected(_) => todo!(),
-                }
-            }
-            Ok(())
-        }
-    }
 
     pub struct MessageSenderMap<MSG, S: MessageSender<MSG>>(
         pub HashMap<ChannelId, S>,
-        PhantomData<MSG>,
+        pub(crate) PhantomData<MSG>,
     );
-
-    pub type MpscSenderMap<MSG> = MessageReceiverWithId<MSG, mpsc::Sender<MSG>>;
-    pub type MpscBoundedSenderMap<MSG> = MessageReceiverWithId<MSG, mpsc::SyncSender<MSG>>;
 
     impl<MSG, S: MessageSender<MSG>> Default for MessageSenderMap<MSG, S> {
         fn default() -> Self {
@@ -250,68 +275,6 @@ mod std_mod {
         pub fn add_message_target(&mut self, target_id: ChannelId, message_sender: S) {
             self.message_sender_map
                 .add_message_target(target_id, message_sender)
-        }
-    }
-
-    impl<MSG> MessageReceiver<MSG> for mpsc::Receiver<GenericMessage<MSG>> {
-        fn try_recv(&self) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
-            match self.try_recv() {
-                Ok(msg) => Ok(Some(msg)),
-                Err(e) => match e {
-                    mpsc::TryRecvError::Empty => Ok(None),
-                    mpsc::TryRecvError::Disconnected => {
-                        Err(GenericReceiveError::TxDisconnected(None).into())
-                    }
-                },
-            }
-        }
-    }
-
-    pub struct MessageWithSenderIdReceiver<MSG, R: MessageReceiver<MSG>>(pub R, PhantomData<MSG>);
-
-    impl<MSG, R: MessageReceiver<MSG>> From<R> for MessageWithSenderIdReceiver<MSG, R> {
-        fn from(receiver: R) -> Self {
-            MessageWithSenderIdReceiver(receiver, PhantomData)
-        }
-    }
-
-    impl<MSG, R: MessageReceiver<MSG>> MessageWithSenderIdReceiver<MSG, R> {
-        pub fn try_recv_message(
-            &self,
-            _local_id: ChannelId,
-        ) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
-            self.0.try_recv()
-        }
-    }
-
-    pub struct MessageReceiverWithId<MSG, R: MessageReceiver<MSG>> {
-        local_channel_id: ChannelId,
-        reply_receiver: MessageWithSenderIdReceiver<MSG, R>,
-    }
-
-    pub type MpscMessageReceiverWithId<MSG> = MessageReceiverWithId<MSG, mpsc::Receiver<MSG>>;
-
-    impl<MSG, R: MessageReceiver<MSG>> MessageReceiverWithId<MSG, R> {
-        pub fn new(
-            local_channel_id: ChannelId,
-            reply_receiver: MessageWithSenderIdReceiver<MSG, R>,
-        ) -> Self {
-            Self {
-                local_channel_id,
-                reply_receiver,
-            }
-        }
-
-        pub fn local_channel_id(&self) -> ChannelId {
-            self.local_channel_id
-        }
-    }
-
-    impl<MSG, R: MessageReceiver<MSG>> MessageReceiverWithId<MSG, R> {
-        pub fn try_recv_message(
-            &self,
-        ) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
-            self.reply_receiver.0.try_recv()
         }
     }
 
@@ -382,4 +345,54 @@ mod std_mod {
             self.local_channel_id
         }
     }
+}
+
+#[cfg(feature = "std")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
+pub mod std_mod {
+
+    use super::*;
+    use std::sync::mpsc;
+
+    use crate::queue::{GenericReceiveError, GenericSendError, GenericTargetedMessagingError};
+
+    impl<MSG: Send> MessageSender<MSG> for mpsc::Sender<GenericMessage<MSG>> {
+        fn send(&self, message: GenericMessage<MSG>) -> Result<(), GenericTargetedMessagingError> {
+            self.send(message)
+                .map_err(|_| GenericSendError::RxDisconnected)?;
+            Ok(())
+        }
+    }
+    impl<MSG: Send> MessageSender<MSG> for mpsc::SyncSender<GenericMessage<MSG>> {
+        fn send(&self, message: GenericMessage<MSG>) -> Result<(), GenericTargetedMessagingError> {
+            if let Err(e) = self.try_send(message) {
+                match e {
+                    mpsc::TrySendError::Full(_) => {
+                        return Err(GenericSendError::QueueFull(None).into());
+                    }
+                    mpsc::TrySendError::Disconnected(_) => todo!(),
+                }
+            }
+            Ok(())
+        }
+    }
+
+    pub type MpscSenderMap<MSG> = MessageReceiverWithId<MSG, mpsc::Sender<MSG>>;
+    pub type MpscBoundedSenderMap<MSG> = MessageReceiverWithId<MSG, mpsc::SyncSender<MSG>>;
+
+    impl<MSG> MessageReceiver<MSG> for mpsc::Receiver<GenericMessage<MSG>> {
+        fn try_recv(&self) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
+            match self.try_recv() {
+                Ok(msg) => Ok(Some(msg)),
+                Err(e) => match e {
+                    mpsc::TryRecvError::Empty => Ok(None),
+                    mpsc::TryRecvError::Disconnected => {
+                        Err(GenericReceiveError::TxDisconnected(None).into())
+                    }
+                },
+            }
+        }
+    }
+
+    pub type MpscMessageReceiverWithId<MSG> = MessageReceiverWithId<MSG, mpsc::Receiver<MSG>>;
 }

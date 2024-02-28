@@ -1,71 +1,76 @@
-use crate::{params::Params, pool::StoreAddr, TargetId};
+use crate::{params::Params, pool::StoreAddr};
+
+#[cfg(feature = "alloc")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+pub use alloc_mod::*;
 
 pub type ActionId = u32;
 
-#[non_exhaustive]
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub enum ActionRequest {
-    UnsignedIdAndStoreData {
-        action_id: ActionId,
-        data_addr: StoreAddr,
-    },
-    #[cfg(feature = "alloc")]
-    UnsignedIdAndVecData {
-        action_id: ActionId,
-        data: alloc::vec::Vec<u8>,
-    },
-    #[cfg(feature = "alloc")]
-    StringIdAndVecData {
-        action_id: alloc::string::String,
-        data: alloc::vec::Vec<u8>,
-    },
-    #[cfg(feature = "alloc")]
-    StringIdAndStoreData {
-        action_id: alloc::string::String,
-        data: StoreAddr,
-    },
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct ActionRequest {
+    pub action_id: ActionId,
+    pub variant: ActionRequestVariant,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TargetedActionRequest {
-    target: TargetId,
-    action_request: ActionRequest,
-}
-
-impl TargetedActionRequest {
-    pub fn new(target: TargetId, action_request: ActionRequest) -> Self {
-        Self {
-            target,
-            action_request,
-        }
+impl ActionRequest {
+    pub fn new(action_id: ActionId, variant: ActionRequestVariant) -> Self {
+        Self { action_id, variant }
     }
 }
 
-/// A reply to an action request specific to PUS.
 #[non_exhaustive]
-#[derive(Clone, Debug)]
-pub enum ActionReply {
-    CompletionFailed {
-        id: ActionId,
-        reason: Params,
-    },
-    StepFailed {
-        id: ActionId,
-        step: u32,
-        reason: Params,
-    },
-    Completed(ActionId),
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub enum ActionRequestVariant {
+    StoreData(StoreAddr),
     #[cfg(feature = "alloc")]
-    CompletedStringId(alloc::string::String),
-    #[cfg(feature = "alloc")]
-    CompletionFailedStringId {
-        id: alloc::string::String,
-        reason: Params,
-    },
-    #[cfg(feature = "alloc")]
-    StepFailedStringId {
-        id: alloc::string::String,
-        step: u32,
-        reason: Params,
-    },
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+    VecData(alloc::vec::Vec<u8>),
 }
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ActionReply {
+    pub action_id: ActionId,
+    pub variant: ActionReplyVariant,
+}
+
+/// A reply to an action request.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq)]
+pub enum ActionReplyVariant {
+    CompletionFailed(Params),
+    StepFailed { step: u32, reason: Params },
+    Completed,
+}
+
+#[cfg(feature = "alloc")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+pub mod alloc_mod {
+    use super::*;
+
+    #[cfg(feature = "alloc")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+    #[derive(Debug, Eq, PartialEq, Clone)]
+    pub struct ActionRequestStringId {
+        pub action_id: alloc::string::String,
+        pub variant: ActionRequestVariant,
+    }
+
+    #[cfg(feature = "alloc")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+    impl ActionRequestStringId {
+        pub fn new(action_id: alloc::string::String, variant: ActionRequestVariant) -> Self {
+            Self { action_id, variant }
+        }
+    }
+
+    #[cfg(feature = "alloc")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+    #[derive(Debug, PartialEq, Clone)]
+    pub struct ActionReplyStringId {
+        pub action_id: alloc::string::String,
+        pub variant: ActionReplyVariant,
+    }
+}
+
+#[cfg(test)]
+mod tests {}

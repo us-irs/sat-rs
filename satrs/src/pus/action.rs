@@ -365,16 +365,20 @@ mod tests {
         CcsdsPacket, SequenceFlags, SpHeader,
     };
 
-    use crate::pus::{
-        tests::{
-            PusServiceHandlerWithVecCommon, PusTestHarness, SimplePusPacketHandler, TestConverter,
-            TestRouter, TestRoutingErrorHandler, APP_DATA_TOO_SHORT, TEST_APID,
+    use crate::{
+        action::ActionRequestVariant,
+        pus::{
+            tests::{
+                PusServiceHandlerWithVecCommon, PusTestHarness, SimplePusPacketHandler,
+                TestConverter, TestRouter, TestRoutingErrorHandler, APP_DATA_TOO_SHORT, TEST_APID,
+            },
+            verification::{
+                tests::TestVerificationReporter, FailParams, RequestId,
+                VerificationReportingProvider,
+            },
+            EcssTcInVecConverter, GenericRoutingError, MpscTcReceiver, PusPacketHandlerResult,
+            PusPacketHandlingError, TmAsVecSenderWithMpsc,
         },
-        verification::{
-            tests::TestVerificationReporter, FailParams, RequestId, VerificationReportingProvider,
-        },
-        EcssTcInVecConverter, GenericRoutingError, MpscTcReceiver, PusPacketHandlerResult,
-        PusPacketHandlingError, TmAsVecSenderWithMpsc,
     };
 
     use super::*;
@@ -385,12 +389,12 @@ mod tests {
         fn route(
             &self,
             target_id: TargetId,
-            hk_request: ActionRequest,
+            action_request: ActionRequest,
             _token: VerificationToken<TcStateAccepted>,
         ) -> Result<(), Self::Error> {
             self.routing_requests
                 .borrow_mut()
-                .push_back((target_id, hk_request));
+                .push_back((target_id, action_request));
             self.check_for_injected_error()
         }
     }
@@ -429,9 +433,9 @@ mod tests {
                     .expect("start success failure");
                 return Ok((
                     target_id.into(),
-                    ActionRequest::UnsignedIdAndVecData {
+                    ActionRequest {
                         action_id: u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap()),
-                        data: tc.user_data()[4..].to_vec(),
+                        variant: ActionRequestVariant::VecData(tc.user_data()[4..].to_vec()),
                     },
                 ));
             }
@@ -522,8 +526,8 @@ mod tests {
         action_handler.check_next_conversion(&tc);
         let (target_id, action_req) = action_handler.retrieve_next_request();
         assert_eq!(target_id, TEST_APID.into());
-        if let ActionRequest::UnsignedIdAndVecData { action_id, data } = action_req {
-            assert_eq!(action_id, 1);
+        assert_eq!(action_req.action_id, 1);
+        if let ActionRequestVariant::VecData(data) = action_req.variant {
             assert_eq!(data, &[]);
         }
     }
@@ -560,8 +564,8 @@ mod tests {
         action_handler.check_next_conversion(&tc);
         let (target_id, action_req) = action_handler.retrieve_next_request();
         assert_eq!(target_id, TEST_APID.into());
-        if let ActionRequest::UnsignedIdAndVecData { action_id, data } = action_req {
-            assert_eq!(action_id, 1);
+        assert_eq!(action_req.action_id, 1);
+        if let ActionRequestVariant::VecData(data) = action_req.variant {
             assert_eq!(data, &[]);
         }
 

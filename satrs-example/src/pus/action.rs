@@ -1,5 +1,5 @@
 use log::{error, warn};
-use satrs::action::ActionRequest;
+use satrs::action::{ActionRequest, ActionRequestVariant};
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
 use satrs::pus::action::{PusActionToRequestConverter, PusService8ActionHandler};
 use satrs::pus::verification::std_mod::{
@@ -58,10 +58,10 @@ impl PusActionToRequestConverter for ExampleActionRequestConverter {
         if subservice == 128 {
             Ok((
                 target_id.raw(),
-                ActionRequest::UnsignedIdAndVecData {
+                ActionRequest::new(
                     action_id,
-                    data: user_data[8..].to_vec(),
-                },
+                    ActionRequestVariant::VecData(user_data[8..].to_vec()),
+                ),
             ))
         } else {
             verif_reporter
