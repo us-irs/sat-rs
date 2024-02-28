@@ -118,25 +118,32 @@ impl fmt::Display for TargetAndApidId {
     }
 }
 
-pub struct MessageWithSenderId<MSG> {
+/// Generic message type which is associated with a sender using a [ChannelId] and associated
+/// with a request using a [RequestId].
+pub struct GenericMessage<MSG> {
     pub sender_id: ChannelId,
+    pub request_id: RequestId,
     pub message: MSG,
 }
 
-impl<MSG> MessageWithSenderId<MSG> {
-    pub fn new(sender_id: ChannelId, message: MSG) -> Self {
-        Self { sender_id, message }
+impl<MSG> GenericMessage<MSG> {
+    pub fn new(request_id: RequestId, sender_id: ChannelId, message: MSG) -> Self {
+        Self {
+            request_id,
+            sender_id,
+            message,
+        }
     }
 }
 
 /// Generic trait for objects which can send targeted messages.
 pub trait MessageSender<MSG>: Send {
-    fn send(&self, message: MessageWithSenderId<MSG>) -> Result<(), GenericTargetedMessagingError>;
+    fn send(&self, message: GenericMessage<MSG>) -> Result<(), GenericTargetedMessagingError>;
 }
 
 // Generic trait for objects which can receive targeted messages.
 pub trait MessageReceiver<MSG> {
-    fn try_recv(&self) -> Result<Option<MessageWithSenderId<MSG>>, GenericTargetedMessagingError>;
+    fn try_recv(&self) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError>;
 }
 
 #[cfg(feature = "std")]
@@ -152,23 +159,17 @@ mod std_mod {
         ChannelId,
     };
 
-    use super::{MessageReceiver, MessageSender, MessageWithSenderId};
+    use super::{GenericMessage, MessageReceiver, MessageSender, RequestId};
 
-    impl<MSG: Send> MessageSender<MSG> for mpsc::Sender<MessageWithSenderId<MSG>> {
-        fn send(
-            &self,
-            message: MessageWithSenderId<MSG>,
-        ) -> Result<(), GenericTargetedMessagingError> {
+    impl<MSG: Send> MessageSender<MSG> for mpsc::Sender<GenericMessage<MSG>> {
+        fn send(&self, message: GenericMessage<MSG>) -> Result<(), GenericTargetedMessagingError> {
             self.send(message)
                 .map_err(|_| GenericSendError::RxDisconnected)?;
             Ok(())
         }
     }
-    impl<MSG: Send> MessageSender<MSG> for mpsc::SyncSender<MessageWithSenderId<MSG>> {
-        fn send(
-            &self,
-            message: MessageWithSenderId<MSG>,
-        ) -> Result<(), GenericTargetedMessagingError> {
+    impl<MSG: Send> MessageSender<MSG> for mpsc::SyncSender<GenericMessage<MSG>> {
+        fn send(&self, message: GenericMessage<MSG>) -> Result<(), GenericTargetedMessagingError> {
             if let Err(e) = self.try_send(message) {
                 match e {
                     mpsc::TrySendError::Full(_) => {
@@ -202,6 +203,7 @@ mod std_mod {
 
         pub fn send_message(
             &self,
+            request_id: RequestId,
             local_channel_id: ChannelId,
             target_channel_id: ChannelId,
             message: MSG,
@@ -210,7 +212,7 @@ mod std_mod {
                 self.0
                     .get(&target_channel_id)
                     .unwrap()
-                    .send(MessageWithSenderId::new(local_channel_id, message))
+                    .send(GenericMessage::new(request_id, local_channel_id, message))
                     .map_err(|_| GenericSendError::RxDisconnected)?;
                 return Ok(());
             }
@@ -233,11 +235,16 @@ mod std_mod {
 
         pub fn send_message(
             &self,
+            request_id: RequestId,
             target_channel_id: ChannelId,
             message: MSG,
         ) -> Result<(), GenericTargetedMessagingError> {
-            self.message_sender_map
-                .send_message(self.local_channel_id, target_channel_id, message)
+            self.message_sender_map.send_message(
+                request_id,
+                self.local_channel_id,
+                target_channel_id,
+                message,
+            )
         }
 
         pub fn add_message_target(&mut self, target_id: ChannelId, message_sender: S) {
@@ -246,10 +253,8 @@ mod std_mod {
         }
     }
 
-    impl<MSG> MessageReceiver<MSG> for mpsc::Receiver<MessageWithSenderId<MSG>> {
-        fn try_recv(
-            &self,
-        ) -> Result<Option<MessageWithSenderId<MSG>>, GenericTargetedMessagingError> {
+    impl<MSG> MessageReceiver<MSG> for mpsc::Receiver<GenericMessage<MSG>> {
+        fn try_recv(&self) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
             match self.try_recv() {
                 Ok(msg) => Ok(Some(msg)),
                 Err(e) => match e {
@@ -274,7 +279,7 @@ mod std_mod {
         pub fn try_recv_message(
             &self,
             _local_id: ChannelId,
-        ) -> Result<Option<MessageWithSenderId<MSG>>, GenericTargetedMessagingError> {
+        ) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
             self.0.try_recv()
         }
     }
@@ -305,7 +310,7 @@ mod std_mod {
     impl<MSG, R: MessageReceiver<MSG>> MessageReceiverWithId<MSG, R> {
         pub fn try_recv_message(
             &self,
-        ) -> Result<Option<MessageWithSenderId<MSG>>, GenericTargetedMessagingError> {
+        ) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
             self.reply_receiver.0.try_recv()
         }
     }
