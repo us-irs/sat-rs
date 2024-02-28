@@ -165,7 +165,6 @@ impl<MSG, R: MessageReceiver<MSG>> From<R> for MessageWithSenderIdReceiver<MSG, 
 impl<MSG, R: MessageReceiver<MSG>> MessageWithSenderIdReceiver<MSG, R> {
     pub fn try_recv_message(
         &self,
-        _local_id: ChannelId,
     ) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
         self.0.try_recv()
     }
@@ -303,6 +302,28 @@ pub mod alloc_mod {
         pub fn local_channel_id_generic(&self) -> ChannelId {
             self.local_channel_id
         }
+
+        /// Try to send a message, which can be a reply or a request, depending on the generics.
+        pub fn send_message(
+            &self,
+            request_id: RequestId,
+            target_channel_id: ChannelId,
+            message: TO,
+        ) -> Result<(), GenericTargetedMessagingError> {
+            self.message_sender_map.send_message(
+                request_id,
+                self.local_channel_id_generic(),
+                target_channel_id,
+                message,
+            )
+        }
+
+        /// Try to receive a message, which can be a reply or a request, depending on the generics.
+        pub fn try_recv_message(
+            &self,
+        ) -> Result<Option<GenericMessage<FROM>>, GenericTargetedMessagingError> {
+            self.message_receiver.try_recv_message()
+        }
     }
 
     pub struct RequestAndReplySenderAndReceiver<
@@ -377,8 +398,8 @@ pub mod std_mod {
         }
     }
 
-    pub type MpscSenderMap<MSG> = MessageReceiverWithId<MSG, mpsc::Sender<MSG>>;
-    pub type MpscBoundedSenderMap<MSG> = MessageReceiverWithId<MSG, mpsc::SyncSender<MSG>>;
+    pub type MessageSenderMapMpsc<MSG> = MessageReceiverWithId<MSG, mpsc::Sender<MSG>>;
+    pub type MessageSenderMapBoundedMpsc<MSG> = MessageReceiverWithId<MSG, mpsc::SyncSender<MSG>>;
 
     impl<MSG> MessageReceiver<MSG> for mpsc::Receiver<GenericMessage<MSG>> {
         fn try_recv(&self) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
@@ -394,5 +415,5 @@ pub mod std_mod {
         }
     }
 
-    pub type MpscMessageReceiverWithId<MSG> = MessageReceiverWithId<MSG, mpsc::Receiver<MSG>>;
+    pub type MessageReceiverWithIdMpsc<MSG> = MessageReceiverWithId<MSG, mpsc::Receiver<MSG>>;
 }

@@ -1,13 +1,10 @@
 use core::cell::Cell;
 use std::{println, sync::mpsc};
 
-use satrs::mode::std_mod::{
-    MpscBoundedModeConnector, MpscBoundedModeRequestHandlerConnector,
-    MpscBoundedModeRequestorConnector,
-};
 use satrs::mode::{
     ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler,
-    ModeRequestReceiver, ModeRequestSender,
+    ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestSender,
+    ModeRequestorAndHandlerMpscBounded, ModeRequestorBoundedMpsc,
 };
 use satrs::request::RequestId;
 use satrs::{
@@ -27,7 +24,7 @@ pub enum TestChannelId {
 
 struct PusModeService {
     pub request_id_counter: Cell<u32>,
-    pub mode_node: MpscBoundedModeRequestorConnector,
+    pub mode_node: ModeRequestorBoundedMpsc,
 }
 
 impl PusModeService {
@@ -46,7 +43,7 @@ impl PusModeService {
 
 struct TestDevice {
     pub name: String,
-    pub mode_node: MpscBoundedModeRequestHandlerConnector,
+    pub mode_node: ModeRequestHandlerMpscBounded,
     pub mode_and_submode: ModeAndSubmode,
     pub mode_requestor_info: Option<(RequestId, ChannelId)>,
 }
@@ -120,7 +117,7 @@ impl ModeRequestHandler for TestDevice {
 }
 
 struct TestAssembly {
-    pub mode_node: MpscBoundedModeConnector,
+    pub mode_node: ModeRequestorAndHandlerMpscBounded,
     pub mode_requestor_info: Option<(RequestId, ChannelId)>,
     pub mode_and_submode: ModeAndSubmode,
     pub target_mode_and_submode: Option<ModeAndSubmode>,
@@ -246,26 +243,20 @@ fn main() {
     let (reply_sender_to_pus, reply_receiver_pus) = mpsc::sync_channel(10);
 
     // Mode requestors and handlers.
-    let mut mode_node_assy = MpscBoundedModeConnector::new(
+    let mut mode_node_assy = ModeRequestorAndHandlerMpscBounded::new(
         TestChannelId::Assembly as u32,
         request_receiver_assy,
         reply_receiver_assy,
     );
     // Mode requestors only.
-    let mut mode_node_pus = MpscBoundedModeRequestorConnector::new(
-        TestChannelId::PusModeService as u32,
-        reply_receiver_pus,
-    );
+    let mut mode_node_pus =
+        ModeRequestorBoundedMpsc::new(TestChannelId::PusModeService as u32, reply_receiver_pus);
 
     // Request handlers only.
-    let mut mode_node_dev1 = MpscBoundedModeRequestHandlerConnector::new(
-        TestChannelId::Device1 as u32,
-        request_receiver_dev1,
-    );
-    let mut mode_node_dev2 = MpscBoundedModeRequestHandlerConnector::new(
-        TestChannelId::Device2 as u32,
-        request_receiver_dev2,
-    );
+    let mut mode_node_dev1 =
+        ModeRequestHandlerMpscBounded::new(TestChannelId::Device1 as u32, request_receiver_dev1);
+    let mut mode_node_dev2 =
+        ModeRequestHandlerMpscBounded::new(TestChannelId::Device2 as u32, request_receiver_dev2);
 
     // Set up mode request senders first.
     mode_node_pus.add_message_target(TestChannelId::Assembly as u32, request_sender_to_assy);
