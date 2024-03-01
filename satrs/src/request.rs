@@ -382,10 +382,13 @@ mod tests {
         ByteConversionError, SpHeader,
     };
 
-    use super::{GenericMessage, MessageReceiverWithId, TargetAndApidId};
+    use crate::queue::{GenericSendError, GenericTargetedMessagingError};
+
+    use super::{GenericMessage, MessageReceiverWithId, MessageSenderMapWithId, TargetAndApidId};
 
     const TEST_CHANNEL_ID_0: u32 = 1;
     const TEST_CHANNEL_ID_1: u32 = 2;
+    const TEST_CHANNEL_ID_2: u32 = 3;
 
     #[test]
     fn test_basic_target_id_with_apid() {
@@ -442,5 +445,45 @@ mod tests {
         assert_eq!(reply.request_id, request_id);
         assert_eq!(reply.sender_id, TEST_CHANNEL_ID_1);
         assert_eq!(reply.message, ());
+    }
+
+    #[test]
+    fn test_sender_map() {
+        let (sender0, receiver0) = mpsc::channel();
+        let (sender1, receiver1) = mpsc::channel();
+        let mut sender_map_with_id = MessageSenderMapWithId::new(TEST_CHANNEL_ID_0);
+        sender_map_with_id.add_message_target(TEST_CHANNEL_ID_1, sender0);
+        sender_map_with_id.add_message_target(TEST_CHANNEL_ID_2, sender1);
+        sender_map_with_id
+            .send_message(1, TEST_CHANNEL_ID_1, 5)
+            .expect("sending message failed");
+        let mut reply = receiver0.recv().expect("receiving message failed");
+        assert_eq!(reply.request_id, 1);
+        assert_eq!(reply.sender_id, TEST_CHANNEL_ID_0);
+        assert_eq!(reply.message, 5);
+        sender_map_with_id
+            .send_message(2, TEST_CHANNEL_ID_2, 10)
+            .expect("sending message failed");
+        reply = receiver1.recv().expect("receiving message failed");
+        assert_eq!(reply.request_id, 2);
+        assert_eq!(reply.sender_id, TEST_CHANNEL_ID_0);
+        assert_eq!(reply.message, 10);
+    }
+
+    #[test]
+    fn test_sender_map_target_does_not_exist() {
+        let (sender0, receiver0) = mpsc::channel();
+        let mut sender_map_with_id = MessageSenderMapWithId::new(TEST_CHANNEL_ID_0);
+        sender_map_with_id.add_message_target(TEST_CHANNEL_ID_1, sender0);
+        let result = sender_map_with_id.send_message(1, TEST_CHANNEL_ID_2, 5);
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        if let GenericTargetedMessagingError::Send(GenericSendError::TargetDoesNotExist(target)) =
+            error
+        {
+            assert_eq!(target, TEST_CHANNEL_ID_2);
+        } else {
+            panic!("Unexpected error type");
+        }
     }
 }

@@ -546,11 +546,11 @@ mod tests {
     use std::sync::mpsc;
 
     use crate::{
-        mode::{ModeAndSubmode, ModeReply},
+        mode::{ModeAndSubmode, ModeReply, ModeReplySender, ModeRequestSender},
         request::GenericMessage,
     };
 
-    use super::{ModeRequest, ModeRequestorMpsc};
+    use super::{ModeRequest, ModeRequestorAndHandlerMpsc, ModeRequestorMpsc};
 
     const TEST_CHANNEL_ID_0: u32 = 5;
     const TEST_CHANNEL_ID_1: u32 = 6;
@@ -593,4 +593,67 @@ mod tests {
 
     #[test]
     fn test_simple_mode_request_handler() {}
+
+    #[test]
+    fn test_mode_requestor_and_request_handler_request_sending() {
+        let (reply_sender_to_connector, reply_receiver_of_connector) = mpsc::channel();
+        let (request_sender_to_connector, request_receiver_of_connector) = mpsc::channel();
+
+        let (request_sender_to_channel_1, request_receiver_channel_1) = mpsc::channel();
+        //let (reply_sender_to_channel_2, reply_receiver_channel_2) = mpsc::channel();
+        let mut mode_connector = ModeRequestorAndHandlerMpsc::new(
+            TEST_CHANNEL_ID_0,
+            request_receiver_of_connector,
+            reply_receiver_of_connector,
+        );
+        assert_eq!(
+            ModeRequestSender::local_channel_id(&mode_connector),
+            TEST_CHANNEL_ID_0
+        );
+        assert_eq!(
+            ModeReplySender::local_channel_id(&mode_connector),
+            TEST_CHANNEL_ID_0
+        );
+        assert_eq!(mode_connector.local_channel_id_generic(), TEST_CHANNEL_ID_0);
+
+        mode_connector.add_request_target(TEST_CHANNEL_ID_1, request_sender_to_channel_1);
+        //mode_connector.add_reply_target(TEST_CHANNEL_ID_2, reply_sender_to_channel_2);
+
+        // Send a request and verify it arrives at the receiver.
+        let request_id = 2;
+        let sent_request = ModeRequest::ReadMode;
+        mode_connector
+            .send_mode_request(request_id, TEST_CHANNEL_ID_1, sent_request)
+            .expect("send failed");
+
+        let request = request_receiver_channel_1.recv().expect("recv failed");
+        assert_eq!(request.request_id, 2);
+        assert_eq!(request.sender_id, TEST_CHANNEL_ID_0);
+        assert_eq!(request.message, ModeRequest::ReadMode);
+    }
+
+    #[test]
+    fn test_mode_requestor_and_request_handler_reply_sending() {
+        let (reply_sender_to_connector, reply_receiver_of_connector) = mpsc::channel();
+        let (request_sender_to_connector, request_receiver_of_connector) = mpsc::channel();
+
+        let (reply_sender_to_channel_2, reply_receiver_channel_2) = mpsc::channel();
+        let mut mode_connector = ModeRequestorAndHandlerMpsc::new(
+            TEST_CHANNEL_ID_0,
+            request_receiver_of_connector,
+            reply_receiver_of_connector,
+        );
+        mode_connector.add_reply_target(TEST_CHANNEL_ID_2, reply_sender_to_channel_2);
+
+        // Send a request and verify it arrives at the receiver.
+        let request_id = 2;
+        let sent_reply = ModeReply::ModeInfo(ModeAndSubmode::new(3, 5));
+        mode_connector
+            .send_mode_reply(request_id, TEST_CHANNEL_ID_2, sent_reply)
+            .expect("send failed");
+        let reply = reply_receiver_channel_2.recv().expect("recv failed");
+        assert_eq!(reply.request_id, 2);
+        assert_eq!(reply.sender_id, TEST_CHANNEL_ID_0);
+        assert_eq!(reply.message, sent_reply);
+    }
 }
