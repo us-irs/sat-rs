@@ -468,7 +468,13 @@ pub enum EcssEnumParams {
 }
 
 macro_rules! writable_as_be_bytes_ecss_enum_impl {
-    ($EnumIdent: ident) => {
+    ($EnumIdent: ident, $Ty: ident) => {
+        impl From<$EnumIdent> for EcssEnumParams {
+            fn from(e: $EnumIdent) -> Self {
+                Self::$Ty(e)
+            }
+        }
+
         impl WritableToBeBytes for $EnumIdent {
             fn written_len(&self) -> usize {
                 self.size()
@@ -481,10 +487,10 @@ macro_rules! writable_as_be_bytes_ecss_enum_impl {
     };
 }
 
-writable_as_be_bytes_ecss_enum_impl!(EcssEnumU8);
-writable_as_be_bytes_ecss_enum_impl!(EcssEnumU16);
-writable_as_be_bytes_ecss_enum_impl!(EcssEnumU32);
-writable_as_be_bytes_ecss_enum_impl!(EcssEnumU64);
+writable_as_be_bytes_ecss_enum_impl!(EcssEnumU8, U8);
+writable_as_be_bytes_ecss_enum_impl!(EcssEnumU16, U16);
+writable_as_be_bytes_ecss_enum_impl!(EcssEnumU32, U32);
+writable_as_be_bytes_ecss_enum_impl!(EcssEnumU64, U64);
 
 impl WritableToBeBytes for EcssEnumParams {
     fn written_len(&self) -> usize {
@@ -964,35 +970,39 @@ mod tests {
 
     #[test]
     fn test_f32_single() {
-        let f32 = F32::from(0.1);
-        assert_eq!(f32.0, 0.1);
-        assert_eq!(WritableToBeBytes::written_len(&f32), 4);
-        let f32_pair_raw = f32.to_be_bytes();
+        let param = F32::from(0.1);
+        assert_eq!(param.0, 0.1);
+        assert_eq!(WritableToBeBytes::written_len(&param), 4);
+        let f32_pair_raw = param.to_be_bytes();
         let f32_0 = f32::from_be_bytes(f32_pair_raw[0..4].try_into().unwrap());
         assert_eq!(f32_0, 0.1);
-        test_writing_fails(&f32);
-        test_cloning_works(&f32);
-        let f32_praw = ParamsRaw::from(f32);
-        test_writing(&f32_praw, &f32);
+        test_writing_fails(&param);
+        test_cloning_works(&param);
+        let praw = ParamsRaw::from(param);
+        test_writing(&praw, &param);
+        let p_try_from = F32::try_from(param.to_be_bytes().as_ref()).expect("try_from failed");
+        assert_eq!(p_try_from, param);
     }
 
     #[test]
     fn test_f32_pair() {
-        let f32_pair = F32Pair::from((0.1, 0.2));
-        assert_eq!(f32_pair.0, 0.1);
-        assert_eq!(f32_pair.1, 0.2);
-        assert_eq!(WritableToBeBytes::written_len(&f32_pair), 8);
-        let f32_pair_raw = f32_pair.to_be_bytes();
+        let param = F32Pair::from((0.1, 0.2));
+        assert_eq!(param.0, 0.1);
+        assert_eq!(param.1, 0.2);
+        assert_eq!(WritableToBeBytes::written_len(&param), 8);
+        let f32_pair_raw = param.to_be_bytes();
         let f32_0 = f32::from_be_bytes(f32_pair_raw[0..4].try_into().unwrap());
         assert_eq!(f32_0, 0.1);
         let f32_1 = f32::from_be_bytes(f32_pair_raw[4..8].try_into().unwrap());
         assert_eq!(f32_1, 0.2);
         let other_pair = F32Pair::from((0.1, 0.2));
-        assert_eq!(f32_pair, other_pair);
-        test_writing_fails(&f32_pair);
-        test_cloning_works(&f32_pair);
-        let f32_praw = ParamsRaw::from(f32_pair);
-        test_writing(&f32_praw, &f32_pair);
+        assert_eq!(param, other_pair);
+        test_writing_fails(&param);
+        test_cloning_works(&param);
+        let praw = ParamsRaw::from(param);
+        test_writing(&praw, &param);
+        let p_try_from = F32Pair::try_from(param.to_be_bytes().as_ref()).expect("try_from failed");
+        assert_eq!(p_try_from, param);
     }
 
     #[test]
@@ -1013,6 +1023,9 @@ mod tests {
         test_cloning_works(&f32);
         let f32_praw = ParamsRaw::from(f32);
         test_writing(&f32_praw, &f32);
+        let f32_try_from =
+            F32Triplet::try_from(f32.to_be_bytes().as_ref()).expect("try_from failed");
+        assert_eq!(f32_try_from, f32);
     }
 
     #[test]
@@ -1065,5 +1078,57 @@ mod tests {
         assert_eq!(f64_2, 0.3);
         test_writing_fails(&f64_triplet);
         test_cloning_works(&f64_triplet);
+    }
+
+    #[test]
+    fn test_u8_ecss_enum() {
+        let value = 200;
+        let u8p = EcssEnumU8::new(value);
+        test_cloning_works(&u8p);
+        let praw = EcssEnumParams::from(u8p);
+        assert_eq!(praw.written_len(), 1);
+        let mut buf = [0; 1];
+        praw.write_to_be_bytes(&mut buf)
+            .expect("writing to buffer failed");
+        buf[0] = 200;
+    }
+
+    #[test]
+    fn test_u16_ecss_enum() {
+        let value = 60000;
+        let u16p = EcssEnumU16::new(value);
+        test_cloning_works(&u16p);
+        let praw = EcssEnumParams::from(u16p);
+        assert_eq!(praw.written_len(), 2);
+        let mut buf = [0; 2];
+        praw.write_to_be_bytes(&mut buf)
+            .expect("writing to buffer failed");
+        assert_eq!(u16::from_be_bytes(buf), value);
+    }
+
+    #[test]
+    fn test_u32_ecss_enum() {
+        let value = 70000;
+        let u32p = EcssEnumU32::new(value);
+        test_cloning_works(&u32p);
+        let praw = EcssEnumParams::from(u32p);
+        assert_eq!(praw.written_len(), 4);
+        let mut buf = [0; 4];
+        praw.write_to_be_bytes(&mut buf)
+            .expect("writing to buffer failed");
+        assert_eq!(u32::from_be_bytes(buf), value);
+    }
+
+    #[test]
+    fn test_u64_ecss_enum() {
+        let value = 0xffffffffff;
+        let u64p = EcssEnumU64::new(value);
+        test_cloning_works(&u64p);
+        let praw = EcssEnumParams::from(u64p);
+        assert_eq!(praw.written_len(), 8);
+        let mut buf = [0; 8];
+        praw.write_to_be_bytes(&mut buf)
+            .expect("writing to buffer failed");
+        assert_eq!(u64::from_be_bytes(buf), value);
     }
 }
