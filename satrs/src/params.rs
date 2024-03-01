@@ -849,6 +849,32 @@ mod tests {
     }
 
     #[test]
+    fn test_u16_single() {
+        let raw_params = U16::from(0x123);
+        assert_eq!(raw_params.0, 0x123);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 2);
+        assert_eq!(raw_params.to_be_bytes(), [0x01, 0x23]);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let u16_praw = ParamsRaw::from(raw_params);
+        test_writing(&u16_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_u16_triplet() {
+        let raw_params = U16Triplet::from((1, 2, 3));
+        assert_eq!(raw_params.0, 1);
+        assert_eq!(raw_params.1, 2);
+        assert_eq!(raw_params.2, 3);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 6);
+        assert_eq!(raw_params.to_be_bytes(), [0, 1, 0, 2, 0, 3]);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let u16_praw = ParamsRaw::from(raw_params);
+        test_writing(&u16_praw, &raw_params);
+    }
+
+    #[test]
     fn test_u8_triplet() {
         let raw_params = U8Triplet::from((1, 2, 3));
         assert_eq!(raw_params.0, 1);
@@ -860,6 +886,94 @@ mod tests {
         test_cloning_works(&raw_params);
         let u8_praw = ParamsRaw::from(raw_params);
         test_writing(&u8_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_i16_single() {
+        let value = -300_i16;
+        let raw_params = I16::from(value);
+        assert_eq!(raw_params.0, value);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 2);
+        assert_eq!(raw_params.to_be_bytes(), value.to_be_bytes());
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let i16_praw = ParamsRaw::from(raw_params);
+        test_writing(&i16_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_i16_pair() {
+        let raw_params = I16Pair::from((-300, -400));
+        assert_eq!(raw_params.0, -300);
+        assert_eq!(raw_params.1, -400);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 4);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let i16_praw = ParamsRaw::from(raw_params);
+        test_writing(&i16_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_i16_triplet() {
+        let raw_params = I16Triplet::from((-300, -400, -350));
+        assert_eq!(raw_params.0, -300);
+        assert_eq!(raw_params.1, -400);
+        assert_eq!(raw_params.2, -350);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 6);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let i16_praw = ParamsRaw::from(raw_params);
+        test_writing(&i16_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_i32_single() {
+        let raw_params = I32::from(-80000);
+        assert_eq!(raw_params.0, -80000);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 4);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let i32_praw = ParamsRaw::from(raw_params);
+        test_writing(&i32_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_i32_pair() {
+        let raw_params = I32Pair::from((-80000, -200));
+        assert_eq!(raw_params.0, -80000);
+        assert_eq!(raw_params.1, -200);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 8);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let i32_praw = ParamsRaw::from(raw_params);
+        test_writing(&i32_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_i32_triplet() {
+        let raw_params = I32Triplet::from((-80000, -5, -200));
+        assert_eq!(raw_params.0, -80000);
+        assert_eq!(raw_params.1, -5);
+        assert_eq!(raw_params.2, -200);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 12);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let i32_praw = ParamsRaw::from(raw_params);
+        test_writing(&i32_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_f32_single() {
+        let f32 = F32::from(0.1);
+        assert_eq!(f32.0, 0.1);
+        assert_eq!(WritableToBeBytes::written_len(&f32), 4);
+        let f32_pair_raw = f32.to_be_bytes();
+        let f32_0 = f32::from_be_bytes(f32_pair_raw[0..4].try_into().unwrap());
+        assert_eq!(f32_0, 0.1);
+        test_writing_fails(&f32);
+        test_cloning_works(&f32);
+        let f32_praw = ParamsRaw::from(f32);
+        test_writing(&f32_praw, &f32);
     }
 
     #[test]
@@ -877,10 +991,62 @@ mod tests {
         assert_eq!(f32_pair, other_pair);
         test_writing_fails(&f32_pair);
         test_cloning_works(&f32_pair);
-        assert_eq!(
-            ParamsRaw::from(f32_pair).written_len(),
-            WritableToBeBytes::written_len(&f32_pair)
-        );
+        let f32_praw = ParamsRaw::from(f32_pair);
+        test_writing(&f32_praw, &f32_pair);
+    }
+
+    #[test]
+    fn test_f32_triplet() {
+        let f32 = F32Triplet::from((0.1, -0.1, -5.2));
+        assert_eq!(f32.0, 0.1);
+        assert_eq!(f32.1, -0.1);
+        assert_eq!(f32.2, -5.2);
+        assert_eq!(WritableToBeBytes::written_len(&f32), 12);
+        let f32_pair_raw = f32.to_be_bytes();
+        let f32_0 = f32::from_be_bytes(f32_pair_raw[0..4].try_into().unwrap());
+        assert_eq!(f32_0, 0.1);
+        let f32_1 = f32::from_be_bytes(f32_pair_raw[4..8].try_into().unwrap());
+        assert_eq!(f32_1, -0.1);
+        let f32_2 = f32::from_be_bytes(f32_pair_raw[8..12].try_into().unwrap());
+        assert_eq!(f32_2, -5.2);
+        test_writing_fails(&f32);
+        test_cloning_works(&f32);
+        let f32_praw = ParamsRaw::from(f32);
+        test_writing(&f32_praw, &f32);
+    }
+
+    #[test]
+    fn test_u64_single() {
+        let u64 = U64::from(0x1010101010);
+        assert_eq!(u64.0, 0x1010101010);
+        assert_eq!(WritableToBeBytes::written_len(&u64), 8);
+        test_writing_fails(&u64);
+        test_cloning_works(&u64);
+        let praw = ParamsRaw::from(u64);
+        test_writing(&praw, &u64);
+    }
+
+    #[test]
+    fn test_i64_single() {
+        let i64 = I64::from(-0xfffffffff);
+        assert_eq!(i64.0, -0xfffffffff);
+        assert_eq!(WritableToBeBytes::written_len(&i64), 8);
+        test_writing_fails(&i64);
+        test_cloning_works(&i64);
+        let praw = ParamsRaw::from(i64);
+        test_writing(&praw, &i64);
+    }
+
+    #[test]
+    fn test_f64_single() {
+        let value = 823_823_812_832.232_3;
+        let f64 = F64::from(value);
+        assert_eq!(f64.0, value);
+        assert_eq!(WritableToBeBytes::written_len(&f64), 8);
+        test_writing_fails(&f64);
+        test_cloning_works(&f64);
+        let praw = ParamsRaw::from(f64);
+        test_writing(&praw, &f64);
     }
 
     #[test]
