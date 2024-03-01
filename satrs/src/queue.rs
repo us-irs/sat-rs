@@ -74,6 +74,25 @@ impl From<GenericReceiveError> for GenericTargetedMessagingError {
     }
 }
 
+impl Display for GenericTargetedMessagingError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Send(err) => write!(f, "generic targeted messaging error: {}", err),
+            Self::Receive(err) => write!(f, "generic targeted messaging error: {}", err),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl Error for GenericTargetedMessagingError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            GenericTargetedMessagingError::Send(send) => Some(send),
+            GenericTargetedMessagingError::Receive(receive) => Some(receive),
+        }
+    }
+}
+
 #[cfg(feature = "std")]
 impl<T> From<mpsc::SendError<T>> for GenericSendError {
     fn from(_: mpsc::SendError<T>) -> Self {

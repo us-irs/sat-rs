@@ -78,7 +78,11 @@ impl From<TargetAndApidId> for u64 {
 
 impl fmt::Display for TargetAndApidId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}, {}", self.apid, self.target)
+        write!(
+            f,
+            "Target and APID ID with  APID {:#03x} and target {}",
+            self.apid, self.target
+        )
     }
 }
 
@@ -188,12 +192,11 @@ pub mod alloc_mod {
             message: MSG,
         ) -> Result<(), GenericTargetedMessagingError> {
             if self.0.contains_key(&target_channel_id) {
-                self.0
+                return self
+                    .0
                     .get(&target_channel_id)
                     .unwrap()
-                    .send(GenericMessage::new(request_id, local_channel_id, message))
-                    .map_err(|_| GenericSendError::RxDisconnected)?;
-                return Ok(());
+                    .send(GenericMessage::new(request_id, local_channel_id, message));
             }
             Err(GenericSendError::TargetDoesNotExist(target_channel_id).into())
         }
@@ -377,12 +380,13 @@ pub mod std_mod {
 mod tests {
     use std::sync::mpsc;
 
+    use alloc::string::ToString;
     use spacepackets::{
         ecss::tc::{PusTcCreator, PusTcSecondaryHeader},
         ByteConversionError, SpHeader,
     };
 
-    use crate::queue::{GenericSendError, GenericTargetedMessagingError};
+    use crate::queue::{GenericReceiveError, GenericSendError, GenericTargetedMessagingError};
 
     use super::{GenericMessage, MessageReceiverWithId, MessageSenderMapWithId, TargetAndApidId};
 
@@ -401,6 +405,11 @@ mod tests {
         let id_from_raw = TargetAndApidId::from(id_raw);
         assert_eq!(id_from_raw, id);
         assert_eq!(id.full_target_id(), (0x111 << 32) | 0x01);
+        let string = id.to_string();
+        assert_eq!(
+            string,
+            "Target and APID ID with  APID 0x111 and target 1".to_string()
+        );
     }
 
     #[test]
@@ -448,6 +457,32 @@ mod tests {
     }
 
     #[test]
+    fn test_receiver_empty() {
+        let (sender, receiver) = mpsc::sync_channel::<GenericMessage<i32>>(2);
+        // Test structure with only a receiver which has a channel ID.
+        let receiver = MessageReceiverWithId::new(TEST_CHANNEL_ID_0, receiver);
+        let reply = receiver.try_recv_message().unwrap();
+        assert!(reply.is_none());
+    }
+
+    #[test]
+    fn test_all_tx_disconnected() {
+        let (sender, receiver) = mpsc::sync_channel::<GenericMessage<i32>>(2);
+        // Test structure with only a receiver which has a channel ID.
+        let receiver = MessageReceiverWithId::new(TEST_CHANNEL_ID_0, receiver);
+        drop(sender);
+        let reply = receiver.try_recv_message();
+        assert!(reply.is_err());
+        let error = reply.unwrap_err();
+        if let GenericTargetedMessagingError::Receive(GenericReceiveError::TxDisconnected(None)) =
+            error
+        {
+        } else {
+            panic!("unexpected error type");
+        }
+    }
+
+    #[test]
     fn test_sender_map() {
         let (sender0, receiver0) = mpsc::channel();
         let (sender1, receiver1) = mpsc::channel();
@@ -486,4 +521,24 @@ mod tests {
             panic!("Unexpected error type");
         }
     }
+    #[test]
+    fn test_sender_map_queue_full() {
+        let (sender0, receiver0) = mpsc::sync_channel(1);
+        let mut sender_map_with_id = MessageSenderMapWithId::new(TEST_CHANNEL_ID_0);
+        sender_map_with_id.add_message_target(TEST_CHANNEL_ID_1, sender0);
+        sender_map_with_id
+            .send_message(1, TEST_CHANNEL_ID_1, 5)
+            .expect("sending message failed");
+        let result = sender_map_with_id.send_message(1, TEST_CHANNEL_ID_1, 5);
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        if let GenericTargetedMessagingError::Send(GenericSendError::QueueFull(capacity)) = error {
+            assert!(capacity.is_none());
+        } else {
+            panic!("Unexpected error type {}", error);
+        }
+    }
+
+    #[test]
+    fn test_sender_map_queue_receiver_disconnected() {}
 }
