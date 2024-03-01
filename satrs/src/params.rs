@@ -63,6 +63,13 @@ pub trait WritableToBeBytes {
     fn written_len(&self) -> usize;
     /// Writes the object to a raw buffer in network endianness (big)
     fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError>;
+
+    #[cfg(feature = "alloc")]
+    fn to_vec(&self) -> Result<Vec<u8>, ByteConversionError> {
+        let mut vec = alloc::vec![0; self.written_len()];
+        self.write_to_be_bytes(&mut vec)?;
+        Ok(vec)
+    }
 }
 
 macro_rules! param_to_be_bytes_impl {
@@ -460,7 +467,7 @@ params_raw_from_newtype!(
 );
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum EcssEnumParams {
+pub enum ParamsEcssEnum {
     U8(EcssEnumU8),
     U16(EcssEnumU16),
     U32(EcssEnumU32),
@@ -469,7 +476,7 @@ pub enum EcssEnumParams {
 
 macro_rules! writable_as_be_bytes_ecss_enum_impl {
     ($EnumIdent: ident, $Ty: ident) => {
-        impl From<$EnumIdent> for EcssEnumParams {
+        impl From<$EnumIdent> for ParamsEcssEnum {
             fn from(e: $EnumIdent) -> Self {
                 Self::$Ty(e)
             }
@@ -492,22 +499,22 @@ writable_as_be_bytes_ecss_enum_impl!(EcssEnumU16, U16);
 writable_as_be_bytes_ecss_enum_impl!(EcssEnumU32, U32);
 writable_as_be_bytes_ecss_enum_impl!(EcssEnumU64, U64);
 
-impl WritableToBeBytes for EcssEnumParams {
+impl WritableToBeBytes for ParamsEcssEnum {
     fn written_len(&self) -> usize {
         match self {
-            EcssEnumParams::U8(e) => e.written_len(),
-            EcssEnumParams::U16(e) => e.written_len(),
-            EcssEnumParams::U32(e) => e.written_len(),
-            EcssEnumParams::U64(e) => e.written_len(),
+            ParamsEcssEnum::U8(e) => e.written_len(),
+            ParamsEcssEnum::U16(e) => e.written_len(),
+            ParamsEcssEnum::U32(e) => e.written_len(),
+            ParamsEcssEnum::U64(e) => e.written_len(),
         }
     }
 
     fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
         match self {
-            EcssEnumParams::U8(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
-            EcssEnumParams::U16(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
-            EcssEnumParams::U32(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
-            EcssEnumParams::U64(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
+            ParamsEcssEnum::U8(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
+            ParamsEcssEnum::U16(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
+            ParamsEcssEnum::U32(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
+            ParamsEcssEnum::U64(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
         }
     }
 }
@@ -516,7 +523,19 @@ impl WritableToBeBytes for EcssEnumParams {
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ParamsHeapless {
     Raw(ParamsRaw),
-    EcssEnum(EcssEnumParams),
+    EcssEnum(ParamsEcssEnum),
+}
+
+impl From<ParamsRaw> for ParamsHeapless {
+    fn from(v: ParamsRaw) -> Self {
+        Self::Raw(v)
+    }
+}
+
+impl From<ParamsEcssEnum> for ParamsHeapless {
+    fn from(v: ParamsEcssEnum) -> Self {
+        Self::EcssEnum(v)
+    }
 }
 
 macro_rules! from_conversions_for_raw {
@@ -816,6 +835,37 @@ mod tests {
     }
 
     #[test]
+    fn test_params_written_len_raw() {
+        let param_raw = ParamsRaw::from((500_u32, 1000_u32));
+        let param: Params = Params::Heapless(param_raw.into());
+        assert_eq!(param.written_len(), 8);
+        let mut buf: [u8; 8] = [0; 8];
+        param
+            .write_to_be_bytes(&mut buf)
+            .expect("writing to buffer failed");
+        assert_eq!(u32::from_be_bytes(buf[0..4].try_into().unwrap()), 500);
+        assert_eq!(u32::from_be_bytes(buf[4..8].try_into().unwrap()), 1000);
+    }
+
+    #[test]
+    fn test_params_written_string() {
+        let string = "Test String".to_string();
+        let param = Params::String(string.clone());
+        assert_eq!(param.written_len(), string.len());
+        let vec = param.to_vec().unwrap();
+        let string_conv_back = String::from_utf8(vec).expect("conversion to string failed");
+        assert_eq!(string_conv_back, string);
+    }
+
+    #[test]
+    fn test_params_written_vec() {
+        let vec: Vec<u8> = alloc::vec![1, 2, 3, 4, 5];
+        let param = Params::Vec(vec.clone());
+        assert_eq!(param.written_len(), vec.len());
+        assert_eq!(param.to_vec().expect("writing vec params failed"), vec);
+    }
+
+    #[test]
     fn test_u32_single() {
         let raw_params = U32::from(20);
         assert_eq!(raw_params.0, 20);
@@ -1085,7 +1135,7 @@ mod tests {
         let value = 200;
         let u8p = EcssEnumU8::new(value);
         test_cloning_works(&u8p);
-        let praw = EcssEnumParams::from(u8p);
+        let praw = ParamsEcssEnum::from(u8p);
         assert_eq!(praw.written_len(), 1);
         let mut buf = [0; 1];
         praw.write_to_be_bytes(&mut buf)
@@ -1098,7 +1148,7 @@ mod tests {
         let value = 60000;
         let u16p = EcssEnumU16::new(value);
         test_cloning_works(&u16p);
-        let praw = EcssEnumParams::from(u16p);
+        let praw = ParamsEcssEnum::from(u16p);
         assert_eq!(praw.written_len(), 2);
         let mut buf = [0; 2];
         praw.write_to_be_bytes(&mut buf)
@@ -1111,7 +1161,7 @@ mod tests {
         let value = 70000;
         let u32p = EcssEnumU32::new(value);
         test_cloning_works(&u32p);
-        let praw = EcssEnumParams::from(u32p);
+        let praw = ParamsEcssEnum::from(u32p);
         assert_eq!(praw.written_len(), 4);
         let mut buf = [0; 4];
         praw.write_to_be_bytes(&mut buf)
@@ -1124,7 +1174,7 @@ mod tests {
         let value = 0xffffffffff;
         let u64p = EcssEnumU64::new(value);
         test_cloning_works(&u64p);
-        let praw = EcssEnumParams::from(u64p);
+        let praw = ParamsEcssEnum::from(u64p);
         assert_eq!(praw.written_len(), 8);
         let mut buf = [0; 8];
         praw.write_to_be_bytes(&mut buf)
