@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Refactored ECSS TM sender abstractions to be generic over different message queue backends.
 - Refactored Verification Reporter abstractions and implementation to be generic over the sender
   instead of using trait objects.
+- Renamed `WritableToBeBytes::raw_len` to `WritableToBeBytes::written_len` for consistency.
 
 ## Fixed
 

@@ -60,12 +60,12 @@ fn test_threaded_usage() {
                                 ParamsHeapless::Raw(raw) => {
                                     raw.write_to_be_bytes(&mut params_array)
                                         .expect("Writing raw parameter failed");
-                                    gen_event(Some(&params_array[0..raw.raw_len()]))
+                                    gen_event(Some(&params_array[0..raw.written_len()]))
                                 }
                                 ParamsHeapless::EcssEnum(e) => {
                                     e.write_to_be_bytes(&mut params_array)
                                         .expect("Writing ECSS enum failed");
-                                    gen_event(Some(&params_array[0..e.raw_len()]))
+                                    gen_event(Some(&params_array[0..e.written_len()]))
                                 }
                             },
                             Params::Vec(vec) => gen_event(Some(vec.as_slice())),

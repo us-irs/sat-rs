@@ -60,7 +60,7 @@ use alloc::vec::Vec;
 /// Generic trait which is used for objects which can be converted into a raw network (big) endian
 /// byte format.
 pub trait WritableToBeBytes {
-    fn raw_len(&self) -> usize;
+    fn written_len(&self) -> usize;
     /// Writes the object to a raw buffer in network endianness (big)
     fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError>;
 }
@@ -69,12 +69,12 @@ macro_rules! param_to_be_bytes_impl {
     ($Newtype: ident) => {
         impl WritableToBeBytes for $Newtype {
             #[inline]
-            fn raw_len(&self) -> usize {
+            fn written_len(&self) -> usize {
                 size_of::<<Self as ToBeBytes>::ByteArray>()
             }
 
             fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
-                let raw_len = self.raw_len();
+                let raw_len = WritableToBeBytes::written_len(self);
                 if buf.len() < raw_len {
                     return Err(ByteConversionError::ToSliceTooSmall {
                         found: buf.len(),
@@ -382,32 +382,32 @@ pub enum ParamsRaw {
 }
 
 impl WritableToBeBytes for ParamsRaw {
-    fn raw_len(&self) -> usize {
+    fn written_len(&self) -> usize {
         match self {
-            ParamsRaw::U8(v) => v.raw_len(),
-            ParamsRaw::U8Pair(v) => v.raw_len(),
-            ParamsRaw::U8Triplet(v) => v.raw_len(),
-            ParamsRaw::I8(v) => v.raw_len(),
-            ParamsRaw::I8Pair(v) => v.raw_len(),
-            ParamsRaw::I8Triplet(v) => v.raw_len(),
-            ParamsRaw::U16(v) => v.raw_len(),
-            ParamsRaw::U16Pair(v) => v.raw_len(),
-            ParamsRaw::U16Triplet(v) => v.raw_len(),
-            ParamsRaw::I16(v) => v.raw_len(),
-            ParamsRaw::I16Pair(v) => v.raw_len(),
-            ParamsRaw::I16Triplet(v) => v.raw_len(),
-            ParamsRaw::U32(v) => v.raw_len(),
-            ParamsRaw::U32Pair(v) => v.raw_len(),
-            ParamsRaw::U32Triplet(v) => v.raw_len(),
-            ParamsRaw::I32(v) => v.raw_len(),
-            ParamsRaw::I32Pair(v) => v.raw_len(),
-            ParamsRaw::I32Triplet(v) => v.raw_len(),
-            ParamsRaw::F32(v) => v.raw_len(),
-            ParamsRaw::F32Pair(v) => v.raw_len(),
-            ParamsRaw::F32Triplet(v) => v.raw_len(),
-            ParamsRaw::U64(v) => v.raw_len(),
-            ParamsRaw::I64(v) => v.raw_len(),
-            ParamsRaw::F64(v) => v.raw_len(),
+            ParamsRaw::U8(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U8Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U8Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I8(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I8Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I8Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U16(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U16Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U16Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I16(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I16Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I16Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U32(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U32Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U32Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I32(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I32Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I32Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::F32(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::F32Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::F32Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U64(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I64(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::F64(v) => WritableToBeBytes::written_len(v),
         }
     }
 
@@ -470,12 +470,12 @@ pub enum EcssEnumParams {
 macro_rules! writable_as_be_bytes_ecss_enum_impl {
     ($EnumIdent: ident) => {
         impl WritableToBeBytes for $EnumIdent {
-            fn raw_len(&self) -> usize {
+            fn written_len(&self) -> usize {
                 self.size()
             }
 
             fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
-                <Self as UnsignedEnum>::write_to_be_bytes(self, buf).map(|_| self.raw_len())
+                <Self as UnsignedEnum>::write_to_be_bytes(self, buf).map(|_| self.written_len())
             }
         }
     };
@@ -487,12 +487,12 @@ writable_as_be_bytes_ecss_enum_impl!(EcssEnumU32);
 writable_as_be_bytes_ecss_enum_impl!(EcssEnumU64);
 
 impl WritableToBeBytes for EcssEnumParams {
-    fn raw_len(&self) -> usize {
+    fn written_len(&self) -> usize {
         match self {
-            EcssEnumParams::U8(e) => e.raw_len(),
-            EcssEnumParams::U16(e) => e.raw_len(),
-            EcssEnumParams::U32(e) => e.raw_len(),
-            EcssEnumParams::U64(e) => e.raw_len(),
+            EcssEnumParams::U8(e) => e.written_len(),
+            EcssEnumParams::U16(e) => e.written_len(),
+            EcssEnumParams::U32(e) => e.written_len(),
+            EcssEnumParams::U64(e) => e.written_len(),
         }
     }
 
@@ -621,11 +621,11 @@ impl From<&str> for Params {
 /// Please note while [WritableToBeBytes] is implemented for [Params], the default implementation
 /// will not be able to process the [Params::Store] parameter variant.
 impl WritableToBeBytes for Params {
-    fn raw_len(&self) -> usize {
+    fn written_len(&self) -> usize {
         match self {
             Params::Heapless(p) => match p {
-                ParamsHeapless::Raw(raw) => raw.raw_len(),
-                ParamsHeapless::EcssEnum(enumeration) => enumeration.raw_len(),
+                ParamsHeapless::Raw(raw) => raw.written_len(),
+                ParamsHeapless::EcssEnum(enumeration) => enumeration.written_len(),
             },
             Params::Store(_) => 0,
             #[cfg(feature = "alloc")]
@@ -685,6 +685,24 @@ mod tests {
     }
 
     #[test]
+    fn test_u32_pair_writing_fails() {
+        let u32_pair = U32Pair(4, 8);
+        test_writing_fails(&u32_pair);
+    }
+
+    fn test_writing_fails(param_raw: &impl WritableToBeBytes) {
+        let pair_size = param_raw.written_len();
+        let mut vec = alloc::vec![0; pair_size - 1];
+        let result = param_raw.write_to_be_bytes(&mut vec);
+        if let Err(ByteConversionError::ToSliceTooSmall { found, expected }) = result {
+            assert_eq!(found, pair_size - 1);
+            assert_eq!(expected, pair_size);
+        } else {
+            panic!("Expected ByteConversionError::ToSliceTooSmall");
+        }
+    }
+
+    #[test]
     fn basic_signed_test_pair() {
         let i8_pair = I8Pair(-3, -16);
         assert_eq!(i8_pair.0, -3);
@@ -694,6 +712,21 @@ mod tests {
         assert_eq!(i8_conv_back, -3);
         i8_conv_back = i8::from_be_bytes(raw[1..2].try_into().unwrap());
         assert_eq!(i8_conv_back, -16);
+    }
+
+    #[test]
+    fn test_from_u32_triplet() {
+        let raw_params = U32Triplet::from((1, 2, 3));
+        assert_eq!(raw_params.0, 1);
+        assert_eq!(raw_params.1, 2);
+        assert_eq!(raw_params.2, 3);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 12);
+        assert_eq!(
+            raw_params.to_be_bytes(),
+            [0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3]
+        );
+        let other = raw_params;
+        assert_eq!(other, raw_params);
     }
 
     #[test]
@@ -730,5 +763,46 @@ mod tests {
         } else {
             panic!("Params type is not a vector")
         }
+    }
+
+    #[test]
+    fn test_from_u32_single() {
+        let raw_params = U32::from(20);
+        assert_eq!(raw_params.0, 20);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 4);
+        assert_eq!(raw_params.to_be_bytes(), [0, 0, 0, 20]);
+        let other = U32::from(20);
+        assert_eq!(raw_params, other);
+    }
+
+    #[test]
+    fn test_f32_pair() {
+        let f32_pair = F32Pair::from((0.1, 0.2));
+        assert_eq!(f32_pair.0, 0.1);
+        assert_eq!(f32_pair.1, 0.2);
+        assert_eq!(WritableToBeBytes::written_len(&f32_pair), 8);
+        let f32_pair_raw = f32_pair.to_be_bytes();
+        let f32_0 = f32::from_be_bytes(f32_pair_raw[0..4].try_into().unwrap());
+        assert_eq!(f32_0, 0.1);
+        let f32_1 = f32::from_be_bytes(f32_pair_raw[4..8].try_into().unwrap());
+        assert_eq!(f32_1, 0.2);
+        let other_pair = F32Pair::from((0.1, 0.2));
+        assert_eq!(f32_pair, other_pair);
+    }
+
+    #[test]
+    fn test_f64_triplet() {
+        let f64_triplet = F64Triplet::from((0.1, 0.2, 0.3));
+        assert_eq!(f64_triplet.0, 0.1);
+        assert_eq!(f64_triplet.1, 0.2);
+        assert_eq!(f64_triplet.2, 0.3);
+        assert_eq!(WritableToBeBytes::written_len(&f64_triplet), 24);
+        let f64_triplet_raw = f64_triplet.to_be_bytes();
+        let f64_0 = f64::from_be_bytes(f64_triplet_raw[0..8].try_into().unwrap());
+        assert_eq!(f64_0, 0.1);
+        let f64_1 = f64::from_be_bytes(f64_triplet_raw[8..16].try_into().unwrap());
+        assert_eq!(f64_1, 0.2);
+        let f64_2 = f64::from_be_bytes(f64_triplet_raw[16..24].try_into().unwrap());
+        assert_eq!(f64_2, 0.3);
     }
 }
