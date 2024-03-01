@@ -345,12 +345,12 @@ pub mod std_mod {
     impl<MSG: Send> MessageSender<MSG> for mpsc::SyncSender<GenericMessage<MSG>> {
         fn send(&self, message: GenericMessage<MSG>) -> Result<(), GenericTargetedMessagingError> {
             if let Err(e) = self.try_send(message) {
-                match e {
-                    mpsc::TrySendError::Full(_) => {
-                        return Err(GenericSendError::QueueFull(None).into());
+                return match e {
+                    mpsc::TrySendError::Full(_) => Err(GenericSendError::QueueFull(None).into()),
+                    mpsc::TrySendError::Disconnected(_) => {
+                        Err(GenericSendError::RxDisconnected.into())
                     }
-                    mpsc::TrySendError::Disconnected(_) => todo!(),
-                }
+                };
             }
             Ok(())
         }
@@ -445,7 +445,7 @@ mod tests {
         let receiver = MessageReceiverWithId::new(TEST_CHANNEL_ID_0, receiver);
         let request_id = 5;
         sender
-            .send(GenericMessage::new(request_id, TEST_CHANNEL_ID_1, ()))
+            .send(GenericMessage::new(request_id, TEST_CHANNEL_ID_1, 5))
             .unwrap();
         let reply = receiver.try_recv_message().unwrap();
         assert!(reply.is_some());
@@ -453,12 +453,12 @@ mod tests {
         let reply = reply.unwrap();
         assert_eq!(reply.request_id, request_id);
         assert_eq!(reply.sender_id, TEST_CHANNEL_ID_1);
-        assert_eq!(reply.message, ());
+        assert_eq!(reply.message, 5);
     }
 
     #[test]
     fn test_receiver_empty() {
-        let (sender, receiver) = mpsc::sync_channel::<GenericMessage<i32>>(2);
+        let (_sender, receiver) = mpsc::sync_channel::<GenericMessage<i32>>(2);
         // Test structure with only a receiver which has a channel ID.
         let receiver = MessageReceiverWithId::new(TEST_CHANNEL_ID_0, receiver);
         let reply = receiver.try_recv_message().unwrap();
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn test_sender_map_target_does_not_exist() {
-        let (sender0, receiver0) = mpsc::channel();
+        let (sender0, _) = mpsc::channel();
         let mut sender_map_with_id = MessageSenderMapWithId::new(TEST_CHANNEL_ID_0);
         sender_map_with_id.add_message_target(TEST_CHANNEL_ID_1, sender0);
         let result = sender_map_with_id.send_message(1, TEST_CHANNEL_ID_2, 5);
@@ -523,7 +523,7 @@ mod tests {
     }
     #[test]
     fn test_sender_map_queue_full() {
-        let (sender0, receiver0) = mpsc::sync_channel(1);
+        let (sender0, _receiver0) = mpsc::sync_channel(1);
         let mut sender_map_with_id = MessageSenderMapWithId::new(TEST_CHANNEL_ID_0);
         sender_map_with_id.add_message_target(TEST_CHANNEL_ID_1, sender0);
         sender_map_with_id
@@ -540,5 +540,17 @@ mod tests {
     }
 
     #[test]
-    fn test_sender_map_queue_receiver_disconnected() {}
+    fn test_sender_map_queue_receiver_disconnected() {
+        let (sender0, receiver0) = mpsc::sync_channel(1);
+        let mut sender_map_with_id = MessageSenderMapWithId::new(TEST_CHANNEL_ID_0);
+        sender_map_with_id.add_message_target(TEST_CHANNEL_ID_1, sender0);
+        drop(receiver0);
+        let result = sender_map_with_id.send_message(1, TEST_CHANNEL_ID_1, 5);
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        if let GenericTargetedMessagingError::Send(GenericSendError::RxDisconnected) = error {
+        } else {
+            panic!("Unexpected error type {}", error);
+        }
+    }
 }
