@@ -6,10 +6,13 @@ use std::{
 use log::{info, warn};
 use satrs::{
     hal::std::tcp_server::{ServerConfig, TcpSpacepacketsServer},
+    pus::ReceivesEcssPusTc,
     spacepackets::PacketId,
-    tmtc::{CcsdsDistributor, CcsdsError, TmPacketSourceCore},
+    tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc, TmPacketSourceCore},
 };
 use satrs_example::config::PUS_APID;
+
+use crate::ccsds::CcsdsReceiver;
 
 pub const PACKET_ID_LOOKUP: &[PacketId] = &[PacketId::const_tc(true, PUS_APID)];
 
@@ -69,20 +72,37 @@ impl TmPacketSourceCore for SyncTcpTmSource {
     }
 }
 
-pub struct TcpTask<MpscErrorType: 'static> {
-    server: TcpSpacepacketsServer<
-        (),
-        CcsdsError<MpscErrorType>,
-        SyncTcpTmSource,
-        CcsdsDistributor<MpscErrorType>,
-    >,
+pub type TcpServerType<TcSource, MpscErrorType> = TcpSpacepacketsServer<
+    (),
+    CcsdsError<MpscErrorType>,
+    SyncTcpTmSource,
+    CcsdsDistributor<CcsdsReceiver<TcSource, MpscErrorType>, MpscErrorType>,
+>;
+
+pub struct TcpTask<
+    TcSource: ReceivesCcsdsTc<Error = MpscErrorType>
+        + ReceivesEcssPusTc<Error = MpscErrorType>
+        + Clone
+        + Send
+        + 'static,
+    MpscErrorType: 'static,
+> {
+    server: TcpServerType<TcSource, MpscErrorType>,
 }
 
-impl<MpscErrorType: 'static + core::fmt::Debug> TcpTask<MpscErrorType> {
+impl<
+        TcSource: ReceivesCcsdsTc<Error = MpscErrorType>
+            + ReceivesEcssPusTc<Error = MpscErrorType>
+            + Clone
+            + Send
+            + 'static,
+        MpscErrorType: 'static + core::fmt::Debug,
+    > TcpTask<TcSource, MpscErrorType>
+{
     pub fn new(
         cfg: ServerConfig,
         tm_source: SyncTcpTmSource,
-        tc_receiver: CcsdsDistributor<MpscErrorType>,
+        tc_receiver: CcsdsDistributor<CcsdsReceiver<TcSource, MpscErrorType>, MpscErrorType>,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
             server: TcpSpacepacketsServer::new(

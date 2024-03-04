@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Refactored Verification Reporter abstractions and implementation to be generic over the sender
   instead of using trait objects.
 - Renamed `WritableToBeBytes::raw_len` to `WritableToBeBytes::written_len` for consistency.
+- `PusServiceProvider` renamed to `PusServiceDistributor` to make the purpose of the object
+  more clear
+- `PusServiceProvider::handle_pus_tc_packet` renamed to `PusServiceDistributor::distribute_packet`.
+- `PusServiceDistibutor` and `CcsdsDistributor` now use generics instead of trait objects.
+  This makes accessing the concrete trait implementations more easy as well.
 
 ## Fixed
 

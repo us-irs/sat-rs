@@ -182,7 +182,7 @@ fn static_tmtc_pool_main() {
     );
 
     let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
-    let udp_ccsds_distributor = CcsdsDistributor::new(Box::new(ccsds_receiver.clone()));
+    let udp_ccsds_distributor = CcsdsDistributor::new(ccsds_receiver.clone());
     let udp_tc_server = UdpTcServer::new(sock_addr, 2048, Box::new(udp_ccsds_distributor))
         .expect("creating UDP TMTC server failed");
     let mut udp_tmtc_server = UdpTmtcServer {
@@ -193,7 +193,7 @@ fn static_tmtc_pool_main() {
         },
     };
 
-    let tcp_ccsds_distributor = CcsdsDistributor::new(Box::new(ccsds_receiver));
+    let tcp_ccsds_distributor = CcsdsDistributor::new(ccsds_receiver);
     let tcp_server_cfg = ServerConfig::new(sock_addr, Duration::from_millis(400), 4096, 8192);
     let sync_tm_tcp_source = SyncTcpTmSource::new(200);
     let mut tcp_server = TcpTask::new(
@@ -396,7 +396,7 @@ fn dyn_tmtc_pool_main() {
     );
 
     let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
-    let udp_ccsds_distributor = CcsdsDistributor::new(Box::new(ccsds_receiver.clone()));
+    let udp_ccsds_distributor = CcsdsDistributor::new(ccsds_receiver.clone());
     let udp_tc_server = UdpTcServer::new(sock_addr, 2048, Box::new(udp_ccsds_distributor))
         .expect("creating UDP TMTC server failed");
     let mut udp_tmtc_server = UdpTmtcServer {
@@ -406,7 +406,7 @@ fn dyn_tmtc_pool_main() {
         },
     };
 
-    let tcp_ccsds_distributor = CcsdsDistributor::new(Box::new(ccsds_receiver));
+    let tcp_ccsds_distributor = CcsdsDistributor::new(ccsds_receiver);
     let tcp_server_cfg = ServerConfig::new(sock_addr, Duration::from_millis(400), 4096, 8192);
     let sync_tm_tcp_source = SyncTcpTmSource::new(200);
     let mut tcp_server = TcpTask::new(
