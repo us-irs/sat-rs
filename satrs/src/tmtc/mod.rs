@@ -18,7 +18,7 @@ pub mod tm_helper;
 #[cfg(feature = "alloc")]
 pub use ccsds_distrib::{CcsdsDistributor, CcsdsError, CcsdsPacketHandler};
 #[cfg(feature = "alloc")]
-pub use pus_distrib::{PusDistributor, PusServiceProvider};
+pub use pus_distrib::{PusDistributor, PusServiceDistributor};
 
 /// Generic trait for object which can receive any telecommands in form of a raw bytestream, with
 /// no assumptions about the received protocol.

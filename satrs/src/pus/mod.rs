@@ -920,7 +920,7 @@ pub mod std_mod {
             }
         }
 
-        /// This function can be used to poll the internal [EcssTcReceiver] object for the next
+        /// This function can be used to poll the internal [EcssTcReceiverCore] object for the next
         /// telecommand packet. It will return `Ok(None)` if there are not packets available.
         /// In any other case, it will perform the acceptance of the ECSS TC packet using the
         /// internal [VerificationReportingProvider] object. It will then return the telecommand
