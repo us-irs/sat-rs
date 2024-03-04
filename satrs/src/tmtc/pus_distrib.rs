@@ -2,7 +2,7 @@
 //!
 //! The routing components consist of two core components:
 //!  1. [PusDistributor] component which dispatches received packets to a user-provided handler.
-//!  2. [PusServiceProvider] trait which should be implemented by the user-provided PUS packet
+//!  2. [PusServiceDistributor] trait which should be implemented by the user-provided PUS packet
 //!     handler.
 //!
 //! The [PusDistributor] implements the [ReceivesEcssPusTc], [ReceivesCcsdsTc] and the
@@ -13,25 +13,26 @@
 //!    the raw bytestream. If this process fails, a [PusDistribError::PusError] is returned to the
 //!    user.
 //! 2. If it was possible to extract both components, the packet will be passed to the
-//!    [PusServiceProvider::handle_pus_tc_packet] method provided by the user.
+//!    [PusServiceDistributor::distribute_packet] method provided by the user.
 //!
 //! # Example
 //!
 //! ```rust
 //! use spacepackets::ecss::WritablePusPacket;
-//! use satrs::tmtc::pus_distrib::{PusDistributor, PusServiceProvider};
+//! use satrs::tmtc::pus_distrib::{PusDistributor, PusServiceDistributor};
 //! use satrs::tmtc::{ReceivesTc, ReceivesTcCore};
 //! use spacepackets::SpHeader;
 //! use spacepackets::ecss::tc::{PusTcCreator, PusTcReader};
+//!
 //! struct ConcretePusHandler {
 //!     handler_call_count: u32
 //! }
 //!
 //! // This is a very simple possible service provider. It increments an internal call count field,
 //! // which is used to verify the handler was called
-//! impl PusServiceProvider for ConcretePusHandler {
+//! impl PusServiceDistributor for ConcretePusHandler {
 //!     type Error = ();
-//!     fn handle_pus_tc_packet(&mut self, service: u8, header: &SpHeader, pus_tc: &PusTcReader) -> Result<(), Self::Error> {
+//!     fn distribute_packet(&mut self, service: u8, header: &SpHeader, pus_tc: &PusTcReader) -> Result<(), Self::Error> {
 //!         assert_eq!(service, 17);
 //!         assert_eq!(pus_tc.len_packed(), 13);
 //!         self.handler_call_count += 1;
@@ -42,7 +43,7 @@
 //! let service_handler = ConcretePusHandler {
 //!     handler_call_count: 0
 //! };
-//! let mut pus_distributor = PusDistributor::new(Box::new(service_handler));
+//! let mut pus_distributor = PusDistributor::new(service_handler);
 //!
 //! // Create and pass PUS ping telecommand with a valid APID
 //! let mut space_packet_header = SpHeader::tc_unseg(0x002, 0x34, 0).unwrap();
@@ -57,50 +58,42 @@
 //!
 //! // User helper function to retrieve concrete class. We check the call count here to verify
 //! // that the PUS ping telecommand was routed successfully.
-//! let concrete_handler_ref: &ConcretePusHandler = pus_distributor
-//!     .service_provider_ref()
-//!     .expect("Casting back to concrete type failed");
-//! assert_eq!(concrete_handler_ref.handler_call_count, 1);
+//! let concrete_handler = pus_distributor.service_distributor();
+//! assert_eq!(concrete_handler.handler_call_count, 1);
 //! ```
 use crate::pus::ReceivesEcssPusTc;
 use crate::tmtc::{ReceivesCcsdsTc, ReceivesTcCore};
-use alloc::boxed::Box;
 use core::fmt::{Display, Formatter};
-use downcast_rs::Downcast;
 use spacepackets::ecss::tc::PusTcReader;
 use spacepackets::ecss::{PusError, PusPacket};
 use spacepackets::SpHeader;
 #[cfg(feature = "std")]
 use std::error::Error;
 
-pub trait PusServiceProvider: Downcast {
+/// Trait for a generic distributor object which can distribute PUS packets based on packet
+/// properties like the PUS service, space packet header or any other content of the PUS packet.
+pub trait PusServiceDistributor {
     type Error;
-    fn handle_pus_tc_packet(
+    fn distribute_packet(
         &mut self,
         service: u8,
         header: &SpHeader,
         pus_tc: &PusTcReader,
     ) -> Result<(), Self::Error>;
 }
-downcast_rs::impl_downcast!(PusServiceProvider assoc Error);
-
-pub trait SendablePusServiceProvider: PusServiceProvider + Send {}
-
-impl<T: Send + PusServiceProvider> SendablePusServiceProvider for T {}
-
-downcast_rs::impl_downcast!(SendablePusServiceProvider assoc Error);
 
 /// Generic distributor object which dispatches received packets to a user provided handler.
-///
-/// This distributor expects the passed trait object to be [Send]able to allow more ergonomic
-/// usage with threads.
-pub struct PusDistributor<E> {
-    pub service_provider: Box<dyn SendablePusServiceProvider<Error = E>>,
+pub struct PusDistributor<ServiceDistributor: PusServiceDistributor<Error = E>, E> {
+    service_distributor: ServiceDistributor,
 }
 
-impl<E> PusDistributor<E> {
-    pub fn new(service_provider: Box<dyn SendablePusServiceProvider<Error = E>>) -> Self {
-        PusDistributor { service_provider }
+impl<ServiceDistributor: PusServiceDistributor<Error = E>, E>
+    PusDistributor<ServiceDistributor, E>
+{
+    pub fn new(service_provider: ServiceDistributor) -> Self {
+        PusDistributor {
+            service_distributor: service_provider,
+        }
     }
 }
 
@@ -113,8 +106,8 @@ pub enum PusDistribError<E> {
 impl<E: Display> Display for PusDistribError<E> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
-            PusDistribError::CustomError(e) => write!(f, "{e}"),
-            PusDistribError::PusError(e) => write!(f, "{e}"),
+            PusDistribError::CustomError(e) => write!(f, "pus distribution error: {e}"),
+            PusDistribError::PusError(e) => write!(f, "pus distribution error: {e}"),
         }
     }
 }
@@ -129,7 +122,9 @@ impl<E: Error> Error for PusDistribError<E> {
     }
 }
 
-impl<E: 'static> ReceivesTcCore for PusDistributor<E> {
+impl<ServiceDistributor: PusServiceDistributor<Error = E>, E: 'static> ReceivesTcCore
+    for PusDistributor<ServiceDistributor, E>
+{
     type Error = PusDistribError<E>;
     fn pass_tc(&mut self, tm_raw: &[u8]) -> Result<(), Self::Error> {
         // Convert to ccsds and call pass_ccsds
@@ -139,7 +134,9 @@ impl<E: 'static> ReceivesTcCore for PusDistributor<E> {
     }
 }
 
-impl<E: 'static> ReceivesCcsdsTc for PusDistributor<E> {
+impl<ServiceDistributor: PusServiceDistributor<Error = E>, E: 'static> ReceivesCcsdsTc
+    for PusDistributor<ServiceDistributor, E>
+{
     type Error = PusDistribError<E>;
     fn pass_ccsds(&mut self, header: &SpHeader, tm_raw: &[u8]) -> Result<(), Self::Error> {
         let (tc, _) = PusTcReader::new(tm_raw).map_err(|e| PusDistribError::PusError(e))?;
@@ -147,34 +144,39 @@ impl<E: 'static> ReceivesCcsdsTc for PusDistributor<E> {
     }
 }
 
-impl<E: 'static> ReceivesEcssPusTc for PusDistributor<E> {
+impl<ServiceDistributor: PusServiceDistributor<Error = E>, E: 'static> ReceivesEcssPusTc
+    for PusDistributor<ServiceDistributor, E>
+{
     type Error = PusDistribError<E>;
     fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTcReader) -> Result<(), Self::Error> {
-        self.service_provider
-            .handle_pus_tc_packet(pus_tc.service(), header, pus_tc)
+        self.service_distributor
+            .distribute_packet(pus_tc.service(), header, pus_tc)
             .map_err(|e| PusDistribError::CustomError(e))
     }
 }
 
-impl<E: 'static> PusDistributor<E> {
-    pub fn service_provider_ref<T: SendablePusServiceProvider<Error = E>>(&self) -> Option<&T> {
-        self.service_provider.downcast_ref::<T>()
+impl<ServiceDistributor: PusServiceDistributor<Error = E>, E: 'static>
+    PusDistributor<ServiceDistributor, E>
+{
+    pub fn service_distributor(&self) -> &ServiceDistributor {
+        &self.service_distributor
     }
 
-    pub fn service_provider_mut<T: SendablePusServiceProvider<Error = E>>(
-        &mut self,
-    ) -> Option<&mut T> {
-        self.service_provider.downcast_mut::<T>()
+    pub fn service_distributor_mut(&mut self) -> &mut ServiceDistributor {
+        &mut self.service_distributor
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::queue::GenericSendError;
     use crate::tmtc::ccsds_distrib::tests::{
-        generate_ping_tc, BasicApidHandlerOwnedQueue, BasicApidHandlerSharedQueue,
+        generate_ping_tc, generate_ping_tc_as_vec, BasicApidHandlerOwnedQueue,
+        BasicApidHandlerSharedQueue,
     };
     use crate::tmtc::ccsds_distrib::{CcsdsDistributor, CcsdsPacketHandler};
+    use alloc::format;
     use alloc::vec::Vec;
     use spacepackets::ecss::PusError;
     use spacepackets::CcsdsPacket;
@@ -185,54 +187,65 @@ mod tests {
 
     fn is_send<T: Send>(_: &T) {}
 
-    struct PusHandlerSharedQueue {
-        pub pus_queue: Arc<Mutex<VecDeque<(u8, u16, Vec<u8>)>>>,
+    pub struct PacketInfo {
+        pub service: u8,
+        pub apid: u16,
+        pub packet: Vec<u8>,
     }
+
+    struct PusHandlerSharedQueue(Arc<Mutex<VecDeque<PacketInfo>>>);
 
     #[derive(Default)]
-    struct PusHandlerOwnedQueue {
-        pub pus_queue: VecDeque<(u8, u16, Vec<u8>)>,
-    }
+    struct PusHandlerOwnedQueue(VecDeque<PacketInfo>);
 
-    impl PusServiceProvider for PusHandlerSharedQueue {
+    impl PusServiceDistributor for PusHandlerSharedQueue {
         type Error = PusError;
-        fn handle_pus_tc_packet(
+        fn distribute_packet(
             &mut self,
             service: u8,
             sp_header: &SpHeader,
             pus_tc: &PusTcReader,
         ) -> Result<(), Self::Error> {
-            let mut vec: Vec<u8> = Vec::new();
-            vec.extend_from_slice(pus_tc.raw_data());
-            Ok(self
-                .pus_queue
+            let mut packet: Vec<u8> = Vec::new();
+            packet.extend_from_slice(pus_tc.raw_data());
+            self.0
                 .lock()
                 .expect("Mutex lock failed")
-                .push_back((service, sp_header.apid(), vec)))
+                .push_back(PacketInfo {
+                    service,
+                    apid: sp_header.apid(),
+                    packet,
+                });
+            Ok(())
         }
     }
 
-    impl PusServiceProvider for PusHandlerOwnedQueue {
+    impl PusServiceDistributor for PusHandlerOwnedQueue {
         type Error = PusError;
-        fn handle_pus_tc_packet(
+        fn distribute_packet(
             &mut self,
             service: u8,
             sp_header: &SpHeader,
             pus_tc: &PusTcReader,
         ) -> Result<(), Self::Error> {
-            let mut vec: Vec<u8> = Vec::new();
-            vec.extend_from_slice(pus_tc.raw_data());
-            Ok(self.pus_queue.push_back((service, sp_header.apid(), vec)))
+            let mut packet: Vec<u8> = Vec::new();
+            packet.extend_from_slice(pus_tc.raw_data());
+            self.0.push_back(PacketInfo {
+                service,
+                apid: sp_header.apid(),
+                packet,
+            });
+            Ok(())
         }
     }
 
     struct ApidHandlerShared {
-        pub pus_distrib: PusDistributor<PusError>,
+        pub pus_distrib: PusDistributor<PusHandlerSharedQueue, PusError>,
         pub handler_base: BasicApidHandlerSharedQueue,
     }
 
     struct ApidHandlerOwned {
-        pub pus_distrib: PusDistributor<PusError>,
+        pub pus_distrib: PusDistributor<PusHandlerOwnedQueue, PusError>,
         handler_base: BasicApidHandlerOwnedQueue,
     }
 
@@ -285,28 +298,36 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "std")]
-    fn test_pus_distribution() {
+    fn test_pus_distribution_as_raw_packet() {
+        let mut pus_distrib = PusDistributor::new(PusHandlerOwnedQueue::default());
+        let tc = generate_ping_tc_as_vec();
+        let result = pus_distrib.pass_tc(&tc);
+        assert!(result.is_ok());
+        assert_eq!(pus_distrib.service_distributor_mut().0.len(), 1);
+        let packet_info = pus_distrib.service_distributor_mut().0.pop_front().unwrap();
+        assert_eq!(packet_info.service, 17);
+        assert_eq!(packet_info.apid, 0x002);
+        assert_eq!(packet_info.packet, tc);
+    }
+
+    #[test]
+    fn test_pus_distribution_combined_handler() {
         let known_packet_queue = Arc::new(Mutex::default());
         let unknown_packet_queue = Arc::new(Mutex::default());
         let pus_queue = Arc::new(Mutex::default());
-        let pus_handler = PusHandlerSharedQueue {
-            pus_queue: pus_queue.clone(),
-        };
+        let pus_handler = PusHandlerSharedQueue(pus_queue.clone());
         let handler_base = BasicApidHandlerSharedQueue {
             known_packet_queue: known_packet_queue.clone(),
             unknown_packet_queue: unknown_packet_queue.clone(),
         };
 
-        let pus_distrib = PusDistributor {
-            service_provider: Box::new(pus_handler),
-        };
+        let pus_distrib = PusDistributor::new(pus_handler);
         is_send(&pus_distrib);
         let apid_handler = ApidHandlerShared {
             pus_distrib,
             handler_base,
         };
-        let mut ccsds_distrib = CcsdsDistributor::new(Box::new(apid_handler));
+        let mut ccsds_distrib = CcsdsDistributor::new(apid_handler);
         let mut test_buf: [u8; 32] = [0; 32];
         let tc_slice = generate_ping_tc(test_buf.as_mut_slice());
 
@@ -322,25 +343,23 @@ mod tests {
         assert_eq!(packet.as_slice(), tc_slice);
         let recvd_pus = pus_queue.lock().unwrap().pop_front();
         assert!(recvd_pus.is_some());
-        let (service, apid, tc_raw) = recvd_pus.unwrap();
-        assert_eq!(service, 17);
-        assert_eq!(apid, 0x002);
-        assert_eq!(tc_raw, tc_slice);
+        let packet_info = recvd_pus.unwrap();
+        assert_eq!(packet_info.service, 17);
+        assert_eq!(packet_info.apid, 0x002);
+        assert_eq!(packet_info.packet, tc_slice);
     }
 
     #[test]
-    fn test_as_any_cast() {
+    fn test_accessing_combined_distributor() {
         let pus_handler = PusHandlerOwnedQueue::default();
         let handler_base = BasicApidHandlerOwnedQueue::default();
-        let pus_distrib = PusDistributor {
-            service_provider: Box::new(pus_handler),
-        };
+        let pus_distrib = PusDistributor::new(pus_handler);
 
         let apid_handler = ApidHandlerOwned {
             pus_distrib,
             handler_base,
         };
-        let mut ccsds_distrib = CcsdsDistributor::new(Box::new(apid_handler));
+        let mut ccsds_distrib = CcsdsDistributor::new(apid_handler);
 
         let mut test_buf: [u8; 32] = [0; 32];
         let tc_slice = generate_ping_tc(test_buf.as_mut_slice());
@@ -349,21 +368,38 @@ mod tests {
             .pass_tc(tc_slice)
             .expect("Passing TC slice failed");
 
-        let apid_handler_casted_back: &mut ApidHandlerOwned = ccsds_distrib
-            .apid_handler_mut()
-            .expect("Cast to concrete type ApidHandler failed");
+        let apid_handler_casted_back = ccsds_distrib.packet_handler_mut();
         assert!(!apid_handler_casted_back
             .handler_base
             .known_packet_queue
             .is_empty());
-        let handler_casted_back: &mut PusHandlerOwnedQueue = apid_handler_casted_back
+        let handler_owned_queue = apid_handler_casted_back
             .pus_distrib
-            .service_provider_mut()
-            .expect("Cast to concrete type PusHandlerOwnedQueue failed");
-        assert!(!handler_casted_back.pus_queue.is_empty());
-        let (service, apid, packet_raw) = handler_casted_back.pus_queue.pop_front().unwrap();
-        assert_eq!(service, 17);
-        assert_eq!(apid, 0x002);
-        assert_eq!(packet_raw.as_slice(), tc_slice);
+            .service_distributor_mut();
+        assert!(!handler_owned_queue.0.is_empty());
+        let packet_info = handler_owned_queue.0.pop_front().unwrap();
+        assert_eq!(packet_info.service, 17);
+        assert_eq!(packet_info.apid, 0x002);
+        assert_eq!(packet_info.packet, tc_slice);
+    }
+
+    #[test]
+    fn test_pus_distrib_error_custom_error() {
+        let error = PusDistribError::CustomError(GenericSendError::RxDisconnected);
+        let error_string = format!("{}", error);
+        assert_eq!(
+            error_string,
+            "pus distribution error: rx side has disconnected"
+        );
+    }
+
+    #[test]
+    fn test_pus_distrib_error_pus_error() {
+        let error = PusDistribError::<GenericSendError>::PusError(PusError::CrcCalculationMissing);
+        let error_string = format!("{}", error);
+        assert_eq!(
+            error_string,
+            "pus distribution error: crc16 was not calculated"
+        );
     }
 }

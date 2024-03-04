@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Refactored ECSS TM sender abstractions to be generic over different message queue backends.
 - Refactored Verification Reporter abstractions and implementation to be generic over the sender
   instead of using trait objects.
+- `PusServiceProvider` renamed to `PusServiceDistributor` to make the purpose of the object
+  more clear
+- `PusServiceProvider::handle_pus_tc_packet` renamed to `PusServiceDistributor::distribute_packet`.
+- `PusServiceDistibutor` and `CcsdsDistributor` now use generics instead of trait objects.
+  This makes accessing the concrete trait implementations more easy as well.
 
 ## Fixed
 
