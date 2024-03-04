@@ -114,6 +114,7 @@ pub mod std_mod {
         },
         request::RequestId,
     };
+    use core::time::Duration;
     use hashbrown::HashMap;
     use spacepackets::time::UnixTimestamp;
     use std::time::SystemTimeError;
@@ -228,34 +229,60 @@ pub mod std_mod {
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct ActiveRequest {
+    pub struct ActiveActionRequest {
+        action_id: ActionId,
         token: VerificationToken<TcStateStarted>,
         start_time: UnixTimestamp,
-        timeout_seconds: u32,
+        timeout: Duration,
     }
 
-    pub struct PusService8ReplyHandler<VerificationReporter: VerificationReportingProvider> {
-        active_requests: HashMap<RequestId, ActiveRequest>,
+    pub trait ActionReplyHandlerHook {
+        fn handle_unexpected_reply(&mut self, reply: &ActionReplyPusWithIds);
+        fn timeout_callback(&self, active_request: &ActiveActionRequest);
+        fn timeout_error_code(&self) -> ResultU16;
+    }
+
+    pub struct PusService8ReplyHandler<
+        VerificationReporter: VerificationReportingProvider,
+        UserHook: ActionReplyHandlerHook,
+    > {
+        active_requests: HashMap<RequestId, ActiveActionRequest>,
         verification_reporter: VerificationReporter,
         fail_data_buf: alloc::vec::Vec<u8>,
         current_time: UnixTimestamp,
+        user_hook: UserHook,
     }
 
-    impl<VerificationReporter: VerificationReportingProvider>
-        PusService8ReplyHandler<VerificationReporter>
+    impl<VerificationReporter: VerificationReportingProvider, UserHook: ActionReplyHandlerHook>
+        PusService8ReplyHandler<VerificationReporter, UserHook>
     {
+        pub fn new(
+            verification_reporter: VerificationReporter,
+            fail_data_buf_size: usize,
+            user_hook: UserHook,
+        ) -> Self {
+            Self {
+                active_requests: HashMap::new(),
+                verification_reporter,
+                fail_data_buf: alloc::vec![0; fail_data_buf_size],
+                current_time: UnixTimestamp::from_now().unwrap(),
+                user_hook,
+            }
+        }
         pub fn add_routed_request(
             &mut self,
             request_id: verification::RequestId,
+            action_id: ActionId,
             token: VerificationToken<TcStateStarted>,
-            timeout_seconds: u32,
+            timeout: Duration,
         ) {
             self.active_requests.insert(
                 request_id.into(),
-                ActiveRequest {
+                ActiveActionRequest {
+                    action_id,
                     token,
                     start_time: self.current_time,
-                    timeout_seconds,
+                    timeout,
                 },
             );
         }
@@ -268,29 +295,23 @@ pub mod std_mod {
         }
 
         pub fn check_for_timeouts(&mut self, time_stamp: &[u8]) -> Result<(), EcssTmtcError> {
-            for (_req_id, active_req) in self.active_requests.iter() {
-                // TODO: Simplified until spacepackets update.
-                let diff =
-                    (self.current_time.unix_seconds - active_req.start_time.unix_seconds) as u32;
-                if diff > active_req.timeout_seconds {
+            for active_req in self.active_requests.values() {
+                let diff = self.current_time - active_req.start_time;
+                if diff.duration_absolute > active_req.timeout {
                     self.handle_timeout(active_req, time_stamp);
                 }
             }
             Ok(())
         }
 
-        pub fn handle_timeout(&self, active_request: &ActiveRequest, time_stamp: &[u8]) {
+        pub fn handle_timeout(&self, active_request: &ActiveActionRequest, time_stamp: &[u8]) {
             self.verification_reporter
                 .completion_failure(
                     active_request.token,
-                    FailParams::new(
-                        time_stamp,
-                        // WTF, what failure code?
-                        &ResultU16::new(0, 0),
-                        &[],
-                    ),
+                    FailParams::new(time_stamp, &self.user_hook.timeout_error_code(), &[]),
                 )
                 .unwrap();
+            self.user_hook.timeout_callback(active_request);
         }
 
         pub fn handle_action_reply(
@@ -300,7 +321,8 @@ pub mod std_mod {
         ) -> Result<(), EcssTmtcError> {
             let active_req = self.active_requests.get(&action_reply_with_ids.request_id);
             if active_req.is_none() {
-                // TODO: This is an unexpected reply. We need to deal with this somehow.
+                self.user_hook
+                    .handle_unexpected_reply(&action_reply_with_ids);
             }
             let active_req = active_req.unwrap();
             match action_reply_with_ids.reply {
