@@ -1458,6 +1458,7 @@ pub mod tests {
     #[allow(dead_code)]
     fn is_sync<T: Sync>(_: &T) {}
 
+    #[derive(Clone)]
     pub struct VerificationStatus {
         pub accepted: Option<bool>,
         pub started: Option<bool>,
@@ -1646,6 +1647,38 @@ pub mod tests {
                 ),
             };
             Ok(())
+        }
+    }
+
+    impl TestVerificationReporter {
+        pub fn verification_info(&self, req_id: &RequestId) -> Option<VerificationStatus> {
+            let verif_map = self.verification_map.lock().unwrap();
+            let value = verif_map.borrow().get(req_id).cloned();
+            value
+        }
+
+        pub fn check_accepted(&self, req_id: &RequestId) -> bool {
+            let verif_map = self.verification_map.lock().unwrap();
+            if let Some(entry) = verif_map.borrow().get(req_id) {
+                return entry.accepted.unwrap_or(false);
+            }
+            false
+        }
+
+        pub fn check_started(&self, req_id: &RequestId) -> bool {
+            let verif_map = self.verification_map.lock().unwrap();
+            if let Some(entry) = verif_map.borrow().get(req_id) {
+                return entry.started.unwrap_or(false);
+            }
+            false
+        }
+
+        pub fn check_completed(&self, req_id: &RequestId) -> bool {
+            let verif_map = self.verification_map.lock().unwrap();
+            if let Some(entry) = verif_map.borrow().get(req_id) {
+                return entry.completed.unwrap_or(false);
+            }
+            false
         }
     }
 

@@ -398,6 +398,7 @@ mod tests {
                 TestConverter, TestRouter, TestRoutingErrorHandler, APP_DATA_TOO_SHORT, TEST_APID,
             },
             verification::{
+                self,
                 tests::{SharedVerificationMap, TestVerificationReporter},
                 FailParams, RequestId, VerificationReportingProvider,
             },
@@ -638,11 +639,28 @@ mod tests {
         let token = test_verif_reporter
             .start_success(token, &[])
             .expect("start success failure");
+        let verif_info = test_verif_reporter
+            .verification_info(&verification::RequestId::from(request_id))
+            .expect("no verification info found");
+        assert!(verif_info.started.expect("not started"));
+        assert!(verif_info.accepted.expect("not accepted"));
         reply_handler.add_routed_request(
             request_id.into(),
             action_id,
             token,
             Duration::from_millis(1),
         );
+        let action_reply = ActionReplyPusWithIds {
+            request_id,
+            action_id,
+            reply: ActionReplyPus::Completed,
+        };
+        reply_handler
+            .handle_action_reply(action_reply, &[])
+            .expect("reply handling failure");
+        let verif_info = test_verif_reporter
+            .verification_info(&verification::RequestId::from(request_id))
+            .expect("no verification info found");
+        assert!(verif_info.completed.expect("not started"));
     }
 }
