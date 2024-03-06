@@ -21,6 +21,7 @@ impl ActionRequest {
 #[non_exhaustive]
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum ActionRequestVariant {
+    NoData,
     StoreData(StoreAddr),
     #[cfg(feature = "alloc")]
     #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]

@@ -376,7 +376,7 @@ pub mod std_mod {
 
 #[cfg(test)]
 mod tests {
-    use core::cell::RefCell;
+    use core::{cell::RefCell, time::Duration};
 
     use alloc::collections::VecDeque;
     use delegate::delegate;
@@ -398,8 +398,8 @@ mod tests {
                 TestConverter, TestRouter, TestRoutingErrorHandler, APP_DATA_TOO_SHORT, TEST_APID,
             },
             verification::{
-                tests::{TestVerificationReporter, SharedVerificationMap}, FailParams, RequestId,
-                VerificationReportingProvider,
+                tests::{SharedVerificationMap, TestVerificationReporter},
+                FailParams, RequestId, VerificationReportingProvider,
             },
             EcssTcInVecConverter, GenericRoutingError, MpscTcReceiver, PusPacketHandlerResult,
             PusPacketHandlingError, TmAsVecSenderWithMpsc,
@@ -624,8 +624,25 @@ mod tests {
     #[test]
     fn test_reply_handler() {
         let reply_handler_hook = TestReplyHandlerHook::default();
-        let test_verif_reporter = TestVerificationReporter::default();
-        //let reply_handler = PusService8ReplyHandler::new(verification_reporter, fail_data_buf_size, user_hook)
-
+        let shared_verif_map = SharedVerificationMap::default();
+        let mut test_verif_reporter = TestVerificationReporter::new(shared_verif_map.clone());
+        let mut reply_handler =
+            PusService8ReplyHandler::new(test_verif_reporter.clone(), 128, reply_handler_hook);
+        let request_id = 0x02;
+        let action_id = 0x03;
+        // let action_req = ActionRequest::new(action_id, ActionRequestVariant::NoData);
+        let token = test_verif_reporter.add_tc_with_req_id(request_id.into());
+        let token = test_verif_reporter
+            .acceptance_success(token, &[])
+            .expect("acceptance success failure");
+        let token = test_verif_reporter
+            .start_success(token, &[])
+            .expect("start success failure");
+        reply_handler.add_routed_request(
+            request_id.into(),
+            action_id,
+            token,
+            Duration::from_millis(1),
+        );
     }
 }
