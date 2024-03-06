@@ -376,6 +376,9 @@ pub mod std_mod {
 
 #[cfg(test)]
 mod tests {
+    use core::cell::RefCell;
+
+    use alloc::collections::VecDeque;
     use delegate::delegate;
 
     use spacepackets::{
@@ -395,7 +398,7 @@ mod tests {
                 TestConverter, TestRouter, TestRoutingErrorHandler, APP_DATA_TOO_SHORT, TEST_APID,
             },
             verification::{
-                tests::TestVerificationReporter, FailParams, RequestId,
+                tests::{TestVerificationReporter, SharedVerificationMap}, FailParams, RequestId,
                 VerificationReportingProvider,
             },
             EcssTcInVecConverter, GenericRoutingError, MpscTcReceiver, PusPacketHandlerResult,
@@ -534,6 +537,28 @@ mod tests {
         }
     }
 
+    const TIMEOUT_ERROR_CODE: ResultU16 = ResultU16::new(1, 2);
+
+    #[derive(Default)]
+    pub struct TestReplyHandlerHook {
+        pub unexpected_replies: VecDeque<ActionReplyPusWithIds>,
+        pub timeouts: RefCell<VecDeque<ActiveActionRequest>>,
+    }
+
+    impl ActionReplyHandlerHook for TestReplyHandlerHook {
+        fn handle_unexpected_reply(&mut self, reply: &ActionReplyPusWithIds) {
+            self.unexpected_replies.push_back(reply.clone());
+        }
+
+        fn timeout_callback(&self, active_request: &ActiveActionRequest) {
+            self.timeouts.borrow_mut().push_back(active_request.clone());
+        }
+
+        fn timeout_error_code(&self) -> ResultU16 {
+            TIMEOUT_ERROR_CODE
+        }
+    }
+
     #[test]
     fn basic_test() {
         let mut action_handler = Pus8HandlerWithVecTester::new();
@@ -594,5 +619,13 @@ mod tests {
         let (target_id, found_error) = action_handler.retrieve_next_error();
         assert_eq!(target_id, TEST_APID.into());
         check_error(found_error);
+    }
+
+    #[test]
+    fn test_reply_handler() {
+        let reply_handler_hook = TestReplyHandlerHook::default();
+        let test_verif_reporter = TestVerificationReporter::default();
+        //let reply_handler = PusService8ReplyHandler::new(verification_reporter, fail_data_buf_size, user_hook)
+
     }
 }
