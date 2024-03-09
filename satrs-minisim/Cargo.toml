@@ -13,9 +13,6 @@ thiserror = "1"
 
 [dependencies.asynchronix]
 version = "0.2.1"
-# path = "../../asynchronix/asynchronix"
-# git = "https://github.com/us-irs/asynchronix.git"
-# branch = "clock-not-sendable"
 
 [dependencies.satrs]
 path = "../satrs"
