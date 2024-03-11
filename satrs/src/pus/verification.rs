@@ -298,9 +298,9 @@ impl<STATE> VerificationToken<STATE> {
 
 /// Composite helper struct to pass failure parameters to the [VerificationReporter]
 pub struct FailParams<'stamp, 'fargs> {
-    time_stamp: &'stamp [u8],
-    failure_code: &'fargs dyn EcssEnumeration,
-    failure_data: &'fargs [u8],
+    pub time_stamp: &'stamp [u8],
+    pub failure_code: &'fargs dyn EcssEnumeration,
+    pub failure_data: &'fargs [u8],
 }
 
 impl<'stamp, 'fargs> FailParams<'stamp, 'fargs> {
@@ -326,8 +326,8 @@ impl<'stamp, 'fargs> FailParams<'stamp, 'fargs> {
 
 /// Composite helper struct to pass step failure parameters to the [VerificationReporter]
 pub struct FailParamsWithStep<'stamp, 'fargs> {
-    bp: FailParams<'stamp, 'fargs>,
-    step: &'fargs dyn EcssEnumeration,
+    pub params: FailParams<'stamp, 'fargs>,
+    pub step: &'fargs dyn EcssEnumeration,
 }
 
 impl<'stamp, 'fargs> FailParamsWithStep<'stamp, 'fargs> {
@@ -338,7 +338,7 @@ impl<'stamp, 'fargs> FailParamsWithStep<'stamp, 'fargs> {
         failure_data: &'fargs [u8],
     ) -> Self {
         Self {
-            bp: FailParams::new(time_stamp, failure_code, failure_data),
+            params: FailParams::new(time_stamp, failure_code, failure_data),
             step,
         }
     }
@@ -783,7 +783,7 @@ impl VerificationReporterCore {
                 msg_count,
                 &token.req_id,
                 Some(params.step),
-                &params.bp,
+                &params.params,
             )
             .map_err(|e| VerificationErrorWithToken(e, token))?,
             token,
@@ -1601,12 +1601,15 @@ pub mod tests {
         fn step_failure(
             &self,
             token: VerificationToken<super::TcStateStarted>,
-            _params: FailParamsWithStep,
+            params: FailParamsWithStep,
         ) -> Result<(), super::VerificationOrSendErrorWithToken<super::TcStateStarted>> {
             let verif_map = self.verification_map.lock().unwrap();
             match verif_map.borrow_mut().get_mut(&token.req_id) {
                 Some(entry) => {
                     entry.step_status = Some(false);
+                    entry.step = params.step.value().try_into().unwrap();
+                    entry.failure_data = Some(params.params.failure_data.to_vec());
+                    entry.fail_enum = Some(params.params.failure_code.value());
                 }
                 None => panic!("unexpected start success for request ID {}", token.req_id()),
             };

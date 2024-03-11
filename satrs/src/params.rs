@@ -609,6 +609,12 @@ impl From<ParamsHeapless> for Params {
     }
 }
 
+impl From<ParamsRaw> for Params {
+    fn from(x: ParamsRaw) -> Self {
+        Self::Heapless(ParamsHeapless::Raw(x))
+    }
+}
+
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 impl From<Vec<u8>> for Params {

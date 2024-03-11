@@ -256,16 +256,35 @@ pub mod std_mod {
     impl<VerificationReporter: VerificationReportingProvider, UserHook: ActionReplyHandlerHook>
         PusService8ReplyHandler<VerificationReporter, UserHook>
     {
+        #[cfg(feature = "std")]
+        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
+        pub fn new_with_init_time_now(
+            verification_reporter: VerificationReporter,
+            fail_data_buf_size: usize,
+            user_hook: UserHook,
+        ) -> Result<Self, SystemTimeError> {
+            let mut reply_handler = Self {
+                active_requests: HashMap::new(),
+                verification_reporter,
+                fail_data_buf: alloc::vec![0; fail_data_buf_size],
+                current_time: UnixTimestamp::default(),
+                user_hook,
+            };
+            reply_handler.update_time_from_now()?;
+            Ok(reply_handler)
+        }
+
         pub fn new(
             verification_reporter: VerificationReporter,
             fail_data_buf_size: usize,
             user_hook: UserHook,
+            init_time: UnixTimestamp,
         ) -> Self {
             Self {
                 active_requests: HashMap::new(),
                 verification_reporter,
                 fail_data_buf: alloc::vec![0; fail_data_buf_size],
-                current_time: UnixTimestamp::from_now().unwrap(),
+                current_time: init_time,
                 user_hook,
             }
         }
@@ -294,6 +313,9 @@ pub mod std_mod {
             Ok(())
         }
 
+        /// Check for timeouts across all active requests.
+        ///
+        /// It will call [Self::handle_timeout] for all active requests which have timed out.
         pub fn check_for_timeouts(&mut self, time_stamp: &[u8]) -> Result<(), EcssTmtcError> {
             for active_req in self.active_requests.values() {
                 let diff = self.current_time - active_req.start_time;
@@ -304,11 +326,22 @@ pub mod std_mod {
             Ok(())
         }
 
+        /// Handle the timeout for a given active request.
+        ///
+        /// This implementation will report a verification completion failure with a user-provided
+        /// error code. It supplies the configured request timeout in milliseconds as a [u64]
+        /// serialized in big-endian format as the failure data.
         pub fn handle_timeout(&self, active_request: &ActiveActionRequest, time_stamp: &[u8]) {
+            let timeout = active_request.timeout.as_millis() as u64;
+            let timeout_raw = timeout.to_be_bytes();
             self.verification_reporter
                 .completion_failure(
                     active_request.token,
-                    FailParams::new(time_stamp, &self.user_hook.timeout_error_code(), &[]),
+                    FailParams::new(
+                        time_stamp,
+                        &self.user_hook.timeout_error_code(),
+                        &timeout_raw,
+                    ),
                 )
                 .unwrap();
             self.user_hook.timeout_callback(active_request);
@@ -327,11 +360,15 @@ pub mod std_mod {
             let active_req = active_req.unwrap();
             match action_reply_with_ids.reply {
                 ActionReplyPus::CompletionFailed { error_code, params } => {
-                    params.write_to_be_bytes(&mut self.fail_data_buf)?;
+                    let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
                     self.verification_reporter
                         .completion_failure(
                             active_req.token,
-                            FailParams::new(time_stamp, &error_code, &self.fail_data_buf),
+                            FailParams::new(
+                                time_stamp,
+                                &error_code,
+                                &self.fail_data_buf[..fail_data_len],
+                            ),
                         )
                         .map_err(|e| e.0)?;
                     self.active_requests
@@ -342,7 +379,7 @@ pub mod std_mod {
                     step,
                     params,
                 } => {
-                    params.write_to_be_bytes(&mut self.fail_data_buf)?;
+                    let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
                     self.verification_reporter
                         .step_failure(
                             active_req.token,
@@ -350,7 +387,7 @@ pub mod std_mod {
                                 time_stamp,
                                 &EcssEnumU16::new(step),
                                 &error_code,
-                                &self.fail_data_buf,
+                                &self.fail_data_buf[..fail_data_len],
                             ),
                         )
                         .map_err(|e| e.0)?;
@@ -380,6 +417,7 @@ pub mod std_mod {
 #[cfg(test)]
 mod tests {
     use core::{cell::RefCell, time::Duration};
+    use std::time::SystemTimeError;
 
     use alloc::collections::VecDeque;
     use delegate::delegate;
@@ -395,6 +433,7 @@ mod tests {
 
     use crate::{
         action::ActionRequestVariant,
+        params::{self, ParamsRaw, WritableToBeBytes},
         pus::{
             tests::{
                 PusServiceHandlerWithVecCommon, PusTestHarness, SimplePusPacketHandler,
@@ -402,7 +441,7 @@ mod tests {
             },
             verification::{
                 self,
-                tests::{SharedVerificationMap, TestVerificationReporter},
+                tests::{SharedVerificationMap, TestVerificationReporter, VerificationStatus},
                 FailParams, TcStateNone, TcStateStarted, VerificationReportingProvider,
             },
             EcssTcInVecConverter, EcssTmtcError, GenericRoutingError, MpscTcReceiver,
@@ -542,6 +581,8 @@ mod tests {
     }
 
     const TIMEOUT_ERROR_CODE: ResultU16 = ResultU16::new(1, 2);
+    const COMPLETION_ERROR_CODE: ResultU16 = ResultU16::new(2, 0);
+    const COMPLETION_ERROR_CODE_STEP: ResultU16 = ResultU16::new(2, 1);
 
     #[derive(Default)]
     pub struct TestReplyHandlerHook {
@@ -573,8 +614,12 @@ mod tests {
             let reply_handler_hook = TestReplyHandlerHook::default();
             let shared_verif_map = SharedVerificationMap::default();
             let test_verif_reporter = TestVerificationReporter::new(shared_verif_map.clone());
-            let reply_handler =
-                PusService8ReplyHandler::new(test_verif_reporter.clone(), 128, reply_handler_hook);
+            let reply_handler = PusService8ReplyHandler::new_with_init_time_now(
+                test_verif_reporter.clone(),
+                128,
+                reply_handler_hook,
+            )
+            .expect("creating reply handler failed");
             Self {
                 verif_reporter: test_verif_reporter,
                 handler: reply_handler,
@@ -605,17 +650,55 @@ mod tests {
             token
         }
 
-        pub fn assert_request_completion(&self, step: Option<u16>, request_id: RequestId) {
+        pub fn assert_request_completion_success(&self, step: Option<u16>, request_id: RequestId) {
             let verif_info = self
                 .verif_reporter
                 .verification_info(&verification::RequestId::from(request_id))
                 .expect("no verification info found");
+            self.assert_request_completion_common(&verif_info, step, true)
+        }
+
+        pub fn assert_request_completion_failure(
+            &self,
+            step: Option<u16>,
+            request_id: RequestId,
+            fail_enum: ResultU16,
+            fail_data: &[u8],
+        ) {
+            let verif_info = self
+                .verif_reporter
+                .verification_info(&verification::RequestId::from(request_id))
+                .expect("no verification info found");
+            self.assert_request_completion_common(&verif_info, step, false);
+            assert_eq!(verif_info.fail_enum.unwrap(), fail_enum.raw() as u64);
+            assert_eq!(verif_info.failure_data.unwrap(), fail_data);
+        }
+
+        pub fn assert_request_completion_common(
+            &self,
+            verif_info: &VerificationStatus,
+            step: Option<u16>,
+            completion_success: bool,
+        ) {
             if let Some(step) = step {
                 assert!(verif_info.step_status.is_some());
                 assert!(verif_info.step_status.unwrap());
                 assert_eq!(step, verif_info.step);
             }
-            assert!(verif_info.completed.expect("request is not completed"));
+            assert_eq!(
+                verif_info.completed.expect("request is not completed"),
+                completion_success
+            );
+        }
+
+        pub fn assert_request_step_failure(&self, step: u16, request_id: RequestId) {
+            let verif_info = self
+                .verif_reporter
+                .verification_info(&verification::RequestId::from(request_id))
+                .expect("no verification info found");
+            assert!(verif_info.step_status.is_some());
+            assert!(!verif_info.step_status.unwrap());
+            assert_eq!(step, verif_info.step);
         }
 
         delegate! {
@@ -633,6 +716,10 @@ mod tests {
                     token: VerificationToken<TcStateStarted>,
                     timeout: Duration,
                 );
+
+                pub fn update_time_from_now(&mut self) -> Result<(), SystemTimeError>;
+
+                pub fn check_for_timeouts(&mut self, time_stamp: &[u8]) -> Result<(), EcssTmtcError>;
             }
             to self.verif_reporter {
                 fn add_tc_with_req_id(&mut self, req_id: verification::RequestId) -> VerificationToken<TcStateNone>;
@@ -703,7 +790,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reply_handler() {
+    fn test_reply_handler_completion_success() {
         let mut reply_testbench = Pus8ReplyTestbench::new();
         let request_id = 0x02;
         let action_id = 0x03;
@@ -722,7 +809,7 @@ mod tests {
         reply_testbench
             .handle_action_reply(action_reply, &[])
             .expect("reply handling failure");
-        reply_testbench.assert_request_completion(None, request_id);
+        reply_testbench.assert_request_completion_success(None, request_id);
     }
 
     #[test]
@@ -753,6 +840,92 @@ mod tests {
         reply_testbench
             .handle_action_reply(action_reply, &[])
             .expect("reply handling failure");
-        reply_testbench.assert_request_completion(Some(1), request_id);
+        reply_testbench.assert_request_completion_success(Some(1), request_id);
+    }
+
+    #[test]
+    fn test_reply_handler_completion_failure() {
+        let mut reply_testbench = Pus8ReplyTestbench::new();
+        let request_id = 0x02;
+        let action_id = 0x03;
+        let token = reply_testbench.init_handling_for_request(request_id, action_id);
+        reply_testbench.add_routed_request(
+            request_id.into(),
+            action_id,
+            token,
+            Duration::from_millis(1),
+        );
+        let params_raw = ParamsRaw::U32(params::U32(5));
+        let action_reply = ActionReplyPusWithIds {
+            request_id,
+            action_id,
+            reply: ActionReplyPus::CompletionFailed {
+                error_code: COMPLETION_ERROR_CODE,
+                params: params_raw.into(),
+            },
+        };
+        reply_testbench
+            .handle_action_reply(action_reply, &[])
+            .expect("reply handling failure");
+        reply_testbench.assert_request_completion_failure(
+            None,
+            request_id,
+            COMPLETION_ERROR_CODE,
+            &params_raw.to_vec().unwrap(),
+        );
+    }
+
+    #[test]
+    fn test_reply_handler_step_failure() {
+        let mut reply_testbench = Pus8ReplyTestbench::new();
+        let request_id = 0x02;
+        let action_id = 0x03;
+        let token = reply_testbench.init_handling_for_request(request_id, action_id);
+        reply_testbench.add_routed_request(
+            request_id.into(),
+            action_id,
+            token,
+            Duration::from_millis(1),
+        );
+        let action_reply = ActionReplyPusWithIds {
+            request_id,
+            action_id,
+            reply: ActionReplyPus::StepFailed {
+                error_code: COMPLETION_ERROR_CODE_STEP,
+                step: 2,
+                params: ParamsRaw::U32(crate::params::U32(5)).into(),
+            },
+        };
+        reply_testbench
+            .handle_action_reply(action_reply, &[])
+            .expect("reply handling failure");
+        reply_testbench.assert_request_step_failure(2, request_id);
+    }
+
+    #[test]
+    fn test_reply_handler_timeout_handling() {
+        let mut reply_testbench = Pus8ReplyTestbench::new();
+        let request_id = 0x02;
+        let action_id = 0x03;
+        let token = reply_testbench.init_handling_for_request(request_id, action_id);
+        reply_testbench.add_routed_request(
+            request_id.into(),
+            action_id,
+            token,
+            Duration::from_millis(1),
+        );
+        let timeout_param = Duration::from_millis(1).as_millis() as u64;
+        let timeout_param_raw = timeout_param.to_be_bytes();
+        std::thread::sleep(Duration::from_millis(2));
+        reply_testbench
+            .update_time_from_now()
+            .expect("time update failure");
+        reply_testbench.check_for_timeouts(&[]).unwrap();
+        reply_testbench.assert_request_completion_failure(
+            None,
+            request_id,
+            TIMEOUT_ERROR_CODE,
+            &timeout_param_raw,
+        );
     }
 }
