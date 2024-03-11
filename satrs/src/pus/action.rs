@@ -1,5 +1,3 @@
-use core::time::Duration;
-
 use crate::{
     action::{ActionId, ActionRequest},
     params::Params,
@@ -7,10 +5,13 @@ use crate::{
     TargetId,
 };
 
-use super::verification::{TcStateAccepted, TcStateStarted, VerificationToken};
+use super::{
+    verification::{TcStateAccepted, VerificationToken},
+    ActiveRequest,
+};
 
 use satrs_shared::res_code::ResultU16;
-use spacepackets::{ecss::EcssEnumU16, time::UnixTimestamp};
+use spacepackets::ecss::EcssEnumU16;
 
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
@@ -66,10 +67,8 @@ pub trait PusActionRequestRouter {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveActionRequest {
-    action_id: ActionId,
-    token: VerificationToken<TcStateStarted>,
-    start_time: UnixTimestamp,
-    timeout: Duration,
+    pub action_id: ActionId,
+    common: ActiveRequest,
 }
 
 pub trait ActiveRequestMapProvider: Default {
@@ -349,9 +348,11 @@ pub mod std_mod {
                 &request_id.into(),
                 ActiveActionRequest {
                     action_id,
-                    token,
-                    start_time: self.current_time,
-                    timeout,
+                    common: ActiveRequest {
+                        token,
+                        start_time: self.current_time,
+                        timeout,
+                    },
                 },
             );
         }
@@ -373,8 +374,8 @@ pub mod std_mod {
         pub fn check_for_timeouts(&mut self, time_stamp: &[u8]) -> Result<(), EcssTmtcError> {
             let mut timed_out_commands = alloc::vec::Vec::new();
             self.active_requests.for_each(|request_id, active_req| {
-                let diff = self.current_time - active_req.start_time;
-                if diff.duration_absolute > active_req.timeout {
+                let diff = self.current_time - active_req.common.start_time;
+                if diff.duration_absolute > active_req.common.timeout {
                     self.handle_timeout(active_req, time_stamp);
                 }
                 timed_out_commands.push(*request_id);
@@ -391,11 +392,11 @@ pub mod std_mod {
         /// error code. It supplies the configured request timeout in milliseconds as a [u64]
         /// serialized in big-endian format as the failure data.
         pub fn handle_timeout(&self, active_request: &ActiveActionRequest, time_stamp: &[u8]) {
-            let timeout = active_request.timeout.as_millis() as u64;
+            let timeout = active_request.common.timeout.as_millis() as u64;
             let timeout_raw = timeout.to_be_bytes();
             self.verification_reporter
                 .completion_failure(
-                    active_request.token,
+                    active_request.common.token,
                     FailParams::new(
                         time_stamp,
                         &self.user_hook.timeout_error_code(),
@@ -422,7 +423,7 @@ pub mod std_mod {
                     let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
                     self.verification_reporter
                         .completion_failure(
-                            active_req.token,
+                            active_req.common.token,
                             FailParams::new(
                                 time_stamp,
                                 &error_code,
@@ -440,7 +441,7 @@ pub mod std_mod {
                     let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
                     self.verification_reporter
                         .step_failure(
-                            active_req.token,
+                            active_req.common.token,
                             FailParamsWithStep::new(
                                 time_stamp,
                                 &EcssEnumU16::new(step),
@@ -453,13 +454,13 @@ pub mod std_mod {
                 }
                 ActionReplyPus::Completed => {
                     self.verification_reporter
-                        .completion_success(active_req.token, time_stamp)
+                        .completion_success(active_req.common.token, time_stamp)
                         .map_err(|e| e.0)?;
                     true
                 }
                 ActionReplyPus::StepSuccess { step } => {
                     self.verification_reporter.step_success(
-                        &active_req.token,
+                        &active_req.common.token,
                         time_stamp,
                         EcssEnumU16::new(step),
                     )?;
@@ -1007,5 +1008,10 @@ mod tests {
             TIMEOUT_ERROR_CODE,
             &timeout_param_raw,
         );
+    }
+
+    #[test]
+    fn test_unrequested_reply() {
+        // TODO: Implement this test.
     }
 }
