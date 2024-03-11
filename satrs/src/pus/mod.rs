@@ -5,12 +5,15 @@
 use crate::pool::{StoreAddr, StoreError};
 use crate::pus::verification::{TcStateAccepted, TcStateToken, VerificationToken};
 use crate::queue::{GenericReceiveError, GenericSendError};
+use crate::request::RequestId;
 use crate::ChannelId;
 use core::fmt::{Display, Formatter};
+use core::time::Duration;
 #[cfg(feature = "alloc")]
 use downcast_rs::{impl_downcast, Downcast};
 #[cfg(feature = "alloc")]
 use dyn_clone::DynClone;
+use spacepackets::time::UnixTimestamp;
 #[cfg(feature = "std")]
 use std::error::Error;
 
@@ -38,6 +41,8 @@ pub use alloc_mod::*;
 
 #[cfg(feature = "std")]
 pub use std_mod::*;
+
+use self::verification::TcStateStarted;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PusTmWrapper<'tm> {
@@ -270,8 +275,30 @@ pub trait ReceivesEcssPusTc {
     fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTcReader) -> Result<(), Self::Error>;
 }
 
+pub trait ActiveRequestMapProvider<V>: Sized {
+    fn insert(&mut self, request_id: &RequestId, request: V);
+    fn get(&self, request_id: RequestId) -> Option<&V>;
+    fn get_mut(&mut self, request_id: RequestId) -> Option<&mut V>;
+    fn remove(&mut self, request_id: RequestId) -> bool;
+
+    /// Call a user-supplied closure for each active request.
+    fn for_each<F: FnMut(&RequestId, &V)>(&self, f: F);
+
+    /// Call a user-supplied closure for each active request. Mutable variant.
+    fn for_each_mut<F: FnMut(&RequestId, &mut V)>(&mut self, f: F);
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveRequest {
+    token: VerificationToken<TcStateStarted>,
+    start_time: UnixTimestamp,
+    timeout: Duration,
+}
+
 #[cfg(feature = "alloc")]
 mod alloc_mod {
+    use hashbrown::HashMap;
+
     use crate::TargetId;
 
     use super::*;
@@ -369,6 +396,39 @@ mod alloc_mod {
             time_stamp: &[u8],
             verif_reporter: &impl VerificationReportingProvider,
         );
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct DefaultActiveRequestMap<V>(pub HashMap<RequestId, V>);
+
+    impl<V> ActiveRequestMapProvider<V> for DefaultActiveRequestMap<V> {
+        fn insert(&mut self, request_id: &RequestId, request: V) {
+            self.0.insert(*request_id, request);
+        }
+
+        fn get(&self, request_id: RequestId) -> Option<&V> {
+            self.0.get(&request_id)
+        }
+
+        fn get_mut(&mut self, request_id: RequestId) -> Option<&mut V> {
+            self.0.get_mut(&request_id)
+        }
+
+        fn remove(&mut self, request_id: RequestId) -> bool {
+            self.0.remove(&request_id).is_some()
+        }
+
+        fn for_each<F: FnMut(&RequestId, &V)>(&self, mut f: F) {
+            for (req_id, active_req) in &self.0 {
+                f(req_id, active_req);
+            }
+        }
+
+        fn for_each_mut<F: FnMut(&RequestId, &mut V)>(&mut self, mut f: F) {
+            for (req_id, active_req) in &mut self.0 {
+                f(req_id, active_req);
+            }
+        }
     }
 }
 

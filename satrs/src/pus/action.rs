@@ -71,19 +71,6 @@ pub struct ActiveActionRequest {
     common: ActiveRequest,
 }
 
-pub trait ActiveRequestMapProvider: Default {
-    fn insert(&mut self, request_id: &RequestId, request: ActiveActionRequest);
-    fn get(&self, request_id: RequestId) -> Option<&ActiveActionRequest>;
-    fn get_mut(&mut self, request_id: RequestId) -> Option<&mut ActiveActionRequest>;
-    fn remove(&mut self, request_id: RequestId) -> bool;
-
-    /// Call a user-supplied closure for each active request.
-    fn for_each<F: FnMut(&RequestId, &ActiveActionRequest)>(&self, f: F);
-
-    /// Call a user-supplied closure for each active request. Mutable variant.
-    fn for_each_mut<F: FnMut(&RequestId, &mut ActiveActionRequest)>(&mut self, f: F);
-}
-
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub mod alloc_mod {
@@ -130,9 +117,10 @@ pub mod std_mod {
             verification::{
                 self, FailParams, FailParamsWithStep, TcStateStarted, VerificationReportingProvider,
             },
-            EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError,
-            GenericRoutingError, PusPacketHandlerResult, PusPacketHandlingError,
-            PusRoutingErrorHandler, PusServiceHelper,
+            ActiveRequestMapProvider, DefaultActiveRequestMap, EcssTcInMemConverter,
+            EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError, GenericRoutingError,
+            PusPacketHandlerResult, PusPacketHandlingError, PusRoutingErrorHandler,
+            PusServiceHelper,
         },
         request::RequestId,
     };
@@ -250,38 +238,7 @@ pub mod std_mod {
         }
     }
 
-    #[derive(Clone, Debug, Default)]
-    pub struct DefaultActiveRequestMap(HashMap<RequestId, ActiveActionRequest>);
-
-    impl ActiveRequestMapProvider for DefaultActiveRequestMap {
-        fn insert(&mut self, request_id: &RequestId, request: ActiveActionRequest) {
-            self.0.insert(*request_id, request);
-        }
-
-        fn get(&self, request_id: RequestId) -> Option<&ActiveActionRequest> {
-            self.0.get(&request_id)
-        }
-
-        fn get_mut(&mut self, request_id: RequestId) -> Option<&mut ActiveActionRequest> {
-            self.0.get_mut(&request_id)
-        }
-
-        fn remove(&mut self, request_id: RequestId) -> bool {
-            self.0.remove(&request_id).is_some()
-        }
-
-        fn for_each<F: FnMut(&RequestId, &ActiveActionRequest)>(&self, mut f: F) {
-            for (req_id, active_req) in &self.0 {
-                f(req_id, active_req);
-            }
-        }
-
-        fn for_each_mut<F: FnMut(&RequestId, &mut ActiveActionRequest)>(&mut self, mut f: F) {
-            for (req_id, active_req) in &mut self.0 {
-                f(req_id, active_req);
-            }
-        }
-    }
+    pub type DefaultActiveActionRequestMap = DefaultActiveRequestMap<ActiveActionRequest>;
 
     pub trait ActionReplyHandlerHook {
         fn handle_unexpected_reply(&mut self, reply: &ActionReplyPusWithIds);
@@ -291,10 +248,10 @@ pub mod std_mod {
 
     pub struct PusService8ReplyHandler<
         VerificationReporter: VerificationReportingProvider,
-        ActiveRequestMap: ActiveRequestMapProvider,
+        ActiveRequestMap: ActiveRequestMapProvider<ActiveActionRequest>,
         UserHook: ActionReplyHandlerHook,
     > {
-        active_requests: ActiveRequestMap,
+        active_request_map: ActiveRequestMap,
         verification_reporter: VerificationReporter,
         fail_data_buf: alloc::vec::Vec<u8>,
         current_time: UnixTimestamp,
@@ -303,20 +260,22 @@ pub mod std_mod {
 
     impl<
             VerificationReporter: VerificationReportingProvider,
-            ActiveRequestMap: ActiveRequestMapProvider,
+            ActiveRequestMap: ActiveRequestMapProvider<ActiveActionRequest>,
             UserHook: ActionReplyHandlerHook,
         > PusService8ReplyHandler<VerificationReporter, ActiveRequestMap, UserHook>
     {
         #[cfg(feature = "std")]
         #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
-        pub fn new_with_init_time_now(
+        pub fn new_from_now(
             verification_reporter: VerificationReporter,
+            active_request_map: ActiveRequestMap,
             fail_data_buf_size: usize,
             user_hook: UserHook,
         ) -> Result<Self, SystemTimeError> {
             let current_time = UnixTimestamp::from_now()?;
             Ok(Self::new(
                 verification_reporter,
+                active_request_map,
                 fail_data_buf_size,
                 user_hook,
                 current_time,
@@ -325,18 +284,20 @@ pub mod std_mod {
 
         pub fn new(
             verification_reporter: VerificationReporter,
+            active_request_map: ActiveRequestMap,
             fail_data_buf_size: usize,
             user_hook: UserHook,
             init_time: UnixTimestamp,
         ) -> Self {
             Self {
-                active_requests: ActiveRequestMap::default(),
+                active_request_map,
                 verification_reporter,
                 fail_data_buf: alloc::vec![0; fail_data_buf_size],
                 current_time: init_time,
                 user_hook,
             }
         }
+
         pub fn add_routed_request(
             &mut self,
             request_id: verification::RequestId,
@@ -344,7 +305,7 @@ pub mod std_mod {
             token: VerificationToken<TcStateStarted>,
             timeout: Duration,
         ) {
-            self.active_requests.insert(
+            self.active_request_map.insert(
                 &request_id.into(),
                 ActiveActionRequest {
                     action_id,
@@ -358,7 +319,7 @@ pub mod std_mod {
         }
 
         pub fn request_active(&self, request_id: RequestId) -> bool {
-            self.active_requests.get(request_id).is_some()
+            self.active_request_map.get(request_id).is_some()
         }
 
         #[cfg(feature = "std")]
@@ -373,7 +334,7 @@ pub mod std_mod {
         /// It will call [Self::handle_timeout] for all active requests which have timed out.
         pub fn check_for_timeouts(&mut self, time_stamp: &[u8]) -> Result<(), EcssTmtcError> {
             let mut timed_out_commands = alloc::vec::Vec::new();
-            self.active_requests.for_each(|request_id, active_req| {
+            self.active_request_map.for_each(|request_id, active_req| {
                 let diff = self.current_time - active_req.common.start_time;
                 if diff.duration_absolute > active_req.common.timeout {
                     self.handle_timeout(active_req, time_stamp);
@@ -381,7 +342,7 @@ pub mod std_mod {
                 timed_out_commands.push(*request_id);
             });
             for timed_out_command in timed_out_commands {
-                self.active_requests.remove(timed_out_command);
+                self.active_request_map.remove(timed_out_command);
             }
             Ok(())
         }
@@ -412,7 +373,9 @@ pub mod std_mod {
             action_reply_with_ids: ActionReplyPusWithIds,
             time_stamp: &[u8],
         ) -> Result<(), EcssTmtcError> {
-            let active_req = self.active_requests.get(action_reply_with_ids.request_id);
+            let active_req = self
+                .active_request_map
+                .get(action_reply_with_ids.request_id);
             if active_req.is_none() {
                 self.user_hook
                     .handle_unexpected_reply(&action_reply_with_ids);
@@ -468,10 +431,45 @@ pub mod std_mod {
                 }
             };
             if remove_entry {
-                self.active_requests
+                self.active_request_map
                     .remove(action_reply_with_ids.request_id);
             }
             Ok(())
+        }
+    }
+
+    impl<VerificationReporter: VerificationReportingProvider, UserHook: ActionReplyHandlerHook>
+        PusService8ReplyHandler<VerificationReporter, DefaultActiveActionRequestMap, UserHook>
+    {
+        #[cfg(feature = "std")]
+        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
+        pub fn new_from_now_with_default_map(
+            verification_reporter: VerificationReporter,
+            fail_data_buf_size: usize,
+            user_hook: UserHook,
+        ) -> Result<Self, SystemTimeError> {
+            let current_time = UnixTimestamp::from_now()?;
+            Ok(Self::new_with_default_map(
+                verification_reporter,
+                fail_data_buf_size,
+                user_hook,
+                current_time,
+            ))
+        }
+
+        pub fn new_with_default_map(
+            verification_reporter: VerificationReporter,
+            fail_data_buf_size: usize,
+            user_hook: UserHook,
+            init_time: UnixTimestamp,
+        ) -> Self {
+            Self::new(
+                verification_reporter,
+                DefaultActiveRequestMap::<ActiveActionRequest>(HashMap::default()),
+                fail_data_buf_size,
+                user_hook,
+                init_time,
+            )
         }
     }
 }
@@ -670,7 +668,7 @@ mod tests {
         verif_reporter: TestVerificationReporter,
         handler: PusService8ReplyHandler<
             TestVerificationReporter,
-            DefaultActiveRequestMap,
+            DefaultActiveActionRequestMap,
             TestReplyHandlerHook,
         >,
     }
@@ -680,7 +678,7 @@ mod tests {
             let reply_handler_hook = TestReplyHandlerHook::default();
             let shared_verif_map = SharedVerificationMap::default();
             let test_verif_reporter = TestVerificationReporter::new(shared_verif_map.clone());
-            let reply_handler = PusService8ReplyHandler::new_with_init_time_now(
+            let reply_handler = PusService8ReplyHandler::new_from_now_with_default_map(
                 test_verif_reporter.clone(),
                 128,
                 reply_handler_hook,
