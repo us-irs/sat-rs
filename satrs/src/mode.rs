@@ -592,12 +592,9 @@ mod tests {
     }
 
     #[test]
-    fn test_simple_mode_request_handler() {}
-
-    #[test]
     fn test_mode_requestor_and_request_handler_request_sending() {
-        let (reply_sender_to_connector, reply_receiver_of_connector) = mpsc::channel();
-        let (request_sender_to_connector, request_receiver_of_connector) = mpsc::channel();
+        let (_reply_sender_to_connector, reply_receiver_of_connector) = mpsc::channel();
+        let (_request_sender_to_connector, request_receiver_of_connector) = mpsc::channel();
 
         let (request_sender_to_channel_1, request_receiver_channel_1) = mpsc::channel();
         //let (reply_sender_to_channel_2, reply_receiver_channel_2) = mpsc::channel();
@@ -634,8 +631,8 @@ mod tests {
 
     #[test]
     fn test_mode_requestor_and_request_handler_reply_sending() {
-        let (reply_sender_to_connector, reply_receiver_of_connector) = mpsc::channel();
-        let (request_sender_to_connector, request_receiver_of_connector) = mpsc::channel();
+        let (_reply_sender_to_connector, reply_receiver_of_connector) = mpsc::channel();
+        let (_request_sender_to_connector, request_receiver_of_connector) = mpsc::channel();
 
         let (reply_sender_to_channel_2, reply_receiver_channel_2) = mpsc::channel();
         let mut mode_connector = ModeRequestorAndHandlerMpsc::new(

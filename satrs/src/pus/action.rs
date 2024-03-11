@@ -37,7 +37,7 @@ pub struct ActionReplyPusWithIds {
 pub enum ActionReplyPus {
     Completed,
     StepSuccess {
-        step: EcssEnumU16,
+        step: u16,
     },
     CompletionFailed {
         error_code: ResultU16,
@@ -45,7 +45,7 @@ pub enum ActionReplyPus {
     },
     StepFailed {
         error_code: ResultU16,
-        step: EcssEnumU16,
+        step: u16,
         params: Params,
     },
 }
@@ -348,7 +348,7 @@ pub mod std_mod {
                             active_req.token,
                             FailParamsWithStep::new(
                                 time_stamp,
-                                &step,
+                                &EcssEnumU16::new(step),
                                 &error_code,
                                 &self.fail_data_buf,
                             ),
@@ -365,8 +365,11 @@ pub mod std_mod {
                         .remove(&action_reply_with_ids.request_id);
                 }
                 ActionReplyPus::StepSuccess { step } => {
-                    self.verification_reporter
-                        .step_success(&active_req.token, time_stamp, step)?;
+                    self.verification_reporter.step_success(
+                        &active_req.token,
+                        time_stamp,
+                        EcssEnumU16::new(step),
+                    )?;
                 }
             }
             Ok(())
@@ -400,10 +403,10 @@ mod tests {
             verification::{
                 self,
                 tests::{SharedVerificationMap, TestVerificationReporter},
-                FailParams, RequestId, VerificationReportingProvider,
+                FailParams, TcStateNone, TcStateStarted, VerificationReportingProvider,
             },
-            EcssTcInVecConverter, GenericRoutingError, MpscTcReceiver, PusPacketHandlerResult,
-            PusPacketHandlingError, TmAsVecSenderWithMpsc,
+            EcssTcInVecConverter, EcssTmtcError, GenericRoutingError, MpscTcReceiver,
+            PusPacketHandlerResult, PusPacketHandlingError, TmAsVecSenderWithMpsc,
         },
     };
 
@@ -471,7 +474,7 @@ mod tests {
         }
     }
 
-    struct Pus8HandlerWithVecTester {
+    struct Pus8RequestTestbenchWithVec {
         common: PusServiceHandlerWithVecCommon<TestVerificationReporter>,
         handler: PusService8ActionHandler<
             MpscTcReceiver,
@@ -484,7 +487,7 @@ mod tests {
         >,
     }
 
-    impl Pus8HandlerWithVecTester {
+    impl Pus8RequestTestbenchWithVec {
         pub fn new() -> Self {
             let (common, srv_handler) =
                 PusServiceHandlerWithVecCommon::new_with_test_verif_sender();
@@ -516,7 +519,7 @@ mod tests {
         }
     }
 
-    impl PusTestHarness for Pus8HandlerWithVecTester {
+    impl PusTestHarness for Pus8RequestTestbenchWithVec {
         delegate! {
             to self.common {
                 fn send_tc(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted>;
@@ -525,12 +528,12 @@ mod tests {
                 fn check_next_verification_tm(
                     &self,
                     subservice: u8,
-                    expected_request_id: RequestId,
+                    expected_request_id: verification::RequestId,
                 );
             }
         }
     }
-    impl SimplePusPacketHandler for Pus8HandlerWithVecTester {
+    impl SimplePusPacketHandler for Pus8RequestTestbenchWithVec {
         delegate! {
             to self.handler {
                 fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
@@ -560,9 +563,86 @@ mod tests {
         }
     }
 
+    pub struct Pus8ReplyTestbench {
+        verif_reporter: TestVerificationReporter,
+        handler: PusService8ReplyHandler<TestVerificationReporter, TestReplyHandlerHook>,
+    }
+
+    impl Pus8ReplyTestbench {
+        pub fn new() -> Self {
+            let reply_handler_hook = TestReplyHandlerHook::default();
+            let shared_verif_map = SharedVerificationMap::default();
+            let test_verif_reporter = TestVerificationReporter::new(shared_verif_map.clone());
+            let reply_handler =
+                PusService8ReplyHandler::new(test_verif_reporter.clone(), 128, reply_handler_hook);
+            Self {
+                verif_reporter: test_verif_reporter,
+                handler: reply_handler,
+            }
+        }
+
+        pub fn init_handling_for_request(
+            &mut self,
+            request_id: RequestId,
+            _action_id: ActionId,
+        ) -> VerificationToken<TcStateStarted> {
+            // let action_req = ActionRequest::new(action_id, ActionRequestVariant::NoData);
+            let token = self.add_tc_with_req_id(request_id.into());
+            let token = self
+                .verif_reporter
+                .acceptance_success(token, &[])
+                .expect("acceptance success failure");
+            let token = self
+                .verif_reporter
+                .start_success(token, &[])
+                .expect("start success failure");
+            let verif_info = self
+                .verif_reporter
+                .verification_info(&verification::RequestId::from(request_id))
+                .expect("no verification info found");
+            assert!(verif_info.started.expect("request was not started"));
+            assert!(verif_info.accepted.expect("request was not accepted"));
+            token
+        }
+
+        pub fn assert_request_completion(&self, step: Option<u16>, request_id: RequestId) {
+            let verif_info = self
+                .verif_reporter
+                .verification_info(&verification::RequestId::from(request_id))
+                .expect("no verification info found");
+            if let Some(step) = step {
+                assert!(verif_info.step_status.is_some());
+                assert!(verif_info.step_status.unwrap());
+                assert_eq!(step, verif_info.step);
+            }
+            assert!(verif_info.completed.expect("request is not completed"));
+        }
+
+        delegate! {
+            to self.handler {
+                pub fn handle_action_reply(
+                    &mut self,
+                    action_reply_with_ids: ActionReplyPusWithIds,
+                    time_stamp: &[u8],
+                ) -> Result<(), EcssTmtcError>;
+
+                pub fn add_routed_request(
+                    &mut self,
+                    request_id: verification::RequestId,
+                    action_id: ActionId,
+                    token: VerificationToken<TcStateStarted>,
+                    timeout: Duration,
+                );
+            }
+            to self.verif_reporter {
+                fn add_tc_with_req_id(&mut self, req_id: verification::RequestId) -> VerificationToken<TcStateNone>;
+            }
+        }
+    }
+
     #[test]
     fn basic_test() {
-        let mut action_handler = Pus8HandlerWithVecTester::new();
+        let mut action_handler = Pus8RequestTestbenchWithVec::new();
         let mut sp_header = SpHeader::tc(TEST_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
         let sec_header = PusTcSecondaryHeader::new_simple(8, 1);
         let action_id: u32 = 1;
@@ -582,7 +662,7 @@ mod tests {
 
     #[test]
     fn test_routing_error() {
-        let mut action_handler = Pus8HandlerWithVecTester::new();
+        let mut action_handler = Pus8RequestTestbenchWithVec::new();
         let mut sp_header = SpHeader::tc(TEST_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
         let sec_header = PusTcSecondaryHeader::new_simple(8, 1);
         let action_id: u32 = 1;
@@ -624,27 +704,11 @@ mod tests {
 
     #[test]
     fn test_reply_handler() {
-        let reply_handler_hook = TestReplyHandlerHook::default();
-        let shared_verif_map = SharedVerificationMap::default();
-        let mut test_verif_reporter = TestVerificationReporter::new(shared_verif_map.clone());
-        let mut reply_handler =
-            PusService8ReplyHandler::new(test_verif_reporter.clone(), 128, reply_handler_hook);
+        let mut reply_testbench = Pus8ReplyTestbench::new();
         let request_id = 0x02;
         let action_id = 0x03;
-        // let action_req = ActionRequest::new(action_id, ActionRequestVariant::NoData);
-        let token = test_verif_reporter.add_tc_with_req_id(request_id.into());
-        let token = test_verif_reporter
-            .acceptance_success(token, &[])
-            .expect("acceptance success failure");
-        let token = test_verif_reporter
-            .start_success(token, &[])
-            .expect("start success failure");
-        let verif_info = test_verif_reporter
-            .verification_info(&verification::RequestId::from(request_id))
-            .expect("no verification info found");
-        assert!(verif_info.started.expect("not started"));
-        assert!(verif_info.accepted.expect("not accepted"));
-        reply_handler.add_routed_request(
+        let token = reply_testbench.init_handling_for_request(request_id, action_id);
+        reply_testbench.add_routed_request(
             request_id.into(),
             action_id,
             token,
@@ -655,12 +719,40 @@ mod tests {
             action_id,
             reply: ActionReplyPus::Completed,
         };
-        reply_handler
+        reply_testbench
             .handle_action_reply(action_reply, &[])
             .expect("reply handling failure");
-        let verif_info = test_verif_reporter
-            .verification_info(&verification::RequestId::from(request_id))
-            .expect("no verification info found");
-        assert!(verif_info.completed.expect("not started"));
+        reply_testbench.assert_request_completion(None, request_id);
+    }
+
+    #[test]
+    fn test_reply_handler_step_success() {
+        let mut reply_testbench = Pus8ReplyTestbench::new();
+        let request_id = 0x02;
+        let action_id = 0x03;
+        let token = reply_testbench.init_handling_for_request(request_id, action_id);
+        reply_testbench.add_routed_request(
+            request_id.into(),
+            action_id,
+            token,
+            Duration::from_millis(1),
+        );
+        let action_reply = ActionReplyPusWithIds {
+            request_id,
+            action_id,
+            reply: ActionReplyPus::StepSuccess { step: 1 },
+        };
+        reply_testbench
+            .handle_action_reply(action_reply, &[])
+            .expect("reply handling failure");
+        let action_reply = ActionReplyPusWithIds {
+            request_id,
+            action_id,
+            reply: ActionReplyPus::Completed,
+        };
+        reply_testbench
+            .handle_action_reply(action_reply, &[])
+            .expect("reply handling failure");
+        reply_testbench.assert_request_completion(Some(1), request_id);
     }
 }

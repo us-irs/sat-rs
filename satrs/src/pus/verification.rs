@@ -1462,7 +1462,7 @@ pub mod tests {
     pub struct VerificationStatus {
         pub accepted: Option<bool>,
         pub started: Option<bool>,
-        pub step: u64,
+        pub step: u16,
         pub step_status: Option<bool>,
         pub completed: Option<bool>,
         pub failure_data: Option<Vec<u8>>,
@@ -1590,7 +1590,7 @@ pub mod tests {
             let verif_map = self.verification_map.lock().unwrap();
             match verif_map.borrow_mut().get_mut(&token.req_id) {
                 Some(entry) => {
-                    entry.step = step.value();
+                    entry.step = step.value().try_into().unwrap();
                     entry.step_status = Some(true);
                 }
                 None => panic!("unexpected start success for request ID {}", token.req_id()),
