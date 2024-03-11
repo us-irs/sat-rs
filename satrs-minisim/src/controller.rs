@@ -7,7 +7,8 @@ use asynchronix::{
 use satrs_minisim::{
     acs::{MgmRequest, MgtRequest},
     eps::PcduRequest,
-    RequestError, SimCtrlReply, SimCtrlRequest, SimReply, SimRequest, SimTarget,
+    SerializableSimMsgPayload, SimCtrlReply, SimCtrlRequest, SimMessageProvider, SimReply,
+    SimRequest, SimRequestError, SimTarget,
 };
 
 use crate::{
@@ -86,19 +87,19 @@ impl SimController {
         }
     }
 
-    fn handle_ctrl_request(&mut self, request: &SimRequest) -> serde_json::Result<()> {
-        let sim_ctrl_request: SimCtrlRequest = serde_json::from_str(request.request())?;
+    fn handle_ctrl_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
+        let sim_ctrl_request = SimCtrlRequest::from_sim_message(request)?;
         match sim_ctrl_request {
             SimCtrlRequest::Ping => {
                 self.reply_sender
-                    .send(SimReply::new(SimTarget::SimCtrl, SimCtrlReply::Pong))
+                    .send(SimReply::new(SimCtrlReply::Pong))
                     .expect("sending reply from sim controller failed");
             }
         }
         Ok(())
     }
-    fn handle_mgm_request(&mut self, request: &SimRequest) -> serde_json::Result<()> {
-        let mgm_request: MgmRequest = serde_json::from_str(request.request())?;
+    fn handle_mgm_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
+        let mgm_request = MgmRequest::from_sim_message(request)?;
         match mgm_request {
             MgmRequest::RequestSensorData => {
                 self.simulation.send_event(
@@ -111,8 +112,8 @@ impl SimController {
         Ok(())
     }
 
-    fn handle_pcdu_request(&mut self, request: &SimRequest) -> serde_json::Result<()> {
-        let pcdu_request: PcduRequest = serde_json::from_str(request.request())?;
+    fn handle_pcdu_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
+        let pcdu_request = PcduRequest::from_sim_message(request)?;
         match pcdu_request {
             PcduRequest::RequestSwitchInfo => {
                 self.simulation
@@ -129,8 +130,8 @@ impl SimController {
         Ok(())
     }
 
-    fn handle_mgt_request(&mut self, request: &SimRequest) -> serde_json::Result<()> {
-        let mgt_request: MgtRequest = serde_json::from_str(request.request())?;
+    fn handle_mgt_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
+        let mgt_request = MgtRequest::from_sim_message(request)?;
         match mgt_request {
             MgtRequest::ApplyTorque { duration, dipole } => self.simulation.send_event(
                 MagnetorquerModel::apply_torque,
@@ -148,7 +149,7 @@ impl SimController {
 
     fn handle_invalid_request_with_valid_target(
         &self,
-        error: serde_json::Error,
+        error: SimRequestError,
         request: &SimRequest,
     ) {
         log::warn!(
@@ -157,10 +158,7 @@ impl SimController {
             error
         );
         self.reply_sender
-            .send(SimReply::new(
-                SimTarget::SimCtrl,
-                SimCtrlReply::from(RequestError::TargetRequestMissmatch(request.clone())),
-            ))
+            .send(SimReply::new(SimCtrlReply::from(error)))
             .expect("sending reply from sim controller failed");
     }
 }
@@ -174,8 +172,7 @@ mod tests {
     #[test]
     fn test_basic_ping() {
         let mut sim_testbench = SimTestbench::new();
-        let sim_ctrl_request = SimCtrlRequest::Ping;
-        let request = SimRequest::new(SimTarget::SimCtrl, sim_ctrl_request);
+        let request = SimRequest::new(SimCtrlRequest::Ping);
         sim_testbench
             .send_request(request)
             .expect("sending sim ctrl request failed");
@@ -185,13 +182,8 @@ mod tests {
         assert!(sim_reply.is_some());
         let sim_reply = sim_reply.unwrap();
         assert_eq!(sim_reply.target(), SimTarget::SimCtrl);
-        let reply: SimCtrlReply = serde_json::from_str(sim_reply.reply())
+        let reply = SimCtrlReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
         assert_eq!(reply, SimCtrlReply::Pong);
-    }
-
-    #[test]
-    fn test_invalid_request() {
-        // TODO: Implement this test. Check for the expected reply.
     }
 }

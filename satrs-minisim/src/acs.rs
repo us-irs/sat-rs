@@ -7,7 +7,7 @@ use asynchronix::{
 use satrs::power::SwitchStateBinary;
 use satrs_minisim::{
     acs::{MgmReply, MgmSensorValues, MgtDipole, MgtHkSet, MgtReply, MGT_GEN_MAGNETIC_FIELD},
-    SimReply, SimTarget,
+    SimReply,
 };
 
 use crate::time::current_millis;
@@ -54,14 +54,10 @@ impl MagnetometerModel {
 
     pub async fn send_sensor_values(&mut self, _: (), scheduler: &Scheduler<Self>) {
         self.reply_sender
-            .send(SimReply::new(
-                SimTarget::Mgm,
-                MgmReply {
-                    switch_state: self.switch_state,
-                    sensor_values: self
-                        .calculate_current_mgm_tuple(current_millis(scheduler.time())),
-                },
-            ))
+            .send(SimReply::new(MgmReply {
+                switch_state: self.switch_state,
+                sensor_values: self.calculate_current_mgm_tuple(current_millis(scheduler.time())),
+            }))
             .expect("sending MGM sensor values failed");
     }
 
@@ -149,12 +145,11 @@ impl MagnetorquerModel {
     }
 
     pub fn send_housekeeping_data(&mut self) {
-        let mgt_reply = MgtReply::Hk(MgtHkSet {
-            dipole: self.torque_dipole,
-            torquing: self.torquing,
-        });
         self.reply_sender
-            .send(SimReply::new(SimTarget::Mgt, mgt_reply))
+            .send(SimReply::new(MgtReply::Hk(MgtHkSet {
+                dipole: self.torque_dipole,
+                torquing: self.torquing,
+            })))
             .unwrap();
     }
 
@@ -186,7 +181,7 @@ pub mod tests {
     use satrs_minisim::{
         acs::{MgmReply, MgmRequest, MgtDipole, MgtHkSet, MgtReply, MgtRequest},
         eps::PcduSwitch,
-        SimRequest, SimTarget,
+        SerializableSimMsgPayload, SimMessageProvider, SimRequest, SimTarget,
     };
 
     use crate::{eps::tests::switch_device_on, test_helpers::SimTestbench};
@@ -194,8 +189,7 @@ pub mod tests {
     #[test]
     fn test_basic_mgm_request() {
         let mut sim_testbench = SimTestbench::new();
-        let mgm_request = MgmRequest::RequestSensorData;
-        let request = SimRequest::new(SimTarget::Mgm, mgm_request);
+        let request = SimRequest::new(MgmRequest::RequestSensorData);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
@@ -205,7 +199,7 @@ pub mod tests {
         assert!(sim_reply.is_some());
         let sim_reply = sim_reply.unwrap();
         assert_eq!(sim_reply.target(), SimTarget::Mgm);
-        let reply: MgmReply = serde_json::from_str(sim_reply.reply())
+        let reply = MgmReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
         assert_eq!(reply.switch_state, SwitchStateBinary::Off);
         assert_eq!(reply.sensor_values.x, 0.0);
@@ -218,8 +212,7 @@ pub mod tests {
         let mut sim_testbench = SimTestbench::new();
         switch_device_on(&mut sim_testbench, PcduSwitch::Mgm);
 
-        let mgm_request = MgmRequest::RequestSensorData;
-        let mut request = SimRequest::new(SimTarget::Mgm, mgm_request);
+        let mut request = SimRequest::new(MgmRequest::RequestSensorData);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
@@ -229,12 +222,11 @@ pub mod tests {
         assert!(sim_reply_res.is_some());
         let mut sim_reply = sim_reply_res.unwrap();
         assert_eq!(sim_reply.target(), SimTarget::Mgm);
-        let first_reply: MgmReply = serde_json::from_str(sim_reply.reply())
+        let first_reply = MgmReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
-        let mgm_request = MgmRequest::RequestSensorData;
         sim_testbench.step_by(Duration::from_millis(50));
 
-        request = SimRequest::new(SimTarget::Mgm, mgm_request);
+        request = SimRequest::new(MgmRequest::RequestSensorData);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
@@ -244,7 +236,7 @@ pub mod tests {
         assert!(sim_reply_res.is_some());
         sim_reply = sim_reply_res.unwrap();
 
-        let second_reply: MgmReply = serde_json::from_str(sim_reply.reply())
+        let second_reply = MgmReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
         // Check that the values are changing.
         assert!(first_reply != second_reply);
@@ -253,8 +245,7 @@ pub mod tests {
     #[test]
     fn test_basic_mgt_request_is_off() {
         let mut sim_testbench = SimTestbench::new();
-        let mgt_request = MgtRequest::RequestHk;
-        let request = SimRequest::new(SimTarget::Mgt, mgt_request);
+        let request = SimRequest::new(MgtRequest::RequestHk);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
@@ -268,8 +259,8 @@ pub mod tests {
     fn test_basic_mgt_request_is_on() {
         let mut sim_testbench = SimTestbench::new();
         switch_device_on(&mut sim_testbench, PcduSwitch::Mgt);
-        let mgt_request = MgtRequest::RequestHk;
-        let request = SimRequest::new(SimTarget::Mgt, mgt_request);
+        let request = SimRequest::new(MgtRequest::RequestHk);
+
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
@@ -278,7 +269,7 @@ pub mod tests {
         let sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_some());
         let sim_reply = sim_reply_res.unwrap();
-        let mgt_reply: MgtReply = serde_json::from_str(sim_reply.reply())
+        let mgt_reply = MgtReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
         match mgt_reply {
             MgtReply::Hk(hk) => {
@@ -290,8 +281,7 @@ pub mod tests {
     }
 
     fn check_mgt_hk(sim_testbench: &mut SimTestbench, expected_hk_set: MgtHkSet) {
-        let mgt_request = MgtRequest::RequestHk;
-        let request = SimRequest::new(SimTarget::Mgt, mgt_request);
+        let request = SimRequest::new(MgtRequest::RequestHk);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
@@ -300,7 +290,7 @@ pub mod tests {
         let sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_some());
         let sim_reply = sim_reply_res.unwrap();
-        let mgt_reply: MgtReply = serde_json::from_str(sim_reply.reply())
+        let mgt_reply = MgtReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
         match mgt_reply {
             MgtReply::Hk(hk) => {
@@ -319,11 +309,10 @@ pub mod tests {
             y: 200,
             z: 1000,
         };
-        let mgt_request = MgtRequest::ApplyTorque {
+        let request = SimRequest::new(MgtRequest::ApplyTorque {
             duration: Duration::from_millis(100),
             dipole: commanded_dipole,
-        };
-        let request = SimRequest::new(SimTarget::Mgt, mgt_request);
+        });
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
