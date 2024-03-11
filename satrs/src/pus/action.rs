@@ -74,7 +74,7 @@ pub struct ActiveActionRequest {
 
 pub trait ActiveRequestMapProvider: Default {
     fn insert(&mut self, request_id: &RequestId, request: ActiveActionRequest);
-    fn get(&self, request_id: RequestId) -> Option<ActiveActionRequest>;
+    fn get(&self, request_id: RequestId) -> Option<&ActiveActionRequest>;
     fn get_mut(&mut self, request_id: RequestId) -> Option<&mut ActiveActionRequest>;
     fn remove(&mut self, request_id: RequestId) -> bool;
 
@@ -255,15 +255,12 @@ pub mod std_mod {
     pub struct DefaultActiveRequestMap(HashMap<RequestId, ActiveActionRequest>);
 
     impl ActiveRequestMapProvider for DefaultActiveRequestMap {
-        // type Iter = hashbrown::hash_map::Iter<'a, RequestId, ActiveActionRequest>;
-        // type IterMut = hashbrown::hash_map::IterMut<'a, RequestId, ActiveActionRequest>;
-
         fn insert(&mut self, request_id: &RequestId, request: ActiveActionRequest) {
             self.0.insert(*request_id, request);
         }
 
-        fn get(&self, request_id: RequestId) -> Option<ActiveActionRequest> {
-            self.0.get(&request_id).cloned()
+        fn get(&self, request_id: RequestId) -> Option<&ActiveActionRequest> {
+            self.0.get(&request_id)
         }
 
         fn get_mut(&mut self, request_id: RequestId) -> Option<&mut ActiveActionRequest> {
@@ -357,6 +354,10 @@ pub mod std_mod {
                     timeout,
                 },
             );
+        }
+
+        pub fn request_active(&self, request_id: RequestId) -> bool {
+            self.active_requests.get(request_id).is_some()
         }
 
         #[cfg(feature = "std")]
@@ -695,6 +696,7 @@ mod tests {
             request_id: RequestId,
             _action_id: ActionId,
         ) -> VerificationToken<TcStateStarted> {
+            assert!(!self.handler.request_active(request_id));
             // let action_req = ActionRequest::new(action_id, ActionRequestVariant::NoData);
             let token = self.add_tc_with_req_id(request_id.into());
             let token = self
@@ -719,7 +721,7 @@ mod tests {
                 .verif_reporter
                 .verification_info(&verification::RequestId::from(request_id))
                 .expect("no verification info found");
-            self.assert_request_completion_common(&verif_info, step, true)
+            self.assert_request_completion_common(request_id, &verif_info, step, true);
         }
 
         pub fn assert_request_completion_failure(
@@ -733,13 +735,14 @@ mod tests {
                 .verif_reporter
                 .verification_info(&verification::RequestId::from(request_id))
                 .expect("no verification info found");
-            self.assert_request_completion_common(&verif_info, step, false);
+            self.assert_request_completion_common(request_id, &verif_info, step, false);
             assert_eq!(verif_info.fail_enum.unwrap(), fail_enum.raw() as u64);
             assert_eq!(verif_info.failure_data.unwrap(), fail_data);
         }
 
         pub fn assert_request_completion_common(
             &self,
+            request_id: RequestId,
             verif_info: &VerificationStatus,
             step: Option<u16>,
             completion_success: bool,
@@ -753,6 +756,7 @@ mod tests {
                 verif_info.completed.expect("request is not completed"),
                 completion_success
             );
+            assert!(!self.handler.request_active(request_id));
         }
 
         pub fn assert_request_step_failure(&self, step: u16, request_id: RequestId) {
@@ -764,22 +768,33 @@ mod tests {
             assert!(!verif_info.step_status.unwrap());
             assert_eq!(step, verif_info.step);
         }
+        pub fn add_routed_request(
+            &mut self,
+            request_id: verification::RequestId,
+            action_id: ActionId,
+            token: VerificationToken<TcStateStarted>,
+            timeout: Duration,
+        ) {
+            if self.handler.request_active(request_id.into()) {
+                panic!("request already present");
+            }
+            self.handler
+                .add_routed_request(request_id, action_id, token, timeout);
+            if !self.handler.request_active(request_id.into()) {
+                panic!("request should be active now");
+            }
+        }
 
         delegate! {
             to self.handler {
+                pub fn request_active(&self, request_id: RequestId) -> bool;
+
                 pub fn handle_action_reply(
                     &mut self,
                     action_reply_with_ids: ActionReplyPusWithIds,
                     time_stamp: &[u8],
                 ) -> Result<(), EcssTmtcError>;
 
-                pub fn add_routed_request(
-                    &mut self,
-                    request_id: verification::RequestId,
-                    action_id: ActionId,
-                    token: VerificationToken<TcStateStarted>,
-                    timeout: Duration,
-                );
 
                 pub fn update_time_from_now(&mut self) -> Result<(), SystemTimeError>;
 
@@ -865,6 +880,7 @@ mod tests {
             token,
             Duration::from_millis(1),
         );
+        assert!(reply_testbench.request_active(request_id));
         let action_reply = ActionReplyPusWithIds {
             request_id,
             action_id,
