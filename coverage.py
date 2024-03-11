@@ -18,15 +18,19 @@ def generate_cov_report(open_report: bool, format: str, package: str):
     out_path = "./target/debug/coverage"
     if format == "lcov":
         out_path = "./target/debug/lcov.info"
-    os.system(
+    grcov_cmd = (
         f"grcov . -s . --binary-path ./target/debug/ -t {format} --branch --ignore-not-existing "
         f"-o {out_path}"
     )
+    print(f"Running: {grcov_cmd}")
+    os.system(grcov_cmd)
     if format == "lcov":
-        os.system(
+        lcov_cmd = (
             "genhtml -o ./target/debug/coverage/ --show-details --highlight --ignore-errors source "
             "--legend ./target/debug/lcov.info"
         )
+        print(f"Running: {lcov_cmd}")
+        os.system(lcov_cmd)
     if open_report:
         coverage_report_path = os.path.abspath("./target/debug/coverage/index.html")
         webbrowser.open_new_tab(coverage_report_path)
@@ -43,7 +47,7 @@ def main():
     parser.add_argument(
         "-p",
         "--package",
-        choices=["satrs"],
+        choices=["satrs", "satrs-minisim"],
         default="satrs",
         help="Choose project to generate coverage for",
     )

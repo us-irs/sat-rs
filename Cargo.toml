@@ -4,6 +4,7 @@ members = [
     "satrs",
     "satrs-mib",
     "satrs-example",
+    "satrs-minisim",
     "satrs-shared",
 ]
 
