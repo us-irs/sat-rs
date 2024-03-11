@@ -24,6 +24,42 @@ pub enum SwitchState {
     Faulty = 3,
 }
 
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SwitchStateBinary {
+    Off = 0,
+    On = 1,
+}
+
+impl TryFrom<SwitchState> for SwitchStateBinary {
+    type Error = ();
+    fn try_from(value: SwitchState) -> Result<Self, Self::Error> {
+        match value {
+            SwitchState::Off => Ok(SwitchStateBinary::Off),
+            SwitchState::On => Ok(SwitchStateBinary::On),
+            _ => Err(()),
+        }
+    }
+}
+
+impl<T: Into<u64>> From<T> for SwitchStateBinary {
+    fn from(value: T) -> Self {
+        if value.into() == 0 {
+            return SwitchStateBinary::Off;
+        }
+        SwitchStateBinary::On
+    }
+}
+
+impl From<SwitchStateBinary> for SwitchState {
+    fn from(value: SwitchStateBinary) -> Self {
+        match value {
+            SwitchStateBinary::Off => SwitchState::Off,
+            SwitchStateBinary::On => SwitchState::On,
+        }
+    }
+}
+
 pub type SwitchId = u16;
 
 /// Generic trait for a device capable of turning on and off switches.
