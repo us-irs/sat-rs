@@ -8,11 +8,13 @@ use crate::queue::{GenericReceiveError, GenericSendError};
 use crate::request::RequestId;
 use crate::{ChannelId, TargetId};
 use core::fmt::{Display, Formatter};
+use core::marker::PhantomData;
 use core::time::Duration;
 #[cfg(feature = "alloc")]
 use downcast_rs::{impl_downcast, Downcast};
 #[cfg(feature = "alloc")]
 use dyn_clone::DynClone;
+use satrs_shared::res_code::ResultU16;
 use spacepackets::time::UnixTimestamp;
 #[cfg(feature = "std")]
 use std::error::Error;
@@ -42,7 +44,7 @@ pub use alloc_mod::*;
 #[cfg(feature = "std")]
 pub use std_mod::*;
 
-use self::verification::TcStateStarted;
+use self::verification::{FailParams, TcStateStarted, VerificationReportingProvider};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PusTmWrapper<'tm> {
@@ -461,6 +463,168 @@ mod alloc_mod {
                 f(req_id, active_req);
             }
         }
+    }
+}
+
+/// Generic user hook method.
+///
+/// This hook method currently serves the following tasks:
+///
+///  1. Pass specific information to the reply handlers which can not be kept inside the
+///     framework. This includes information like the error codes used for packet verification.
+///  2. It exposes callback methods which can be useful to perform custom user operations like
+///     logging.
+pub trait ReplyHandlerHook<ActiveRequestType, ReplyType> {
+    fn handle_unexpected_reply(&mut self, reply: &ReplyType);
+    fn timeout_callback(&self, active_request: &ActiveRequestType);
+    fn timeout_error_code(&self) -> ResultU16;
+}
+
+/// Generic reply handler structure which can be used to handle replies for a specific PUS service.
+///
+/// This is done by keeping track of active requests using an internal map structure. An API
+/// to register new active requests is exposed as well.
+/// The reply handler performs boilerplate tasks like performing the verification handling and
+/// timeout handling.
+///
+/// This object is not useful by itself but serves as a common building block for high-level
+/// PUS reply handlers. Concrete PUS handlers should constrain the [ActiveRequestProvider] and
+/// the `ReplyType` generics to specific types tailored towards PUS services in addition to
+/// providing an API which can process received replies and convert them into verification
+/// completions or other operation like user hook calls. The framework also provides some concrete
+/// PUS handlers for common PUS services like the mode, action and housekeeping service.
+///
+/// This object does not automatically update its internal time information used to check for
+/// timeouts. The user should call the [Self::update_time] and [Self::update_time_from_now] methods
+/// to do this.
+pub struct PusServiceReplyHandler<
+    VerificationReporter: VerificationReportingProvider,
+    ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestType>,
+    UserHook: ReplyHandlerHook<ActiveRequestType, ReplyType>,
+    ActiveRequestType: ActiveRequestProvider,
+    ReplyType,
+> {
+    active_request_map: ActiveRequestMap,
+    verification_reporter: VerificationReporter,
+    fail_data_buf: alloc::vec::Vec<u8>,
+    current_time: UnixTimestamp,
+    pub user_hook: UserHook,
+    phantom: PhantomData<(ActiveRequestType, ReplyType)>,
+}
+
+impl<
+        VerificationReporter: VerificationReportingProvider,
+        ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestType>,
+        UserHook: ReplyHandlerHook<ActiveRequestType, ReplyType>,
+        ActiveRequestType: ActiveRequestProvider,
+        ReplyType,
+    >
+    PusServiceReplyHandler<
+        VerificationReporter,
+        ActiveRequestMap,
+        UserHook,
+        ActiveRequestType,
+        ReplyType,
+    >
+{
+    #[cfg(feature = "std")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
+    pub fn new_from_now(
+        verification_reporter: VerificationReporter,
+        active_request_map: ActiveRequestMap,
+        fail_data_buf_size: usize,
+        user_hook: UserHook,
+    ) -> Result<Self, std::time::SystemTimeError> {
+        let current_time = UnixTimestamp::from_now()?;
+        Ok(Self::new(
+            verification_reporter,
+            active_request_map,
+            fail_data_buf_size,
+            user_hook,
+            current_time,
+        ))
+    }
+
+    pub fn new(
+        verification_reporter: VerificationReporter,
+        active_request_map: ActiveRequestMap,
+        fail_data_buf_size: usize,
+        user_hook: UserHook,
+        init_time: UnixTimestamp,
+    ) -> Self {
+        Self {
+            active_request_map,
+            verification_reporter,
+            fail_data_buf: alloc::vec![0; fail_data_buf_size],
+            current_time: init_time,
+            user_hook,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn add_routed_request(
+        &mut self,
+        request_id: verification::RequestId,
+        active_request_type: ActiveRequestType,
+    ) {
+        self.active_request_map
+            .insert(&request_id.into(), active_request_type);
+    }
+
+    pub fn request_active(&self, request_id: RequestId) -> bool {
+        self.active_request_map.get(request_id).is_some()
+    }
+
+    /// Check for timeouts across all active requests.
+    ///
+    /// It will call [Self::handle_timeout] for all active requests which have timed out.
+    pub fn check_for_timeouts(&mut self, time_stamp: &[u8]) -> Result<(), EcssTmtcError> {
+        let mut timed_out_commands = alloc::vec::Vec::new();
+        self.active_request_map.for_each(|request_id, active_req| {
+            let diff = self.current_time - active_req.start_time();
+            if diff.duration_absolute > active_req.timeout() {
+                self.handle_timeout(active_req, time_stamp);
+            }
+            timed_out_commands.push(*request_id);
+        });
+        for timed_out_command in timed_out_commands {
+            self.active_request_map.remove(timed_out_command);
+        }
+        Ok(())
+    }
+
+    /// Handle the timeout for a given active request.
+    ///
+    /// This implementation will report a verification completion failure with a user-provided
+    /// error code. It supplies the configured request timeout in milliseconds as a [u64]
+    /// serialized in big-endian format as the failure data.
+    pub fn handle_timeout(&self, active_request: &ActiveRequestType, time_stamp: &[u8]) {
+        let timeout = active_request.timeout().as_millis() as u64;
+        let timeout_raw = timeout.to_be_bytes();
+        self.verification_reporter
+            .completion_failure(
+                active_request.token(),
+                FailParams::new(
+                    time_stamp,
+                    &self.user_hook.timeout_error_code(),
+                    &timeout_raw,
+                ),
+            )
+            .unwrap();
+        self.user_hook.timeout_callback(active_request);
+    }
+
+    /// Update the current time used for timeout checks based on the current OS time.
+    #[cfg(feature = "std")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
+    pub fn update_time_from_now(&mut self) -> Result<(), std::time::SystemTimeError> {
+        self.current_time = UnixTimestamp::from_now()?;
+        Ok(())
+    }
+
+    /// Update the current time used for timeout checks.
+    pub fn update_time(&mut self, time: UnixTimestamp) {
+        self.current_time = time;
     }
 }
 

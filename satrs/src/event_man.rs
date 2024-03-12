@@ -101,40 +101,40 @@ pub trait ListenerMapProvider {
 }
 
 pub trait SenderMapProvider<
-    SP: EventSendProvider<EV, AUX>,
-    EV: GenericEvent = EventU32,
-    AUX = Params,
+    EventSender: EventSendProvider<Ev, Data>,
+    Ev: GenericEvent = EventU32,
+    Data = Params,
 >
 {
     fn contains_send_event_provider(&self, id: &ChannelId) -> bool;
 
-    fn get_send_event_provider(&self, id: &ChannelId) -> Option<&SP>;
-    fn add_send_event_provider(&mut self, send_provider: SP) -> bool;
+    fn get_send_event_provider(&self, id: &ChannelId) -> Option<&EventSender>;
+    fn add_send_event_provider(&mut self, send_provider: EventSender) -> bool;
 }
 
 /// Generic event manager implementation.
 ///
 /// # Generics
 ///
-///  * `ERP`: [EventReceiveProvider] used to receive all events.
-///  * `SMP`: [SenderMapProvider]  which maps channel IDs to send providers.
-///  * `LTR`: [ListenerMapProvider] which maps listener keys to channel IDs.
-///  * `SP`: [EventSendProvider] contained within the sender map which sends the events.
-///  * `EV`: The event type. This type must implement the [GenericEvent]. Currently only [EventU32]
+///  * `EventReceiver`: [EventReceiveProvider] used to receive all events.
+///  * `SenderMap`: [SenderMapProvider]  which maps channel IDs to send providers.
+///  * `ListenerMap`: [ListenerMapProvider] which maps listener keys to channel IDs.
+///  * `EventSender`: [EventSendProvider] contained within the sender map which sends the events.
+///  * `Ev`: The event type. This type must implement the [GenericEvent]. Currently only [EventU32]
 ///     and [EventU16] are supported.
-///  * `AUX`: Auxiliary data which is sent with the event to provide optional context information
+///  * `Data`: Auxiliary data which is sent with the event to provide optional context information
 pub struct EventManager<
-    ERP: EventReceiveProvider<EV, AUX>,
-    SMP: SenderMapProvider<SP, EV, AUX>,
-    LTR: ListenerMapProvider,
-    SP: EventSendProvider<EV, AUX>,
-    EV: GenericEvent = EventU32,
-    AUX = Params,
+    EventReceiver: EventReceiveProvider<Ev, Data>,
+    SenderMap: SenderMapProvider<EventSender, Ev, Data>,
+    ListenerMap: ListenerMapProvider,
+    EventSender: EventSendProvider<Ev, Data>,
+    Ev: GenericEvent = EventU32,
+    Data = Params,
 > {
-    event_receiver: ERP,
-    sender_map: SMP,
-    listener_map: LTR,
-    phantom: core::marker::PhantomData<(SP, EV, AUX)>,
+    event_receiver: EventReceiver,
+    sender_map: SenderMap,
+    listener_map: ListenerMap,
+    phantom: core::marker::PhantomData<(EventSender, Ev, Data)>,
 }
 
 #[derive(Debug)]
@@ -157,26 +157,26 @@ pub enum EventRoutingError {
 }
 
 #[derive(Debug)]
-pub struct EventRoutingErrorsWithResult<EV: GenericEvent, AUX> {
-    pub result: EventRoutingResult<EV, AUX>,
+pub struct EventRoutingErrorsWithResult<Ev: GenericEvent, Data> {
+    pub result: EventRoutingResult<Ev, Data>,
     pub errors: [Option<EventRoutingError>; 3],
 }
 
 impl<
-        ER: EventReceiveProvider<EV, AUX>,
-        S: SenderMapProvider<SP, EV, AUX>,
-        L: ListenerMapProvider,
-        SP: EventSendProvider<EV, AUX>,
-        EV: GenericEvent + Copy,
-        AUX: Clone,
-    > EventManager<ER, S, L, SP, EV, AUX>
+        EventReceiver: EventReceiveProvider<Ev, Data>,
+        SenderMap: SenderMapProvider<EventSender, Ev, Data>,
+        ListenerMap: ListenerMapProvider,
+        EventSender: EventSendProvider<Ev, Data>,
+        Ev: GenericEvent + Copy,
+        Data: Clone,
+    > EventManager<EventReceiver, SenderMap, ListenerMap, EventSender, Ev, Data>
 {
     pub fn remove_duplicates(&mut self, key: &ListenerKey) {
         self.listener_map.remove_duplicates(key)
     }
 
     /// Subscribe for a unique event.
-    pub fn subscribe_single(&mut self, event: &EV, sender_id: ChannelId) {
+    pub fn subscribe_single(&mut self, event: &Ev, sender_id: ChannelId) {
         self.update_listeners(ListenerKey::Single(event.raw_as_largest_type()), sender_id);
     }
 
