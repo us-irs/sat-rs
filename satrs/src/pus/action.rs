@@ -7,9 +7,10 @@ use crate::{
 
 use super::{
     verification::{TcStateAccepted, VerificationToken},
-    ActiveRequest,
+    ActiveRequest, ActiveRequestProvider,
 };
 
+use delegate::delegate;
 use satrs_shared::res_code::ResultU16;
 use spacepackets::ecss::EcssEnumU16;
 
@@ -36,7 +37,7 @@ pub struct ActionReplyPusWithIds {
 
 /// A reply to an action request, but tailored to the PUS standard verification process.
 #[non_exhaustive]
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum ActionReplyPus {
     Completed,
     StepSuccess {
@@ -69,6 +70,17 @@ pub trait PusActionRequestRouter {
 pub struct ActiveActionRequest {
     pub action_id: ActionId,
     common: ActiveRequest,
+}
+
+impl ActiveRequestProvider for ActiveActionRequest {
+    delegate! {
+        to self.common {
+            fn target_id(&self) -> TargetId;
+            fn token(&self) -> VerificationToken<super::verification::TcStateStarted>;
+            fn start_time(&self) -> spacepackets::time::UnixTimestamp;
+            fn timeout(&self) -> core::time::Duration;
+        }
+    }
 }
 
 #[cfg(feature = "alloc")]
@@ -117,15 +129,15 @@ pub mod std_mod {
             verification::{
                 self, FailParams, FailParamsWithStep, TcStateStarted, VerificationReportingProvider,
             },
-            ActiveRequestMapProvider, DefaultActiveRequestMap, EcssTcInMemConverter,
-            EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError, GenericRoutingError,
-            PusPacketHandlerResult, PusPacketHandlingError, PusRoutingErrorHandler,
-            PusServiceHelper,
+            ActiveRequestMapProvider, ActiveRequestProvider, DefaultActiveRequestMap,
+            EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError,
+            GenericRoutingError, PusPacketHandlerResult, PusPacketHandlingError,
+            PusRoutingErrorHandler, PusServiceHelper,
         },
         request::RequestId,
     };
-    use core::time::Duration;
-    use hashbrown::HashMap;
+    use core::{marker::PhantomData, time::Duration};
+    use delegate::delegate;
     use spacepackets::time::UnixTimestamp;
     use std::time::SystemTimeError;
 
@@ -240,29 +252,41 @@ pub mod std_mod {
 
     pub type DefaultActiveActionRequestMap = DefaultActiveRequestMap<ActiveActionRequest>;
 
-    pub trait ActionReplyHandlerHook {
-        fn handle_unexpected_reply(&mut self, reply: &ActionReplyPusWithIds);
-        fn timeout_callback(&self, active_request: &ActiveActionRequest);
+    pub trait ReplyHandlerHook<ActiveRequestType, Reply> {
+        fn handle_unexpected_reply(&mut self, reply: &Reply);
+        fn timeout_callback(&self, active_request: &ActiveRequestType);
         fn timeout_error_code(&self) -> ResultU16;
     }
 
-    pub struct PusService8ReplyHandler<
+    pub struct PusServiceReplyHandler<
         VerificationReporter: VerificationReportingProvider,
-        ActiveRequestMap: ActiveRequestMapProvider<ActiveActionRequest>,
-        UserHook: ActionReplyHandlerHook,
+        ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestType>,
+        UserHook: ReplyHandlerHook<ActiveRequestType, Reply>,
+        ActiveRequestType: ActiveRequestProvider,
+        Reply,
     > {
         active_request_map: ActiveRequestMap,
         verification_reporter: VerificationReporter,
         fail_data_buf: alloc::vec::Vec<u8>,
         current_time: UnixTimestamp,
-        user_hook: UserHook,
+        pub user_hook: UserHook,
+        phantom: PhantomData<(ActiveRequestType, Reply)>,
     }
 
     impl<
             VerificationReporter: VerificationReportingProvider,
-            ActiveRequestMap: ActiveRequestMapProvider<ActiveActionRequest>,
-            UserHook: ActionReplyHandlerHook,
-        > PusService8ReplyHandler<VerificationReporter, ActiveRequestMap, UserHook>
+            ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestType>,
+            UserHook: ReplyHandlerHook<ActiveRequestType, ReplyType>,
+            ActiveRequestType: ActiveRequestProvider,
+            ReplyType,
+        >
+        PusServiceReplyHandler<
+            VerificationReporter,
+            ActiveRequestMap,
+            UserHook,
+            ActiveRequestType,
+            ReplyType,
+        >
     {
         #[cfg(feature = "std")]
         #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
@@ -295,38 +319,21 @@ pub mod std_mod {
                 fail_data_buf: alloc::vec![0; fail_data_buf_size],
                 current_time: init_time,
                 user_hook,
+                phantom: PhantomData,
             }
         }
 
         pub fn add_routed_request(
             &mut self,
             request_id: verification::RequestId,
-            action_id: ActionId,
-            token: VerificationToken<TcStateStarted>,
-            timeout: Duration,
+            active_request_type: ActiveRequestType,
         ) {
-            self.active_request_map.insert(
-                &request_id.into(),
-                ActiveActionRequest {
-                    action_id,
-                    common: ActiveRequest {
-                        token,
-                        start_time: self.current_time,
-                        timeout,
-                    },
-                },
-            );
+            self.active_request_map
+                .insert(&request_id.into(), active_request_type);
         }
 
         pub fn request_active(&self, request_id: RequestId) -> bool {
             self.active_request_map.get(request_id).is_some()
-        }
-
-        #[cfg(feature = "std")]
-        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
-        pub fn update_time_from_now(&mut self) -> Result<(), SystemTimeError> {
-            self.current_time = UnixTimestamp::from_now()?;
-            Ok(())
         }
 
         /// Check for timeouts across all active requests.
@@ -335,8 +342,8 @@ pub mod std_mod {
         pub fn check_for_timeouts(&mut self, time_stamp: &[u8]) -> Result<(), EcssTmtcError> {
             let mut timed_out_commands = alloc::vec::Vec::new();
             self.active_request_map.for_each(|request_id, active_req| {
-                let diff = self.current_time - active_req.common.start_time;
-                if diff.duration_absolute > active_req.common.timeout {
+                let diff = self.current_time - active_req.start_time();
+                if diff.duration_absolute > active_req.timeout() {
                     self.handle_timeout(active_req, time_stamp);
                 }
                 timed_out_commands.push(*request_id);
@@ -352,12 +359,12 @@ pub mod std_mod {
         /// This implementation will report a verification completion failure with a user-provided
         /// error code. It supplies the configured request timeout in milliseconds as a [u64]
         /// serialized in big-endian format as the failure data.
-        pub fn handle_timeout(&self, active_request: &ActiveActionRequest, time_stamp: &[u8]) {
-            let timeout = active_request.common.timeout.as_millis() as u64;
+        pub fn handle_timeout(&self, active_request: &ActiveRequestType, time_stamp: &[u8]) {
+            let timeout = active_request.timeout().as_millis() as u64;
             let timeout_raw = timeout.to_be_bytes();
             self.verification_reporter
                 .completion_failure(
-                    active_request.common.token,
+                    active_request.token(),
                     FailParams::new(
                         time_stamp,
                         &self.user_hook.timeout_error_code(),
@@ -368,29 +375,150 @@ pub mod std_mod {
             self.user_hook.timeout_callback(active_request);
         }
 
+        #[cfg(feature = "std")]
+        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
+        pub fn update_time_from_now(&mut self) -> Result<(), SystemTimeError> {
+            self.current_time = UnixTimestamp::from_now()?;
+            Ok(())
+        }
+    }
+
+    pub type PusService8ReplyHandler<VerificationReporter, ActiveRequestMap, UserHook> =
+        PusServiceReplyHandler<
+            VerificationReporter,
+            DefaultActiveActionRequestMap,
+            UserHook,
+            ActiveActionRequest,
+            ActionReplyPusWithIds,
+        >;
+    /*
+    pub struct PusService8ReplyHandler<
+        VerificationReporter: VerificationReportingProvider,
+        ActiveRequestMap: ActiveRequestMapProvider<ActiveActionRequest>,
+        UserHook: ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithIds>,
+    > {
+        pub inner: PusServiceReplyHandler<
+            VerificationReporter,
+            ActiveRequestMap,
+            UserHook,
+            ActiveActionRequest,
+            ActionReplyPusWithIds,
+        >,
+    }
+    */
+
+    impl<
+            VerificationReporter: VerificationReportingProvider,
+            ActiveRequestMap: ActiveRequestMapProvider<ActiveActionRequest>,
+            UserHook: ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithIds>,
+        > PusService8ReplyHandler<VerificationReporter, ActiveRequestMap, UserHook>
+    {
+        #[cfg(feature = "std")]
+        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
+        pub fn new_from_now(
+            verification_reporter: VerificationReporter,
+            active_request_map: ActiveRequestMap,
+            fail_data_buf_size: usize,
+            user_hook: UserHook,
+        ) -> Result<Self, SystemTimeError> {
+            let current_time = UnixTimestamp::from_now()?;
+            Ok(Self::new(
+                verification_reporter,
+                active_request_map,
+                fail_data_buf_size,
+                user_hook,
+                current_time,
+            ))
+        }
+
+        pub fn new(
+            verification_reporter: VerificationReporter,
+            active_request_map: ActiveRequestMap,
+            fail_data_buf_size: usize,
+            user_hook: UserHook,
+            init_time: UnixTimestamp,
+        ) -> Self {
+            Self {
+                inner: PusServiceReplyHandler::new(
+                    verification_reporter,
+                    active_request_map,
+                    fail_data_buf_size,
+                    user_hook,
+                    init_time,
+                ),
+            }
+        }
+
+        pub fn add_routed_request(
+            &mut self,
+            request_id: verification::RequestId,
+            target_id: TargetId,
+            action_id: ActionId,
+            token: VerificationToken<TcStateStarted>,
+            timeout: Duration,
+        ) {
+            self.inner.active_request_map.insert(
+                &request_id.into(),
+                ActiveActionRequest {
+                    action_id,
+                    common: ActiveRequest {
+                        target_id,
+                        token,
+                        start_time: self.inner.current_time,
+                        timeout,
+                    },
+                },
+            );
+        }
+
+        delegate! {
+            to self.inner {
+                pub fn request_active(&self, request_id: RequestId) -> bool;
+                #[cfg(feature = "std")]
+                #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
+                pub fn update_time_from_now(&mut self) -> Result<(), SystemTimeError>;
+
+                /// Check for timeouts across all active requests.
+                ///
+                /// It will call [Self::handle_timeout] for all active requests which have timed out.
+                pub fn check_for_timeouts(&mut self, time_stamp: &[u8]) -> Result<(), EcssTmtcError>;
+
+                /// Handle the timeout for a given active request.
+                ///
+                /// This implementation will report a verification completion failure with a user-provided
+                /// error code. It supplies the configured request timeout in milliseconds as a [u64]
+                /// serialized in big-endian format as the failure data.
+                pub fn handle_timeout(&self, active_request: &ActiveActionRequest, time_stamp: &[u8]);
+            }
+        }
+
         pub fn handle_action_reply(
             &mut self,
             action_reply_with_ids: ActionReplyPusWithIds,
             time_stamp: &[u8],
         ) -> Result<(), EcssTmtcError> {
             let active_req = self
+                .inner
                 .active_request_map
                 .get(action_reply_with_ids.request_id);
             if active_req.is_none() {
-                self.user_hook
+                self.inner
+                    .user_hook
                     .handle_unexpected_reply(&action_reply_with_ids);
+                return Ok(());
             }
             let active_req = active_req.unwrap().clone();
             let remove_entry = match action_reply_with_ids.reply {
                 ActionReplyPus::CompletionFailed { error_code, params } => {
-                    let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
-                    self.verification_reporter
+                    let fail_data_len = params.write_to_be_bytes(&mut self.inner.fail_data_buf)?;
+                    self.inner
+                        .verification_reporter
                         .completion_failure(
                             active_req.common.token,
                             FailParams::new(
                                 time_stamp,
                                 &error_code,
-                                &self.fail_data_buf[..fail_data_len],
+                                &self.inner.fail_data_buf[..fail_data_len],
                             ),
                         )
                         .map_err(|e| e.0)?;
@@ -401,28 +529,30 @@ pub mod std_mod {
                     step,
                     params,
                 } => {
-                    let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
-                    self.verification_reporter
+                    let fail_data_len = params.write_to_be_bytes(&mut self.inner.fail_data_buf)?;
+                    self.inner
+                        .verification_reporter
                         .step_failure(
                             active_req.common.token,
                             FailParamsWithStep::new(
                                 time_stamp,
                                 &EcssEnumU16::new(step),
                                 &error_code,
-                                &self.fail_data_buf[..fail_data_len],
+                                &self.inner.fail_data_buf[..fail_data_len],
                             ),
                         )
                         .map_err(|e| e.0)?;
                     true
                 }
                 ActionReplyPus::Completed => {
-                    self.verification_reporter
+                    self.inner
+                        .verification_reporter
                         .completion_success(active_req.common.token, time_stamp)
                         .map_err(|e| e.0)?;
                     true
                 }
                 ActionReplyPus::StepSuccess { step } => {
-                    self.verification_reporter.step_success(
+                    self.inner.verification_reporter.step_success(
                         &active_req.common.token,
                         time_stamp,
                         EcssEnumU16::new(step),
@@ -431,15 +561,18 @@ pub mod std_mod {
                 }
             };
             if remove_entry {
-                self.active_request_map
+                self.inner
+                    .active_request_map
                     .remove(action_reply_with_ids.request_id);
             }
             Ok(())
         }
     }
 
-    impl<VerificationReporter: VerificationReportingProvider, UserHook: ActionReplyHandlerHook>
-        PusService8ReplyHandler<VerificationReporter, DefaultActiveActionRequestMap, UserHook>
+    impl<
+            VerificationReporter: VerificationReportingProvider,
+            UserHook: ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithIds>,
+        > PusService8ReplyHandler<VerificationReporter, DefaultActiveActionRequestMap, UserHook>
     {
         #[cfg(feature = "std")]
         #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
@@ -465,7 +598,7 @@ pub mod std_mod {
         ) -> Self {
             Self::new(
                 verification_reporter,
-                DefaultActiveRequestMap::<ActiveActionRequest>(HashMap::default()),
+                DefaultActiveActionRequestMap::default(),
                 fail_data_buf_size,
                 user_hook,
                 init_time,
@@ -650,7 +783,7 @@ mod tests {
         pub timeouts: RefCell<VecDeque<ActiveActionRequest>>,
     }
 
-    impl ActionReplyHandlerHook for TestReplyHandlerHook {
+    impl ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithIds> for TestReplyHandlerHook {
         fn handle_unexpected_reply(&mut self, reply: &ActionReplyPusWithIds) {
             self.unexpected_replies.push_back(reply.clone());
         }
@@ -674,16 +807,26 @@ mod tests {
     }
 
     impl Pus8ReplyTestbench {
-        pub fn new() -> Self {
+        pub fn new(normal_ctor: bool) -> Self {
             let reply_handler_hook = TestReplyHandlerHook::default();
             let shared_verif_map = SharedVerificationMap::default();
             let test_verif_reporter = TestVerificationReporter::new(shared_verif_map.clone());
-            let reply_handler = PusService8ReplyHandler::new_from_now_with_default_map(
-                test_verif_reporter.clone(),
-                128,
-                reply_handler_hook,
-            )
-            .expect("creating reply handler failed");
+            let reply_handler = if normal_ctor {
+                PusService8ReplyHandler::new_from_now_with_default_map(
+                    test_verif_reporter.clone(),
+                    128,
+                    reply_handler_hook,
+                )
+                .expect("creating reply handler failed")
+            } else {
+                PusService8ReplyHandler::new_from_now(
+                    test_verif_reporter.clone(),
+                    DefaultActiveActionRequestMap::default(),
+                    128,
+                    reply_handler_hook,
+                )
+                .expect("creating reply handler failed")
+            };
             Self {
                 verif_reporter: test_verif_reporter,
                 handler: reply_handler,
@@ -713,6 +856,15 @@ mod tests {
             assert!(verif_info.started.expect("request was not started"));
             assert!(verif_info.accepted.expect("request was not accepted"));
             token
+        }
+
+        pub fn next_unrequested_reply(&self) -> Option<ActionReplyPusWithIds> {
+            self.handler
+                .inner
+                .user_hook
+                .unexpected_replies
+                .front()
+                .cloned()
         }
 
         pub fn assert_request_completion_success(&self, step: Option<u16>, request_id: RequestId) {
@@ -770,6 +922,7 @@ mod tests {
         pub fn add_routed_request(
             &mut self,
             request_id: verification::RequestId,
+            target_id: TargetId,
             action_id: ActionId,
             token: VerificationToken<TcStateStarted>,
             timeout: Duration,
@@ -778,7 +931,7 @@ mod tests {
                 panic!("request already present");
             }
             self.handler
-                .add_routed_request(request_id, action_id, token, timeout);
+                .add_routed_request(request_id, target_id, action_id, token, timeout);
             if !self.handler.request_active(request_id.into()) {
                 panic!("request should be active now");
             }
@@ -869,12 +1022,14 @@ mod tests {
 
     #[test]
     fn test_reply_handler_completion_success() {
-        let mut reply_testbench = Pus8ReplyTestbench::new();
+        let mut reply_testbench = Pus8ReplyTestbench::new(true);
         let request_id = 0x02;
+        let target_id = 0x05;
         let action_id = 0x03;
         let token = reply_testbench.init_handling_for_request(request_id, action_id);
         reply_testbench.add_routed_request(
             request_id.into(),
+            target_id,
             action_id,
             token,
             Duration::from_millis(1),
@@ -893,12 +1048,14 @@ mod tests {
 
     #[test]
     fn test_reply_handler_step_success() {
-        let mut reply_testbench = Pus8ReplyTestbench::new();
+        let mut reply_testbench = Pus8ReplyTestbench::new(false);
         let request_id = 0x02;
+        let target_id = 0x05;
         let action_id = 0x03;
         let token = reply_testbench.init_handling_for_request(request_id, action_id);
         reply_testbench.add_routed_request(
             request_id.into(),
+            target_id,
             action_id,
             token,
             Duration::from_millis(1),
@@ -924,12 +1081,14 @@ mod tests {
 
     #[test]
     fn test_reply_handler_completion_failure() {
-        let mut reply_testbench = Pus8ReplyTestbench::new();
+        let mut reply_testbench = Pus8ReplyTestbench::new(true);
         let request_id = 0x02;
+        let target_id = 0x05;
         let action_id = 0x03;
         let token = reply_testbench.init_handling_for_request(request_id, action_id);
         reply_testbench.add_routed_request(
             request_id.into(),
+            target_id,
             action_id,
             token,
             Duration::from_millis(1),
@@ -956,12 +1115,14 @@ mod tests {
 
     #[test]
     fn test_reply_handler_step_failure() {
-        let mut reply_testbench = Pus8ReplyTestbench::new();
+        let mut reply_testbench = Pus8ReplyTestbench::new(false);
         let request_id = 0x02;
+        let target_id = 0x05;
         let action_id = 0x03;
         let token = reply_testbench.init_handling_for_request(request_id, action_id);
         reply_testbench.add_routed_request(
             request_id.into(),
+            target_id,
             action_id,
             token,
             Duration::from_millis(1),
@@ -983,12 +1144,14 @@ mod tests {
 
     #[test]
     fn test_reply_handler_timeout_handling() {
-        let mut reply_testbench = Pus8ReplyTestbench::new();
+        let mut reply_testbench = Pus8ReplyTestbench::new(true);
         let request_id = 0x02;
+        let target_id = 0x06;
         let action_id = 0x03;
         let token = reply_testbench.init_handling_for_request(request_id, action_id);
         reply_testbench.add_routed_request(
             request_id.into(),
+            target_id,
             action_id,
             token,
             Duration::from_millis(1),
@@ -1010,6 +1173,22 @@ mod tests {
 
     #[test]
     fn test_unrequested_reply() {
-        // TODO: Implement this test.
+        let mut reply_testbench = Pus8ReplyTestbench::new(true);
+        let request_id = 0x02;
+        let action_id = 0x03;
+        let action_reply = ActionReplyPusWithIds {
+            request_id,
+            action_id,
+            reply: ActionReplyPus::Completed,
+        };
+        reply_testbench
+            .handle_action_reply(action_reply, &[])
+            .expect("reply handling failure");
+        let reply = reply_testbench.next_unrequested_reply();
+        assert!(reply.is_some());
+        let reply = reply.unwrap();
+        assert_eq!(reply.action_id, action_id);
+        assert_eq!(reply.request_id, request_id);
+        assert_eq!(reply.reply, ActionReplyPus::Completed);
     }
 }

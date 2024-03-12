@@ -6,7 +6,7 @@ use crate::pool::{StoreAddr, StoreError};
 use crate::pus::verification::{TcStateAccepted, TcStateToken, VerificationToken};
 use crate::queue::{GenericReceiveError, GenericSendError};
 use crate::request::RequestId;
-use crate::ChannelId;
+use crate::{ChannelId, TargetId};
 use core::fmt::{Display, Formatter};
 use core::time::Duration;
 #[cfg(feature = "alloc")]
@@ -288,11 +288,37 @@ pub trait ActiveRequestMapProvider<V>: Sized {
     fn for_each_mut<F: FnMut(&RequestId, &mut V)>(&mut self, f: F);
 }
 
+pub trait ActiveRequestProvider {
+    fn target_id(&self) -> TargetId;
+    fn token(&self) -> VerificationToken<TcStateStarted>;
+    fn start_time(&self) -> UnixTimestamp;
+    fn timeout(&self) -> Duration;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveRequest {
+    target_id: TargetId,
     token: VerificationToken<TcStateStarted>,
     start_time: UnixTimestamp,
     timeout: Duration,
+}
+
+impl ActiveRequestProvider for ActiveRequest {
+    fn target_id(&self) -> TargetId {
+        self.target_id
+    }
+
+    fn token(&self) -> VerificationToken<TcStateStarted> {
+        self.token
+    }
+
+    fn start_time(&self) -> UnixTimestamp {
+        self.start_time
+    }
+
+    fn timeout(&self) -> Duration {
+        self.timeout
+    }
 }
 
 #[cfg(feature = "alloc")]
@@ -398,8 +424,14 @@ mod alloc_mod {
         );
     }
 
-    #[derive(Clone, Debug, Default)]
+    #[derive(Clone, Debug)]
     pub struct DefaultActiveRequestMap<V>(pub HashMap<RequestId, V>);
+
+    impl<V> Default for DefaultActiveRequestMap<V> {
+        fn default() -> Self {
+            Self(HashMap::new())
+        }
+    }
 
     impl<V> ActiveRequestMapProvider<V> for DefaultActiveRequestMap<V> {
         fn insert(&mut self, request_id: &RequestId, request: V) {
