@@ -49,18 +49,18 @@ impl SimController {
     }
 
     pub fn run(&mut self, start_time: MonotonicTime, udp_polling_interval_ms: u64) {
-        let mut t = start_time + Duration::from_millis(udp_polling_interval_ms);
-        self.sys_clock.synchronize(t);
+        let mut t = start_time;
         loop {
+            let t_old = t;
             // Check for UDP requests every millisecond. Shift the simulator ahead here to prevent
             // replies lying in the past.
             t += Duration::from_millis(udp_polling_interval_ms);
+            self.sys_clock.synchronize(t);
+            self.handle_sim_requests();
             self.simulation
                 .step_until(t)
                 .expect("simulation step failed");
-            self.handle_sim_requests();
 
-            self.sys_clock.synchronize(t);
         }
     }
 

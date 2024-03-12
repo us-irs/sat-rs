@@ -1,3 +1,4 @@
+use asynchronix::time::MonotonicTime;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,6 +20,7 @@ pub struct SimMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SimRequest {
     inner: SimMessage,
+    timestamp: MonotonicTime
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
