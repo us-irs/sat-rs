@@ -56,18 +56,20 @@ impl SimController {
             // replies lying in the past.
             t += Duration::from_millis(udp_polling_interval_ms);
             self.sys_clock.synchronize(t);
-            self.handle_sim_requests();
+            self.handle_sim_requests(t_old);
             self.simulation
                 .step_until(t)
                 .expect("simulation step failed");
-
         }
     }
 
-    pub fn handle_sim_requests(&mut self) {
+    pub fn handle_sim_requests(&mut self, old_timestamp: MonotonicTime) {
         loop {
             match self.request_receiver.try_recv() {
                 Ok(request) => {
+                    if request.timestamp < old_timestamp {
+                        log::warn!("stale data with timestamp {:?} received", request.timestamp);
+                    }
                     if let Err(e) = match request.target() {
                         SimTarget::SimCtrl => self.handle_ctrl_request(&request),
                         SimTarget::Mgm => self.handle_mgm_request(&request),
@@ -172,11 +174,11 @@ mod tests {
     #[test]
     fn test_basic_ping() {
         let mut sim_testbench = SimTestbench::new();
-        let request = SimRequest::new(SimCtrlRequest::Ping);
+        let request = SimRequest::new_with_epoch_time(SimCtrlRequest::Ping);
         sim_testbench
             .send_request(request)
             .expect("sending sim ctrl request failed");
-        sim_testbench.handle_sim_requests();
+        sim_testbench.handle_sim_requests_time_agnostic();
         sim_testbench.step();
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());

@@ -13,6 +13,9 @@ thiserror = "1"
 
 [dependencies.asynchronix]
 version = "0.2.1"
+git = "https://github.com/asynchronics/asynchronix.git"
+branch = "main"
+features = ["serde"]
 
 [dependencies.satrs]
 path = "../satrs"

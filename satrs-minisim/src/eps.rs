@@ -86,14 +86,14 @@ pub(crate) mod tests {
         switch: PcduSwitch,
         target: SwitchStateBinary,
     ) {
-        let request = SimRequest::new(PcduRequest::SwitchDevice {
+        let request = SimRequest::new_with_epoch_time(PcduRequest::SwitchDevice {
             switch,
             state: target,
         });
         sim_testbench
             .send_request(request)
             .expect("sending MGM switch request failed");
-        sim_testbench.handle_sim_requests();
+        sim_testbench.handle_sim_requests_time_agnostic();
         sim_testbench.step();
     }
 
@@ -113,11 +113,11 @@ pub(crate) mod tests {
     }
 
     fn check_switch_state(sim_testbench: &mut SimTestbench, expected_switch_map: &SwitchMap) {
-        let request = SimRequest::new(PcduRequest::RequestSwitchInfo);
+        let request = SimRequest::new_with_epoch_time(PcduRequest::RequestSwitchInfo);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
-        sim_testbench.handle_sim_requests();
+        sim_testbench.handle_sim_requests_time_agnostic();
         sim_testbench.step();
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());
@@ -143,11 +143,11 @@ pub(crate) mod tests {
     #[test]
     fn test_pcdu_switcher_request() {
         let mut sim_testbench = SimTestbench::new();
-        let request = SimRequest::new(PcduRequest::RequestSwitchInfo);
+        let request = SimRequest::new_with_epoch_time(PcduRequest::RequestSwitchInfo);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
-        sim_testbench.handle_sim_requests();
+        sim_testbench.handle_sim_requests_time_agnostic();
         sim_testbench.step_by(Duration::from_millis(1));
 
         let sim_reply = sim_testbench.try_receive_next_reply();
