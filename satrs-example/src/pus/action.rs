@@ -1,18 +1,16 @@
 use log::{error, warn};
 use satrs::action::{ActionRequest, ActionRequestVariant};
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
-use satrs::pus::action::{PusActionToRequestConverter, PusService8ActionHandler};
-use satrs::pus::verification::std_mod::{
-    VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
-};
+use satrs::pus::action::PusService8ActionRequestHandler;
 use satrs::pus::verification::{
-    FailParams, TcStateAccepted, VerificationReportingProvider, VerificationToken,
+    FailParams, TcStateAccepted, VerificationReporterWithSharedPoolMpscBoundedSender,
+    VerificationReporterWithVecMpscSender, VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
     EcssTcReceiverCore, EcssTmSenderCore, MpscTcReceiver, PusPacketHandlerResult,
-    PusPacketHandlingError, PusServiceHelper, TmAsVecSenderWithId, TmAsVecSenderWithMpsc,
-    TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
+    PusPacketHandlingError, PusServiceHelper, PusTcToRequestConverter, TmAsVecSenderWithId,
+    TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
 };
 use satrs::request::TargetAndApidId;
 use satrs::spacepackets::ecss::tc::PusTcReader;
@@ -29,7 +27,7 @@ use super::GenericRoutingErrorHandler;
 #[derive(Default)]
 pub struct ExampleActionRequestConverter {}
 
-impl PusActionToRequestConverter for ExampleActionRequestConverter {
+impl PusTcToRequestConverter<ActionRequest> for ExampleActionRequestConverter {
     type Error = PusPacketHandlingError;
 
     fn convert(
@@ -99,7 +97,7 @@ pub fn create_action_service_static(
         "PUS_8_TC_RECV",
         pus_action_rx,
     );
-    let pus_8_handler = PusService8ActionHandler::new(
+    let pus_8_handler = PusService8ActionRequestHandler::new(
         PusServiceHelper::new(
             action_srv_receiver,
             action_srv_tm_sender,
@@ -135,7 +133,7 @@ pub fn create_action_service_dynamic(
         "PUS_8_TC_RECV",
         pus_action_rx,
     );
-    let pus_8_handler = PusService8ActionHandler::new(
+    let pus_8_handler = PusService8ActionRequestHandler::new(
         PusServiceHelper::new(
             action_srv_receiver,
             action_srv_tm_sender,
@@ -156,7 +154,7 @@ pub struct Pus8Wrapper<
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
-    pub(crate) pus_8_handler: PusService8ActionHandler<
+    pub(crate) pus_8_handler: PusService8ActionRequestHandler<
         TcReceiver,
         TmSender,
         TcInMemConverter,

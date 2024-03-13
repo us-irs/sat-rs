@@ -5,10 +5,7 @@ use crate::{
     TargetId,
 };
 
-use super::{
-    verification::{TcStateAccepted, VerificationToken},
-    ActiveRequest, ActiveRequestProvider,
-};
+use super::{verification::VerificationToken, ActiveRequest, ActiveRequestProvider};
 
 use delegate::delegate;
 use satrs_shared::res_code::ResultU16;
@@ -20,6 +17,7 @@ pub use std_mod::*;
 
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
+#[allow(unused_imports)]
 pub use alloc_mod::*;
 
 #[derive(Clone, Debug)]
@@ -54,18 +52,6 @@ pub enum ActionReplyPus {
     },
 }
 
-/// This trait is an abstraction for the routing of PUS service 8 action requests to a dedicated
-/// recipient using the generic [TargetId].
-pub trait PusActionRequestRouter {
-    type Error;
-    fn route(
-        &self,
-        target_id: TargetId,
-        hk_request: ActionRequest,
-        token: VerificationToken<TcStateAccepted>,
-    ) -> Result<(), Self::Error>;
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveActionRequest {
     pub action_id: ActionId,
@@ -85,39 +71,7 @@ impl ActiveRequestProvider for ActiveActionRequest {
 
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
-pub mod alloc_mod {
-    use spacepackets::ecss::tc::PusTcReader;
-
-    use crate::pus::verification::VerificationReportingProvider;
-
-    use super::*;
-
-    /// This trait is an abstraction for the conversion of a PUS service 8 action telecommand into
-    /// an [ActionRequest].
-    ///
-    /// Having a dedicated trait for this allows maximum flexiblity and tailoring of the standard.
-    /// The only requirement is that a valid [TargetId] and an [ActionRequest] are returned by the
-    /// core conversion function.
-    ///
-    /// The user should take care of performing the error handling as well. Some of the following
-    /// aspects might be relevant:
-    ///
-    /// - Checking the validity of the APID, service ID, subservice ID.
-    /// - Checking the validity of the user data.
-    ///
-    /// A [VerificationReportingProvider] instance is passed to the user to also allow handling
-    /// of the verification process as part of the PUS standard requirements.
-    pub trait PusActionToRequestConverter {
-        type Error;
-        fn convert(
-            &mut self,
-            token: VerificationToken<TcStateAccepted>,
-            tc: &PusTcReader,
-            time_stamp: &[u8],
-            verif_reporter: &impl VerificationReportingProvider,
-        ) -> Result<(TargetId, ActionRequest), Self::Error>;
-    }
-}
+pub mod alloc_mod {}
 
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
@@ -125,14 +79,12 @@ pub mod std_mod {
     use crate::{
         params::WritableToBeBytes,
         pus::{
-            get_current_cds_short_timestamp,
             verification::{
                 self, FailParams, FailParamsWithStep, TcStateStarted, VerificationReportingProvider,
             },
-            ActiveRequestMapProvider, DefaultActiveRequestMap, EcssTcInMemConverter,
-            EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError, GenericRoutingError,
-            PusPacketHandlerResult, PusPacketHandlingError, PusRoutingErrorHandler,
-            PusServiceHelper, PusServiceReplyHandler, ReplyHandlerHook,
+            ActiveRequestMapProvider, DefaultActiveRequestMap, EcssTmSenderCore, EcssTmtcError,
+            GenericRoutingError, PusServiceReplyHandler, PusTargetedRequestHandler,
+            ReplyHandlerHook,
         },
     };
     use core::time::Duration;
@@ -141,123 +93,38 @@ pub mod std_mod {
 
     use super::*;
 
-    /// This is a high-level handler for the PUS service 8 action service.
-    ///
-    /// It performs the following handling steps:
-    ///
-    /// 1. Retrieve the next TC packet from the [PusServiceHelper]. The [EcssTcInMemConverter]
-    ///    allows to configure the used telecommand memory backend.
-    /// 2. Convert the TC to a targeted action request using the provided
-    ///    [PusActionToRequestConverter]. The generic error type is constrained to the
-    ///    [PusPacketHandlingError] for the concrete implementation which offers a packet handler.
-    /// 3. Route the action request using the provided [PusActionRequestRouter].
-    /// 4. Handle all routing errors using the provided [PusRoutingErrorHandler].
-    pub struct PusService8ActionHandler<
-        TcReceiver: EcssTcReceiverCore,
-        TmSender: EcssTmSenderCore,
-        TcInMemConverter: EcssTcInMemConverter,
-        VerificationReporter: VerificationReportingProvider,
-        RequestConverter: PusActionToRequestConverter,
-        RequestRouter: PusActionRequestRouter<Error = RoutingError>,
-        RoutingErrorHandler: PusRoutingErrorHandler<Error = RoutingError>,
+    pub type PusService8ActionRequestHandler<
+        TcReceiver,
+        TmSender,
+        TcInMemConverter,
+        VerificationReporter,
+        RequestConverter,
+        RequestRouter,
+        RoutingErrorHandler,
         RoutingError = GenericRoutingError,
-    > {
-        service_helper:
-            PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
-        pub request_converter: RequestConverter,
-        pub request_router: RequestRouter,
-        pub routing_error_handler: RoutingErrorHandler,
-    }
-
-    impl<
-            TcReceiver: EcssTcReceiverCore,
-            TmSender: EcssTmSenderCore,
-            TcInMemConverter: EcssTcInMemConverter,
-            VerificationReporter: VerificationReportingProvider,
-            RequestConverter: PusActionToRequestConverter<Error = PusPacketHandlingError>,
-            RequestRouter: PusActionRequestRouter<Error = RoutingError>,
-            RoutingErrorHandler: PusRoutingErrorHandler<Error = RoutingError>,
-            RoutingError: Clone,
-        >
-        PusService8ActionHandler<
-            TcReceiver,
-            TmSender,
-            TcInMemConverter,
-            VerificationReporter,
-            RequestConverter,
-            RequestRouter,
-            RoutingErrorHandler,
-            RoutingError,
-        >
-    where
-        PusPacketHandlingError: From<RoutingError>,
-    {
-        pub fn new(
-            service_helper: PusServiceHelper<
-                TcReceiver,
-                TmSender,
-                TcInMemConverter,
-                VerificationReporter,
-            >,
-            request_converter: RequestConverter,
-            request_router: RequestRouter,
-            routing_error_handler: RoutingErrorHandler,
-        ) -> Self {
-            Self {
-                service_helper,
-                request_converter,
-                request_router,
-                routing_error_handler,
-            }
-        }
-
-        /// Core function to poll the next TC packet and try to handle it.
-        pub fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
-            let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
-            if possible_packet.is_none() {
-                return Ok(PusPacketHandlerResult::Empty);
-            }
-            let ecss_tc_and_token = possible_packet.unwrap();
-            let tc = self
-                .service_helper
-                .tc_in_mem_converter
-                .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
-            let mut partial_error = None;
-            let time_stamp = get_current_cds_short_timestamp(&mut partial_error);
-            let (target_id, action_request) = self.request_converter.convert(
-                ecss_tc_and_token.token,
-                &tc,
-                &time_stamp,
-                &self.service_helper.common.verification_handler,
-            )?;
-            if let Err(e) =
-                self.request_router
-                    .route(target_id, action_request, ecss_tc_and_token.token)
-            {
-                self.routing_error_handler.handle_error(
-                    target_id,
-                    ecss_tc_and_token.token,
-                    &tc,
-                    e.clone(),
-                    &time_stamp,
-                    &self.service_helper.common.verification_handler,
-                );
-                return Err(e.into());
-            }
-            Ok(PusPacketHandlerResult::RequestHandled)
-        }
-    }
+    > = PusTargetedRequestHandler<
+        TcReceiver,
+        TmSender,
+        TcInMemConverter,
+        VerificationReporter,
+        RequestConverter,
+        RequestRouter,
+        RoutingErrorHandler,
+        ActionRequest,
+        RoutingError,
+    >;
 
     pub type DefaultActiveActionRequestMap = DefaultActiveRequestMap<ActiveActionRequest>;
 
     /// Type definition for a PUS 8 action service reply handler which constrains the
     /// [PusServiceReplyHandler] active request and reply generics to the [ActiveActionRequest] and
     /// [ActionReplyPusWithIds] type.
-    pub type PusService8ReplyHandler<VerificationReporter, ActiveRequestMap, UserHook> =
+    pub type PusService8ReplyHandler<VerificationReporter, ActiveRequestMap, UserHook, TmSender> =
         PusServiceReplyHandler<
             VerificationReporter,
             ActiveRequestMap,
             UserHook,
+            TmSender,
             ActiveActionRequest,
             ActionReplyPusWithIds,
         >;
@@ -266,7 +133,8 @@ pub mod std_mod {
             VerificationReporter: VerificationReportingProvider,
             ActiveRequestMap: ActiveRequestMapProvider<ActiveActionRequest>,
             UserHook: ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithIds>,
-        > PusService8ReplyHandler<VerificationReporter, ActiveRequestMap, UserHook>
+            TmSender: EcssTmSenderCore,
+        > PusService8ReplyHandler<VerificationReporter, ActiveRequestMap, UserHook, TmSender>
     {
         /// Helper method to register a recently routed action request.
         pub fn add_routed_action_request(
@@ -366,7 +234,14 @@ pub mod std_mod {
     impl<
             VerificationReporter: VerificationReportingProvider,
             UserHook: ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithIds>,
-        > PusService8ReplyHandler<VerificationReporter, DefaultActiveActionRequestMap, UserHook>
+            TmSender: EcssTmSenderCore,
+        >
+        PusService8ReplyHandler<
+            VerificationReporter,
+            DefaultActiveActionRequestMap,
+            UserHook,
+            TmSender,
+        >
     {
         /// Create a new PUS Service 8 reply handler with the [ActiveRequestMap] generic
         /// constrained to the [DefaultActiveActionRequestMap] object and with the current time
@@ -377,12 +252,14 @@ pub mod std_mod {
             verification_reporter: VerificationReporter,
             fail_data_buf_size: usize,
             user_hook: UserHook,
+            tm_sender: TmSender,
         ) -> Result<Self, SystemTimeError> {
             let current_time = UnixTimestamp::from_now()?;
             Ok(Self::new_with_default_map(
                 verification_reporter,
                 fail_data_buf_size,
                 user_hook,
+                tm_sender,
                 current_time,
             ))
         }
@@ -393,6 +270,7 @@ pub mod std_mod {
             verification_reporter: VerificationReporter,
             fail_data_buf_size: usize,
             user_hook: UserHook,
+            tm_sender: TmSender,
             init_time: UnixTimestamp,
         ) -> Self {
             Self::new(
@@ -400,6 +278,7 @@ pub mod std_mod {
                 DefaultActiveActionRequestMap::default(),
                 fail_data_buf_size,
                 user_hook,
+                tm_sender,
                 init_time,
             )
         }
@@ -409,9 +288,9 @@ pub mod std_mod {
 #[cfg(test)]
 mod tests {
     use core::{cell::RefCell, time::Duration};
-    use std::time::SystemTimeError;
+    use std::{sync::mpsc, time::SystemTimeError};
 
-    use alloc::collections::VecDeque;
+    use alloc::{collections::VecDeque, vec::Vec};
     use delegate::delegate;
 
     use spacepackets::{
@@ -434,33 +313,34 @@ mod tests {
             verification::{
                 self,
                 tests::{SharedVerificationMap, TestVerificationReporter, VerificationStatus},
-                FailParams, TcStateNone, TcStateStarted, VerificationReportingProvider,
+                FailParams, TcStateAccepted, TcStateNone, TcStateStarted,
+                VerificationReportingProvider,
             },
             EcssTcInVecConverter, EcssTmtcError, GenericRoutingError, MpscTcReceiver,
-            PusPacketHandlerResult, PusPacketHandlingError, ReplyHandlerHook,
-            TmAsVecSenderWithMpsc,
+            PusPacketHandlerResult, PusPacketHandlingError, PusRequestRouter,
+            PusTcToRequestConverter, ReplyHandlerHook, TmAsVecSenderWithMpsc,
         },
     };
 
     use super::*;
 
-    impl PusActionRequestRouter for TestRouter<ActionRequest> {
+    impl<Request> PusRequestRouter<Request> for TestRouter<Request> {
         type Error = GenericRoutingError;
 
         fn route(
             &self,
             target_id: TargetId,
-            action_request: ActionRequest,
+            request: Request,
             _token: VerificationToken<TcStateAccepted>,
         ) -> Result<(), Self::Error> {
             self.routing_requests
                 .borrow_mut()
-                .push_back((target_id, action_request));
+                .push_back((target_id, request));
             self.check_for_injected_error()
         }
     }
 
-    impl PusActionToRequestConverter for TestConverter<8> {
+    impl PusTcToRequestConverter<ActionRequest> for TestConverter<8> {
         type Error = PusPacketHandlingError;
         fn convert(
             &mut self,
@@ -508,7 +388,7 @@ mod tests {
 
     struct Pus8RequestTestbenchWithVec {
         common: PusServiceHandlerWithVecCommon<TestVerificationReporter>,
-        handler: PusService8ActionHandler<
+        handler: PusService8ActionRequestHandler<
             MpscTcReceiver,
             TmAsVecSenderWithMpsc,
             EcssTcInVecConverter,
@@ -525,7 +405,7 @@ mod tests {
                 PusServiceHandlerWithVecCommon::new_with_test_verif_sender();
             Self {
                 common,
-                handler: PusService8ActionHandler::new(
+                handler: PusService8ActionRequestHandler::new(
                     srv_handler,
                     TestConverter::default(),
                     TestRouter::default(),
@@ -599,10 +479,13 @@ mod tests {
 
     pub struct Pus8ReplyTestbench {
         verif_reporter: TestVerificationReporter,
+        #[allow(dead_code)]
+        ecss_tm_receiver: mpsc::Receiver<Vec<u8>>,
         handler: PusService8ReplyHandler<
             TestVerificationReporter,
             DefaultActiveActionRequestMap,
             TestReplyHandlerHook,
+            mpsc::Sender<Vec<u8>>,
         >,
     }
 
@@ -611,11 +494,13 @@ mod tests {
             let reply_handler_hook = TestReplyHandlerHook::default();
             let shared_verif_map = SharedVerificationMap::default();
             let test_verif_reporter = TestVerificationReporter::new(shared_verif_map.clone());
+            let (ecss_tm_sender, ecss_tm_receiver) = mpsc::channel();
             let reply_handler = if normal_ctor {
                 PusService8ReplyHandler::new_from_now_with_default_map(
                     test_verif_reporter.clone(),
                     128,
                     reply_handler_hook,
+                    ecss_tm_sender,
                 )
                 .expect("creating reply handler failed")
             } else {
@@ -624,11 +509,13 @@ mod tests {
                     DefaultActiveActionRequestMap::default(),
                     128,
                     reply_handler_hook,
+                    ecss_tm_sender,
                 )
                 .expect("creating reply handler failed")
             };
             Self {
                 verif_reporter: test_verif_reporter,
+                ecss_tm_receiver,
                 handler: reply_handler,
             }
         }

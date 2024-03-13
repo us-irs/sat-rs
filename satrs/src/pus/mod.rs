@@ -337,6 +337,18 @@ pub trait ReplyHandlerHook<ActiveRequestType, ReplyType> {
     fn timeout_error_code(&self) -> ResultU16;
 }
 
+/// This trait is an abstraction for the routing of PUS request to a dedicated
+/// recipient using the generic [TargetId].
+pub trait PusRequestRouter<Request> {
+    type Error;
+    fn route(
+        &self,
+        target_id: TargetId,
+        hk_request: Request,
+        token: VerificationToken<TcStateAccepted>,
+    ) -> Result<(), Self::Error>;
+}
+
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
     use hashbrown::HashMap;
@@ -427,6 +439,32 @@ pub mod alloc_mod {
 
     impl_downcast!(EcssTcReceiver);
 
+    /// This trait is an abstraction for the conversion of a PUS telecommand into a generic request
+    /// type.
+    ///
+    /// Having a dedicated trait for this allows maximum flexiblity and tailoring of the standard.
+    /// The only requirement is that a valid [TargetId] and a request instance are returned by the
+    /// core conversion function.
+    ///
+    /// The user should take care of performing the error handling as well. Some of the following
+    /// aspects might be relevant:
+    ///
+    /// - Checking the validity of the APID, service ID, subservice ID.
+    /// - Checking the validity of the user data.
+    ///
+    /// A [VerificationReportingProvider] instance is passed to the user to also allow handling
+    /// of the verification process as part of the PUS standard requirements.
+    pub trait PusTcToRequestConverter<Request> {
+        type Error;
+        fn convert(
+            &mut self,
+            token: VerificationToken<TcStateAccepted>,
+            tc: &PusTcReader,
+            time_stamp: &[u8],
+            verif_reporter: &impl VerificationReportingProvider,
+        ) -> Result<(TargetId, Request), Self::Error>;
+    }
+
     pub trait PusRoutingErrorHandler {
         type Error;
         fn handle_error(
@@ -500,6 +538,7 @@ pub mod alloc_mod {
         VerificationReporter: VerificationReportingProvider,
         ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestType>,
         UserHook: ReplyHandlerHook<ActiveRequestType, ReplyType>,
+        TmSender: EcssTmSenderCore,
         ActiveRequestType: ActiveRequestProvider,
         ReplyType,
     > {
@@ -508,6 +547,7 @@ pub mod alloc_mod {
         pub fail_data_buf: alloc::vec::Vec<u8>,
         pub current_time: UnixTimestamp,
         pub user_hook: UserHook,
+        pub tm_sender: TmSender,
         phantom: PhantomData<(ActiveRequestType, ReplyType)>,
     }
 
@@ -515,6 +555,7 @@ pub mod alloc_mod {
             VerificationReporter: VerificationReportingProvider,
             ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestType>,
             UserHook: ReplyHandlerHook<ActiveRequestType, ReplyType>,
+            TmSender: EcssTmSenderCore,
             ActiveRequestType: ActiveRequestProvider,
             ReplyType,
         >
@@ -522,6 +563,7 @@ pub mod alloc_mod {
             VerificationReporter,
             ActiveRequestMap,
             UserHook,
+            TmSender,
             ActiveRequestType,
             ReplyType,
         >
@@ -533,6 +575,7 @@ pub mod alloc_mod {
             active_request_map: ActiveRequestMap,
             fail_data_buf_size: usize,
             user_hook: UserHook,
+            tm_sender: TmSender,
         ) -> Result<Self, std::time::SystemTimeError> {
             let current_time = UnixTimestamp::from_now()?;
             Ok(Self::new(
@@ -540,6 +583,7 @@ pub mod alloc_mod {
                 active_request_map,
                 fail_data_buf_size,
                 user_hook,
+                tm_sender,
                 current_time,
             ))
         }
@@ -549,6 +593,7 @@ pub mod alloc_mod {
             active_request_map: ActiveRequestMap,
             fail_data_buf_size: usize,
             user_hook: UserHook,
+            tm_sender: TmSender,
             init_time: UnixTimestamp,
         ) -> Self {
             Self {
@@ -557,6 +602,7 @@ pub mod alloc_mod {
                 fail_data_buf: alloc::vec![0; fail_data_buf_size],
                 current_time: init_time,
                 user_hook,
+                tm_sender,
                 phantom: PhantomData,
             }
         }
@@ -642,6 +688,7 @@ pub mod std_mod {
     use crate::tmtc::tm_helper::SharedTmPool;
     use crate::{ChannelId, TargetId};
     use alloc::vec::Vec;
+    use core::marker::PhantomData;
     use spacepackets::ecss::tc::PusTcReader;
     use spacepackets::ecss::tm::PusTmCreator;
     use spacepackets::ecss::{PusError, WritablePusPacket};
@@ -657,7 +704,10 @@ pub mod std_mod {
     pub use cb_mod::*;
 
     use super::verification::VerificationReportingProvider;
-    use super::{AcceptedEcssTcAndToken, TcInMemory};
+    use super::{
+        AcceptedEcssTcAndToken, PusRequestRouter, PusRoutingErrorHandler, PusTcToRequestConverter,
+        TcInMemory,
+    };
 
     impl From<mpsc::SendError<StoreAddr>> for EcssTmtcError {
         fn from(_: mpsc::SendError<StoreAddr>) -> Self {
@@ -928,6 +978,118 @@ pub mod std_mod {
                     )),
                 })
             }
+        }
+    }
+
+    /// This is a high-level handler for the PUS service 8 action service.
+    ///
+    /// It performs the following handling steps:
+    ///
+    /// 1. Retrieve the next TC packet from the [PusServiceHelper]. The [EcssTcInMemConverter]
+    ///    allows to configure the used telecommand memory backend.
+    /// 2. Convert the TC to a targeted action request using the provided
+    ///    [PusActionToRequestConverter]. The generic error type is constrained to the
+    ///    [PusPacketHandlingError] for the concrete implementation which offers a packet handler.
+    /// 3. Route the action request using the provided [PusActionRequestRouter].
+    /// 4. Handle all routing errors using the provided [PusRoutingErrorHandler].
+    pub struct PusTargetedRequestHandler<
+        TcReceiver: EcssTcReceiverCore,
+        TmSender: EcssTmSenderCore,
+        TcInMemConverter: EcssTcInMemConverter,
+        VerificationReporter: VerificationReportingProvider,
+        RequestConverter: PusTcToRequestConverter<Request>,
+        RequestRouter: PusRequestRouter<Request, Error = RoutingError>,
+        RoutingErrorHandler: PusRoutingErrorHandler<Error = RoutingError>,
+        Request,
+        RoutingError = GenericRoutingError,
+    > {
+        service_helper:
+            PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+        pub request_converter: RequestConverter,
+        pub request_router: RequestRouter,
+        pub routing_error_handler: RoutingErrorHandler,
+        phantom: PhantomData<Request>,
+    }
+
+    impl<
+            TcReceiver: EcssTcReceiverCore,
+            TmSender: EcssTmSenderCore,
+            TcInMemConverter: EcssTcInMemConverter,
+            VerificationReporter: VerificationReportingProvider,
+            RequestConverter: PusTcToRequestConverter<Request, Error = PusPacketHandlingError>,
+            RequestRouter: PusRequestRouter<Request, Error = RoutingError>,
+            RoutingErrorHandler: PusRoutingErrorHandler<Error = RoutingError>,
+            Request,
+            RoutingError: Clone,
+        >
+        PusTargetedRequestHandler<
+            TcReceiver,
+            TmSender,
+            TcInMemConverter,
+            VerificationReporter,
+            RequestConverter,
+            RequestRouter,
+            RoutingErrorHandler,
+            Request,
+            RoutingError,
+        >
+    where
+        PusPacketHandlingError: From<RoutingError>,
+    {
+        pub fn new(
+            service_helper: PusServiceHelper<
+                TcReceiver,
+                TmSender,
+                TcInMemConverter,
+                VerificationReporter,
+            >,
+            request_converter: RequestConverter,
+            request_router: RequestRouter,
+            routing_error_handler: RoutingErrorHandler,
+        ) -> Self {
+            Self {
+                service_helper,
+                request_converter,
+                request_router,
+                routing_error_handler,
+                phantom: PhantomData,
+            }
+        }
+
+        /// Core function to poll the next TC packet and try to handle it.
+        pub fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+            let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
+            if possible_packet.is_none() {
+                return Ok(PusPacketHandlerResult::Empty);
+            }
+            let ecss_tc_and_token = possible_packet.unwrap();
+            let tc = self
+                .service_helper
+                .tc_in_mem_converter
+                .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
+            let mut partial_error = None;
+            let time_stamp = get_current_cds_short_timestamp(&mut partial_error);
+            let (target_id, action_request) = self.request_converter.convert(
+                ecss_tc_and_token.token,
+                &tc,
+                &time_stamp,
+                &self.service_helper.common.verification_handler,
+            )?;
+            if let Err(e) =
+                self.request_router
+                    .route(target_id, action_request, ecss_tc_and_token.token)
+            {
+                self.routing_error_handler.handle_error(
+                    target_id,
+                    ecss_tc_and_token.token,
+                    &tc,
+                    e.clone(),
+                    &time_stamp,
+                    &self.service_helper.common.verification_handler,
+                );
+                return Err(e.into());
+            }
+            Ok(PusPacketHandlerResult::RequestHandled)
         }
     }
 

@@ -5,10 +5,9 @@ use derive_new::new;
 use satrs::action::ActionRequest;
 use satrs::hk::HkRequest;
 use satrs::mode::ModeRequest;
-use satrs::pus::action::PusActionRequestRouter;
 use satrs::pus::hk::PusHkRequestRouter;
 use satrs::pus::verification::{TcStateAccepted, VerificationToken};
-use satrs::pus::GenericRoutingError;
+use satrs::pus::{GenericRoutingError, PusRequestRouter};
 use satrs::queue::GenericSendError;
 use satrs::TargetId;
 
@@ -71,7 +70,7 @@ impl PusHkRequestRouter for GenericRequestRouter {
     }
 }
 
-impl PusActionRequestRouter for GenericRequestRouter {
+impl PusRequestRouter<ActionRequest> for GenericRequestRouter {
     type Error = GenericRoutingError;
 
     fn route(

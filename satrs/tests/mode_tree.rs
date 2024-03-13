@@ -48,6 +48,10 @@ struct TestDevice {
     pub mode_requestor_info: Option<(RequestId, ChannelId)>,
 }
 
+pub struct ModeLeafDeviceHelper {
+    // pub
+}
+
 impl TestDevice {
     pub fn run(&mut self) {
         self.check_mode_requests().expect("mode messaging error");
