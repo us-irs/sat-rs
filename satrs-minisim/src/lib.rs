@@ -1,6 +1,8 @@
 use asynchronix::time::MonotonicTime;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+pub const SIM_CTRL_UDP_PORT: u16 = 7303;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SimTarget {
     SimCtrl,
