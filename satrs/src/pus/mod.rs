@@ -44,7 +44,7 @@ pub use alloc_mod::*;
 #[cfg(feature = "std")]
 pub use std_mod::*;
 
-use self::verification::{FailParams, TcStateStarted, VerificationReportingProvider};
+use self::verification::{FailParams, TcStateStarted};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PusTmWrapper<'tm> {
@@ -338,7 +338,7 @@ pub trait ReplyHandlerHook<ActiveRequestType, ReplyType> {
 }
 
 #[cfg(feature = "alloc")]
-mod alloc_mod {
+pub mod alloc_mod {
     use hashbrown::HashMap;
 
     use crate::TargetId;
@@ -503,10 +503,10 @@ mod alloc_mod {
         ActiveRequestType: ActiveRequestProvider,
         ReplyType,
     > {
-        active_request_map: ActiveRequestMap,
-        verification_reporter: VerificationReporter,
-        fail_data_buf: alloc::vec::Vec<u8>,
-        current_time: UnixTimestamp,
+        pub active_request_map: ActiveRequestMap,
+        pub verification_reporter: VerificationReporter,
+        pub fail_data_buf: alloc::vec::Vec<u8>,
+        pub current_time: UnixTimestamp,
         pub user_hook: UserHook,
         phantom: PhantomData<(ActiveRequestType, ReplyType)>,
     }
