@@ -102,7 +102,8 @@ fn main() {
         .chain(std::io::stdout())
         .chain(fern::log_file("output.log").expect("could not open log output file"))
         // Apply globally
-        .apply().expect("could not apply logger configuration");
+        .apply()
+        .expect("could not apply logger configuration");
 
     log::info!("starting simulation thread");
     // This thread schedules the simulator.

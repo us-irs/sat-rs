@@ -27,7 +27,7 @@ impl SimTestbench {
         }
     }
     pub fn handle_sim_requests_time_agnostic(&mut self) {
-        self.handle_sim_requests(MonotonicTime::EPOCH); 
+        self.handle_sim_requests(MonotonicTime::EPOCH);
     }
 
     delegate! {
