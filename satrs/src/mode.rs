@@ -26,6 +26,8 @@ pub struct ModeAndSubmode {
 }
 
 impl ModeAndSubmode {
+    const RAW_LEN: usize = size_of::<Mode>() + size_of::<Submode>();
+
     pub const fn new_mode_only(mode: Mode) -> Self {
         Self { mode, submode: 0 }
     }
@@ -34,14 +36,10 @@ impl ModeAndSubmode {
         Self { mode, submode }
     }
 
-    pub fn raw_len() -> usize {
-        size_of::<u32>() + size_of::<u16>()
-    }
-
     pub fn from_be_bytes(buf: &[u8]) -> Result<Self, ByteConversionError> {
         if buf.len() < 6 {
             return Err(ByteConversionError::FromSliceTooSmall {
-                expected: 6,
+                expected: Self::RAW_LEN,
                 found: buf.len(),
             });
         }
@@ -53,6 +51,18 @@ impl ModeAndSubmode {
                     .unwrap(),
             ),
         })
+    }
+
+    pub fn to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
+        if buf.len() < Self::RAW_LEN {
+            return Err(ByteConversionError::ToSliceTooSmall {
+                expected: Self::RAW_LEN,
+                found: buf.len(),
+            });
+        }
+        buf[0..size_of::<Mode>()].copy_from_slice(&self.mode.to_be_bytes());
+        buf[size_of::<Mode>()..Self::RAW_LEN].copy_from_slice(&self.submode.to_be_bytes());
+        Ok(Self::RAW_LEN)
     }
 
     pub fn mode(&self) -> Mode {
@@ -111,6 +121,7 @@ pub enum ModeReply {
     ModeInfo(ModeAndSubmode),
     /// Reply to a mode request to confirm the commanded mode was reached.
     ModeReply(ModeAndSubmode),
+    // Can not reach the commanded mode. Returns the mode which was reached in the end.
     CantReachMode(ModeAndSubmode),
     WrongMode {
         expected: ModeAndSubmode,

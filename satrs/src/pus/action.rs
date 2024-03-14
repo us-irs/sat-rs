@@ -1,8 +1,8 @@
 use crate::{
     action::{ActionId, ActionRequest},
     params::Params,
-    request::RequestId,
-    TargetId,
+    request::{GenericMessage, RequestId},
+    ChannelId, TargetId,
 };
 
 use super::{verification::VerificationToken, ActiveRequest, ActiveRequestProvider};
@@ -26,13 +26,6 @@ pub struct ActionRequestWithId {
     pub request: ActionRequest,
 }
 
-#[derive(Clone, Debug)]
-pub struct ActionReplyPusWithIds {
-    pub request_id: RequestId,
-    pub action_id: ActionId,
-    pub reply: ActionReplyPus,
-}
-
 /// A reply to an action request, but tailored to the PUS standard verification process.
 #[non_exhaustive]
 #[derive(Clone, PartialEq, Debug)]
@@ -50,6 +43,35 @@ pub enum ActionReplyPus {
         step: u16,
         params: Params,
     },
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ActionReplyPusWithActionId {
+    pub action_id: ActionId,
+    pub variant: ActionReplyPus,
+}
+
+impl ActionReplyPusWithActionId {
+    pub fn new(action_id: ActionId, variant: ActionReplyPus) -> Self {
+        Self { action_id, variant }
+    }
+}
+
+pub type GenericActionReplyPus = GenericMessage<ActionReplyPusWithActionId>;
+
+impl GenericActionReplyPus {
+    pub fn new_action_reply(
+        request_id: RequestId,
+        sender_id: ChannelId,
+        action_id: ActionId,
+        reply: ActionReplyPus,
+    ) -> Self {
+        Self::new(
+            request_id,
+            sender_id,
+            ActionReplyPusWithActionId::new(action_id, reply),
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,13 +148,13 @@ pub mod std_mod {
             UserHook,
             TmSender,
             ActiveActionRequest,
-            ActionReplyPusWithIds,
+            ActionReplyPusWithActionId,
         >;
 
     impl<
             VerificationReporter: VerificationReportingProvider,
             ActiveRequestMap: ActiveRequestMapProvider<ActiveActionRequest>,
-            UserHook: ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithIds>,
+            UserHook: ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithActionId>,
             TmSender: EcssTmSenderCore,
         > PusService8ReplyHandler<VerificationReporter, ActiveRequestMap, UserHook, TmSender>
     {
@@ -162,7 +184,7 @@ pub mod std_mod {
         /// Main handler function to handle all received action replies.
         pub fn handle_action_reply(
             &mut self,
-            action_reply_with_ids: ActionReplyPusWithIds,
+            action_reply_with_ids: GenericMessage<ActionReplyPusWithActionId>,
             time_stamp: &[u8],
         ) -> Result<(), EcssTmtcError> {
             let active_req = self
@@ -174,7 +196,7 @@ pub mod std_mod {
                 return Ok(());
             }
             let active_req = active_req.unwrap().clone();
-            let remove_entry = match action_reply_with_ids.reply {
+            let remove_entry = match action_reply_with_ids.message.variant {
                 ActionReplyPus::CompletionFailed { error_code, params } => {
                     let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
                     self.verification_reporter
@@ -233,7 +255,7 @@ pub mod std_mod {
 
     impl<
             VerificationReporter: VerificationReportingProvider,
-            UserHook: ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithIds>,
+            UserHook: ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithActionId>,
             TmSender: EcssTmSenderCore,
         >
         PusService8ReplyHandler<
@@ -303,7 +325,7 @@ mod tests {
     };
 
     use crate::{
-        action::ActionRequestVariant,
+        action::{ActionReplyVariant, ActionRequestVariant},
         params::{self, ParamsRaw, WritableToBeBytes},
         pus::{
             tests::{
@@ -459,12 +481,12 @@ mod tests {
 
     #[derive(Default)]
     pub struct TestReplyHandlerHook {
-        pub unexpected_replies: VecDeque<ActionReplyPusWithIds>,
+        pub unexpected_replies: VecDeque<GenericActionReplyPus>,
         pub timeouts: RefCell<VecDeque<ActiveActionRequest>>,
     }
 
-    impl ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithIds> for TestReplyHandlerHook {
-        fn handle_unexpected_reply(&mut self, reply: &ActionReplyPusWithIds) {
+    impl ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithActionId> for TestReplyHandlerHook {
+        fn handle_unexpected_reply(&mut self, reply: &GenericActionReplyPus) {
             self.unexpected_replies.push_back(reply.clone());
         }
 
@@ -545,7 +567,7 @@ mod tests {
             token
         }
 
-        pub fn next_unrequested_reply(&self) -> Option<ActionReplyPusWithIds> {
+        pub fn next_unrequested_reply(&self) -> Option<GenericActionReplyPus> {
             self.handler.user_hook.unexpected_replies.front().cloned()
         }
 
@@ -623,12 +645,11 @@ mod tests {
             to self.handler {
                 pub fn request_active(&self, request_id: RequestId) -> bool;
 
-                pub fn handle_action_reply(
-                    &mut self,
-                    action_reply_with_ids: ActionReplyPusWithIds,
-                    time_stamp: &[u8],
-                ) -> Result<(), EcssTmtcError>;
-
+        pub fn handle_action_reply(
+            &mut self,
+            action_reply_with_ids: GenericMessage<ActionReplyPusWithActionId>,
+            time_stamp: &[u8]
+        ) -> Result<(), EcssTmtcError>;
 
                 pub fn update_time_from_now(&mut self) -> Result<(), SystemTimeError>;
 
@@ -705,6 +726,7 @@ mod tests {
     #[test]
     fn test_reply_handler_completion_success() {
         let mut reply_testbench = Pus8ReplyTestbench::new(true);
+        let sender_id = 0x06;
         let request_id = 0x02;
         let target_id = 0x05;
         let action_id = 0x03;
@@ -717,11 +739,14 @@ mod tests {
             Duration::from_millis(1),
         );
         assert!(reply_testbench.request_active(request_id));
-        let action_reply = ActionReplyPusWithIds {
+        let action_reply = GenericMessage::new(
             request_id,
-            action_id,
-            reply: ActionReplyPus::Completed,
-        };
+            sender_id,
+            ActionReplyPusWithActionId {
+                action_id,
+                variant: ActionReplyPus::Completed,
+            },
+        );
         reply_testbench
             .handle_action_reply(action_reply, &[])
             .expect("reply handling failure");
@@ -742,19 +767,21 @@ mod tests {
             token,
             Duration::from_millis(1),
         );
-        let action_reply = ActionReplyPusWithIds {
+        let action_reply = GenericActionReplyPus::new_action_reply(
             request_id,
             action_id,
-            reply: ActionReplyPus::StepSuccess { step: 1 },
-        };
+            action_id,
+            ActionReplyPus::StepSuccess { step: 1 },
+        );
         reply_testbench
             .handle_action_reply(action_reply, &[])
             .expect("reply handling failure");
-        let action_reply = ActionReplyPusWithIds {
+        let action_reply = GenericActionReplyPus::new_action_reply(
             request_id,
             action_id,
-            reply: ActionReplyPus::Completed,
-        };
+            action_id,
+            ActionReplyPus::Completed,
+        );
         reply_testbench
             .handle_action_reply(action_reply, &[])
             .expect("reply handling failure");
@@ -764,6 +791,7 @@ mod tests {
     #[test]
     fn test_reply_handler_completion_failure() {
         let mut reply_testbench = Pus8ReplyTestbench::new(true);
+        let sender_id = 0x01;
         let request_id = 0x02;
         let target_id = 0x05;
         let action_id = 0x03;
@@ -776,14 +804,15 @@ mod tests {
             Duration::from_millis(1),
         );
         let params_raw = ParamsRaw::U32(params::U32(5));
-        let action_reply = ActionReplyPusWithIds {
+        let action_reply = GenericActionReplyPus::new_action_reply(
             request_id,
+            sender_id,
             action_id,
-            reply: ActionReplyPus::CompletionFailed {
+            ActionReplyPus::CompletionFailed {
                 error_code: COMPLETION_ERROR_CODE,
                 params: params_raw.into(),
             },
-        };
+        );
         reply_testbench
             .handle_action_reply(action_reply, &[])
             .expect("reply handling failure");
@@ -798,6 +827,7 @@ mod tests {
     #[test]
     fn test_reply_handler_step_failure() {
         let mut reply_testbench = Pus8ReplyTestbench::new(false);
+        let sender_id = 0x01;
         let request_id = 0x02;
         let target_id = 0x05;
         let action_id = 0x03;
@@ -809,15 +839,16 @@ mod tests {
             token,
             Duration::from_millis(1),
         );
-        let action_reply = ActionReplyPusWithIds {
+        let action_reply = GenericActionReplyPus::new_action_reply(
             request_id,
+            sender_id,
             action_id,
-            reply: ActionReplyPus::StepFailed {
+            ActionReplyPus::StepFailed {
                 error_code: COMPLETION_ERROR_CODE_STEP,
                 step: 2,
                 params: ParamsRaw::U32(crate::params::U32(5)).into(),
             },
-        };
+        );
         reply_testbench
             .handle_action_reply(action_reply, &[])
             .expect("reply handling failure");
@@ -856,21 +887,24 @@ mod tests {
     #[test]
     fn test_unrequested_reply() {
         let mut reply_testbench = Pus8ReplyTestbench::new(true);
+        let sender_id = 0x01;
         let request_id = 0x02;
         let action_id = 0x03;
-        let action_reply = ActionReplyPusWithIds {
+
+        let action_reply = GenericActionReplyPus::new_action_reply(
             request_id,
+            sender_id,
             action_id,
-            reply: ActionReplyPus::Completed,
-        };
+            ActionReplyPus::Completed,
+        );
         reply_testbench
             .handle_action_reply(action_reply, &[])
             .expect("reply handling failure");
         let reply = reply_testbench.next_unrequested_reply();
         assert!(reply.is_some());
         let reply = reply.unwrap();
-        assert_eq!(reply.action_id, action_id);
+        assert_eq!(reply.message.action_id, action_id);
         assert_eq!(reply.request_id, request_id);
-        assert_eq!(reply.reply, ActionReplyPus::Completed);
+        assert_eq!(reply.message.variant, ActionReplyPus::Completed);
     }
 }

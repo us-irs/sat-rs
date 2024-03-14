@@ -5,7 +5,7 @@
 use crate::pool::{StoreAddr, StoreError};
 use crate::pus::verification::{TcStateAccepted, TcStateToken, VerificationToken};
 use crate::queue::{GenericReceiveError, GenericSendError};
-use crate::request::RequestId;
+use crate::request::{GenericMessage, RequestId};
 use crate::{ChannelId, TargetId};
 use core::fmt::{Display, Formatter};
 use core::marker::PhantomData;
@@ -332,7 +332,7 @@ impl ActiveRequestProvider for ActiveRequest {
 ///  2. It exposes callback methods which can be useful to perform custom user operations like
 ///     logging.
 pub trait ReplyHandlerHook<ActiveRequestType, ReplyType> {
-    fn handle_unexpected_reply(&mut self, reply: &ReplyType);
+    fn handle_unexpected_reply(&mut self, reply: &GenericMessage<ReplyType>);
     fn timeout_callback(&self, active_request: &ActiveRequestType);
     fn timeout_error_code(&self) -> ResultU16;
 }

@@ -88,7 +88,7 @@ impl fmt::Display for TargetAndApidId {
 
 /// Generic message type which is associated with a sender using a [ChannelId] and associated
 /// with a request using a [RequestId].
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GenericMessage<MSG> {
     pub sender_id: ChannelId,
