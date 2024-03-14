@@ -544,7 +544,7 @@ pub mod alloc_mod {
     > {
         pub active_request_map: ActiveRequestMap,
         pub verification_reporter: VerificationReporter,
-        pub fail_data_buf: alloc::vec::Vec<u8>,
+        pub tm_buf: alloc::vec::Vec<u8>,
         pub current_time: UnixTimestamp,
         pub user_hook: UserHook,
         pub tm_sender: TmSender,
@@ -599,7 +599,7 @@ pub mod alloc_mod {
             Self {
                 active_request_map,
                 verification_reporter,
-                fail_data_buf: alloc::vec![0; fail_data_buf_size],
+                tm_buf: alloc::vec![0; fail_data_buf_size],
                 current_time: init_time,
                 user_hook,
                 tm_sender,

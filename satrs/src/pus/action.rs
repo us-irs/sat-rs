@@ -198,15 +198,11 @@ pub mod std_mod {
             let active_req = active_req.unwrap().clone();
             let remove_entry = match action_reply_with_ids.message.variant {
                 ActionReplyPus::CompletionFailed { error_code, params } => {
-                    let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
+                    let fail_data_len = params.write_to_be_bytes(&mut self.tm_buf)?;
                     self.verification_reporter
                         .completion_failure(
                             active_req.common.token,
-                            FailParams::new(
-                                time_stamp,
-                                &error_code,
-                                &self.fail_data_buf[..fail_data_len],
-                            ),
+                            FailParams::new(time_stamp, &error_code, &self.tm_buf[..fail_data_len]),
                         )
                         .map_err(|e| e.0)?;
                     true
@@ -216,7 +212,7 @@ pub mod std_mod {
                     step,
                     params,
                 } => {
-                    let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
+                    let fail_data_len = params.write_to_be_bytes(&mut self.tm_buf)?;
                     self.verification_reporter
                         .step_failure(
                             active_req.common.token,
@@ -224,7 +220,7 @@ pub mod std_mod {
                                 time_stamp,
                                 &EcssEnumU16::new(step),
                                 &error_code,
-                                &self.fail_data_buf[..fail_data_len],
+                                &self.tm_buf[..fail_data_len],
                             ),
                         )
                         .map_err(|e| e.0)?;
@@ -325,7 +321,7 @@ mod tests {
     };
 
     use crate::{
-        action::{ActionReplyVariant, ActionRequestVariant},
+        action::ActionRequestVariant,
         params::{self, ParamsRaw, WritableToBeBytes},
         pus::{
             tests::{

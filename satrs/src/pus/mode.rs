@@ -31,15 +31,20 @@ pub mod std_mod {
     use core::time::Duration;
 
     use satrs_shared::res_code::ResultU16;
+    use spacepackets::{
+        ecss::tm::{PusTmCreator, PusTmSecondaryHeader},
+        SpHeader,
+    };
 
     use crate::{
         mode::{ModeReply, ModeRequest},
         pus::{
+            mode::Subservice,
             verification::{
                 self, FailParams, TcStateStarted, VerificationReportingProvider, VerificationToken,
             },
             ActiveRequest, ActiveRequestMapProvider, EcssTmSenderCore, EcssTmtcError,
-            GenericRoutingError, PusServiceReplyHandler, PusTargetedRequestHandler,
+            GenericRoutingError, PusServiceReplyHandler, PusTargetedRequestHandler, PusTmWrapper,
             ReplyHandlerHook,
         },
         TargetId,
@@ -50,7 +55,7 @@ pub mod std_mod {
         fn can_not_reach_mode_result_code(&self) -> ResultU16;
     }
 
-    use super::GenericModeReplyPus;
+    use super::{GenericModeReplyPus, MODE_SERVICE_ID};
 
     pub type PusModeServiceRequestHandler<
         TcReceiver,
@@ -130,24 +135,37 @@ pub mod std_mod {
             let active_req = active_req.unwrap().clone();
             let remove_entry = match mode_reply_with_id.message {
                 ModeReply::ModeReply(reply) => {
-                    // TODO: Send dedicated TM to send mode information.
-                    // TODO: Generate TM. Service ID from hook, subservice ID is fixed for
-                    // framework purposes, APID can be retrieved from Request ID.
-
+                    let req_id = verification::RequestId::from(mode_reply_with_id.request_id);
+                    let mut sp_header = SpHeader::tm_unseg(
+                        req_id.packet_id().apid(),
+                        req_id.packet_seq_ctrl().seq_count(),
+                        0,
+                    )
+                    .expect("space packet header creation error");
+                    let sec_header = PusTmSecondaryHeader::new(
+                        MODE_SERVICE_ID,
+                        Subservice::TmModeReply as u8,
+                        0,
+                        0,
+                        Some(time_stamp),
+                    );
+                    let pus_tm =
+                        PusTmCreator::new(&mut sp_header, sec_header, &mut self.tm_buf, true);
+                    self.tm_sender.send_tm(PusTmWrapper::Direct(pus_tm))?;
                     self.verification_reporter
                         .completion_success(active_req.token, time_stamp)
                         .map_err(|e| e.0)?;
                     true
                 }
                 ModeReply::CantReachMode(reached_mode) => {
-                    let fail_data_len = reached_mode.to_be_bytes(&mut self.fail_data_buf)?;
+                    let fail_data_len = reached_mode.to_be_bytes(&mut self.tm_buf)?;
                     self.verification_reporter
                         .completion_failure(
                             active_req.token,
                             FailParams::new(
                                 time_stamp,
                                 &self.user_hook.can_not_reach_mode_result_code(),
-                                &self.fail_data_buf[0..fail_data_len],
+                                &self.tm_buf[0..fail_data_len],
                             ),
                         )
                         .map_err(|e| e.0)?;

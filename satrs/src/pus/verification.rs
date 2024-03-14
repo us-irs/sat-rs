@@ -139,10 +139,27 @@ impl PartialEq for RequestId {
 impl RequestId {
     pub const SIZE_AS_BYTES: usize = size_of::<u32>();
 
+    /// This allows extracting the request ID from a given PUS telecommand.
+    pub fn new(tc: &(impl CcsdsPacket + IsPusTelecommand)) -> Self {
+        RequestId {
+            version_number: tc.ccsds_version(),
+            packet_id: tc.packet_id(),
+            psc: tc.psc(),
+        }
+    }
+
     pub fn raw(&self) -> u32 {
         ((self.version_number as u32) << 29)
             | ((self.packet_id.raw() as u32) << 16)
             | self.psc.raw() as u32
+    }
+
+    pub fn packet_id(&self) -> PacketId {
+        self.packet_id
+    }
+
+    pub fn packet_seq_ctrl(&self) -> PacketSequenceCtrl {
+        self.psc
     }
 
     pub fn to_bytes(&self, buf: &mut [u8]) {
@@ -160,16 +177,6 @@ impl RequestId {
             packet_id: PacketId::from(((raw >> 16) & 0xffff) as u16),
             psc: PacketSequenceCtrl::from((raw & 0xffff) as u16),
         })
-    }
-}
-impl RequestId {
-    /// This allows extracting the request ID from a given PUS telecommand.
-    pub fn new(tc: &(impl CcsdsPacket + IsPusTelecommand)) -> Self {
-        RequestId {
-            version_number: tc.ccsds_version(),
-            packet_id: tc.packet_id(),
-            psc: tc.psc(),
-        }
     }
 }
 
