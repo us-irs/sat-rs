@@ -122,7 +122,6 @@ pub mod std_mod {
         VerificationReporter,
         RequestConverter,
         RequestRouter,
-        RoutingErrorHandler,
         RoutingError = GenericRoutingError,
     > = PusTargetedRequestHandler<
         TcReceiver,
@@ -131,7 +130,6 @@ pub mod std_mod {
         VerificationReporter,
         RequestConverter,
         RequestRouter,
-        RoutingErrorHandler,
         ActionRequest,
         RoutingError,
     >;
@@ -326,7 +324,7 @@ mod tests {
         pus::{
             tests::{
                 PusServiceHandlerWithVecCommon, PusTestHarness, SimplePusPacketHandler,
-                TestConverter, TestRouter, TestRoutingErrorHandler, APP_DATA_TOO_SHORT, TEST_APID,
+                TestConverter, TestRouter, APP_DATA_TOO_SHORT, TEST_APID,
             },
             verification::{
                 self,
@@ -355,6 +353,20 @@ mod tests {
                 .borrow_mut()
                 .push_back((target_id, request));
             self.check_for_injected_error()
+        }
+
+        fn handle_error(
+            &self,
+            target_id: TargetId,
+            token: VerificationToken<TcStateAccepted>,
+            tc: &PusTcReader,
+            error: Self::Error,
+            time_stamp: &[u8],
+            verif_reporter: &impl VerificationReportingProvider,
+        ) {
+            self.routing_errors
+                .borrow_mut()
+                .push_back((target_id, error));
         }
     }
 
@@ -413,7 +425,6 @@ mod tests {
             TestVerificationReporter,
             TestConverter<8>,
             TestRouter<ActionRequest>,
-            TestRoutingErrorHandler,
         >,
     }
 
@@ -427,7 +438,6 @@ mod tests {
                     srv_handler,
                     TestConverter::default(),
                     TestRouter::default(),
-                    TestRoutingErrorHandler::default(),
                 ),
             }
         }
@@ -443,8 +453,8 @@ mod tests {
             }
         }
         delegate! {
-            to self.handler.routing_error_handler {
-                pub fn retrieve_next_error(&mut self) -> (TargetId, GenericRoutingError);
+            to self.handler.request_router {
+                pub fn retrieve_next_routing_error(&mut self) -> (TargetId, GenericRoutingError);
             }
         }
     }
@@ -714,7 +724,7 @@ mod tests {
             assert_eq!(data, &[]);
         }
 
-        let (target_id, found_error) = action_handler.retrieve_next_error();
+        let (target_id, found_error) = action_handler.retrieve_next_routing_error();
         assert_eq!(target_id, TEST_APID.into());
         check_error(found_error);
     }
