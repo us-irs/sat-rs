@@ -44,7 +44,7 @@ pub use alloc_mod::*;
 #[cfg(feature = "std")]
 pub use std_mod::*;
 
-use self::verification::{FailParams, TcStateStarted};
+use self::verification::{FailParams, TcStateStarted, VerificationReportingProvider};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PusTmWrapper<'tm> {
@@ -347,6 +347,15 @@ pub trait PusRequestRouter<Request> {
         hk_request: Request,
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<(), Self::Error>;
+    fn handle_error(
+        &self,
+        target_id: TargetId,
+        token: VerificationToken<TcStateAccepted>,
+        tc: &PusTcReader,
+        error: Self::Error,
+        time_stamp: &[u8],
+        verif_reporter: &impl VerificationReportingProvider,
+    );
 }
 
 #[cfg(feature = "alloc")]
@@ -463,19 +472,6 @@ pub mod alloc_mod {
             time_stamp: &[u8],
             verif_reporter: &impl VerificationReportingProvider,
         ) -> Result<(TargetId, Request), Self::Error>;
-    }
-
-    pub trait PusRoutingErrorHandler {
-        type Error;
-        fn handle_error(
-            &self,
-            target_id: TargetId,
-            token: VerificationToken<TcStateAccepted>,
-            tc: &PusTcReader,
-            error: Self::Error,
-            time_stamp: &[u8],
-            verif_reporter: &impl VerificationReportingProvider,
-        );
     }
 
     #[derive(Clone, Debug)]
@@ -704,10 +700,7 @@ pub mod std_mod {
     pub use cb_mod::*;
 
     use super::verification::VerificationReportingProvider;
-    use super::{
-        AcceptedEcssTcAndToken, PusRequestRouter, PusRoutingErrorHandler, PusTcToRequestConverter,
-        TcInMemory,
-    };
+    use super::{AcceptedEcssTcAndToken, PusRequestRouter, PusTcToRequestConverter, TcInMemory};
 
     impl From<mpsc::SendError<StoreAddr>> for EcssTmtcError {
         fn from(_: mpsc::SendError<StoreAddr>) -> Self {
@@ -999,7 +992,6 @@ pub mod std_mod {
         VerificationReporter: VerificationReportingProvider,
         RequestConverter: PusTcToRequestConverter<Request>,
         RequestRouter: PusRequestRouter<Request, Error = RoutingError>,
-        RoutingErrorHandler: PusRoutingErrorHandler<Error = RoutingError>,
         Request,
         RoutingError = GenericRoutingError,
     > {
@@ -1007,7 +999,7 @@ pub mod std_mod {
             PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
         pub request_converter: RequestConverter,
         pub request_router: RequestRouter,
-        pub routing_error_handler: RoutingErrorHandler,
+        // pub routing_error_handler: RoutingErrorHandler,
         phantom: PhantomData<Request>,
     }
 
@@ -1018,7 +1010,7 @@ pub mod std_mod {
             VerificationReporter: VerificationReportingProvider,
             RequestConverter: PusTcToRequestConverter<Request, Error = PusPacketHandlingError>,
             RequestRouter: PusRequestRouter<Request, Error = RoutingError>,
-            RoutingErrorHandler: PusRoutingErrorHandler<Error = RoutingError>,
+            // RoutingErrorHandler: PusRoutingErrorHandler<Error = RoutingError>,
             Request,
             RoutingError: Clone,
         >
@@ -1029,7 +1021,7 @@ pub mod std_mod {
             VerificationReporter,
             RequestConverter,
             RequestRouter,
-            RoutingErrorHandler,
+            // RoutingErrorHandler,
             Request,
             RoutingError,
         >
@@ -1045,13 +1037,12 @@ pub mod std_mod {
             >,
             request_converter: RequestConverter,
             request_router: RequestRouter,
-            routing_error_handler: RoutingErrorHandler,
         ) -> Self {
             Self {
                 service_helper,
                 request_converter,
                 request_router,
-                routing_error_handler,
+                // routing_error_handler,
                 phantom: PhantomData,
             }
         }
@@ -1079,7 +1070,7 @@ pub mod std_mod {
                 self.request_router
                     .route(target_id, action_request, ecss_tc_and_token.token)
             {
-                self.routing_error_handler.handle_error(
+                self.request_router.handle_error(
                     target_id,
                     ecss_tc_and_token.token,
                     &tc,
@@ -1451,8 +1442,8 @@ pub mod tests {
     };
     use super::{
         EcssTcAndToken, EcssTcInSharedStoreConverter, EcssTcInVecConverter, GenericRoutingError,
-        MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError, PusRoutingErrorHandler,
-        PusServiceHelper, TcInMemory, TmAsVecSenderWithId, TmAsVecSenderWithMpsc,
+        MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError, PusServiceHelper,
+        TcInMemory, TmAsVecSenderWithId, TmAsVecSenderWithMpsc,
         TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
     };
 
@@ -1766,44 +1757,9 @@ pub mod tests {
         }
     }
 
-    #[derive(Default)]
-    pub struct TestRoutingErrorHandler {
-        pub routing_errors: RefCell<VecDeque<(TargetId, GenericRoutingError)>>,
-    }
-
-    impl PusRoutingErrorHandler for TestRoutingErrorHandler {
-        type Error = GenericRoutingError;
-
-        fn handle_error(
-            &self,
-            target_id: TargetId,
-            _token: VerificationToken<TcStateAccepted>,
-            _tc: &PusTcReader,
-            error: Self::Error,
-            _time_stamp: &[u8],
-            _verif_reporter: &impl VerificationReportingProvider,
-        ) {
-            self.routing_errors
-                .borrow_mut()
-                .push_back((target_id, error));
-        }
-    }
-
-    impl TestRoutingErrorHandler {
-        pub fn is_empty(&self) -> bool {
-            self.routing_errors.borrow().is_empty()
-        }
-
-        pub fn retrieve_next_error(&mut self) -> (TargetId, GenericRoutingError) {
-            if self.routing_errors.borrow().is_empty() {
-                panic!("no routing request available");
-            }
-            self.routing_errors.borrow_mut().pop_front().unwrap()
-        }
-    }
-
     pub struct TestRouter<REQUEST> {
         pub routing_requests: RefCell<VecDeque<(TargetId, REQUEST)>>,
+        pub routing_errors: RefCell<VecDeque<(TargetId, GenericRoutingError)>>,
         pub injected_routing_failure: RefCell<Option<GenericRoutingError>>,
     }
 
@@ -1811,6 +1767,7 @@ pub mod tests {
         fn default() -> Self {
             Self {
                 routing_requests: Default::default(),
+                routing_errors: Default::default(),
                 injected_routing_failure: Default::default(),
             }
         }
@@ -1822,6 +1779,31 @@ pub mod tests {
                 return Err(self.injected_routing_failure.borrow_mut().take().unwrap());
             }
             Ok(())
+        }
+
+        pub fn handle_error(
+            &self,
+            target_id: TargetId,
+            _token: VerificationToken<TcStateAccepted>,
+            _tc: &PusTcReader,
+            error: GenericRoutingError,
+            _time_stamp: &[u8],
+            _verif_reporter: &impl VerificationReportingProvider,
+        ) {
+            self.routing_errors
+                .borrow_mut()
+                .push_back((target_id, error));
+        }
+
+        pub fn no_routing_errors(&self) -> bool {
+            self.routing_errors.borrow().is_empty()
+        }
+
+        pub fn retrieve_next_routing_error(&mut self) -> (TargetId, GenericRoutingError) {
+            if self.routing_errors.borrow().is_empty() {
+                panic!("no routing request available");
+            }
+            self.routing_errors.borrow_mut().pop_front().unwrap()
         }
 
         pub fn inject_routing_error(&mut self, error: GenericRoutingError) {

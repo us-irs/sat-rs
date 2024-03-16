@@ -1,7 +1,10 @@
 use log::{error, warn};
 use satrs::action::{ActionRequest, ActionRequestVariant};
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
-use satrs::pus::action::PusService8ActionRequestHandler;
+use satrs::pus::action::{
+    ActionReplyPusWithActionId, ActiveActionRequest, DefaultActiveActionRequestMap,
+    PusService8ActionRequestHandler, PusService8ReplyHandler,
+};
 use satrs::pus::verification::{
     FailParams, TcStateAccepted, VerificationReporterWithSharedPoolMpscBoundedSender,
     VerificationReporterWithVecMpscSender, VerificationReportingProvider, VerificationToken,
@@ -9,8 +12,9 @@ use satrs::pus::verification::{
 use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
     EcssTcReceiverCore, EcssTmSenderCore, MpscTcReceiver, PusPacketHandlerResult,
-    PusPacketHandlingError, PusServiceHelper, PusTcToRequestConverter, TmAsVecSenderWithId,
-    TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
+    PusPacketHandlingError, PusServiceHelper, PusTcToRequestConverter, ReplyHandlerHook,
+    TmAsVecSenderWithId, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
+    TmInSharedPoolSenderWithId,
 };
 use satrs::request::TargetAndApidId;
 use satrs::spacepackets::ecss::tc::PusTcReader;
@@ -21,8 +25,6 @@ use satrs_example::config::{tmtc_err, TcReceiverId, TmSenderId, PUS_APID};
 use std::sync::mpsc::{self};
 
 use crate::requests::GenericRequestRouter;
-
-use super::GenericRoutingErrorHandler;
 
 #[derive(Default)]
 pub struct ExampleActionRequestConverter {}
@@ -97,19 +99,29 @@ pub fn create_action_service_static(
         "PUS_8_TC_RECV",
         pus_action_rx,
     );
-    let pus_8_handler = PusService8ActionRequestHandler::new(
+    let action_request_handler = PusService8ActionRequestHandler::new(
         PusServiceHelper::new(
             action_srv_receiver,
-            action_srv_tm_sender,
+            action_srv_tm_sender.clone(),
             PUS_APID,
             verif_reporter.clone(),
             EcssTcInSharedStoreConverter::new(tc_pool.clone(), 2048),
         ),
         ExampleActionRequestConverter::default(),
         action_router,
-        GenericRoutingErrorHandler::<8>::default(),
     );
-    Pus8Wrapper { pus_8_handler }
+    let action_reply_handler = PusService8ReplyHandler::new_from_now(
+        verif_reporter.clone(),
+        DefaultActiveActionRequestMap::default(),
+        1024,
+        PusActionReplyHook::default(),
+        action_srv_tm_sender,
+    )
+    .expect("Failed to create PUS 8 reply handler");
+    Pus8Wrapper {
+        action_request_handler,
+        action_reply_handler,
+    }
 }
 
 pub fn create_action_service_dynamic(
@@ -133,35 +145,69 @@ pub fn create_action_service_dynamic(
         "PUS_8_TC_RECV",
         pus_action_rx,
     );
-    let pus_8_handler = PusService8ActionRequestHandler::new(
+    let action_request_handler = PusService8ActionRequestHandler::new(
         PusServiceHelper::new(
             action_srv_receiver,
-            action_srv_tm_sender,
+            action_srv_tm_sender.clone(),
             PUS_APID,
             verif_reporter.clone(),
             EcssTcInVecConverter::default(),
         ),
         ExampleActionRequestConverter::default(),
         action_router,
-        GenericRoutingErrorHandler::<8>::default(),
     );
-    Pus8Wrapper { pus_8_handler }
+    let action_reply_handler = PusService8ReplyHandler::new_from_now(
+        verif_reporter.clone(),
+        DefaultActiveActionRequestMap::default(),
+        1024,
+        PusActionReplyHook::default(),
+        action_srv_tm_sender,
+    )
+    .expect("Failed to create PUS 8 reply handler");
+    Pus8Wrapper {
+        action_request_handler,
+        action_reply_handler,
+    }
 }
 
+#[derive(Default)]
+pub struct PusActionReplyHook {}
+
+impl ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithActionId> for PusActionReplyHook {
+    fn handle_unexpected_reply(
+        &mut self,
+        reply: &satrs::request::GenericMessage<ActionReplyPusWithActionId>,
+    ) {
+        println!("received unexpected action reply {:?}", reply);
+    }
+
+    fn timeout_callback(&self, active_request: &ActiveActionRequest) {
+        println!("active request {active_request:?} timed out");
+    }
+
+    fn timeout_error_code(&self) -> satrs::res_code::ResultU16 {
+        todo!()
+    }
+}
 pub struct Pus8Wrapper<
     TcReceiver: EcssTcReceiverCore,
     TmSender: EcssTmSenderCore,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
-    pub(crate) pus_8_handler: PusService8ActionRequestHandler<
+    pub(crate) action_request_handler: PusService8ActionRequestHandler<
         TcReceiver,
         TmSender,
         TcInMemConverter,
         VerificationReporter,
         ExampleActionRequestConverter,
         GenericRequestRouter,
-        GenericRoutingErrorHandler<8>,
+    >,
+    pub(crate) action_reply_handler: PusService8ReplyHandler<
+        VerificationReporter,
+        DefaultActiveActionRequestMap,
+        PusActionReplyHook,
+        TmSender,
     >,
 }
 
@@ -173,7 +219,7 @@ impl<
     > Pus8Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
     pub fn handle_next_packet(&mut self) -> bool {
-        match self.pus_8_handler.handle_one_tc() {
+        match self.action_request_handler.handle_one_tc() {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {
@@ -193,6 +239,7 @@ impl<
                 error!("PUS packet handling error: {error:?}")
             }
         }
+        // self.action_reply_handler.handle_replies();
         false
     }
 }

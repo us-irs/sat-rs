@@ -1,9 +1,7 @@
 use crate::tmtc::MpscStoreAndSendError;
 use log::warn;
 use satrs::pus::verification::{FailParams, VerificationReportingProvider};
-use satrs::pus::{
-    EcssTcAndToken, GenericRoutingError, PusPacketHandlerResult, PusRoutingErrorHandler, TcInMemory,
-};
+use satrs::pus::{EcssTcAndToken, PusPacketHandlerResult, TcInMemory};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusServiceId;
 use satrs::spacepackets::time::cds::TimeProvider;
@@ -151,58 +149,5 @@ impl<VerificationReporter: VerificationReportingProvider> PusReceiver<Verificati
             }
         }
         Ok(PusPacketHandlerResult::RequestHandled)
-    }
-}
-
-#[derive(Default)]
-pub struct GenericRoutingErrorHandler<const SERVICE_ID: u8> {}
-
-impl<const SERVICE_ID: u8> PusRoutingErrorHandler for GenericRoutingErrorHandler<SERVICE_ID> {
-    type Error = satrs::pus::GenericRoutingError;
-
-    fn handle_error(
-        &self,
-        target_id: satrs::TargetId,
-        token: satrs::pus::verification::VerificationToken<
-            satrs::pus::verification::TcStateAccepted,
-        >,
-        _tc: &PusTcReader,
-        error: Self::Error,
-        time_stamp: &[u8],
-        verif_reporter: &impl VerificationReportingProvider,
-    ) {
-        warn!("Routing request for service {SERVICE_ID} failed: {error:?}");
-        match error {
-            GenericRoutingError::UnknownTargetId(id) => {
-                let mut fail_data: [u8; 8] = [0; 8];
-                fail_data.copy_from_slice(&id.to_be_bytes());
-                verif_reporter
-                    .start_failure(
-                        token,
-                        FailParams::new(time_stamp, &tmtc_err::UNKNOWN_TARGET_ID, &fail_data),
-                    )
-                    .expect("Sending start failure failed");
-            }
-            GenericRoutingError::SendError(_) => {
-                let mut fail_data: [u8; 8] = [0; 8];
-                fail_data.copy_from_slice(&target_id.to_be_bytes());
-                verif_reporter
-                    .start_failure(
-                        token,
-                        FailParams::new(time_stamp, &tmtc_err::ROUTING_ERROR, &fail_data),
-                    )
-                    .expect("Sending start failure failed");
-            }
-            GenericRoutingError::NotEnoughAppData { expected, found } => {
-                let mut context_info = (found as u32).to_be_bytes().to_vec();
-                context_info.extend_from_slice(&(expected as u32).to_be_bytes());
-                verif_reporter
-                    .start_failure(
-                        token,
-                        FailParams::new(time_stamp, &tmtc_err::NOT_ENOUGH_APP_DATA, &context_info),
-                    )
-                    .expect("Sending start failure failed");
-            }
-        }
     }
 }

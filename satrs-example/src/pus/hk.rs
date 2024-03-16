@@ -1,18 +1,16 @@
 use log::{error, warn};
 use satrs::hk::{CollectionIntervalFactor, HkRequest};
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
-use satrs::pus::hk::{PusHkToRequestConverter, PusService3HkHandler};
-use satrs::pus::verification::std_mod::{
-    VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
-};
+use satrs::pus::hk::PusService3HkRequestHandler;
 use satrs::pus::verification::{
-    FailParams, TcStateAccepted, VerificationReportingProvider, VerificationToken,
+    FailParams, TcStateAccepted, VerificationReporterWithSharedPoolMpscBoundedSender,
+    VerificationReporterWithVecMpscSender, VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
     EcssTcReceiverCore, EcssTmSenderCore, MpscTcReceiver, PusPacketHandlerResult,
-    PusPacketHandlingError, PusServiceHelper, TmAsVecSenderWithId, TmAsVecSenderWithMpsc,
-    TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
+    PusPacketHandlingError, PusServiceHelper, PusTcToRequestConverter, TmAsVecSenderWithId,
+    TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
 };
 use satrs::request::TargetAndApidId;
 use satrs::spacepackets::ecss::tc::PusTcReader;
@@ -24,12 +22,10 @@ use std::sync::mpsc::{self};
 
 use crate::requests::GenericRequestRouter;
 
-use super::GenericRoutingErrorHandler;
-
 #[derive(Default)]
 pub struct ExampleHkRequestConverter {}
 
-impl PusHkToRequestConverter for ExampleHkRequestConverter {
+impl PusTcToRequestConverter<HkRequest> for ExampleHkRequestConverter {
     type Error = PusPacketHandlingError;
 
     fn convert(
@@ -165,7 +161,7 @@ pub fn create_hk_service_static(
     );
     let hk_srv_receiver =
         MpscTcReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
-    let pus_3_handler = PusService3HkHandler::new(
+    let pus_3_handler = PusService3HkRequestHandler::new(
         PusServiceHelper::new(
             hk_srv_receiver,
             hk_srv_tm_sender,
@@ -175,7 +171,6 @@ pub fn create_hk_service_static(
         ),
         ExampleHkRequestConverter::default(),
         request_router,
-        GenericRoutingErrorHandler::default(),
     );
     Pus3Wrapper { pus_3_handler }
 }
@@ -198,7 +193,7 @@ pub fn create_hk_service_dynamic(
     );
     let hk_srv_receiver =
         MpscTcReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
-    let pus_3_handler = PusService3HkHandler::new(
+    let pus_3_handler = PusService3HkRequestHandler::new(
         PusServiceHelper::new(
             hk_srv_receiver,
             hk_srv_tm_sender,
@@ -208,7 +203,6 @@ pub fn create_hk_service_dynamic(
         ),
         ExampleHkRequestConverter::default(),
         request_router,
-        GenericRoutingErrorHandler::default(),
     );
     Pus3Wrapper { pus_3_handler }
 }
@@ -219,14 +213,13 @@ pub struct Pus3Wrapper<
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
-    pub(crate) pus_3_handler: PusService3HkHandler<
+    pub(crate) pus_3_handler: PusService3HkRequestHandler<
         TcReceiver,
         TmSender,
         TcInMemConverter,
         VerificationReporter,
         ExampleHkRequestConverter,
         GenericRequestRouter,
-        GenericRoutingErrorHandler<3>,
     >,
 }
 
