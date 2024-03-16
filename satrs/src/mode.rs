@@ -190,6 +190,11 @@ pub trait ModeRequestHandler: ModeProvider {
 
     fn announce_mode(&self, request_id: RequestId, sender_id: ChannelId, recursive: bool);
     fn handle_mode_reached(&mut self) -> Result<(), GenericTargetedMessagingError>;
+    fn send_mode_reply(
+        &self,
+        request_id: RequestId,
+        target_id: ChannelId,
+    ) -> Result<(), GenericTargetedMessagingError>;
 }
 
 pub trait ModeReplyReceiver {

@@ -13,6 +13,7 @@ use satrs::{
     request::GenericMessage,
     ChannelId,
 };
+use spacepackets::time::UnixTimestamp;
 use std::string::{String, ToString};
 
 pub enum TestChannelId {
@@ -45,41 +46,48 @@ struct TestDevice {
     pub name: String,
     pub mode_node: ModeRequestHandlerMpscBounded,
     pub mode_and_submode: ModeAndSubmode,
+    pub transition_active: bool,
+    pub transition_start: std::time::Instant,
+    pub transition_timeout_ms: u32,
     pub mode_requestor_info: Option<(RequestId, ChannelId)>,
 }
 
-pub struct ModeLeafDeviceHelper {
-    // pub
+fn mode_leaf_node_req_handler(
+    handler: &mut impl ModeRequestHandler,
+    request: GenericMessage<ModeRequest>,
+) {
+    match request.message {
+        ModeRequest::SetMode(mode_and_submode) => {
+            handler
+                .start_transition(request.request_id, request.sender_id, mode_and_submode)
+                .unwrap();
+        }
+        ModeRequest::ReadMode => handler
+            .send_mode_reply(request.request_id, request.sender_id)
+            .unwrap(),
+        ModeRequest::AnnounceMode => {
+            handler.announce_mode(request.request_id, request.sender_id, false)
+        }
+        ModeRequest::AnnounceModeRecursive => {
+            handler.announce_mode(request.request_id, request.sender_id, true)
+        }
+    }
 }
 
 impl TestDevice {
     pub fn run(&mut self) {
-        self.check_mode_requests().expect("mode messaging error");
+        if !self.transition_active {
+            self.check_mode_requests().expect("mode messaging error");
+        } else {
+            self.handle_transition()
+        }
     }
+
+    pub fn handle_transition(&mut self) {}
 
     pub fn check_mode_requests(&mut self) -> Result<(), GenericTargetedMessagingError> {
         if let Some(request) = self.mode_node.try_recv_mode_request()? {
-            match request.message {
-                ModeRequest::SetMode(mode_and_submode) => {
-                    self.start_transition(request.request_id, request.sender_id, mode_and_submode)
-                        .unwrap();
-                    self.mode_requestor_info = Some((request.request_id, request.sender_id));
-                }
-                ModeRequest::ReadMode => self
-                    .mode_node
-                    .send_mode_reply(
-                        request.request_id,
-                        request.sender_id,
-                        ModeReply::ModeReply(self.mode_and_submode),
-                    )
-                    .unwrap(),
-                ModeRequest::AnnounceMode => {
-                    self.announce_mode(request.request_id, request.sender_id, false)
-                }
-                ModeRequest::AnnounceModeRecursive => {
-                    self.announce_mode(request.request_id, request.sender_id, true)
-                }
-            }
+            mode_leaf_node_req_handler(self, request);
         }
         Ok(())
     }
@@ -90,14 +98,19 @@ impl ModeProvider for TestDevice {
         self.mode_and_submode
     }
 }
+
 impl ModeRequestHandler for TestDevice {
     fn start_transition(
         &mut self,
-        _request_id: RequestId,
-        _sender_id: ChannelId,
+        request_id: RequestId,
+        sender_id: ChannelId,
         mode_and_submode: ModeAndSubmode,
     ) -> Result<(), ModeError> {
         self.mode_and_submode = mode_and_submode;
+        self.mode_requestor_info = Some((request_id, sender_id));
+        self.transition_active = true;
+        self.transition_timeout_ms = 50;
+        self.transition_start = std::time::Instant::now();
         self.handle_mode_reached()?;
         Ok(())
     }
@@ -114,9 +127,21 @@ impl ModeRequestHandler for TestDevice {
         self.mode_node.send_mode_reply(
             req_id,
             sender_id,
-            ModeReply::ModeReply(self.mode_and_submode),
+            ModeReply::ModeReply(self.mode_and_submode()),
         )?;
         Ok(())
+    }
+
+    fn send_mode_reply(
+        &self,
+        request_id: RequestId,
+        target_id: ChannelId,
+    ) -> Result<(), GenericTargetedMessagingError> {
+        self.mode_node.send_mode_reply(
+            request_id,
+            target_id,
+            ModeReply::ModeReply(self.mode_and_submode),
+        )
     }
 }
 
@@ -141,26 +166,7 @@ impl TestAssembly {
 
     pub fn check_mode_requests(&mut self) -> Result<(), GenericTargetedMessagingError> {
         if let Some(request) = self.mode_node.try_recv_mode_request()? {
-            match request.message {
-                ModeRequest::SetMode(mode_and_submode) => {
-                    self.start_transition(request.request_id, request.sender_id, mode_and_submode)
-                        .unwrap();
-                }
-                ModeRequest::ReadMode => self
-                    .mode_node
-                    .send_mode_reply(
-                        request.request_id,
-                        request.sender_id,
-                        ModeReply::ModeReply(self.mode_and_submode),
-                    )
-                    .unwrap(),
-                ModeRequest::AnnounceMode => {
-                    self.announce_mode(request.request_id, request.sender_id, false)
-                }
-                ModeRequest::AnnounceModeRecursive => {
-                    self.announce_mode(request.request_id, request.sender_id, true)
-                }
-            }
+            mode_leaf_node_req_handler(self, request)
         }
         Ok(())
     }
@@ -226,11 +232,19 @@ impl ModeRequestHandler for TestAssembly {
     }
 
     fn handle_mode_reached(&mut self) -> Result<(), GenericTargetedMessagingError> {
-        let (req_id, sender_id) = self.mode_requestor_info.unwrap();
+        let (request_id, sender_id) = self.mode_requestor_info.unwrap();
+        self.send_mode_reply(request_id, sender_id)
+    }
+
+    fn send_mode_reply(
+        &self,
+        request_id: RequestId,
+        target_id: ChannelId,
+    ) -> Result<(), GenericTargetedMessagingError> {
         self.mode_node.send_mode_reply(
-            req_id,
-            sender_id,
-            ModeReply::ModeReply(self.mode_and_submode),
+            request_id,
+            target_id,
+            ModeReply::ModeReply(self.mode_and_submode()),
         )?;
         Ok(())
     }
