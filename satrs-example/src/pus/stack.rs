@@ -1,6 +1,9 @@
-use satrs::pus::{
-    verification::VerificationReportingProvider, EcssTcInMemConverter, EcssTcReceiverCore,
-    EcssTmSenderCore,
+use satrs::{
+    pus::{
+        verification::VerificationReportingProvider, EcssTcInMemConverter, EcssTcReceiverCore,
+        EcssTmSenderCore,
+    },
+    spacepackets::time::{cds, TimeWriter},
 };
 
 use super::{
@@ -51,6 +54,10 @@ impl<
 
     pub fn periodic_operation(&mut self) {
         self.schedule_srv.release_tcs();
+        let time_stamp = cds::TimeProvider::from_now_with_u16_days()
+            .expect("time stamp generation error")
+            .to_vec()
+            .unwrap();
         loop {
             let mut all_queues_empty = true;
             let mut is_srv_finished = |srv_handler_finished: bool| {
@@ -58,9 +65,9 @@ impl<
                     all_queues_empty = false;
                 }
             };
-            is_srv_finished(self.test_srv.handle_next_packet());
-            is_srv_finished(self.schedule_srv.handle_next_packet());
-            is_srv_finished(self.event_srv.handle_next_packet());
+            is_srv_finished(self.test_srv.handle_next_packet(&time_stamp));
+            is_srv_finished(self.schedule_srv.handle_next_packet(&time_stamp));
+            is_srv_finished(self.event_srv.handle_next_packet(&time_stamp));
             is_srv_finished(self.action_srv.handle_next_packet());
             is_srv_finished(self.hk_srv.handle_next_packet());
             if all_queues_empty {

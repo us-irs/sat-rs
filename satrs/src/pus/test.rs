@@ -11,10 +11,9 @@ use super::verification::{
     VerificationReporterWithVecMpscSender, VerificationReportingProvider,
 };
 use super::{
-    get_current_cds_short_timestamp, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
-    EcssTcInVecConverter, EcssTcReceiverCore, EcssTmSenderCore, MpscTcReceiver, PusServiceHelper,
-    TmAsVecSenderWithBoundedMpsc, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
-    TmInSharedPoolSenderWithMpsc,
+    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiverCore,
+    EcssTmSenderCore, MpscTcReceiver, PusServiceHelper, TmAsVecSenderWithBoundedMpsc,
+    TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithMpsc,
 };
 
 /// This is a helper class for [std] environments to handle generic PUS 17 (test service) packets.
@@ -47,7 +46,10 @@ impl<
         Self { service_helper }
     }
 
-    pub fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+    pub fn handle_one_tc(
+        &mut self,
+        time_stamp: &[u8],
+    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
         if possible_packet.is_none() {
             return Ok(PusPacketHandlerResult::Empty);
@@ -62,12 +64,11 @@ impl<
         }
         if tc.subservice() == 1 {
             let mut partial_error = None;
-            let time_stamp = get_current_cds_short_timestamp(&mut partial_error);
             let result = self
                 .service_helper
                 .common
                 .verification_handler
-                .start_success(ecss_tc_and_token.token, &time_stamp)
+                .start_success(ecss_tc_and_token.token, time_stamp)
                 .map_err(|_| PartialPusHandlingError::Verification);
             let start_token = if let Ok(result) = result {
                 Some(result)
@@ -78,7 +79,7 @@ impl<
             // Sequence count will be handled centrally in TM funnel.
             let mut reply_header =
                 SpHeader::tm_unseg(self.service_helper.common.tm_apid, 0, 0).unwrap();
-            let tc_header = PusTmSecondaryHeader::new_simple(17, 2, &time_stamp);
+            let tc_header = PusTmSecondaryHeader::new_simple(17, 2, time_stamp);
             let ping_reply = PusTmCreator::new(&mut reply_header, tc_header, &[], true);
             let result = self
                 .service_helper
@@ -95,7 +96,7 @@ impl<
                     .service_helper
                     .common
                     .verification_handler
-                    .completion_success(start_token, &time_stamp)
+                    .completion_success(start_token, time_stamp)
                     .is_err()
                 {
                     partial_error = Some(PartialPusHandlingError::Verification)
@@ -168,6 +169,7 @@ mod tests {
     use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTmReader;
     use spacepackets::ecss::PusPacket;
+    use spacepackets::time::{cds, TimeWriter};
     use spacepackets::{SequenceFlags, SpHeader};
 
     use super::PusService17TestHandler;
@@ -208,10 +210,9 @@ mod tests {
         }
     }
     impl SimplePusPacketHandler for Pus17HandlerWithStoreTester {
-        delegate! {
-            to self.handler {
-                fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
-            }
+        fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+            let time_stamp = cds::TimeProvider::new_with_u16_days(0, 0).to_vec().unwrap();
+            self.handler.handle_one_tc(&time_stamp)
         }
     }
 
@@ -251,10 +252,9 @@ mod tests {
         }
     }
     impl SimplePusPacketHandler for Pus17HandlerWithVecTester {
-        delegate! {
-            to self.handler {
-                fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
-            }
+        fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+            let time_stamp = cds::TimeProvider::new_with_u16_days(0, 0).to_vec().unwrap();
+            self.handler.handle_one_tc(&time_stamp)
         }
     }
 

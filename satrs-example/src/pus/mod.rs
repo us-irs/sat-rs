@@ -1,7 +1,18 @@
+use crate::requests::GenericRequestRouter;
 use crate::tmtc::MpscStoreAndSendError;
 use log::warn;
-use satrs::pus::verification::{FailParams, VerificationReportingProvider};
-use satrs::pus::{EcssTcAndToken, PusPacketHandlerResult, TcInMemory};
+use satrs::pus::verification::{
+    self, FailParams, VerificationReporter, VerificationReporterWithSharedPoolMpscBoundedSender,
+    VerificationReporterWithVecMpscSender, VerificationReportingProvider,
+};
+use satrs::pus::{
+    ActiveRequestMapProvider, ActiveRequestProvider, DefaultActiveRequestMap, EcssTcAndToken,
+    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiverCore,
+    EcssTmSenderCore, GenericRoutingError, MpscTcReceiver, PusPacketHandlerResult, PusReplyHandler,
+    PusServiceHelper, PusServiceReplyHandler, PusTcToRequestConverter, ReplyHandlerHook,
+    TcInMemory, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
+};
+use satrs::request::GenericMessage;
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusServiceId;
 use satrs::spacepackets::time::cds::TimeProvider;
@@ -36,13 +47,6 @@ struct TimeStampHelper {
 }
 
 impl TimeStampHelper {
-    pub fn new() -> Self {
-        Self {
-            stamper: TimeProvider::new_with_u16_days(0, 0),
-            time_stamp: [0; 7],
-        }
-    }
-
     pub fn stamp(&self) -> &[u8] {
         &self.time_stamp
     }
@@ -57,13 +61,134 @@ impl TimeStampHelper {
     }
 }
 
+impl Default for TimeStampHelper {
+    fn default() -> Self {
+        Self {
+            stamper: TimeProvider::from_now_with_u16_days().expect("creating time stamper failed"),
+            time_stamp: Default::default(),
+        }
+    }
+}
+
 impl<VerificationReporter: VerificationReportingProvider> PusReceiver<VerificationReporter> {
     pub fn new(verif_reporter: VerificationReporter, pus_router: PusTcMpscRouter) -> Self {
         Self {
             verif_reporter,
             pus_router,
-            stamp_helper: TimeStampHelper::new(),
+            stamp_helper: TimeStampHelper::default(),
         }
+    }
+}
+
+pub struct PusTargetedRequestService<
+    TcReceiver: EcssTcReceiverCore,
+    TmSender: EcssTmSenderCore,
+    TcInMemConverter: EcssTcInMemConverter,
+    VerificationReporter: VerificationReportingProvider,
+    RequestConverter: PusTcToRequestConverter<RequestType>,
+    ReplyHook: ReplyHandlerHook<RequestType, ReplyType>,
+    ActiveRequestMap: ActiveRequestMapProvider<RequestType>,
+    ActiveRequestType: ActiveRequestProvider,
+    RequestType,
+    ReplyType,
+> {
+    pub service_helper:
+        PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+    pub request_router: GenericRequestRouter,
+    pub request_converter: RequestConverter,
+    pub active_request_map: ActiveRequestMap,
+    pub reply_hook: ReplyHook,
+    phantom: std::marker::PhantomData<RequestType>,
+}
+
+impl<
+        TcReceiver: EcssTcReceiverCore,
+        TmSender: EcssTmSenderCore,
+        TcInMemConverter: EcssTcInMemConverter,
+        VerificationReporter: VerificationReportingProvider,
+        RequestConverter: PusTcToRequestConverter<RequestType>,
+        ReplyHandler: PusReplyHandler<ActiveRequestType, ReplyType>,
+        ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestType>,
+        ActiveRequestType: ActiveRequestProvider,
+        RequestType,
+        ReplyType,
+    >
+    PusTargetedRequestService<
+        TcReceiver,
+        TmSender,
+        TcInMemConverter,
+        VerificationReporter,
+        RequestConverter,
+        ReplyHandler,
+        ActiveRequestMap,
+        ActiveRequestType,
+        RequestType,
+        ReplyType,
+    >
+{
+    pub fn new(
+        service_helper: PusServiceHelper<
+            TcReceiver,
+            TmSender,
+            TcInMemConverter,
+            VerificationReporter,
+        >,
+        request_converter: RequestConverter,
+        request_router: GenericRequestRouter,
+        active_request_map: ActiveRequestMap,
+        reply_hook: ReplyHandler,
+    ) -> Self {
+        Self {
+            service_helper,
+            request_router,
+            request_converter,
+            active_request_map,
+            reply_hook,
+            phantom: std::marker::PhantomData,
+        }
+    }
+
+    pub fn handle_one_tc(&mut self) {
+        let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
+        if possible_packet.is_none() {
+            return Ok(PusPacketHandlerResult::Empty);
+        }
+        let ecss_tc_and_token = possible_packet.unwrap();
+        let tc = self
+            .service_helper
+            .tc_in_mem_converter
+            .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
+        let mut partial_error = None;
+        let time_stamp = get_current_cds_short_timestamp(&mut partial_error);
+        let (active_request, action_request) = self.request_converter.convert(
+            ecss_tc_and_token.token,
+            &tc,
+            &time_stamp,
+            &self.service_helper.common.verification_handler,
+        )?;
+        if let Err(e) = self.request_router.route(
+            active_request.target_id(),
+            action_request,
+            ecss_tc_and_token.token,
+        ) {
+            let verif_request_id = verification::RequestId::new(&tc);
+            self.active_request_map
+                .insert(verif_request_id.into(), active_request);
+            self.request_router.handle_error(
+                target_id,
+                ecss_tc_and_token.token,
+                &tc,
+                e.clone(),
+                &time_stamp,
+                &self.service_helper.common.verification_handler,
+            );
+            return Err(e.into());
+        }
+        Ok(PusPacketHandlerResult::RequestHandled)
+    }
+
+    pub fn insert_reply(&mut self, reply: &GenericMessage<ReplyType>) {
+        // self.reply_hook.insert_reply(reply, &self.active_request_map);
     }
 }
 

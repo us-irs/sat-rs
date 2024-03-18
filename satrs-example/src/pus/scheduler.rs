@@ -103,8 +103,11 @@ impl<
         }
     }
 
-    pub fn handle_next_packet(&mut self) -> bool {
-        match self.pus_11_handler.handle_one_tc(&mut self.sched_tc_pool) {
+    pub fn handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
+        match self
+            .pus_11_handler
+            .handle_one_tc(time_stamp, &mut self.sched_tc_pool)
+        {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {

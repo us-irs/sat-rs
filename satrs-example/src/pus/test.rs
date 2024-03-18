@@ -111,8 +111,8 @@ impl<
         VerificationReporter: VerificationReportingProvider,
     > Service17CustomWrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
-    pub fn handle_next_packet(&mut self) -> bool {
-        let res = self.pus17_handler.handle_one_tc();
+    pub fn handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
+        let res = self.pus17_handler.handle_one_tc(time_stamp);
         if res.is_err() {
             warn!("PUS17 handler failed with error {:?}", res.unwrap_err());
             return true;

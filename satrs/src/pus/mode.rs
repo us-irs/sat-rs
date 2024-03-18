@@ -43,44 +43,24 @@ pub mod std_mod {
     };
 
     use crate::{
-        mode::{GenericModeReply, ModeRequest},
+        mode::GenericModeReply,
         pus::{
             mode::Subservice,
             verification::{
                 self, FailParams, TcStateStarted, VerificationReportingProvider, VerificationToken,
             },
-            ActiveRequest, ActiveRequestMapProvider, EcssTmSenderCore, EcssTmtcError,
-            GenericRoutingError, PusServiceReplyHandler, PusTargetedRequestHandler, PusTmWrapper,
-            ReplyHandlerHook,
+            ActivePusRequest, ActiveRequestMapProvider, EcssTmSenderCore, EcssTmtcError,
+            PusServiceReplyHandler, PusTmWrapper, ReplyHandlerHook,
         },
         TargetId,
     };
 
-    pub trait ModeReplyHook: ReplyHandlerHook<ActiveRequest, ModeReply> {
+    pub trait ModeReplyHook: ReplyHandlerHook<ActivePusRequest, ModeReply> {
         fn wrong_mode_result_code(&self) -> ResultU16;
         fn can_not_reach_mode_result_code(&self) -> ResultU16;
     }
 
     use super::{ModeReply, MODE_SERVICE_ID};
-
-    pub type PusModeServiceRequestHandler<
-        TcReceiver,
-        TmSender,
-        TcInMemConverter,
-        VerificationReporter,
-        RequestConverter,
-        RequestRouter,
-        RoutingError = GenericRoutingError,
-    > = PusTargetedRequestHandler<
-        TcReceiver,
-        TmSender,
-        TcInMemConverter,
-        VerificationReporter,
-        RequestConverter,
-        RequestRouter,
-        ModeRequest,
-        RoutingError,
-    >;
 
     /// Type definition for a PUS mode servicd reply handler which constrains the
     /// [PusServiceReplyHandler] active request and reply generics to the [ActiveActionRequest] and
@@ -95,13 +75,13 @@ pub mod std_mod {
         ActiveRequestMap,
         UserHook,
         TmSender,
-        ActiveRequest,
+        ActivePusRequest,
         ModeReply,
     >;
 
     impl<
             VerificationReporter: VerificationReportingProvider,
-            ActiveRequestMap: ActiveRequestMapProvider<ActiveRequest>,
+            ActiveRequestMap: ActiveRequestMapProvider<ActivePusRequest>,
             UserHook: ModeReplyHook,
             TmSender: EcssTmSenderCore,
         > PusModeServiceReplyHandler<VerificationReporter, ActiveRequestMap, UserHook, TmSender>
@@ -116,7 +96,7 @@ pub mod std_mod {
         ) {
             self.active_request_map.insert(
                 &request_id.into(),
-                ActiveRequest {
+                ActivePusRequest {
                     target_id,
                     token,
                     start_time: self.current_time,

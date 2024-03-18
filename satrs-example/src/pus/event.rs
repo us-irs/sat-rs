@@ -106,8 +106,8 @@ impl<
         VerificationReporter: VerificationReportingProvider,
     > Pus5Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
-    pub fn handle_next_packet(&mut self) -> bool {
-        match self.pus_5_handler.handle_one_tc() {
+    pub fn handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
+        match self.pus_5_handler.handle_one_tc(time_stamp) {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {

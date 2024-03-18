@@ -29,7 +29,6 @@ pub mod event;
 pub mod event_man;
 #[cfg(feature = "std")]
 pub mod event_srv;
-pub mod hk;
 pub mod mode;
 pub mod scheduler;
 #[cfg(feature = "std")]
@@ -44,7 +43,7 @@ pub use alloc_mod::*;
 #[cfg(feature = "std")]
 pub use std_mod::*;
 
-use self::verification::{FailParams, TcStateStarted, VerificationReportingProvider};
+use self::verification::{TcStateStarted, VerificationReportingProvider};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PusTmWrapper<'tm> {
@@ -298,14 +297,14 @@ pub trait ActiveRequestProvider {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActiveRequest {
+pub struct ActivePusRequest {
     target_id: TargetId,
     token: VerificationToken<TcStateStarted>,
     start_time: UnixTimestamp,
     timeout: Duration,
 }
 
-impl ActiveRequestProvider for ActiveRequest {
+impl ActiveRequestProvider for ActivePusRequest {
     fn target_id(&self) -> TargetId {
         self.target_id
     }
@@ -323,30 +322,18 @@ impl ActiveRequestProvider for ActiveRequest {
     }
 }
 
-/// Generic user hook method.
-///
-/// This hook method currently serves the following tasks:
-///
-///  1. Pass specific information to the reply handlers which can not be kept inside the
-///     framework. This includes information like the error codes used for packet verification.
-///  2. It exposes callback methods which can be useful to perform custom user operations like
-///     logging.
-pub trait ReplyHandlerHook<ActiveRequestType, ReplyType> {
-    fn handle_unexpected_reply(&mut self, reply: &GenericMessage<ReplyType>);
-    fn timeout_callback(&self, active_request: &ActiveRequestType);
-    fn timeout_error_code(&self) -> ResultU16;
-}
-
 /// This trait is an abstraction for the routing of PUS request to a dedicated
 /// recipient using the generic [TargetId].
 pub trait PusRequestRouter<Request> {
     type Error;
+
     fn route(
         &self,
         target_id: TargetId,
         hk_request: Request,
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<(), Self::Error>;
+
     fn handle_error(
         &self,
         target_id: TargetId,
@@ -355,6 +342,23 @@ pub trait PusRequestRouter<Request> {
         error: Self::Error,
         time_stamp: &[u8],
         verif_reporter: &impl VerificationReportingProvider,
+    );
+}
+
+pub trait PusReplyHandler<ActiveRequestInfo: ActiveRequestProvider, ReplyType> {
+    type Error;
+
+    fn handle_reply(
+        &mut self,
+        reply: &GenericMessage<ReplyType>,
+        verification_handler: &impl VerificationReportingProvider,
+        tm_sender: &impl EcssTmSenderCore,
+    ) -> Result<bool, Self::Error>;
+
+    fn handle_unexpected_reply(
+        &mut self,
+        reply: &GenericMessage<ReplyType>,
+        tm_sender: &impl EcssTmSenderCore,
     );
 }
 
@@ -463,7 +467,7 @@ pub mod alloc_mod {
     ///
     /// A [VerificationReportingProvider] instance is passed to the user to also allow handling
     /// of the verification process as part of the PUS standard requirements.
-    pub trait PusTcToRequestConverter<Request> {
+    pub trait PusTcToRequestConverter<ActiveRequestInfo, Request> {
         type Error;
         fn convert(
             &mut self,
@@ -471,7 +475,7 @@ pub mod alloc_mod {
             tc: &PusTcReader,
             time_stamp: &[u8],
             verif_reporter: &impl VerificationReportingProvider,
-        ) -> Result<(TargetId, Request), Self::Error>;
+        ) -> Result<(ActiveRequestInfo, Request), Self::Error>;
     }
 
     #[derive(Clone, Debug)]
@@ -513,7 +517,9 @@ pub mod alloc_mod {
         }
     }
 
-    /// Generic reply handler structure which can be used to handle replies for a specific PUS service.
+    /*
+    /// Generic reply handler structure which can be used to handle replies for a specific PUS
+    /// service.
     ///
     /// This is done by keeping track of active requests using an internal map structure. An API
     /// to register new active requests is exposed as well.
@@ -524,42 +530,35 @@ pub mod alloc_mod {
     /// PUS reply handlers. Concrete PUS handlers should constrain the [ActiveRequestProvider] and
     /// the `ReplyType` generics to specific types tailored towards PUS services in addition to
     /// providing an API which can process received replies and convert them into verification
-    /// completions or other operation like user hook calls. The framework also provides some concrete
-    /// PUS handlers for common PUS services like the mode, action and housekeeping service.
+    /// completions or other operation like user hook calls. The framework also provides some
+    /// concrete PUS handlers for common PUS services like the mode, action and housekeeping
+    /// service.
     ///
     /// This object does not automatically update its internal time information used to check for
-    /// timeouts. The user should call the [Self::update_time] and [Self::update_time_from_now] methods
-    /// to do this.
+    /// timeouts. The user should call the [Self::update_time] and [Self::update_time_from_now]
+    /// methods to do this.
     pub struct PusServiceReplyHandler<
-        VerificationReporter: VerificationReportingProvider,
         ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestType>,
-        UserHook: ReplyHandlerHook<ActiveRequestType, ReplyType>,
-        TmSender: EcssTmSenderCore,
+        ReplyHook: ReplyHandlerHook<ActiveRequestType, ReplyType>,
         ActiveRequestType: ActiveRequestProvider,
         ReplyType,
     > {
         pub active_request_map: ActiveRequestMap,
-        pub verification_reporter: VerificationReporter,
         pub tm_buf: alloc::vec::Vec<u8>,
         pub current_time: UnixTimestamp,
-        pub user_hook: UserHook,
-        pub tm_sender: TmSender,
+        pub user_hook: ReplyHook,
         phantom: PhantomData<(ActiveRequestType, ReplyType)>,
     }
 
     impl<
-            VerificationReporter: VerificationReportingProvider,
             ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestType>,
-            UserHook: ReplyHandlerHook<ActiveRequestType, ReplyType>,
-            TmSender: EcssTmSenderCore,
+            ReplyHook: ReplyHandlerHook<ActiveRequestType, ReplyType>,
             ActiveRequestType: ActiveRequestProvider,
             ReplyType,
         >
         PusServiceReplyHandler<
-            VerificationReporter,
             ActiveRequestMap,
-            UserHook,
-            TmSender,
+            ReplyHook,
             ActiveRequestType,
             ReplyType,
         >
@@ -567,15 +566,12 @@ pub mod alloc_mod {
         #[cfg(feature = "std")]
         #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
         pub fn new_from_now(
-            verification_reporter: VerificationReporter,
             active_request_map: ActiveRequestMap,
             fail_data_buf_size: usize,
-            user_hook: UserHook,
-            tm_sender: TmSender,
+            user_hook: ReplyHook,
         ) -> Result<Self, std::time::SystemTimeError> {
             let current_time = UnixTimestamp::from_now()?;
             Ok(Self::new(
-                verification_reporter,
                 active_request_map,
                 fail_data_buf_size,
                 user_hook,
@@ -585,16 +581,14 @@ pub mod alloc_mod {
         }
 
         pub fn new(
-            verification_reporter: VerificationReporter,
             active_request_map: ActiveRequestMap,
             fail_data_buf_size: usize,
-            user_hook: UserHook,
+            user_hook: ReplyHook,
             tm_sender: TmSender,
             init_time: UnixTimestamp,
         ) -> Self {
             Self {
                 active_request_map,
-                verification_reporter,
                 tm_buf: alloc::vec![0; fail_data_buf_size],
                 current_time: init_time,
                 user_hook,
@@ -668,6 +662,7 @@ pub mod alloc_mod {
             self.current_time = time;
         }
     }
+    */
 }
 
 #[cfg(feature = "std")]
@@ -684,13 +679,10 @@ pub mod std_mod {
     use crate::tmtc::tm_helper::SharedTmPool;
     use crate::{ChannelId, TargetId};
     use alloc::vec::Vec;
-    use core::marker::PhantomData;
     use spacepackets::ecss::tc::PusTcReader;
     use spacepackets::ecss::tm::PusTmCreator;
     use spacepackets::ecss::{PusError, WritablePusPacket};
-    use spacepackets::time::cds::TimeProvider;
     use spacepackets::time::StdTimestampError;
-    use spacepackets::time::TimeWriter;
     use std::string::String;
     use std::sync::mpsc;
     use std::sync::mpsc::TryRecvError;
@@ -700,7 +692,7 @@ pub mod std_mod {
     pub use cb_mod::*;
 
     use super::verification::VerificationReportingProvider;
-    use super::{AcceptedEcssTcAndToken, PusRequestRouter, PusTcToRequestConverter, TcInMemory};
+    use super::{AcceptedEcssTcAndToken, TcInMemory};
 
     impl From<mpsc::SendError<StoreAddr>> for EcssTmtcError {
         fn from(_: mpsc::SendError<StoreAddr>) -> Self {
@@ -974,17 +966,18 @@ pub mod std_mod {
         }
     }
 
-    /// This is a high-level handler for the PUS service 8 action service.
+    /// This is a high-level handler for the generic PUS services which need to convert PUS
+    /// commands into a request/reply pattern.
     ///
     /// It performs the following handling steps:
     ///
     /// 1. Retrieve the next TC packet from the [PusServiceHelper]. The [EcssTcInMemConverter]
     ///    allows to configure the used telecommand memory backend.
     /// 2. Convert the TC to a targeted action request using the provided
-    ///    [PusActionToRequestConverter]. The generic error type is constrained to the
+    ///    [PusTcToRequestConverter]. The generic error type is constrained to the
     ///    [PusPacketHandlingError] for the concrete implementation which offers a packet handler.
-    /// 3. Route the action request using the provided [PusActionRequestRouter].
-    /// 4. Handle all routing errors using the provided [PusRoutingErrorHandler].
+    /// 3. Route the action request using the provided [PusRequestRouter].
+    /*
     pub struct PusTargetedRequestHandler<
         TcReceiver: EcssTcReceiverCore,
         TmSender: EcssTmSenderCore,
@@ -999,10 +992,12 @@ pub mod std_mod {
             PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
         pub request_converter: RequestConverter,
         pub request_router: RequestRouter,
-        // pub routing_error_handler: RoutingErrorHandler,
         phantom: PhantomData<Request>,
     }
 
+    // pub trait PusReplyHandlerProvider {
+    // fn add_routed_request(&mut self, request_id: RequestId, active_request: ActiveRequest);
+    // }
     impl<
             TcReceiver: EcssTcReceiverCore,
             TmSender: EcssTmSenderCore,
@@ -1010,7 +1005,6 @@ pub mod std_mod {
             VerificationReporter: VerificationReportingProvider,
             RequestConverter: PusTcToRequestConverter<Request, Error = PusPacketHandlingError>,
             RequestRouter: PusRequestRouter<Request, Error = RoutingError>,
-            // RoutingErrorHandler: PusRoutingErrorHandler<Error = RoutingError>,
             Request,
             RoutingError: Clone,
         >
@@ -1021,7 +1015,6 @@ pub mod std_mod {
             VerificationReporter,
             RequestConverter,
             RequestRouter,
-            // RoutingErrorHandler,
             Request,
             RoutingError,
         >
@@ -1042,7 +1035,6 @@ pub mod std_mod {
                 service_helper,
                 request_converter,
                 request_router,
-                // routing_error_handler,
                 phantom: PhantomData,
             }
         }
@@ -1083,7 +1075,7 @@ pub mod std_mod {
             Ok(PusPacketHandlerResult::RequestHandled)
         }
     }
-
+    */
     // TODO: All these types could probably be no_std if we implemented error handling ourselves..
     // but thiserror is really nice, so keep it like this for simplicity for now. Maybe thiserror
     // will be no_std soon, see https://github.com/rust-lang/rust/issues/103765 .
@@ -1271,26 +1263,6 @@ pub mod std_mod {
         pub tm_sender: TmSender,
         pub tm_apid: u16,
         pub verification_handler: VerificationReporter,
-    }
-    #[cfg(feature = "std")]
-    pub fn get_current_cds_short_timestamp(
-        partial_error: &mut Option<PartialPusHandlingError>,
-    ) -> [u8; 7] {
-        let mut time_stamp: [u8; 7] = [0; 7];
-        let time_provider =
-            TimeProvider::from_now_with_u16_days().map_err(PartialPusHandlingError::Time);
-        if let Ok(time_provider) = time_provider {
-            // Can't fail, we have a buffer with the exact required size.
-            time_provider.write_to_bytes(&mut time_stamp).unwrap();
-        } else {
-            *partial_error = Some(time_provider.unwrap_err());
-        }
-        time_stamp
-    }
-    #[cfg(feature = "std")]
-    pub fn get_current_timestamp_ignore_error() -> [u8; 7] {
-        let mut dummy = None;
-        get_current_cds_short_timestamp(&mut dummy)
     }
 
     /// This is a high-level PUS packet handler helper.

@@ -7,10 +7,7 @@ use spacepackets::ecss::PusPacket;
 use std::sync::mpsc::Sender;
 
 use super::verification::VerificationReportingProvider;
-use super::{
-    get_current_cds_short_timestamp, EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore,
-    PusServiceHelper,
-};
+use super::{EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore, PusServiceHelper};
 
 pub struct PusService5EventHandler<
     TcReceiver: EcssTcReceiverCore,
@@ -45,7 +42,10 @@ impl<
         }
     }
 
-    pub fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+    pub fn handle_one_tc(
+        &mut self,
+        time_stamp: &[u8],
+    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
         if possible_packet.is_none() {
             return Ok(PusPacketHandlerResult::Empty);
@@ -63,7 +63,7 @@ impl<
                 ecss_tc_and_token.token,
             ));
         }
-        let handle_enable_disable_request = |enable: bool, stamp: [u8; 7]| {
+        let handle_enable_disable_request = |enable: bool| {
             if tc.user_data().len() < 4 {
                 return Err(PusPacketHandlingError::NotEnoughAppData {
                     expected: 4,
@@ -76,7 +76,7 @@ impl<
                 .service_helper
                 .common
                 .verification_handler
-                .start_success(ecss_tc_and_token.token, &stamp)
+                .start_success(ecss_tc_and_token.token, time_stamp)
                 .map_err(|_| PartialPusHandlingError::Verification);
             let partial_error = start_token.clone().err();
             let mut token: TcStateToken = ecss_tc_and_token.token.into();
@@ -106,8 +106,6 @@ impl<
             }
             Ok(PusPacketHandlerResult::RequestHandled)
         };
-        let mut partial_error = None;
-        let time_stamp = get_current_cds_short_timestamp(&mut partial_error);
         match srv.unwrap() {
             Subservice::TmInfoReport
             | Subservice::TmLowSeverityReport
@@ -116,10 +114,10 @@ impl<
                 return Err(PusPacketHandlingError::InvalidSubservice(tc.subservice()))
             }
             Subservice::TcEnableEventGeneration => {
-                handle_enable_disable_request(true, time_stamp)?;
+                handle_enable_disable_request(true)?;
             }
             Subservice::TcDisableEventGeneration => {
-                handle_enable_disable_request(false, time_stamp)?;
+                handle_enable_disable_request(false)?;
             }
             Subservice::TcReportDisabledList | Subservice::TmDisabledEventsReport => {
                 return Ok(PusPacketHandlerResult::SubserviceNotImplemented(
@@ -137,6 +135,7 @@ impl<
 mod tests {
     use delegate::delegate;
     use spacepackets::ecss::event::Subservice;
+    use spacepackets::time::{cds, TimeWriter};
     use spacepackets::util::UnsignedEnum;
     use spacepackets::{
         ecss::{
@@ -200,10 +199,9 @@ mod tests {
     }
 
     impl SimplePusPacketHandler for Pus5HandlerWithStoreTester {
-        delegate! {
-            to self.handler {
-                fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
-            }
+        fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+            let time_stamp = cds::TimeProvider::new_with_u16_days(0, 0).to_vec().unwrap();
+            self.handler.handle_one_tc(&time_stamp)
         }
     }
 

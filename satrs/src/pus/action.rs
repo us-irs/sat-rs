@@ -105,7 +105,6 @@ pub mod std_mod {
                 self, FailParams, FailParamsWithStep, TcStateStarted, VerificationReportingProvider,
             },
             ActiveRequestMapProvider, DefaultActiveRequestMap, EcssTmSenderCore, EcssTmtcError,
-            GenericRoutingError, PusServiceReplyHandler, PusTargetedRequestHandler,
             ReplyHandlerHook,
         },
     };
@@ -115,27 +114,9 @@ pub mod std_mod {
 
     use super::*;
 
-    pub type PusService8ActionRequestHandler<
-        TcReceiver,
-        TmSender,
-        TcInMemConverter,
-        VerificationReporter,
-        RequestConverter,
-        RequestRouter,
-        RoutingError = GenericRoutingError,
-    > = PusTargetedRequestHandler<
-        TcReceiver,
-        TmSender,
-        TcInMemConverter,
-        VerificationReporter,
-        RequestConverter,
-        RequestRouter,
-        ActionRequest,
-        RoutingError,
-    >;
-
     pub type DefaultActiveActionRequestMap = DefaultActiveRequestMap<ActiveActionRequest>;
 
+    /*
     /// Type definition for a PUS 8 action service reply handler which constrains the
     /// [PusServiceReplyHandler] active request and reply generics to the [ActiveActionRequest] and
     /// [ActionReplyPusWithIds] type.
@@ -299,6 +280,7 @@ pub mod std_mod {
             )
         }
     }
+    */
 }
 
 #[cfg(test)]
@@ -311,11 +293,12 @@ mod tests {
 
     use spacepackets::{
         ecss::{
-            tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader},
+            tc::{PusTcCreator, PusTcReader},
             tm::PusTmReader,
             PusPacket,
         },
-        CcsdsPacket, SequenceFlags, SpHeader,
+        time::{cds, TimeWriter},
+        CcsdsPacket,
     };
 
     use crate::{
@@ -324,7 +307,7 @@ mod tests {
         pus::{
             tests::{
                 PusServiceHandlerWithVecCommon, PusTestHarness, SimplePusPacketHandler,
-                TestConverter, TestRouter, APP_DATA_TOO_SHORT, TEST_APID,
+                TestConverter, TestRouter, APP_DATA_TOO_SHORT,
             },
             verification::{
                 self,
@@ -332,9 +315,9 @@ mod tests {
                 FailParams, TcStateAccepted, TcStateNone, TcStateStarted,
                 VerificationReportingProvider,
             },
-            EcssTcInVecConverter, EcssTmtcError, GenericRoutingError, MpscTcReceiver,
-            PusPacketHandlerResult, PusPacketHandlingError, PusRequestRouter,
-            PusTcToRequestConverter, ReplyHandlerHook, TmAsVecSenderWithMpsc,
+            EcssTcInMemConverter, EcssTcInVecConverter, EcssTmtcError, GenericRoutingError,
+            MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError, PusRequestRouter,
+            PusServiceHelper, PusTcToRequestConverter, ReplyHandlerHook, TmAsVecSenderWithMpsc,
         },
     };
 
@@ -416,29 +399,32 @@ mod tests {
         }
     }
 
-    struct Pus8RequestTestbenchWithVec {
-        common: PusServiceHandlerWithVecCommon<TestVerificationReporter>,
-        handler: PusService8ActionRequestHandler<
+    pub struct PusDynRequestHandler<const SERVICE: u8, Request> {
+        srv_helper: PusServiceHelper<
             MpscTcReceiver,
             TmAsVecSenderWithMpsc,
             EcssTcInVecConverter,
             TestVerificationReporter,
-            TestConverter<8>,
-            TestRouter<ActionRequest>,
         >,
+        request_converter: TestConverter<SERVICE>,
+        request_router: TestRouter<Request>,
+    }
+
+    struct Pus8RequestTestbenchWithVec {
+        common: PusServiceHandlerWithVecCommon<TestVerificationReporter>,
+        handler: PusDynRequestHandler<8, ActionRequest>,
     }
 
     impl Pus8RequestTestbenchWithVec {
         pub fn new() -> Self {
-            let (common, srv_handler) =
-                PusServiceHandlerWithVecCommon::new_with_test_verif_sender();
+            let (common, srv_helper) = PusServiceHandlerWithVecCommon::new_with_test_verif_sender();
             Self {
                 common,
-                handler: PusService8ActionRequestHandler::new(
-                    srv_handler,
-                    TestConverter::default(),
-                    TestRouter::default(),
-                ),
+                handler: PusDynRequestHandler {
+                    srv_helper,
+                    request_converter: TestConverter::default(),
+                    request_router: TestRouter::default(),
+                },
             }
         }
 
@@ -474,10 +460,43 @@ mod tests {
         }
     }
     impl SimplePusPacketHandler for Pus8RequestTestbenchWithVec {
-        delegate! {
-            to self.handler {
-                fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
+        fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+            let possible_packet = self.handler.srv_helper.retrieve_and_accept_next_packet()?;
+            if possible_packet.is_none() {
+                return Ok(PusPacketHandlerResult::Empty);
             }
+            let ecss_tc_and_token = possible_packet.unwrap();
+            let tc = self
+                .handler
+                .srv_helper
+                .tc_in_mem_converter
+                .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
+            let time_stamp = cds::TimeProvider::from_now_with_u16_days()
+                .expect("timestamp generation failed")
+                .to_vec()
+                .unwrap();
+            let (target_id, action_request) = self.handler.request_converter.convert(
+                ecss_tc_and_token.token,
+                &tc,
+                &time_stamp,
+                &self.handler.srv_helper.common.verification_handler,
+            )?;
+            if let Err(e) = self.handler.request_router.route(
+                target_id,
+                action_request,
+                ecss_tc_and_token.token,
+            ) {
+                self.handler.request_router.handle_error(
+                    target_id,
+                    ecss_tc_and_token.token,
+                    &tc,
+                    e.clone(),
+                    &time_stamp,
+                    &self.handler.srv_helper.common.verification_handler,
+                );
+                return Err(e.into());
+            }
+            Ok(PusPacketHandlerResult::RequestHandled)
         }
     }
 
@@ -665,68 +684,6 @@ mod tests {
                 fn add_tc_with_req_id(&mut self, req_id: verification::RequestId) -> VerificationToken<TcStateNone>;
             }
         }
-    }
-
-    #[test]
-    fn basic_test() {
-        let mut action_handler = Pus8RequestTestbenchWithVec::new();
-        let mut sp_header = SpHeader::tc(TEST_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
-        let sec_header = PusTcSecondaryHeader::new_simple(8, 1);
-        let action_id: u32 = 1;
-        let action_id_raw = action_id.to_be_bytes();
-        let tc = PusTcCreator::new(&mut sp_header, sec_header, action_id_raw.as_ref(), true);
-        action_handler.send_tc(&tc);
-        let result = action_handler.handle_one_tc();
-        assert!(result.is_ok());
-        action_handler.check_next_conversion(&tc);
-        let (target_id, action_req) = action_handler.retrieve_next_request();
-        assert_eq!(target_id, TEST_APID.into());
-        assert_eq!(action_req.action_id, 1);
-        if let ActionRequestVariant::VecData(data) = action_req.variant {
-            assert_eq!(data, &[]);
-        }
-    }
-
-    #[test]
-    fn test_routing_error() {
-        let mut action_handler = Pus8RequestTestbenchWithVec::new();
-        let mut sp_header = SpHeader::tc(TEST_APID, SequenceFlags::Unsegmented, 0, 0).unwrap();
-        let sec_header = PusTcSecondaryHeader::new_simple(8, 1);
-        let action_id: u32 = 1;
-        let action_id_raw = action_id.to_be_bytes();
-        let tc = PusTcCreator::new(&mut sp_header, sec_header, action_id_raw.as_ref(), true);
-        let error = GenericRoutingError::UnknownTargetId(25);
-        action_handler
-            .handler
-            .request_router
-            .inject_routing_error(error);
-        action_handler.send_tc(&tc);
-        let result = action_handler.handle_one_tc();
-        assert!(result.is_err());
-        let check_error = |routing_error: GenericRoutingError| {
-            if let GenericRoutingError::UnknownTargetId(id) = routing_error {
-                assert_eq!(id, 25);
-            } else {
-                panic!("unexpected error type");
-            }
-        };
-        if let PusPacketHandlingError::RequestRoutingError(routing_error) = result.unwrap_err() {
-            check_error(routing_error);
-        } else {
-            panic!("unexpected error type");
-        }
-
-        action_handler.check_next_conversion(&tc);
-        let (target_id, action_req) = action_handler.retrieve_next_request();
-        assert_eq!(target_id, TEST_APID.into());
-        assert_eq!(action_req.action_id, 1);
-        if let ActionRequestVariant::VecData(data) = action_req.variant {
-            assert_eq!(data, &[]);
-        }
-
-        let (target_id, found_error) = action_handler.retrieve_next_routing_error();
-        assert_eq!(target_id, TEST_APID.into());
-        check_error(found_error);
     }
 
     #[test]

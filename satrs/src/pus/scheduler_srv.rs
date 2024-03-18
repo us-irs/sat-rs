@@ -5,10 +5,9 @@ use super::verification::{
     VerificationReporterWithVecMpscSender, VerificationReportingProvider,
 };
 use super::{
-    get_current_cds_short_timestamp, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
-    EcssTcInVecConverter, EcssTcReceiverCore, EcssTmSenderCore, MpscTcReceiver, PusServiceHelper,
-    TmAsVecSenderWithBoundedMpsc, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
-    TmInSharedPoolSenderWithMpsc,
+    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiverCore,
+    EcssTmSenderCore, MpscTcReceiver, PusServiceHelper, TmAsVecSenderWithBoundedMpsc,
+    TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithMpsc,
 };
 use crate::pool::PoolProvider;
 use crate::pus::{PusPacketHandlerResult, PusPacketHandlingError};
@@ -76,6 +75,7 @@ impl<
 
     pub fn handle_one_tc(
         &mut self,
+        time_stamp: &[u8],
         sched_tc_pool: &mut (impl PoolProvider + ?Sized),
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
@@ -95,15 +95,14 @@ impl<
                 ecss_tc_and_token.token,
             ));
         }
-        let mut partial_error = None;
-        let time_stamp = get_current_cds_short_timestamp(&mut partial_error);
+        let partial_error = None;
         match standard_subservice.unwrap() {
             scheduling::Subservice::TcEnableScheduling => {
                 let start_token = self
                     .service_helper
                     .common
                     .verification_handler
-                    .start_success(ecss_tc_and_token.token, &time_stamp)
+                    .start_success(ecss_tc_and_token.token, time_stamp)
                     .expect("Error sending start success");
 
                 self.scheduler.enable();
@@ -111,7 +110,7 @@ impl<
                     self.service_helper
                         .common
                         .verification_handler
-                        .completion_success(start_token, &time_stamp)
+                        .completion_success(start_token, time_stamp)
                         .expect("Error sending completion success");
                 } else {
                     return Err(PusPacketHandlingError::Other(
@@ -124,7 +123,7 @@ impl<
                     .service_helper
                     .common
                     .verification_handler
-                    .start_success(ecss_tc_and_token.token, &time_stamp)
+                    .start_success(ecss_tc_and_token.token, time_stamp)
                     .expect("Error sending start success");
 
                 self.scheduler.disable();
@@ -132,7 +131,7 @@ impl<
                     self.service_helper
                         .common
                         .verification_handler
-                        .completion_success(start_token, &time_stamp)
+                        .completion_success(start_token, time_stamp)
                         .expect("Error sending completion success");
                 } else {
                     return Err(PusPacketHandlingError::Other(
@@ -145,7 +144,7 @@ impl<
                     .service_helper
                     .common
                     .verification_handler
-                    .start_success(ecss_tc_and_token.token, &time_stamp)
+                    .start_success(ecss_tc_and_token.token, time_stamp)
                     .expect("Error sending start success");
 
                 self.scheduler
@@ -155,7 +154,7 @@ impl<
                 self.service_helper
                     .common
                     .verification_handler
-                    .completion_success(start_token, &time_stamp)
+                    .completion_success(start_token, time_stamp)
                     .expect("Error sending completion success");
             }
             scheduling::Subservice::TcInsertActivity => {
@@ -163,7 +162,7 @@ impl<
                     .service_helper
                     .common
                     .verification_handler
-                    .start_success(ecss_tc_and_token.token, &time_stamp)
+                    .start_success(ecss_tc_and_token.token, time_stamp)
                     .expect("error sending start success");
 
                 // let mut pool = self.sched_tc_pool.write().expect("locking pool failed");
@@ -174,7 +173,7 @@ impl<
                 self.service_helper
                     .common
                     .verification_handler
-                    .completion_success(start_token, &time_stamp)
+                    .completion_success(start_token, time_stamp)
                     .expect("sending completion success failed");
             }
             _ => {
@@ -241,7 +240,10 @@ mod tests {
         verification::{RequestId, TcStateAccepted, VerificationToken},
         EcssTcInSharedStoreConverter,
     };
-    use crate::pus::{MpscTcReceiver, TmInSharedPoolSenderWithBoundedMpsc};
+    use crate::pus::{
+        MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError,
+        TmInSharedPoolSenderWithBoundedMpsc,
+    };
     use alloc::collections::VecDeque;
     use delegate::delegate;
     use spacepackets::ecss::scheduling::Subservice;
@@ -279,6 +281,12 @@ mod tests {
                 handler: PusService11SchedHandler::new(srv_handler, test_scheduler),
                 sched_tc_pool,
             }
+        }
+
+        pub fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+            let time_stamp = cds::TimeProvider::new_with_u16_days(0, 0).to_vec().unwrap();
+            self.handler
+                .handle_one_tc(&time_stamp, &mut self.sched_tc_pool)
         }
     }
 
@@ -347,9 +355,10 @@ mod tests {
         let token = test_harness.send_tc(&enable_scheduling);
 
         let request_id = token.req_id();
+        let time_stamp = cds::TimeProvider::new_with_u16_days(0, 0).to_vec().unwrap();
         test_harness
             .handler
-            .handle_one_tc(&mut test_harness.sched_tc_pool)
+            .handle_one_tc(&time_stamp, &mut test_harness.sched_tc_pool)
             .unwrap();
         test_harness.check_next_verification_tm(1, request_id);
         test_harness.check_next_verification_tm(3, request_id);
@@ -407,10 +416,7 @@ mod tests {
         let token = test_harness.send_tc(&enable_scheduling);
 
         let request_id = token.req_id();
-        test_harness
-            .handler
-            .handle_one_tc(&mut test_harness.sched_tc_pool)
-            .unwrap();
+        test_harness.handle_one_tc().unwrap();
         test_harness.check_next_verification_tm(1, request_id);
         test_harness.check_next_verification_tm(3, request_id);
         test_harness.check_next_verification_tm(7, request_id);

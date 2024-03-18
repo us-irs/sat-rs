@@ -53,6 +53,8 @@ pub mod tmtc_err {
     pub const UNKNOWN_TARGET_ID: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 4);
     #[resultcode]
     pub const ROUTING_ERROR: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 5);
+    #[resultcode(info = "Request timeout for targeted PUS request. P1: Request ID. P2: Target ID")]
+    pub const REQUEST_TIMEOUT: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 6);
 
     #[resultcode(
         info = "Not enough data inside the TC application data field. Optionally includes: \
