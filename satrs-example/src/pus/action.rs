@@ -3,8 +3,8 @@ use satrs::action::{ActionRequest, ActionRequestVariant};
 use satrs::params::WritableToBeBytes;
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
 use satrs::pus::action::{
-    ActionReplyPus, ActionReplyPusWithActionId, ActionRequestWithId, ActionRequestorBoundedMpsc,
-    ActionRequestorMpsc, ActivePusActionRequestStd, DefaultActiveActionRequestMap,
+    ActionReplyPus, ActionReplyPusWithActionId, ActionRequestWithId, ActivePusActionRequestStd,
+    DefaultActiveActionRequestMap,
 };
 use satrs::pus::verification::{
     self, FailParams, FailParamsWithStep, TcStateAccepted,
@@ -18,7 +18,7 @@ use satrs::pus::{
     PusTcToRequestConverter, TmAsVecSenderWithId, TmAsVecSenderWithMpsc,
     TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
 };
-use satrs::request::{GenericMessage, MessageReceiver, MessageSender, TargetAndApidId};
+use satrs::request::{GenericMessage, TargetAndApidId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{EcssEnumU16, PusPacket};
 use satrs::tmtc::tm_helper::SharedTmPool;
@@ -200,13 +200,13 @@ pub fn create_action_service_static(
     verif_reporter: VerificationReporterWithSharedPoolMpscBoundedSender,
     tc_pool: SharedStaticMemoryPool,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
-    action_router: ActionRequestorBoundedMpsc,
+    action_router: GenericRequestRouter,
+    reply_receiver: mpsc::Receiver<GenericMessage<ActionReplyPusWithActionId>>,
 ) -> Pus8Wrapper<
     MpscTcReceiver,
     TmInSharedPoolSenderWithBoundedMpsc,
     EcssTcInSharedStoreConverter,
     VerificationReporterWithSharedPoolMpscBoundedSender,
-    mpsc::SyncSender<GenericMessage<ActionRequest>>,
 > {
     let action_srv_tm_sender = TmInSharedPoolSenderWithId::new(
         TmSenderId::PusAction as ChannelId,
@@ -233,6 +233,7 @@ pub fn create_action_service_static(
         DefaultActiveActionRequestMap::default(),
         ActionReplyHandler::default(),
         action_router,
+        reply_receiver,
     );
     Pus8Wrapper {
         action_request_handler,
@@ -243,13 +244,13 @@ pub fn create_action_service_dynamic(
     tm_funnel_tx: mpsc::Sender<Vec<u8>>,
     verif_reporter: VerificationReporterWithVecMpscSender,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
-    action_router: ActionRequestorMpsc,
+    action_router: GenericRequestRouter,
+    reply_receiver: mpsc::Receiver<GenericMessage<ActionReplyPusWithActionId>>,
 ) -> Pus8Wrapper<
     MpscTcReceiver,
     TmAsVecSenderWithMpsc,
     EcssTcInVecConverter,
     VerificationReporterWithVecMpscSender,
-    mpsc::Sender<GenericMessage<ActionRequest>>,
 > {
     let action_srv_tm_sender = TmAsVecSenderWithId::new(
         TmSenderId::PusAction as ChannelId,
@@ -273,6 +274,7 @@ pub fn create_action_service_dynamic(
         DefaultActiveActionRequestMap::default(),
         ActionReplyHandler::default(),
         action_router,
+        reply_receiver,
     );
     Pus8Wrapper {
         action_request_handler,
@@ -284,7 +286,6 @@ pub struct Pus8Wrapper<
     TmSender: EcssTmSenderCore,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
-    RequestSender: MessageSender<ActionRequest>,
 > {
     pub(crate) action_request_handler: PusTargetedRequestService<
         TcReceiver,
@@ -295,8 +296,7 @@ pub struct Pus8Wrapper<
         ActionReplyHandler,
         DefaultActiveActionRequestMap,
         ActivePusActionRequestStd,
-        RequestSender,
-        ActionRequest,
+        ActionRequestWithId,
         ActionReplyPusWithActionId,
     >,
 }
@@ -306,8 +306,7 @@ impl<
         TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
-        RequestSender: MessageSender<ActionRequest>,
-    > Pus8Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter, RequestSender>
+    > Pus8Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
     pub fn handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
         match self.action_request_handler.handle_one_tc(time_stamp) {

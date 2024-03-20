@@ -13,7 +13,7 @@ use satrs::pus::{
     TmAsVecSenderWithId, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
     TmInSharedPoolSenderWithId,
 };
-use satrs::request::TargetAndApidId;
+use satrs::request::{TargetAndApidId, GenericMessage};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{hk, PusPacket};
 use satrs::tmtc::tm_helper::SharedTmPool;
@@ -212,6 +212,7 @@ pub fn create_hk_service_static(
     tc_pool: SharedStaticMemoryPool,
     pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
     request_router: GenericRequestRouter,
+    reply_receiver: mpsc::Receiver<GenericMessage<HkReply>>,
 ) -> Pus3Wrapper<
     MpscTcReceiver,
     TmInSharedPoolSenderWithBoundedMpsc,
@@ -235,9 +236,10 @@ pub fn create_hk_service_static(
             EcssTcInSharedStoreConverter::new(tc_pool, 2048),
         ),
         ExampleHkRequestConverter::default(),
-        request_router,
         DefaultActiveRequestMap::default(),
         HkReplyHandler::default(),
+        request_router,
+        reply_receiver
     );
     Pus3Wrapper { pus_3_handler }
 }
@@ -247,6 +249,7 @@ pub fn create_hk_service_dynamic(
     verif_reporter: VerificationReporterWithVecMpscSender,
     pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
     request_router: GenericRequestRouter,
+    reply_receiver: mpsc::Receiver<GenericMessage<HkReply>>,
 ) -> Pus3Wrapper<
     MpscTcReceiver,
     TmAsVecSenderWithMpsc,
@@ -269,9 +272,10 @@ pub fn create_hk_service_dynamic(
             EcssTcInVecConverter::default(),
         ),
         ExampleHkRequestConverter::default(),
-        request_router,
         DefaultActiveRequestMap::default(),
         HkReplyHandler::default(),
+        request_router,
+        reply_receiver
     );
     Pus3Wrapper { pus_3_handler }
 }

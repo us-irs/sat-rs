@@ -9,6 +9,7 @@ use satrs::pus::{
     PusPacketHandlerResult, PusPacketHandlingError, PusReplyHandler, PusRequestRouter,
     PusServiceHelper, PusTcToRequestConverter, TcInMemory,
 };
+use satrs::queue::GenericReceiveError;
 use satrs::request::{GenericMessage, MessageReceiver, MessageSender, MessageSenderAndReceiver};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusServiceId;
@@ -87,18 +88,16 @@ pub struct PusTargetedRequestService<
     ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType, Error = EcssTmtcError>,
     ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestInfo>,
     ActiveRequestInfo: ActiveRequestProvider,
-    RequestSender: MessageSender<RequestType>,
-    RequestType: Send,
+    RequestType,
     ReplyType,
 > {
     pub service_helper:
         PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
-    //pub request_router: GenericRequestRouter,
+    pub request_router: GenericRequestRouter,
     pub request_converter: RequestConverter,
     pub active_request_map: ActiveRequestMap,
-    pub request_router_reply_receiver:
-        MessageSenderAndReceiver<RequestType, ReplyType, RequestSender, mpsc::Receiver<ReplyType>>,
     pub reply_handler: ReplyHandler,
+    pub reply_receiver: mpsc::Receiver<GenericMessage<ReplyType>>,
     phantom: std::marker::PhantomData<(RequestType, ActiveRequestInfo, ReplyType)>,
 }
 
@@ -111,8 +110,7 @@ impl<
         ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType, Error = EcssTmtcError>,
         ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestInfo>,
         ActiveRequestInfo: ActiveRequestProvider,
-        RequestSender: MessageSender<RequestType>,
-        RequestType: Send,
+        RequestType,
         ReplyType,
     >
     PusTargetedRequestService<
@@ -124,7 +122,6 @@ impl<
         ReplyHandler,
         ActiveRequestMap,
         ActiveRequestInfo,
-        RequestSender,
         RequestType,
         ReplyType,
     >
@@ -141,19 +138,16 @@ where
         request_converter: RequestConverter,
         active_request_map: ActiveRequestMap,
         reply_hook: ReplyHandler,
-        request_router_reply_receiver: MessageSenderAndReceiver<
-            RequestType,
-            ReplyType,
-            RequestSender,
-            mpsc::Receiver<GenericMessage<ReplyType>>,
-        >,
+        request_router: GenericRequestRouter,
+        reply_receiver: mpsc::Receiver<GenericMessage<ReplyType>>,
     ) -> Self {
         Self {
             service_helper,
             request_converter,
             active_request_map,
             reply_handler: reply_hook,
-            request_router_reply_receiver,
+            request_router,
+            reply_receiver,
             phantom: std::marker::PhantomData,
         }
     }
@@ -178,18 +172,16 @@ where
             &self.service_helper.common.verification_handler,
         )?;
         let verif_request_id = verification::RequestId::new(&tc);
-        if let Err(e) = self
-            .request_router_reply_receiver
-            .message_sender_map
-            .send_message(request_id, local_channel_id, target_channel_id, request)
-        // .(request_info.target_id(), request, ecss_tc_and_token.token)
+        if let Err(e) =
+            self.request_router
+                .route(request_info.target_id(), request, request_info.token())
         {
             let target_id = request_info.target_id();
             self.active_request_map
                 .insert(&verif_request_id.into(), request_info);
             self.request_router.handle_error(
                 target_id,
-                ecss_tc_and_token.token,
+                request_info.token(),
                 &tc,
                 e.clone(),
                 time_stamp,
@@ -200,7 +192,26 @@ where
         Ok(PusPacketHandlerResult::RequestHandled)
     }
 
-    pub fn insert_reply(
+    pub fn check_one_reply(&mut self, time_stamp: &[u8]) -> Result<bool, EcssTmtcError> {
+        match self.reply_receiver.try_recv() {
+            Ok(reply) => {
+                self.handle_reply(&reply, time_stamp)?;
+                Ok(true)
+            }
+            Err(e) => match e {
+                mpsc::TryRecvError::Empty => {
+                    return Ok(false);
+                }
+                mpsc::TryRecvError::Disconnected => {
+                    return Err(EcssTmtcError::Receive(GenericReceiveError::TxDisconnected(
+                        None,
+                    )));
+                }
+            },
+        }
+    }
+
+    pub fn handle_reply(
         &mut self,
         reply: &GenericMessage<ReplyType>,
         time_stamp: &[u8],

@@ -119,6 +119,10 @@ fn static_tmtc_pool_main() {
     let (pus_sched_tx, pus_sched_rx) = channel();
     let (pus_hk_tx, pus_hk_rx) = channel();
     let (pus_action_tx, pus_action_rx) = channel();
+
+    let (pus_action_reply_tx, pus_action_reply_rx) = channel();
+    let (pus_hk_reply_tx, pus_hk_reply_rx) = channel();
+
     let pus_router = PusTcMpscRouter {
         test_service_receiver: pus_test_tx,
         event_service_receiver: pus_event_tx,
@@ -157,6 +161,7 @@ fn static_tmtc_pool_main() {
         shared_tc_pool.pool.clone(),
         pus_action_rx,
         request_map.clone(),
+        pus_action_reply_rx,
     );
     let pus_hk_service = create_hk_service_static(
         shared_tm_pool.clone(),
@@ -165,6 +170,7 @@ fn static_tmtc_pool_main() {
         shared_tc_pool.pool.clone(),
         pus_hk_rx,
         request_map,
+        pus_hk_reply_rx
     );
     let mut pus_stack = PusStack::new(
         pus_hk_service,
@@ -340,6 +346,10 @@ fn dyn_tmtc_pool_main() {
     let (pus_sched_tx, pus_sched_rx) = channel();
     let (pus_hk_tx, pus_hk_rx) = channel();
     let (pus_action_tx, pus_action_rx) = channel();
+
+    let (pus_action_reply_tx, pus_action_reply_rx) = channel();
+    let (pus_hk_reply_tx, pus_hk_reply_rx) = channel();
+
     let pus_router = PusTcMpscRouter {
         test_service_receiver: pus_test_tx,
         event_service_receiver: pus_event_tx,
@@ -373,12 +383,14 @@ fn dyn_tmtc_pool_main() {
         verif_reporter.clone(),
         pus_action_rx,
         request_map.clone(),
+        pus_action_reply_rx,
     );
     let pus_hk_service = create_hk_service_dynamic(
         tm_funnel_tx.clone(),
         verif_reporter.clone(),
         pus_hk_rx,
         request_map,
+        pus_hk_reply_rx
     );
     let mut pus_stack = PusStack::new(
         pus_hk_service,
