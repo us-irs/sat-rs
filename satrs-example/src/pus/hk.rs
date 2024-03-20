@@ -1,31 +1,83 @@
 use log::{error, warn};
 use satrs::hk::{CollectionIntervalFactor, HkRequest};
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
-use satrs::pus::hk::PusService3HkRequestHandler;
 use satrs::pus::verification::{
     FailParams, TcStateAccepted, VerificationReporterWithSharedPoolMpscBoundedSender,
     VerificationReporterWithVecMpscSender, VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
-    EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    EcssTcReceiverCore, EcssTmSenderCore, MpscTcReceiver, PusPacketHandlerResult,
-    PusPacketHandlingError, PusServiceHelper, PusTcToRequestConverter, TmAsVecSenderWithId,
+    ActivePusRequest, ActiveRequestProvider, DefaultActiveRequestMap, EcssTcAndToken,
+    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiverCore,
+    EcssTmSenderCore, MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError,
+    PusReplyHandler, PusServiceHelper, PusTcToRequestConverter, TmAsVecSenderWithId,
     TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
 };
 use satrs::request::TargetAndApidId;
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{hk, PusPacket};
+use satrs::spacepackets::time::UnixTimestamp;
 use satrs::tmtc::tm_helper::SharedTmPool;
 use satrs::{ChannelId, TargetId};
 use satrs_example::config::{hk_err, tmtc_err, TcReceiverId, TmSenderId, PUS_APID};
 use std::sync::mpsc::{self};
+use std::time::Duration;
 
 use crate::requests::GenericRequestRouter;
+
+use super::PusTargetedRequestService;
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum HkReply {
+    Ack,
+}
+
+pub struct HkReplyHandler {
+    fail_data_buf: [u8; 128],
+}
+
+impl Default for HkReplyHandler {
+    fn default() -> Self {
+        Self {
+            fail_data_buf: [0; 128],
+        }
+    }
+}
+
+impl PusReplyHandler<ActivePusRequest, HkReply> for HkReplyHandler {
+    type Error = ();
+
+    fn handle_unexpected_reply(
+        &mut self,
+        reply: &satrs::request::GenericMessage<HkReply>,
+        tm_sender: &impl EcssTmSenderCore,
+    ) {
+        log::warn!("received unexpected reply for service 3: {reply:?}");
+    }
+
+    fn handle_reply(
+        &mut self,
+        reply: &satrs::request::GenericMessage<HkReply>,
+        active_request: &ActivePusRequest,
+        verification_handler: &impl VerificationReportingProvider,
+        time_stamp: &[u8],
+        tm_sender: &impl EcssTmSenderCore,
+    ) -> Result<bool, Self::Error> {
+        let remove_entry = match reply.message {
+            HkReply::Ack => {
+                verification_handler
+                    .completion_success(active_request.token(), time_stamp)
+                    .expect("Sending end success TM failed");
+                true
+            }
+        };
+        Ok(remove_entry)
+    }
+}
 
 #[derive(Default)]
 pub struct ExampleHkRequestConverter {}
 
-impl PusTcToRequestConverter<HkRequest> for ExampleHkRequestConverter {
+impl PusTcToRequestConverter<ActivePusRequest, HkRequest> for ExampleHkRequestConverter {
     type Error = PusPacketHandlingError;
 
     fn convert(
@@ -34,7 +86,7 @@ impl PusTcToRequestConverter<HkRequest> for ExampleHkRequestConverter {
         tc: &PusTcReader,
         time_stamp: &[u8],
         verif_reporter: &impl VerificationReportingProvider,
-    ) -> Result<(TargetId, HkRequest), Self::Error> {
+    ) -> Result<(ActivePusRequest, HkRequest), Self::Error> {
         let user_data = tc.user_data();
         if user_data.is_empty() {
             let user_data_len = user_data.len() as u32;
@@ -71,7 +123,7 @@ impl PusTcToRequestConverter<HkRequest> for ExampleHkRequestConverter {
             });
         }
         let subservice = tc.subservice();
-        let target_id = TargetAndApidId::from_pus_tc(tc).expect("invalid tc format");
+        let target_id_and_apid = TargetAndApidId::from_pus_tc(tc).expect("invalid tc format");
         let unique_id = u32::from_be_bytes(tc.user_data()[4..8].try_into().unwrap());
 
         let standard_subservice = hk::Subservice::try_from(subservice);
@@ -84,58 +136,66 @@ impl PusTcToRequestConverter<HkRequest> for ExampleHkRequestConverter {
                 .expect("Sending start failure TM failed");
             return Err(PusPacketHandlingError::InvalidSubservice(subservice));
         }
-        Ok((
-            target_id.into(),
-            match standard_subservice.unwrap() {
-                hk::Subservice::TcEnableHkGeneration | hk::Subservice::TcEnableDiagGeneration => {
-                    HkRequest::Enable(unique_id)
-                }
-                hk::Subservice::TcDisableHkGeneration | hk::Subservice::TcDisableDiagGeneration => {
-                    HkRequest::Disable(unique_id)
-                }
-                hk::Subservice::TcReportHkReportStructures => todo!(),
-                hk::Subservice::TmHkPacket => todo!(),
-                hk::Subservice::TcGenerateOneShotHk | hk::Subservice::TcGenerateOneShotDiag => {
-                    HkRequest::OneShot(unique_id)
-                }
-                hk::Subservice::TcModifyDiagCollectionInterval
-                | hk::Subservice::TcModifyHkCollectionInterval => {
-                    if user_data.len() < 12 {
-                        verif_reporter
-                            .start_failure(
-                                token,
-                                FailParams::new_no_fail_data(
-                                    time_stamp,
-                                    &tmtc_err::NOT_ENOUGH_APP_DATA,
-                                ),
-                            )
-                            .expect("Sending start failure TM failed");
-                        return Err(PusPacketHandlingError::NotEnoughAppData {
-                            expected: 12,
-                            found: user_data.len(),
-                        });
-                    }
-                    HkRequest::ModifyCollectionInterval(
-                        unique_id,
-                        CollectionIntervalFactor::from_be_bytes(
-                            user_data[8..12].try_into().unwrap(),
-                        ),
-                    )
-                }
-                _ => {
+        let request = match standard_subservice.unwrap() {
+            hk::Subservice::TcEnableHkGeneration | hk::Subservice::TcEnableDiagGeneration => {
+                HkRequest::Enable(unique_id)
+            }
+            hk::Subservice::TcDisableHkGeneration | hk::Subservice::TcDisableDiagGeneration => {
+                HkRequest::Disable(unique_id)
+            }
+            hk::Subservice::TcReportHkReportStructures => todo!(),
+            hk::Subservice::TmHkPacket => todo!(),
+            hk::Subservice::TcGenerateOneShotHk | hk::Subservice::TcGenerateOneShotDiag => {
+                HkRequest::OneShot(unique_id)
+            }
+            hk::Subservice::TcModifyDiagCollectionInterval
+            | hk::Subservice::TcModifyHkCollectionInterval => {
+                if user_data.len() < 12 {
                     verif_reporter
                         .start_failure(
                             token,
-                            FailParams::new(
+                            FailParams::new_no_fail_data(
                                 time_stamp,
-                                &tmtc_err::PUS_SUBSERVICE_NOT_IMPLEMENTED,
-                                &[subservice],
+                                &tmtc_err::NOT_ENOUGH_APP_DATA,
                             ),
                         )
                         .expect("Sending start failure TM failed");
-                    return Err(PusPacketHandlingError::InvalidSubservice(subservice));
+                    return Err(PusPacketHandlingError::NotEnoughAppData {
+                        expected: 12,
+                        found: user_data.len(),
+                    });
                 }
-            },
+                HkRequest::ModifyCollectionInterval(
+                    unique_id,
+                    CollectionIntervalFactor::from_be_bytes(user_data[8..12].try_into().unwrap()),
+                )
+            }
+            _ => {
+                verif_reporter
+                    .start_failure(
+                        token,
+                        FailParams::new(
+                            time_stamp,
+                            &tmtc_err::PUS_SUBSERVICE_NOT_IMPLEMENTED,
+                            &[subservice],
+                        ),
+                    )
+                    .expect("Sending start failure TM failed");
+                return Err(PusPacketHandlingError::InvalidSubservice(subservice));
+            }
+        };
+        let token = verif_reporter
+            .start_success(token, time_stamp)
+            .map_err(|e| e.0)?;
+        Ok((
+            ActivePusRequest::new(
+                target_id_and_apid.into(),
+                token,
+                UnixTimestamp::from_now().unwrap(),
+                Duration::from_secs(60),
+            )
+            .into(),
+            request,
         ))
     }
 }
@@ -161,7 +221,7 @@ pub fn create_hk_service_static(
     );
     let hk_srv_receiver =
         MpscTcReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
-    let pus_3_handler = PusService3HkRequestHandler::new(
+    let pus_3_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
             hk_srv_receiver,
             hk_srv_tm_sender,
@@ -171,6 +231,8 @@ pub fn create_hk_service_static(
         ),
         ExampleHkRequestConverter::default(),
         request_router,
+        DefaultActiveRequestMap::default(),
+        HkReplyHandler::default(),
     );
     Pus3Wrapper { pus_3_handler }
 }
@@ -193,7 +255,7 @@ pub fn create_hk_service_dynamic(
     );
     let hk_srv_receiver =
         MpscTcReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
-    let pus_3_handler = PusService3HkRequestHandler::new(
+    let pus_3_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
             hk_srv_receiver,
             hk_srv_tm_sender,
@@ -203,6 +265,8 @@ pub fn create_hk_service_dynamic(
         ),
         ExampleHkRequestConverter::default(),
         request_router,
+        DefaultActiveRequestMap::default(),
+        HkReplyHandler::default(),
     );
     Pus3Wrapper { pus_3_handler }
 }
@@ -213,13 +277,17 @@ pub struct Pus3Wrapper<
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
-    pub(crate) pus_3_handler: PusService3HkRequestHandler<
+    pub(crate) pus_3_handler: PusTargetedRequestService<
         TcReceiver,
         TmSender,
         TcInMemConverter,
         VerificationReporter,
         ExampleHkRequestConverter,
-        GenericRequestRouter,
+        HkReplyHandler,
+        DefaultActiveRequestMap<ActivePusRequest>,
+        ActivePusRequest,
+        HkRequest,
+        HkReply,
     >,
 }
 
@@ -230,8 +298,8 @@ impl<
         VerificationReporter: VerificationReportingProvider,
     > Pus3Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
-    pub fn handle_next_packet(&mut self) -> bool {
-        match self.pus_3_handler.handle_one_tc() {
+    pub fn handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
+        match self.pus_3_handler.handle_one_tc(time_stamp) {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {

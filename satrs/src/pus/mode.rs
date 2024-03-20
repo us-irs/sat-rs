@@ -42,26 +42,16 @@ pub mod std_mod {
         SpHeader,
     };
 
-    use crate::{
-        mode::GenericModeReply,
-        pus::{
-            mode::Subservice,
-            verification::{
-                self, FailParams, TcStateStarted, VerificationReportingProvider, VerificationToken,
-            },
-            ActivePusRequest, ActiveRequestMapProvider, EcssTmSenderCore, EcssTmtcError,
-            PusServiceReplyHandler, PusTmWrapper, ReplyHandlerHook,
-        },
-        TargetId,
-    };
-
+    /*
     pub trait ModeReplyHook: ReplyHandlerHook<ActivePusRequest, ModeReply> {
         fn wrong_mode_result_code(&self) -> ResultU16;
         fn can_not_reach_mode_result_code(&self) -> ResultU16;
     }
+    */
 
     use super::{ModeReply, MODE_SERVICE_ID};
 
+    /*
     /// Type definition for a PUS mode servicd reply handler which constrains the
     /// [PusServiceReplyHandler] active request and reply generics to the [ActiveActionRequest] and
     /// [ActionReplyPusWithIds] type.
@@ -180,6 +170,7 @@ pub mod std_mod {
             Ok(())
         }
     }
+    */
 }
 
 #[cfg(test)]

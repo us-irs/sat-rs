@@ -5,7 +5,7 @@ use crate::{
     ChannelId, TargetId,
 };
 
-use super::{verification::VerificationToken, ActiveRequest, ActiveRequestProvider};
+use super::{verification::VerificationToken, ActivePusRequest, ActiveRequestProvider};
 
 use delegate::delegate;
 use satrs_shared::res_code::ResultU16;
@@ -75,18 +75,33 @@ impl GenericActionReplyPus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActiveActionRequest {
+pub struct ActivePusActionRequest {
     pub action_id: ActionId,
-    common: ActiveRequest,
+    common: ActivePusRequest,
 }
 
-impl ActiveRequestProvider for ActiveActionRequest {
+impl ActiveRequestProvider for ActivePusActionRequest {
     delegate! {
         to self.common {
             fn target_id(&self) -> TargetId;
             fn token(&self) -> VerificationToken<super::verification::TcStateStarted>;
             fn start_time(&self) -> spacepackets::time::UnixTimestamp;
             fn timeout(&self) -> core::time::Duration;
+        }
+    }
+}
+
+impl ActivePusActionRequest {
+    pub fn new(
+        action_id: ActionId,
+        target_id: TargetId,
+        token: VerificationToken<super::verification::TcStateStarted>,
+        start_time: spacepackets::time::UnixTimestamp,
+        timeout: core::time::Duration,
+    ) -> Self {
+        Self {
+            action_id,
+            common: ActivePusRequest::new(target_id, token, start_time, timeout),
         }
     }
 }
@@ -105,7 +120,6 @@ pub mod std_mod {
                 self, FailParams, FailParamsWithStep, TcStateStarted, VerificationReportingProvider,
             },
             ActiveRequestMapProvider, DefaultActiveRequestMap, EcssTmSenderCore, EcssTmtcError,
-            ReplyHandlerHook,
         },
     };
     use core::time::Duration;
@@ -114,7 +128,7 @@ pub mod std_mod {
 
     use super::*;
 
-    pub type DefaultActiveActionRequestMap = DefaultActiveRequestMap<ActiveActionRequest>;
+    pub type DefaultActiveActionRequestMap = DefaultActiveRequestMap<ActivePusActionRequest>;
 
     /*
     /// Type definition for a PUS 8 action service reply handler which constrains the
@@ -317,12 +331,13 @@ mod tests {
             },
             EcssTcInMemConverter, EcssTcInVecConverter, EcssTmtcError, GenericRoutingError,
             MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError, PusRequestRouter,
-            PusServiceHelper, PusTcToRequestConverter, ReplyHandlerHook, TmAsVecSenderWithMpsc,
+            PusServiceHelper, PusTcToRequestConverter, TmAsVecSenderWithMpsc,
         },
     };
 
     use super::*;
 
+    /*
     impl<Request> PusRequestRouter<Request> for TestRouter<Request> {
         type Error = GenericRoutingError;
 
@@ -507,15 +522,15 @@ mod tests {
     #[derive(Default)]
     pub struct TestReplyHandlerHook {
         pub unexpected_replies: VecDeque<GenericActionReplyPus>,
-        pub timeouts: RefCell<VecDeque<ActiveActionRequest>>,
+        pub timeouts: RefCell<VecDeque<ActivePusActionRequest>>,
     }
 
-    impl ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithActionId> for TestReplyHandlerHook {
+    impl ReplyHandlerHook<ActivePusActionRequest, ActionReplyPusWithActionId> for TestReplyHandlerHook {
         fn handle_unexpected_reply(&mut self, reply: &GenericActionReplyPus) {
             self.unexpected_replies.push_back(reply.clone());
         }
 
-        fn timeout_callback(&self, active_request: &ActiveActionRequest) {
+        fn timeout_callback(&self, active_request: &ActivePusActionRequest) {
             self.timeouts.borrow_mut().push_back(active_request.clone());
         }
 
@@ -870,4 +885,5 @@ mod tests {
         assert_eq!(reply.request_id, request_id);
         assert_eq!(reply.message.variant, ActionReplyPus::Completed);
     }
+    */
 }

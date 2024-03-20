@@ -304,6 +304,22 @@ pub struct ActivePusRequest {
     timeout: Duration,
 }
 
+impl ActivePusRequest {
+    pub fn new(
+        target_id: TargetId,
+        token: VerificationToken<TcStateStarted>,
+        start_time: UnixTimestamp,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            target_id,
+            token,
+            start_time,
+            timeout,
+        }
+    }
+}
+
 impl ActiveRequestProvider for ActivePusRequest {
     fn target_id(&self) -> TargetId {
         self.target_id
@@ -330,7 +346,7 @@ pub trait PusRequestRouter<Request> {
     fn route(
         &self,
         target_id: TargetId,
-        hk_request: Request,
+        request: Request,
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<(), Self::Error>;
 
@@ -351,7 +367,9 @@ pub trait PusReplyHandler<ActiveRequestInfo: ActiveRequestProvider, ReplyType> {
     fn handle_reply(
         &mut self,
         reply: &GenericMessage<ReplyType>,
+        active_request: &ActiveRequestInfo,
         verification_handler: &impl VerificationReportingProvider,
+        time_stamp: &[u8],
         tm_sender: &impl EcssTmSenderCore,
     ) -> Result<bool, Self::Error>;
 
@@ -467,7 +485,7 @@ pub mod alloc_mod {
     ///
     /// A [VerificationReportingProvider] instance is passed to the user to also allow handling
     /// of the verification process as part of the PUS standard requirements.
-    pub trait PusTcToRequestConverter<ActiveRequestInfo, Request> {
+    pub trait PusTcToRequestConverter<ActiveRequestInfo: ActiveRequestProvider, Request> {
         type Error;
         fn convert(
             &mut self,

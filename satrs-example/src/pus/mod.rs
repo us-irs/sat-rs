@@ -1,16 +1,11 @@
 use crate::requests::GenericRequestRouter;
 use crate::tmtc::MpscStoreAndSendError;
 use log::warn;
-use satrs::pus::verification::{
-    self, FailParams, VerificationReporter, VerificationReporterWithSharedPoolMpscBoundedSender,
-    VerificationReporterWithVecMpscSender, VerificationReportingProvider,
-};
+use satrs::pus::verification::{self, FailParams, VerificationReportingProvider};
 use satrs::pus::{
-    ActiveRequestMapProvider, ActiveRequestProvider, DefaultActiveRequestMap, EcssTcAndToken,
-    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiverCore,
-    EcssTmSenderCore, GenericRoutingError, MpscTcReceiver, PusPacketHandlerResult, PusReplyHandler,
-    PusServiceHelper, PusServiceReplyHandler, PusTcToRequestConverter, ReplyHandlerHook,
-    TcInMemory, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
+    ActiveRequestMapProvider, ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter,
+    EcssTcReceiverCore, EcssTmSenderCore, PusPacketHandlerResult, PusPacketHandlingError,
+    PusReplyHandler, PusRequestRouter, PusServiceHelper, PusTcToRequestConverter, TcInMemory,
 };
 use satrs::request::GenericMessage;
 use satrs::spacepackets::ecss::tc::PusTcReader;
@@ -85,10 +80,10 @@ pub struct PusTargetedRequestService<
     TmSender: EcssTmSenderCore,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
-    RequestConverter: PusTcToRequestConverter<RequestType>,
-    ReplyHook: ReplyHandlerHook<RequestType, ReplyType>,
-    ActiveRequestMap: ActiveRequestMapProvider<RequestType>,
-    ActiveRequestType: ActiveRequestProvider,
+    RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = PusPacketHandlingError>,
+    ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType>,
+    ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestInfo>,
+    ActiveRequestInfo: ActiveRequestProvider,
     RequestType,
     ReplyType,
 > {
@@ -97,8 +92,8 @@ pub struct PusTargetedRequestService<
     pub request_router: GenericRequestRouter,
     pub request_converter: RequestConverter,
     pub active_request_map: ActiveRequestMap,
-    pub reply_hook: ReplyHook,
-    phantom: std::marker::PhantomData<RequestType>,
+    pub reply_hook: ReplyHandler,
+    phantom: std::marker::PhantomData<(RequestType, ActiveRequestInfo, ReplyType)>,
 }
 
 impl<
@@ -106,10 +101,10 @@ impl<
         TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
-        RequestConverter: PusTcToRequestConverter<RequestType>,
-        ReplyHandler: PusReplyHandler<ActiveRequestType, ReplyType>,
-        ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestType>,
-        ActiveRequestType: ActiveRequestProvider,
+        RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = PusPacketHandlingError>,
+        ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType>,
+        ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestInfo>,
+        ActiveRequestInfo: ActiveRequestProvider,
         RequestType,
         ReplyType,
     >
@@ -121,7 +116,7 @@ impl<
         RequestConverter,
         ReplyHandler,
         ActiveRequestMap,
-        ActiveRequestType,
+        ActiveRequestInfo,
         RequestType,
         ReplyType,
     >
@@ -148,7 +143,10 @@ impl<
         }
     }
 
-    pub fn handle_one_tc(&mut self) {
+    pub fn handle_one_tc(
+        &mut self,
+        time_stamp: &[u8],
+    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
         let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
         if possible_packet.is_none() {
             return Ok(PusPacketHandlerResult::Empty);
@@ -159,7 +157,6 @@ impl<
             .tc_in_mem_converter
             .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
         let mut partial_error = None;
-        let time_stamp = get_current_cds_short_timestamp(&mut partial_error);
         let (active_request, action_request) = self.request_converter.convert(
             ecss_tc_and_token.token,
             &tc,
@@ -175,7 +172,7 @@ impl<
             self.active_request_map
                 .insert(verif_request_id.into(), active_request);
             self.request_router.handle_error(
-                target_id,
+                active_request.target_id(),
                 ecss_tc_and_token.token,
                 &tc,
                 e.clone(),
