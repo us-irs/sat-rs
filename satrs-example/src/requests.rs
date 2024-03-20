@@ -3,9 +3,9 @@ use std::sync::mpsc;
 
 use derive_new::new;
 use log::warn;
-use satrs::action::ActionRequest;
 use satrs::hk::HkRequest;
 use satrs::mode::ModeRequest;
+use satrs::pus::action::ActionRequestWithId;
 use satrs::pus::verification::{
     FailParams, TcStateAccepted, VerificationReportingProvider, VerificationToken,
 };
@@ -17,21 +17,21 @@ use satrs::TargetId;
 use satrs_example::config::tmtc_err;
 
 #[allow(dead_code)]
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum Request {
     Hk(HkRequest),
     Mode(ModeRequest),
-    Action(ActionRequest),
+    Action(ActionRequestWithId),
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, new)]
+#[derive(Clone, Debug, new)]
 pub struct TargetedRequest {
     pub(crate) target_id: TargetId,
     pub(crate) request: Request,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Debug)]
 pub struct RequestWithToken {
     pub(crate) targeted_request: TargetedRequest,
     pub(crate) token: VerificationToken<TcStateAccepted>,
@@ -138,13 +138,13 @@ impl PusRequestRouter<HkRequest> for GenericRequestRouter {
     }
 }
 
-impl PusRequestRouter<ActionRequest> for GenericRequestRouter {
+impl PusRequestRouter<ActionRequestWithId> for GenericRequestRouter {
     type Error = GenericRoutingError;
 
     fn route(
         &self,
         target_id: TargetId,
-        action_request: ActionRequest,
+        action_request: ActionRequestWithId,
         token: VerificationToken<TcStateAccepted>,
     ) -> Result<(), Self::Error> {
         if let Some(sender) = self.0.get(&target_id) {

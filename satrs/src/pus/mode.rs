@@ -2,13 +2,12 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::mode::ModeReply;
-
 #[cfg(feature = "alloc")]
 #[allow(unused_imports)]
 pub use alloc_mod::*;
 
 #[cfg(feature = "std")]
+#[allow(unused_imports)]
 pub use std_mod::*;
 
 pub const MODE_SERVICE_ID: u8 = 200;
@@ -33,25 +32,20 @@ pub mod alloc_mod {}
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub mod std_mod {
-    use core::time::Duration;
-
-    use satrs_shared::res_code::ResultU16;
+    /*
     use spacepackets::{
         ecss::tm::{PusTmCreator, PusTmSecondaryHeader},
         util::UnsignedEnum,
         SpHeader,
     };
 
-    /*
     pub trait ModeReplyHook: ReplyHandlerHook<ActivePusRequest, ModeReply> {
         fn wrong_mode_result_code(&self) -> ResultU16;
         fn can_not_reach_mode_result_code(&self) -> ResultU16;
     }
-    */
 
     use super::{ModeReply, MODE_SERVICE_ID};
 
-    /*
     /// Type definition for a PUS mode servicd reply handler which constrains the
     /// [PusServiceReplyHandler] active request and reply generics to the [ActiveActionRequest] and
     /// [ActionReplyPusWithIds] type.

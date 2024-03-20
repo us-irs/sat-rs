@@ -4,8 +4,9 @@ use log::warn;
 use satrs::pus::verification::{self, FailParams, VerificationReportingProvider};
 use satrs::pus::{
     ActiveRequestMapProvider, ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter,
-    EcssTcReceiverCore, EcssTmSenderCore, PusPacketHandlerResult, PusPacketHandlingError,
-    PusReplyHandler, PusRequestRouter, PusServiceHelper, PusTcToRequestConverter, TcInMemory,
+    EcssTcReceiverCore, EcssTmSenderCore, GenericRoutingError, PusPacketHandlerResult,
+    PusPacketHandlingError, PusReplyHandler, PusRequestRouter, PusServiceHelper,
+    PusTcToRequestConverter, TcInMemory,
 };
 use satrs::request::GenericMessage;
 use satrs::spacepackets::ecss::tc::PusTcReader;
@@ -120,6 +121,8 @@ impl<
         RequestType,
         ReplyType,
     >
+where
+    GenericRequestRouter: PusRequestRouter<RequestType, Error = GenericRoutingError>,
 {
     pub fn new(
         service_helper: PusServiceHelper<
@@ -156,27 +159,26 @@ impl<
             .service_helper
             .tc_in_mem_converter
             .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
-        let mut partial_error = None;
-        let (active_request, action_request) = self.request_converter.convert(
+        let (request_info, request) = self.request_converter.convert(
             ecss_tc_and_token.token,
             &tc,
-            &time_stamp,
+            time_stamp,
             &self.service_helper.common.verification_handler,
         )?;
-        if let Err(e) = self.request_router.route(
-            active_request.target_id(),
-            action_request,
-            ecss_tc_and_token.token,
-        ) {
-            let verif_request_id = verification::RequestId::new(&tc);
+        let verif_request_id = verification::RequestId::new(&tc);
+        if let Err(e) =
+            self.request_router
+                .route(request_info.target_id(), request, ecss_tc_and_token.token)
+        {
+            let target_id = request_info.target_id();
             self.active_request_map
-                .insert(verif_request_id.into(), active_request);
+                .insert(&verif_request_id.into(), request_info);
             self.request_router.handle_error(
-                active_request.target_id(),
+                target_id,
                 ecss_tc_and_token.token,
                 &tc,
                 e.clone(),
-                &time_stamp,
+                time_stamp,
                 &self.service_helper.common.verification_handler,
             );
             return Err(e.into());
@@ -184,9 +186,7 @@ impl<
         Ok(PusPacketHandlerResult::RequestHandled)
     }
 
-    pub fn insert_reply(&mut self, reply: &GenericMessage<ReplyType>) {
-        // self.reply_hook.insert_reply(reply, &self.active_request_map);
-    }
+    pub fn insert_reply(&mut self, reply: &GenericMessage<ReplyType>) {}
 }
 
 impl<VerificationReporter: VerificationReportingProvider> PusReceiver<VerificationReporter> {

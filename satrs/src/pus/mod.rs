@@ -8,14 +8,11 @@ use crate::queue::{GenericReceiveError, GenericSendError};
 use crate::request::{GenericMessage, RequestId};
 use crate::{ChannelId, TargetId};
 use core::fmt::{Display, Formatter};
-use core::marker::PhantomData;
 use core::time::Duration;
 #[cfg(feature = "alloc")]
 use downcast_rs::{impl_downcast, Downcast};
 #[cfg(feature = "alloc")]
 use dyn_clone::DynClone;
-use satrs_shared::res_code::ResultU16;
-use spacepackets::time::UnixTimestamp;
 #[cfg(feature = "std")]
 use std::error::Error;
 
@@ -277,7 +274,7 @@ pub trait ReceivesEcssPusTc {
 }
 
 pub trait ActiveRequestMapProvider<V>: Sized {
-    fn insert(&mut self, request_id: &RequestId, request: V);
+    fn insert(&mut self, request_id: &RequestId, request_info: V);
     fn get(&self, request_id: RequestId) -> Option<&V>;
     fn get_mut(&mut self, request_id: RequestId) -> Option<&mut V>;
     fn remove(&mut self, request_id: RequestId) -> bool;
@@ -292,50 +289,8 @@ pub trait ActiveRequestMapProvider<V>: Sized {
 pub trait ActiveRequestProvider {
     fn target_id(&self) -> TargetId;
     fn token(&self) -> VerificationToken<TcStateStarted>;
-    fn start_time(&self) -> UnixTimestamp;
+    fn has_timed_out(&self) -> bool;
     fn timeout(&self) -> Duration;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActivePusRequest {
-    target_id: TargetId,
-    token: VerificationToken<TcStateStarted>,
-    start_time: UnixTimestamp,
-    timeout: Duration,
-}
-
-impl ActivePusRequest {
-    pub fn new(
-        target_id: TargetId,
-        token: VerificationToken<TcStateStarted>,
-        start_time: UnixTimestamp,
-        timeout: Duration,
-    ) -> Self {
-        Self {
-            target_id,
-            token,
-            start_time,
-            timeout,
-        }
-    }
-}
-
-impl ActiveRequestProvider for ActivePusRequest {
-    fn target_id(&self) -> TargetId {
-        self.target_id
-    }
-
-    fn token(&self) -> VerificationToken<TcStateStarted> {
-        self.token
-    }
-
-    fn start_time(&self) -> UnixTimestamp {
-        self.start_time
-    }
-
-    fn timeout(&self) -> Duration {
-        self.timeout
-    }
 }
 
 /// This trait is an abstraction for the routing of PUS request to a dedicated
@@ -383,8 +338,6 @@ pub trait PusReplyHandler<ActiveRequestInfo: ActiveRequestProvider, ReplyType> {
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
     use hashbrown::HashMap;
-
-    use crate::TargetId;
 
     use super::*;
 
@@ -697,6 +650,7 @@ pub mod std_mod {
     use crate::tmtc::tm_helper::SharedTmPool;
     use crate::{ChannelId, TargetId};
     use alloc::vec::Vec;
+    use core::time::Duration;
     use spacepackets::ecss::tc::PusTcReader;
     use spacepackets::ecss::tm::PusTmCreator;
     use spacepackets::ecss::{PusError, WritablePusPacket};
@@ -709,8 +663,8 @@ pub mod std_mod {
     #[cfg(feature = "crossbeam")]
     pub use cb_mod::*;
 
-    use super::verification::VerificationReportingProvider;
-    use super::{AcceptedEcssTcAndToken, TcInMemory};
+    use super::verification::{TcStateStarted, VerificationReportingProvider};
+    use super::{AcceptedEcssTcAndToken, ActiveRequestProvider, TcInMemory};
 
     impl From<mpsc::SendError<StoreAddr>> for EcssTmtcError {
         fn from(_: mpsc::SendError<StoreAddr>) -> Self {
@@ -1094,6 +1048,47 @@ pub mod std_mod {
         }
     }
     */
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ActivePusRequestStd {
+        target_id: TargetId,
+        token: VerificationToken<TcStateStarted>,
+        start_time: std::time::Instant,
+        timeout: Duration,
+    }
+
+    impl ActivePusRequestStd {
+        pub fn new(
+            target_id: TargetId,
+            token: VerificationToken<TcStateStarted>,
+            timeout: Duration,
+        ) -> Self {
+            Self {
+                target_id,
+                token,
+                start_time: std::time::Instant::now(),
+                timeout,
+            }
+        }
+    }
+
+    impl ActiveRequestProvider for ActivePusRequestStd {
+        fn target_id(&self) -> TargetId {
+            self.target_id
+        }
+        fn token(&self) -> VerificationToken<TcStateStarted> {
+            self.token
+        }
+
+        fn timeout(&self) -> Duration {
+            self.timeout
+        }
+
+        fn has_timed_out(&self) -> bool {
+            std::time::Instant::now() - self.start_time > self.timeout
+        }
+    }
+
     // TODO: All these types could probably be no_std if we implemented error handling ourselves..
     // but thiserror is really nice, so keep it like this for simplicity for now. Maybe thiserror
     // will be no_std soon, see https://github.com/rust-lang/rust/issues/103765 .

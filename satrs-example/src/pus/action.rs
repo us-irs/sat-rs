@@ -3,7 +3,7 @@ use satrs::action::{ActionRequest, ActionRequestVariant};
 use satrs::params::WritableToBeBytes;
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
 use satrs::pus::action::{
-    ActionReplyPus, ActionReplyPusWithActionId, ActionRequestWithId, ActivePusActionRequest,
+    ActionReplyPus, ActionReplyPusWithActionId, ActionRequestWithId, ActivePusActionRequestStd,
     DefaultActiveActionRequestMap,
 };
 use satrs::pus::verification::{
@@ -21,7 +21,6 @@ use satrs::pus::{
 use satrs::request::{GenericMessage, TargetAndApidId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{EcssEnumU16, PusPacket};
-use satrs::spacepackets::time::UnixTimestamp;
 use satrs::tmtc::tm_helper::SharedTmPool;
 use satrs::ChannelId;
 use satrs_example::config::{tmtc_err, TcReceiverId, TmSenderId, PUS_APID};
@@ -44,13 +43,13 @@ impl Default for ActionReplyHandler {
     }
 }
 
-impl PusReplyHandler<ActivePusActionRequest, ActionReplyPusWithActionId> for ActionReplyHandler {
+impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPusWithActionId> for ActionReplyHandler {
     type Error = EcssTmtcError;
 
     fn handle_unexpected_reply(
         &mut self,
         reply: &GenericMessage<ActionReplyPusWithActionId>,
-        tm_sender: &impl EcssTmSenderCore,
+        _tm_sender: &impl EcssTmSenderCore,
     ) {
         log::warn!("received unexpected reply for service 8: {reply:?}");
     }
@@ -58,12 +57,12 @@ impl PusReplyHandler<ActivePusActionRequest, ActionReplyPusWithActionId> for Act
     fn handle_reply(
         &mut self,
         reply: &satrs::request::GenericMessage<ActionReplyPusWithActionId>,
-        active_request: &ActivePusActionRequest,
+        active_request: &ActivePusActionRequestStd,
         verification_handler: &impl VerificationReportingProvider,
         time_stamp: &[u8],
-        tm_sender: &impl EcssTmSenderCore,
+        _tm_sender: &impl EcssTmSenderCore,
     ) -> Result<bool, Self::Error> {
-        let remove_entry = match reply.message.variant {
+        let remove_entry = match &reply.message.variant {
             ActionReplyPus::CompletionFailed { error_code, params } => {
                 let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
                 verification_handler
@@ -71,7 +70,7 @@ impl PusReplyHandler<ActivePusActionRequest, ActionReplyPusWithActionId> for Act
                         active_request.token(),
                         FailParams::new(
                             time_stamp,
-                            &error_code,
+                            error_code,
                             &self.fail_data_buf[..fail_data_len],
                         ),
                     )
@@ -89,8 +88,8 @@ impl PusReplyHandler<ActivePusActionRequest, ActionReplyPusWithActionId> for Act
                         active_request.token(),
                         FailParamsWithStep::new(
                             time_stamp,
-                            &EcssEnumU16::new(step),
-                            &error_code,
+                            &EcssEnumU16::new(*step),
+                            error_code,
                             &self.fail_data_buf[..fail_data_len],
                         ),
                     )
@@ -107,7 +106,7 @@ impl PusReplyHandler<ActivePusActionRequest, ActionReplyPusWithActionId> for Act
                 verification_handler.step_success(
                     &active_request.token(),
                     time_stamp,
-                    EcssEnumU16::new(step),
+                    EcssEnumU16::new(*step),
                 )?;
                 false
             }
@@ -130,7 +129,7 @@ impl PusReplyHandler<ActivePusActionRequest, ActionReplyPusWithActionId> for Act
 #[derive(Default)]
 pub struct ExampleActionRequestConverter {}
 
-impl PusTcToRequestConverter<ActivePusActionRequest, ActionRequestWithId>
+impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequestWithId>
     for ExampleActionRequestConverter
 {
     type Error = PusPacketHandlingError;
@@ -141,7 +140,7 @@ impl PusTcToRequestConverter<ActivePusActionRequest, ActionRequestWithId>
         tc: &PusTcReader,
         time_stamp: &[u8],
         verif_reporter: &impl VerificationReportingProvider,
-    ) -> Result<(ActivePusActionRequest, ActionRequestWithId), Self::Error> {
+    ) -> Result<(ActivePusActionRequestStd, ActionRequestWithId), Self::Error> {
         let subservice = tc.subservice();
         let user_data = tc.user_data();
         if user_data.len() < 8 {
@@ -163,11 +162,10 @@ impl PusTcToRequestConverter<ActivePusActionRequest, ActionRequestWithId>
                 .start_success(token, time_stamp)
                 .map_err(|e| e.0)?;
             Ok((
-                ActivePusActionRequest::new(
+                ActivePusActionRequestStd::new(
                     action_id,
                     target_id_and_apid.into(),
                     token,
-                    UnixTimestamp::from_now().unwrap(),
                     Duration::from_secs(30),
                 ),
                 ActionRequestWithId {
@@ -309,7 +307,7 @@ pub struct Pus8Wrapper<
         ExampleActionRequestConverter,
         ActionReplyHandler,
         DefaultActiveActionRequestMap,
-        ActivePusActionRequest,
+        ActivePusActionRequestStd,
         ActionRequestWithId,
         ActionReplyPusWithActionId,
     >,

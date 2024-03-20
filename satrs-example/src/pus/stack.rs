@@ -68,8 +68,8 @@ impl<
             is_srv_finished(self.test_srv.handle_next_packet(&time_stamp));
             is_srv_finished(self.schedule_srv.handle_next_packet(&time_stamp));
             is_srv_finished(self.event_srv.handle_next_packet(&time_stamp));
-            is_srv_finished(self.action_srv.handle_next_packet());
-            is_srv_finished(self.hk_srv.handle_next_packet());
+            is_srv_finished(self.action_srv.handle_next_packet(&time_stamp));
+            is_srv_finished(self.hk_srv.handle_next_packet(&time_stamp));
             if all_queues_empty {
                 break;
             }

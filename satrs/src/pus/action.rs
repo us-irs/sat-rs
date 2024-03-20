@@ -5,11 +5,10 @@ use crate::{
     ChannelId, TargetId,
 };
 
-use super::{verification::VerificationToken, ActivePusRequest, ActiveRequestProvider};
+use super::{verification::VerificationToken, ActivePusRequestStd, ActiveRequestProvider};
 
 use delegate::delegate;
 use satrs_shared::res_code::ResultU16;
-use spacepackets::ecss::EcssEnumU16;
 
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
@@ -74,38 +73,6 @@ impl GenericActionReplyPus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActivePusActionRequest {
-    pub action_id: ActionId,
-    common: ActivePusRequest,
-}
-
-impl ActiveRequestProvider for ActivePusActionRequest {
-    delegate! {
-        to self.common {
-            fn target_id(&self) -> TargetId;
-            fn token(&self) -> VerificationToken<super::verification::TcStateStarted>;
-            fn start_time(&self) -> spacepackets::time::UnixTimestamp;
-            fn timeout(&self) -> core::time::Duration;
-        }
-    }
-}
-
-impl ActivePusActionRequest {
-    pub fn new(
-        action_id: ActionId,
-        target_id: TargetId,
-        token: VerificationToken<super::verification::TcStateStarted>,
-        start_time: spacepackets::time::UnixTimestamp,
-        timeout: core::time::Duration,
-    ) -> Self {
-        Self {
-            action_id,
-            common: ActivePusRequest::new(target_id, token, start_time, timeout),
-        }
-    }
-}
-
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub mod alloc_mod {}
@@ -113,192 +80,46 @@ pub mod alloc_mod {}
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod std_mod {
-    use crate::{
-        params::WritableToBeBytes,
-        pus::{
-            verification::{
-                self, FailParams, FailParamsWithStep, TcStateStarted, VerificationReportingProvider,
-            },
-            ActiveRequestMapProvider, DefaultActiveRequestMap, EcssTmSenderCore, EcssTmtcError,
-        },
-    };
-    use core::time::Duration;
-    use spacepackets::time::UnixTimestamp;
-    use std::time::SystemTimeError;
+    use crate::pus::{verification, DefaultActiveRequestMap};
 
     use super::*;
 
-    pub type DefaultActiveActionRequestMap = DefaultActiveRequestMap<ActivePusActionRequest>;
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ActivePusActionRequestStd {
+        pub action_id: ActionId,
+        common: ActivePusRequestStd,
+    }
 
-    /*
-    /// Type definition for a PUS 8 action service reply handler which constrains the
-    /// [PusServiceReplyHandler] active request and reply generics to the [ActiveActionRequest] and
-    /// [ActionReplyPusWithIds] type.
-    pub type PusService8ReplyHandler<VerificationReporter, ActiveRequestMap, UserHook, TmSender> =
-        PusServiceReplyHandler<
-            VerificationReporter,
-            ActiveRequestMap,
-            UserHook,
-            TmSender,
-            ActiveActionRequest,
-            ActionReplyPusWithActionId,
-        >;
+    impl ActiveRequestProvider for ActivePusActionRequestStd {
+        delegate! {
+            to self.common {
+                fn target_id(&self) -> TargetId;
+                fn token(&self) -> VerificationToken<verification::TcStateStarted>;
+                fn has_timed_out(&self) -> bool;
+                fn timeout(&self) -> core::time::Duration;
+            }
+        }
+    }
 
-    impl<
-            VerificationReporter: VerificationReportingProvider,
-            ActiveRequestMap: ActiveRequestMapProvider<ActiveActionRequest>,
-            UserHook: ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithActionId>,
-            TmSender: EcssTmSenderCore,
-        > PusService8ReplyHandler<VerificationReporter, ActiveRequestMap, UserHook, TmSender>
-    {
-        /// Helper method to register a recently routed action request.
-        pub fn add_routed_action_request(
-            &mut self,
-            request_id: verification::RequestId,
-            target_id: TargetId,
+    impl ActivePusActionRequestStd {
+        pub fn new(
             action_id: ActionId,
-            token: VerificationToken<TcStateStarted>,
-            timeout: Duration,
-        ) {
-            self.active_request_map.insert(
-                &request_id.into(),
-                ActiveActionRequest {
-                    action_id,
-                    common: ActiveRequest {
-                        target_id,
-                        token,
-                        start_time: self.current_time,
-                        timeout,
-                    },
-                },
-            );
-        }
-
-        /// Main handler function to handle all received action replies.
-        pub fn handle_action_reply(
-            &mut self,
-            action_reply_with_ids: GenericMessage<ActionReplyPusWithActionId>,
-            time_stamp: &[u8],
-        ) -> Result<(), EcssTmtcError> {
-            let active_req = self
-                .active_request_map
-                .get(action_reply_with_ids.request_id);
-            if active_req.is_none() {
-                self.user_hook
-                    .handle_unexpected_reply(&action_reply_with_ids);
-                return Ok(());
-            }
-            let active_req = active_req.unwrap().clone();
-            let remove_entry = match action_reply_with_ids.message.variant {
-                ActionReplyPus::CompletionFailed { error_code, params } => {
-                    let fail_data_len = params.write_to_be_bytes(&mut self.tm_buf)?;
-                    self.verification_reporter
-                        .completion_failure(
-                            active_req.common.token,
-                            FailParams::new(time_stamp, &error_code, &self.tm_buf[..fail_data_len]),
-                        )
-                        .map_err(|e| e.0)?;
-                    true
-                }
-                ActionReplyPus::StepFailed {
-                    error_code,
-                    step,
-                    params,
-                } => {
-                    let fail_data_len = params.write_to_be_bytes(&mut self.tm_buf)?;
-                    self.verification_reporter
-                        .step_failure(
-                            active_req.common.token,
-                            FailParamsWithStep::new(
-                                time_stamp,
-                                &EcssEnumU16::new(step),
-                                &error_code,
-                                &self.tm_buf[..fail_data_len],
-                            ),
-                        )
-                        .map_err(|e| e.0)?;
-                    true
-                }
-                ActionReplyPus::Completed => {
-                    self.verification_reporter
-                        .completion_success(active_req.common.token, time_stamp)
-                        .map_err(|e| e.0)?;
-                    true
-                }
-                ActionReplyPus::StepSuccess { step } => {
-                    self.verification_reporter.step_success(
-                        &active_req.common.token,
-                        time_stamp,
-                        EcssEnumU16::new(step),
-                    )?;
-                    false
-                }
-            };
-            if remove_entry {
-                self.active_request_map
-                    .remove(action_reply_with_ids.request_id);
-            }
-            Ok(())
-        }
-    }
-
-    impl<
-            VerificationReporter: VerificationReportingProvider,
-            UserHook: ReplyHandlerHook<ActiveActionRequest, ActionReplyPusWithActionId>,
-            TmSender: EcssTmSenderCore,
-        >
-        PusService8ReplyHandler<
-            VerificationReporter,
-            DefaultActiveActionRequestMap,
-            UserHook,
-            TmSender,
-        >
-    {
-        /// Create a new PUS Service 8 reply handler with the [ActiveRequestMap] generic
-        /// constrained to the [DefaultActiveActionRequestMap] object and with the current time
-        /// set to the OS time.
-        #[cfg(feature = "std")]
-        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
-        pub fn new_from_now_with_default_map(
-            verification_reporter: VerificationReporter,
-            fail_data_buf_size: usize,
-            user_hook: UserHook,
-            tm_sender: TmSender,
-        ) -> Result<Self, SystemTimeError> {
-            let current_time = UnixTimestamp::from_now()?;
-            Ok(Self::new_with_default_map(
-                verification_reporter,
-                fail_data_buf_size,
-                user_hook,
-                tm_sender,
-                current_time,
-            ))
-        }
-
-        /// Create a new PUS Service 8 reply handler with the [ActiveRequestMap] generic
-        /// constrained to the [DefaultActiveActionRequestMap] object.
-        pub fn new_with_default_map(
-            verification_reporter: VerificationReporter,
-            fail_data_buf_size: usize,
-            user_hook: UserHook,
-            tm_sender: TmSender,
-            init_time: UnixTimestamp,
+            target_id: TargetId,
+            token: VerificationToken<verification::TcStateStarted>,
+            timeout: core::time::Duration,
         ) -> Self {
-            Self::new(
-                verification_reporter,
-                DefaultActiveActionRequestMap::default(),
-                fail_data_buf_size,
-                user_hook,
-                tm_sender,
-                init_time,
-            )
+            Self {
+                action_id,
+                common: ActivePusRequestStd::new(target_id, token, timeout),
+            }
         }
     }
-    */
+    pub type DefaultActiveActionRequestMap = DefaultActiveRequestMap<ActivePusActionRequestStd>;
 }
 
 #[cfg(test)]
 mod tests {
+    /*
     use core::{cell::RefCell, time::Duration};
     use std::{sync::mpsc, time::SystemTimeError};
 
@@ -337,7 +158,6 @@ mod tests {
 
     use super::*;
 
-    /*
     impl<Request> PusRequestRouter<Request> for TestRouter<Request> {
         type Error = GenericRoutingError;
 

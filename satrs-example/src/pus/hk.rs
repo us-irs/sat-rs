@@ -6,7 +6,7 @@ use satrs::pus::verification::{
     VerificationReporterWithVecMpscSender, VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
-    ActivePusRequest, ActiveRequestProvider, DefaultActiveRequestMap, EcssTcAndToken,
+    ActivePusRequestStd, ActiveRequestProvider, DefaultActiveRequestMap, EcssTcAndToken,
     EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiverCore,
     EcssTmSenderCore, MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError,
     PusReplyHandler, PusServiceHelper, PusTcToRequestConverter, TmAsVecSenderWithId,
@@ -15,9 +15,8 @@ use satrs::pus::{
 use satrs::request::TargetAndApidId;
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{hk, PusPacket};
-use satrs::spacepackets::time::UnixTimestamp;
 use satrs::tmtc::tm_helper::SharedTmPool;
-use satrs::{ChannelId, TargetId};
+use satrs::ChannelId;
 use satrs_example::config::{hk_err, tmtc_err, TcReceiverId, TmSenderId, PUS_APID};
 use std::sync::mpsc::{self};
 use std::time::Duration;
@@ -31,25 +30,16 @@ pub enum HkReply {
     Ack,
 }
 
-pub struct HkReplyHandler {
-    fail_data_buf: [u8; 128],
-}
+#[derive(Default)]
+pub struct HkReplyHandler {}
 
-impl Default for HkReplyHandler {
-    fn default() -> Self {
-        Self {
-            fail_data_buf: [0; 128],
-        }
-    }
-}
-
-impl PusReplyHandler<ActivePusRequest, HkReply> for HkReplyHandler {
+impl PusReplyHandler<ActivePusRequestStd, HkReply> for HkReplyHandler {
     type Error = ();
 
     fn handle_unexpected_reply(
         &mut self,
         reply: &satrs::request::GenericMessage<HkReply>,
-        tm_sender: &impl EcssTmSenderCore,
+        _tm_sender: &impl EcssTmSenderCore,
     ) {
         log::warn!("received unexpected reply for service 3: {reply:?}");
     }
@@ -57,27 +47,35 @@ impl PusReplyHandler<ActivePusRequest, HkReply> for HkReplyHandler {
     fn handle_reply(
         &mut self,
         reply: &satrs::request::GenericMessage<HkReply>,
-        active_request: &ActivePusRequest,
+        active_request: &ActivePusRequestStd,
         verification_handler: &impl VerificationReportingProvider,
         time_stamp: &[u8],
-        tm_sender: &impl EcssTmSenderCore,
+        _tm_sender: &impl EcssTmSenderCore,
     ) -> Result<bool, Self::Error> {
-        let remove_entry = match reply.message {
+        match reply.message {
             HkReply::Ack => {
                 verification_handler
                     .completion_success(active_request.token(), time_stamp)
                     .expect("Sending end success TM failed");
-                true
             }
         };
-        Ok(remove_entry)
+        Ok(true)
     }
 }
 
-#[derive(Default)]
-pub struct ExampleHkRequestConverter {}
+pub struct ExampleHkRequestConverter {
+    timeout: Duration,
+}
 
-impl PusTcToRequestConverter<ActivePusRequest, HkRequest> for ExampleHkRequestConverter {
+impl Default for ExampleHkRequestConverter {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(60),
+        }
+    }
+}
+
+impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for ExampleHkRequestConverter {
     type Error = PusPacketHandlingError;
 
     fn convert(
@@ -86,7 +84,7 @@ impl PusTcToRequestConverter<ActivePusRequest, HkRequest> for ExampleHkRequestCo
         tc: &PusTcReader,
         time_stamp: &[u8],
         verif_reporter: &impl VerificationReportingProvider,
-    ) -> Result<(ActivePusRequest, HkRequest), Self::Error> {
+    ) -> Result<(ActivePusRequestStd, HkRequest), Self::Error> {
         let user_data = tc.user_data();
         if user_data.is_empty() {
             let user_data_len = user_data.len() as u32;
@@ -188,13 +186,7 @@ impl PusTcToRequestConverter<ActivePusRequest, HkRequest> for ExampleHkRequestCo
             .start_success(token, time_stamp)
             .map_err(|e| e.0)?;
         Ok((
-            ActivePusRequest::new(
-                target_id_and_apid.into(),
-                token,
-                UnixTimestamp::from_now().unwrap(),
-                Duration::from_secs(60),
-            )
-            .into(),
+            ActivePusRequestStd::new(target_id_and_apid.into(), token, self.timeout),
             request,
         ))
     }
@@ -284,8 +276,8 @@ pub struct Pus3Wrapper<
         VerificationReporter,
         ExampleHkRequestConverter,
         HkReplyHandler,
-        DefaultActiveRequestMap<ActivePusRequest>,
-        ActivePusRequest,
+        DefaultActiveRequestMap<ActivePusRequestStd>,
+        ActivePusRequestStd,
         HkRequest,
         HkReply,
     >,
