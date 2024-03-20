@@ -3,8 +3,8 @@ use satrs::action::{ActionRequest, ActionRequestVariant};
 use satrs::params::WritableToBeBytes;
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
 use satrs::pus::action::{
-    ActionReplyPus, ActionReplyPusWithActionId, ActionRequestWithId, ActivePusActionRequestStd,
-    DefaultActiveActionRequestMap,
+    ActionReplyPus, ActionReplyPusWithActionId, ActionRequestWithId, ActionRequestorBoundedMpsc,
+    ActionRequestorMpsc, ActivePusActionRequestStd, DefaultActiveActionRequestMap,
 };
 use satrs::pus::verification::{
     self, FailParams, FailParamsWithStep, TcStateAccepted,
@@ -18,7 +18,7 @@ use satrs::pus::{
     PusTcToRequestConverter, TmAsVecSenderWithId, TmAsVecSenderWithMpsc,
     TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
 };
-use satrs::request::{GenericMessage, TargetAndApidId};
+use satrs::request::{GenericMessage, MessageReceiver, MessageSender, TargetAndApidId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{EcssEnumU16, PusPacket};
 use satrs::tmtc::tm_helper::SharedTmPool;
@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use crate::requests::GenericRequestRouter;
 
-use super::PusTargetedRequestService;
+use super::{generic_pus_request_timeout_handler, PusTargetedRequestService};
 
 pub struct ActionReplyHandler {
     fail_data_buf: [u8; 128],
@@ -50,8 +50,9 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPusWithActionId> for 
         &mut self,
         reply: &GenericMessage<ActionReplyPusWithActionId>,
         _tm_sender: &impl EcssTmSenderCore,
-    ) {
+    ) -> Result<(), Self::Error> {
         log::warn!("received unexpected reply for service 8: {reply:?}");
+        Ok(())
     }
 
     fn handle_reply(
@@ -115,15 +116,20 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPusWithActionId> for 
         Ok(remove_entry)
     }
 
-    /*
-    fn timeout_callback(&self, active_request: &ActiveRequestType) {
-        log::warn!("timeout for active request {active_request} on service {SERVICE}");
+    fn handle_request_timeout(
+        &mut self,
+        active_request: &ActivePusActionRequestStd,
+        verification_handler: &impl VerificationReportingProvider,
+        time_stamp: &[u8],
+        _tm_sender: &impl EcssTmSenderCore,
+    ) -> Result<(), Self::Error> {
+        generic_pus_request_timeout_handler(
+            active_request,
+            verification_handler,
+            time_stamp,
+            "action",
+        )
     }
-
-    fn timeout_error_code(&self) -> satrs::res_code::ResultU16 {
-        REQUEST_TIMEOUT
-    }
-    */
 }
 
 #[derive(Default)]
@@ -194,12 +200,13 @@ pub fn create_action_service_static(
     verif_reporter: VerificationReporterWithSharedPoolMpscBoundedSender,
     tc_pool: SharedStaticMemoryPool,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
-    action_router: GenericRequestRouter,
+    action_router: ActionRequestorBoundedMpsc,
 ) -> Pus8Wrapper<
     MpscTcReceiver,
     TmInSharedPoolSenderWithBoundedMpsc,
     EcssTcInSharedStoreConverter,
     VerificationReporterWithSharedPoolMpscBoundedSender,
+    mpsc::SyncSender<GenericMessage<ActionRequest>>,
 > {
     let action_srv_tm_sender = TmInSharedPoolSenderWithId::new(
         TmSenderId::PusAction as ChannelId,
@@ -221,11 +228,11 @@ pub fn create_action_service_static(
             EcssTcInSharedStoreConverter::new(tc_pool.clone(), 2048),
         ),
         ExampleActionRequestConverter::default(),
-        action_router,
         // TODO: Implementation which does not use run-time allocation? Maybe something like
         // a bounded wrapper which pre-allocates using [HashMap::with_capacity]..
         DefaultActiveActionRequestMap::default(),
         ActionReplyHandler::default(),
+        action_router,
     );
     Pus8Wrapper {
         action_request_handler,
@@ -236,12 +243,13 @@ pub fn create_action_service_dynamic(
     tm_funnel_tx: mpsc::Sender<Vec<u8>>,
     verif_reporter: VerificationReporterWithVecMpscSender,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
-    action_router: GenericRequestRouter,
+    action_router: ActionRequestorMpsc,
 ) -> Pus8Wrapper<
     MpscTcReceiver,
     TmAsVecSenderWithMpsc,
     EcssTcInVecConverter,
     VerificationReporterWithVecMpscSender,
+    mpsc::Sender<GenericMessage<ActionRequest>>,
 > {
     let action_srv_tm_sender = TmAsVecSenderWithId::new(
         TmSenderId::PusAction as ChannelId,
@@ -262,42 +270,21 @@ pub fn create_action_service_dynamic(
             EcssTcInVecConverter::default(),
         ),
         ExampleActionRequestConverter::default(),
-        action_router,
         DefaultActiveActionRequestMap::default(),
         ActionReplyHandler::default(),
+        action_router,
     );
     Pus8Wrapper {
         action_request_handler,
     }
 }
 
-/*
-#[derive(Default)]
-pub struct PusActionReplyHook {}
-
-impl ReplyHandlerHook<ActivePusActionRequest, ActionReplyPusWithActionId> for PusActionReplyHook {
-    fn handle_unexpected_reply(
-        &mut self,
-        reply: &satrs::request::GenericMessage<ActionReplyPusWithActionId>,
-    ) {
-        println!("received unexpected action reply {:?}", reply);
-    }
-
-    fn timeout_callback(&self, active_request: &ActivePusActionRequest) {
-        println!("active request {active_request:?} timed out");
-    }
-
-    fn timeout_error_code(&self) -> satrs::res_code::ResultU16 {
-        todo!()
-    }
-}
-*/
-
 pub struct Pus8Wrapper<
     TcReceiver: EcssTcReceiverCore,
     TmSender: EcssTmSenderCore,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
+    RequestSender: MessageSender<ActionRequest>,
 > {
     pub(crate) action_request_handler: PusTargetedRequestService<
         TcReceiver,
@@ -308,7 +295,8 @@ pub struct Pus8Wrapper<
         ActionReplyHandler,
         DefaultActiveActionRequestMap,
         ActivePusActionRequestStd,
-        ActionRequestWithId,
+        RequestSender,
+        ActionRequest,
         ActionReplyPusWithActionId,
     >,
 }
@@ -318,7 +306,8 @@ impl<
         TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
-    > Pus8Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
+        RequestSender: MessageSender<ActionRequest>,
+    > Pus8Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter, RequestSender>
 {
     pub fn handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
         match self.action_request_handler.handle_one_tc(time_stamp) {

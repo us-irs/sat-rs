@@ -44,8 +44,6 @@ pub mod std_mod {
         fn can_not_reach_mode_result_code(&self) -> ResultU16;
     }
 
-    use super::{ModeReply, MODE_SERVICE_ID};
-
     /// Type definition for a PUS mode servicd reply handler which constrains the
     /// [PusServiceReplyHandler] active request and reply generics to the [ActiveActionRequest] and
     /// [ActionReplyPusWithIds] type.
@@ -174,10 +172,9 @@ mod tests {
 
     use crate::{
         mode::{
-            ModeAndSubmode, ModeReplySender, ModeRequest, ModeRequestSender,
+            ModeAndSubmode, ModeReply, ModeReplySender, ModeRequest, ModeRequestSender,
             ModeRequestorAndHandlerMpsc, ModeRequestorMpsc,
         },
-        pus::mode::ModeReply,
         request::GenericMessage,
     };
 

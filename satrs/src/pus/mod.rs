@@ -332,7 +332,15 @@ pub trait PusReplyHandler<ActiveRequestInfo: ActiveRequestProvider, ReplyType> {
         &mut self,
         reply: &GenericMessage<ReplyType>,
         tm_sender: &impl EcssTmSenderCore,
-    );
+    ) -> Result<(), Self::Error>;
+
+    fn handle_request_timeout(
+        &mut self,
+        active_request: &ActiveRequestInfo,
+        verification_handler: &impl VerificationReportingProvider,
+        time_stamp: &[u8],
+        tm_sender: &impl EcssTmSenderCore,
+    ) -> Result<(), Self::Error>;
 }
 
 #[cfg(feature = "alloc")]

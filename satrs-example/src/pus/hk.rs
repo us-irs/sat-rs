@@ -8,9 +8,10 @@ use satrs::pus::verification::{
 use satrs::pus::{
     ActivePusRequestStd, ActiveRequestProvider, DefaultActiveRequestMap, EcssTcAndToken,
     EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiverCore,
-    EcssTmSenderCore, MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError,
-    PusReplyHandler, PusServiceHelper, PusTcToRequestConverter, TmAsVecSenderWithId,
-    TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
+    EcssTmSenderCore, EcssTmtcError, MpscTcReceiver, PusPacketHandlerResult,
+    PusPacketHandlingError, PusReplyHandler, PusServiceHelper, PusTcToRequestConverter,
+    TmAsVecSenderWithId, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
+    TmInSharedPoolSenderWithId,
 };
 use satrs::request::TargetAndApidId;
 use satrs::spacepackets::ecss::tc::PusTcReader;
@@ -21,6 +22,7 @@ use satrs_example::config::{hk_err, tmtc_err, TcReceiverId, TmSenderId, PUS_APID
 use std::sync::mpsc::{self};
 use std::time::Duration;
 
+use crate::pus::generic_pus_request_timeout_handler;
 use crate::requests::GenericRequestRouter;
 
 use super::PusTargetedRequestService;
@@ -34,14 +36,15 @@ pub enum HkReply {
 pub struct HkReplyHandler {}
 
 impl PusReplyHandler<ActivePusRequestStd, HkReply> for HkReplyHandler {
-    type Error = ();
+    type Error = EcssTmtcError;
 
     fn handle_unexpected_reply(
         &mut self,
         reply: &satrs::request::GenericMessage<HkReply>,
         _tm_sender: &impl EcssTmSenderCore,
-    ) {
+    ) -> Result<(), Self::Error> {
         log::warn!("received unexpected reply for service 3: {reply:?}");
+        Ok(())
     }
 
     fn handle_reply(
@@ -60,6 +63,16 @@ impl PusReplyHandler<ActivePusRequestStd, HkReply> for HkReplyHandler {
             }
         };
         Ok(true)
+    }
+
+    fn handle_request_timeout(
+        &mut self,
+        active_request: &ActivePusRequestStd,
+        verification_handler: &impl VerificationReportingProvider,
+        time_stamp: &[u8],
+        _tm_sender: &impl EcssTmSenderCore,
+    ) -> Result<(), Self::Error> {
+        generic_pus_request_timeout_handler(active_request, verification_handler, time_stamp, "HK")
     }
 }
 

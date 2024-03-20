@@ -75,11 +75,72 @@ impl GenericActionReplyPus {
 
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
-pub mod alloc_mod {}
+pub mod alloc_mod {
+    use crate::{
+        action::ActionRequest,
+        queue::GenericTargetedMessagingError,
+        request::{
+            GenericMessage, MessageReceiver, MessageSender, MessageSenderAndReceiver, RequestId,
+        },
+        ChannelId,
+    };
+
+    use super::ActionReplyPusWithActionId;
+
+    /// Helper type definition for a mode handler which can handle mode requests.
+    pub type ActionRequestHandlerInterface<S, R> =
+        MessageSenderAndReceiver<ActionReplyPusWithActionId, ActionRequest, S, R>;
+
+    impl<S: MessageSender<ActionReplyPusWithActionId>, R: MessageReceiver<ActionRequest>>
+        ActionRequestHandlerInterface<S, R>
+    {
+        pub fn try_recv_action_request(
+            &self,
+        ) -> Result<Option<GenericMessage<ActionRequest>>, GenericTargetedMessagingError> {
+            self.try_recv_message()
+        }
+
+        pub fn send_action_reply(
+            &self,
+            request_id: RequestId,
+            target_id: ChannelId,
+            reply: ActionReplyPusWithActionId,
+        ) -> Result<(), GenericTargetedMessagingError> {
+            self.send_message(request_id, target_id, reply)
+        }
+    }
+
+    /// Helper type defintion for a mode handler object which can send mode requests and receive
+    /// mode replies.
+    pub type ActionRequestorInterface<S, R> =
+        MessageSenderAndReceiver<ActionRequest, ActionReplyPusWithActionId, S, R>;
+
+    impl<S: MessageSender<ActionRequest>, R: MessageReceiver<ActionReplyPusWithActionId>>
+        ActionRequestorInterface<S, R>
+    {
+        pub fn try_recv_action_reply(
+            &self,
+        ) -> Result<Option<GenericMessage<ActionReplyPusWithActionId>>, GenericTargetedMessagingError>
+        {
+            self.try_recv_message()
+        }
+
+        pub fn send_action_request(
+            &self,
+            request_id: RequestId,
+            target_id: ChannelId,
+            request: ActionRequest,
+        ) -> Result<(), GenericTargetedMessagingError> {
+            self.send_message(request_id, target_id, request)
+        }
+    }
+}
 
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod std_mod {
+    use std::sync::mpsc;
+
     use crate::pus::{verification, DefaultActiveRequestMap};
 
     use super::*;
@@ -115,6 +176,39 @@ pub mod std_mod {
         }
     }
     pub type DefaultActiveActionRequestMap = DefaultActiveRequestMap<ActivePusActionRequestStd>;
+
+    pub type ActionRequestHandlerMpsc = ActionRequestHandlerInterface<
+        mpsc::Sender<GenericMessage<ActionReplyPusWithActionId>>,
+        mpsc::Receiver<GenericMessage<ActionRequest>>,
+    >;
+    pub type ActionRequestHandlerMpscBounded = ActionRequestHandlerInterface<
+        mpsc::SyncSender<GenericMessage<ActionReplyPusWithActionId>>,
+        mpsc::Receiver<GenericMessage<ActionRequest>>,
+    >;
+
+    pub type ActionRequestorMpsc = ActionRequestorInterface<
+        mpsc::Sender<GenericMessage<ActionRequest>>,
+        mpsc::Receiver<GenericMessage<ActionReplyPusWithActionId>>,
+    >;
+    pub type ActionRequestorBoundedMpsc = ActionRequestorInterface<
+        mpsc::SyncSender<GenericMessage<ActionRequest>>,
+        mpsc::Receiver<GenericMessage<ActionReplyPusWithActionId>>,
+    >;
+
+    /*
+    pub type ModeRequestorAndHandlerMpsc = ModeInterface<
+        mpsc::Sender<GenericMessage<ModeRequest>>,
+        mpsc::Receiver<GenericMessage<ModeReply>>,
+        mpsc::Sender<GenericMessage<ModeReply>>,
+        mpsc::Receiver<GenericMessage<ModeRequest>>,
+    >;
+    pub type ModeRequestorAndHandlerMpscBounded = ModeInterface<
+        mpsc::SyncSender<GenericMessage<ModeRequest>>,
+        mpsc::Receiver<GenericMessage<ModeReply>>,
+        mpsc::SyncSender<GenericMessage<ModeReply>>,
+        mpsc::Receiver<GenericMessage<ModeRequest>>,
+    >;
+    */
 }
 
 #[cfg(test)]

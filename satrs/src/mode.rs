@@ -375,7 +375,8 @@ pub mod alloc_mod {
         }
     }
 
-    /// Helper type defintion for a mode handler object which can send mode requests.
+    /// Helper type defintion for a mode handler object which can send mode requests and receive
+    /// mode replies.
     pub type ModeRequestorInterface<S, R> = MessageSenderAndReceiver<ModeRequest, ModeReply, S, R>;
 
     impl<S: MessageSender<ModeRequest>, R: MessageReceiver<ModeReply>> ModeRequestorInterface<S, R> {

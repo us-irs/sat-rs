@@ -1,20 +1,22 @@
 use crate::requests::GenericRequestRouter;
 use crate::tmtc::MpscStoreAndSendError;
 use log::warn;
+use satrs::pus::action::ActivePusActionRequestStd;
 use satrs::pus::verification::{self, FailParams, VerificationReportingProvider};
 use satrs::pus::{
     ActiveRequestMapProvider, ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter,
-    EcssTcReceiverCore, EcssTmSenderCore, GenericRoutingError, PusPacketHandlerResult,
-    PusPacketHandlingError, PusReplyHandler, PusRequestRouter, PusServiceHelper,
-    PusTcToRequestConverter, TcInMemory,
+    EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError, GenericRoutingError,
+    PusPacketHandlerResult, PusPacketHandlingError, PusReplyHandler, PusRequestRouter,
+    PusServiceHelper, PusTcToRequestConverter, TcInMemory,
 };
-use satrs::request::GenericMessage;
+use satrs::request::{GenericMessage, MessageReceiver, MessageSender, MessageSenderAndReceiver};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusServiceId;
 use satrs::spacepackets::time::cds::TimeProvider;
 use satrs::spacepackets::time::TimeWriter;
 use satrs_example::config::{tmtc_err, CustomPusServiceId};
-use std::sync::mpsc::Sender;
+use std::fmt::Debug;
+use std::sync::mpsc::{self, Sender};
 
 pub mod action;
 pub mod event;
@@ -82,18 +84,21 @@ pub struct PusTargetedRequestService<
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
     RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = PusPacketHandlingError>,
-    ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType>,
+    ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType, Error = EcssTmtcError>,
     ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestInfo>,
     ActiveRequestInfo: ActiveRequestProvider,
-    RequestType,
+    RequestSender: MessageSender<RequestType>,
+    RequestType: Send,
     ReplyType,
 > {
     pub service_helper:
         PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
-    pub request_router: GenericRequestRouter,
+    //pub request_router: GenericRequestRouter,
     pub request_converter: RequestConverter,
     pub active_request_map: ActiveRequestMap,
-    pub reply_hook: ReplyHandler,
+    pub request_router_reply_receiver:
+        MessageSenderAndReceiver<RequestType, ReplyType, RequestSender, mpsc::Receiver<ReplyType>>,
+    pub reply_handler: ReplyHandler,
     phantom: std::marker::PhantomData<(RequestType, ActiveRequestInfo, ReplyType)>,
 }
 
@@ -103,10 +108,11 @@ impl<
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
         RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = PusPacketHandlingError>,
-        ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType>,
+        ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType, Error = EcssTmtcError>,
         ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestInfo>,
         ActiveRequestInfo: ActiveRequestProvider,
-        RequestType,
+        RequestSender: MessageSender<RequestType>,
+        RequestType: Send,
         ReplyType,
     >
     PusTargetedRequestService<
@@ -118,6 +124,7 @@ impl<
         ReplyHandler,
         ActiveRequestMap,
         ActiveRequestInfo,
+        RequestSender,
         RequestType,
         ReplyType,
     >
@@ -132,16 +139,21 @@ where
             VerificationReporter,
         >,
         request_converter: RequestConverter,
-        request_router: GenericRequestRouter,
         active_request_map: ActiveRequestMap,
         reply_hook: ReplyHandler,
+        request_router_reply_receiver: MessageSenderAndReceiver<
+            RequestType,
+            ReplyType,
+            RequestSender,
+            mpsc::Receiver<GenericMessage<ReplyType>>,
+        >,
     ) -> Self {
         Self {
             service_helper,
-            request_router,
             request_converter,
             active_request_map,
-            reply_hook,
+            reply_handler: reply_hook,
+            request_router_reply_receiver,
             phantom: std::marker::PhantomData,
         }
     }
@@ -166,9 +178,11 @@ where
             &self.service_helper.common.verification_handler,
         )?;
         let verif_request_id = verification::RequestId::new(&tc);
-        if let Err(e) =
-            self.request_router
-                .route(request_info.target_id(), request, ecss_tc_and_token.token)
+        if let Err(e) = self
+            .request_router_reply_receiver
+            .message_sender_map
+            .send_message(request_id, local_channel_id, target_channel_id, request)
+        // .(request_info.target_id(), request, ecss_tc_and_token.token)
         {
             let target_id = request_info.target_id();
             self.active_request_map
@@ -186,7 +200,66 @@ where
         Ok(PusPacketHandlerResult::RequestHandled)
     }
 
-    pub fn insert_reply(&mut self, reply: &GenericMessage<ReplyType>) {}
+    pub fn insert_reply(
+        &mut self,
+        reply: &GenericMessage<ReplyType>,
+        time_stamp: &[u8],
+    ) -> Result<(), EcssTmtcError> {
+        let active_req_opt = self.active_request_map.get(reply.request_id);
+        if active_req_opt.is_none() {
+            self.reply_handler
+                .handle_unexpected_reply(reply, &self.service_helper.common.tm_sender)?;
+        }
+        let active_request = active_req_opt.unwrap();
+        let request_finished = self
+            .reply_handler
+            .handle_reply(
+                reply,
+                active_request,
+                &self.service_helper.common.verification_handler,
+                time_stamp,
+                &self.service_helper.common.tm_sender,
+            )
+            .unwrap_or(false);
+        if request_finished {
+            self.active_request_map.remove(reply.request_id);
+        }
+        Ok(())
+    }
+
+    pub fn check_for_request_timeouts(&mut self) {
+        let mut requests_to_delete = Vec::new();
+        self.active_request_map
+            .for_each(|request_id, request_info| {
+                if request_info.has_timed_out() {
+                    requests_to_delete.push(*request_id);
+                }
+            });
+        if !requests_to_delete.is_empty() {
+            for request_id in requests_to_delete {
+                self.active_request_map.remove(request_id);
+            }
+        }
+    }
+}
+
+pub fn generic_pus_request_timeout_handler(
+    active_request: &(impl ActiveRequestProvider + Debug),
+    verification_handler: &impl VerificationReportingProvider,
+    time_stamp: &[u8],
+    service_str: &'static str,
+) -> Result<(), EcssTmtcError> {
+    log::warn!("timeout for active request {active_request:?} on {service_str} service");
+    verification_handler
+        .completion_failure(
+            active_request.token(),
+            FailParams::new(
+                time_stamp,
+                &satrs_example::config::tmtc_err::REQUEST_TIMEOUT,
+                &[],
+            ),
+        )
+        .map_err(|e| e.0)
 }
 
 impl<VerificationReporter: VerificationReportingProvider> PusReceiver<VerificationReporter> {
