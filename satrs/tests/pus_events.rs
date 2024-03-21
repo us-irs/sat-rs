@@ -30,7 +30,7 @@ fn test_threaded_usage() {
 
     let (pus_event_man_tx, pus_event_man_rx) = mpsc::channel();
     let pus_event_man_send_provider = EventU32SenderMpsc::new(1, pus_event_man_tx);
-    event_man.subscribe_all(pus_event_man_send_provider.channel_id());
+    event_man.subscribe_all(pus_event_man_send_provider.target_id());
     event_man.add_sender(pus_event_man_send_provider);
     let (event_tx, event_rx) = mpsc::channel();
     let reporter = EventReporter::new(0x02, 128).expect("Creating event reporter failed");

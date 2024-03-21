@@ -7,7 +7,6 @@ use satrs::mode::{
     ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestorAndHandlerMpscBounded,
     ModeRequestorBoundedMpsc,
 };
-use satrs::pus::action::ActionRequestWithId;
 use satrs::request::RequestId;
 use satrs::{
     mode::{ModeAndSubmode, ModeReply, ModeRequest},
@@ -17,7 +16,7 @@ use satrs::{
 };
 use std::string::{String, ToString};
 
-pub enum TestChannelId {
+pub enum TestComponentId {
     Device1 = 1,
     Device2 = 2,
     Assembly = 3,
@@ -34,7 +33,7 @@ impl PusModeService {
         self.mode_node
             .send_mode_request(
                 self.request_id_counter.get(),
-                TestChannelId::Assembly as u32,
+                TestComponentId::Assembly as ComponentId,
                 ModeRequest::AnnounceModeRecursive,
             )
             .unwrap();
@@ -48,7 +47,7 @@ struct TestDevice {
     pub mode_node: ModeRequestHandlerMpscBounded,
     pub mode_and_submode: ModeAndSubmode,
     pub mode_requestor_info: Option<(RequestId, ComponentId)>,
-    pub action_queue: mpsc::Receiver<GenericMessage<ActionRequest>>,
+    // pub action_queue: mpsc::Receiver<GenericMessage<ActionRequest>>,
 }
 
 pub struct ModeLeafDeviceHelper {}
@@ -249,45 +248,69 @@ fn main() {
 
     // Mode requestors and handlers.
     let mut mode_node_assy = ModeRequestorAndHandlerMpscBounded::new(
-        TestChannelId::Assembly as u32,
+        TestComponentId::Assembly as ComponentId,
         request_receiver_assy,
         reply_receiver_assy,
     );
     // Mode requestors only.
-    let mut mode_node_pus =
-        ModeRequestorBoundedMpsc::new(TestChannelId::PusModeService as u32, reply_receiver_pus);
+    let mut mode_node_pus = ModeRequestorBoundedMpsc::new(
+        TestComponentId::PusModeService as ComponentId,
+        reply_receiver_pus,
+    );
 
     // Request handlers only.
-    let mut mode_node_dev1 =
-        ModeRequestHandlerMpscBounded::new(TestChannelId::Device1 as u32, request_receiver_dev1);
-    let mut mode_node_dev2 =
-        ModeRequestHandlerMpscBounded::new(TestChannelId::Device2 as u32, request_receiver_dev2);
+    let mut mode_node_dev1 = ModeRequestHandlerMpscBounded::new(
+        TestComponentId::Device1 as ComponentId,
+        request_receiver_dev1,
+    );
+    let mut mode_node_dev2 = ModeRequestHandlerMpscBounded::new(
+        TestComponentId::Device2 as ComponentId,
+        request_receiver_dev2,
+    );
 
     // Set up mode request senders first.
-    mode_node_pus.add_message_target(TestChannelId::Assembly as u32, request_sender_to_assy);
     mode_node_pus.add_message_target(
-        TestChannelId::Device1 as u32,
+        TestComponentId::Assembly as ComponentId,
+        request_sender_to_assy,
+    );
+    mode_node_pus.add_message_target(
+        TestComponentId::Device1 as ComponentId,
         request_sender_to_dev1.clone(),
     );
     mode_node_pus.add_message_target(
-        TestChannelId::Device2 as u32,
+        TestComponentId::Device2 as ComponentId,
         request_sender_to_dev2.clone(),
     );
-    mode_node_assy.add_request_target(TestChannelId::Device1 as u32, request_sender_to_dev1);
-    mode_node_assy.add_request_target(TestChannelId::Device2 as u32, request_sender_to_dev2);
+    mode_node_assy.add_request_target(
+        TestComponentId::Device1 as ComponentId,
+        request_sender_to_dev1,
+    );
+    mode_node_assy.add_request_target(
+        TestComponentId::Device2 as ComponentId,
+        request_sender_to_dev2,
+    );
 
     // Set up mode reply senders.
-    mode_node_dev1.add_message_target(TestChannelId::Assembly as u32, reply_sender_to_assy.clone());
     mode_node_dev1.add_message_target(
-        TestChannelId::PusModeService as u32,
+        TestComponentId::Assembly as ComponentId,
+        reply_sender_to_assy.clone(),
+    );
+    mode_node_dev1.add_message_target(
+        TestComponentId::PusModeService as ComponentId,
         reply_sender_to_pus.clone(),
     );
-    mode_node_dev2.add_message_target(TestChannelId::Assembly as u32, reply_sender_to_assy);
     mode_node_dev2.add_message_target(
-        TestChannelId::PusModeService as u32,
+        TestComponentId::Assembly as ComponentId,
+        reply_sender_to_assy,
+    );
+    mode_node_dev2.add_message_target(
+        TestComponentId::PusModeService as ComponentId,
         reply_sender_to_pus.clone(),
     );
-    mode_node_assy.add_reply_target(TestChannelId::PusModeService as u32, reply_sender_to_pus);
+    mode_node_assy.add_reply_target(
+        TestComponentId::PusModeService as ComponentId,
+        reply_sender_to_pus,
+    );
 
     let mut device1 = TestDevice {
         name: "Test Device 1".to_string(),
