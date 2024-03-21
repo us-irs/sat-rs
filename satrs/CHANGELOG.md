@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - `PusServiceProvider::handle_pus_tc_packet` renamed to `PusServiceDistributor::distribute_packet`.
 - `PusServiceDistibutor` and `CcsdsDistributor` now use generics instead of trait objects.
   This makes accessing the concrete trait implementations more easy as well.
+- Major overhaul of the PUS handling module.
+- Replace `TargetId` by `ComponentId`.
+- Replace most usages of `ChannelId` by `ComponentId`. A dedicated channel ID has limited usage
+  due to the nature of typed channels in Rust.
 
 ## Fixed
 
