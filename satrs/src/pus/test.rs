@@ -12,8 +12,9 @@ use super::verification::{
 };
 use super::{
     EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiverCore,
-    EcssTmSenderCore, MpscTcReceiver, PusServiceHelper, TmAsVecSenderWithBoundedMpsc,
-    TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithMpsc,
+    EcssTmSenderCore, GenericConversionError, MpscTcReceiver, PusServiceHelper,
+    TmAsVecSenderWithBoundedMpsc, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
+    TmInSharedPoolSenderWithMpsc,
 };
 
 /// This is a helper class for [std] environments to handle generic PUS 17 (test service) packets.
@@ -55,19 +56,18 @@ impl<
             return Ok(PusPacketHandlerResult::Empty);
         }
         let ecss_tc_and_token = possible_packet.unwrap();
-        let tc = self
-            .service_helper
-            .tc_in_mem_converter
-            .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
+        self.service_helper
+            .tc_in_mem_converter_mut()
+            .cache(&ecss_tc_and_token.tc_in_memory)?;
+        let tc = self.service_helper.tc_in_mem_converter().convert()?;
         if tc.service() != 17 {
-            return Err(PusPacketHandlingError::WrongService(tc.service()));
+            return Err(GenericConversionError::WrongService(tc.service()).into());
         }
         if tc.subservice() == 1 {
             let mut partial_error = None;
             let result = self
                 .service_helper
-                .common
-                .verification_handler
+                .verif_reporter()
                 .start_success(ecss_tc_and_token.token, time_stamp)
                 .map_err(|_| PartialPusHandlingError::Verification);
             let start_token = if let Ok(result) = result {
@@ -94,8 +94,7 @@ impl<
             if let Some(start_token) = start_token {
                 if self
                     .service_helper
-                    .common
-                    .verification_handler
+                    .verif_reporter()
                     .completion_success(start_token, time_stamp)
                     .is_err()
                 {
@@ -162,8 +161,9 @@ mod tests {
     use crate::pus::verification::RequestId;
     use crate::pus::verification::{TcStateAccepted, VerificationToken};
     use crate::pus::{
-        EcssTcInSharedStoreConverter, EcssTcInVecConverter, MpscTcReceiver, PusPacketHandlerResult,
-        PusPacketHandlingError, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
+        EcssTcInSharedStoreConverter, EcssTcInVecConverter, GenericConversionError, MpscTcReceiver,
+        PusPacketHandlerResult, PusPacketHandlingError, TmAsVecSenderWithMpsc,
+        TmInSharedPoolSenderWithBoundedMpsc,
     };
     use delegate::delegate;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
@@ -320,7 +320,10 @@ mod tests {
         let result = test_harness.handle_one_tc();
         assert!(result.is_err());
         let error = result.unwrap_err();
-        if let PusPacketHandlingError::WrongService(num) = error {
+        if let PusPacketHandlingError::RequestConversion(GenericConversionError::WrongService(
+            num,
+        )) = error
+        {
             assert_eq!(num, 3);
         } else {
             panic!("unexpected error type {error}")

@@ -7,13 +7,13 @@ use satrs::hk::HkRequest;
 use satrs::mode::ModeRequest;
 use satrs::pus::action::ActionRequestWithId;
 use satrs::pus::verification::{
-    FailParams, TcStateAccepted, VerificationReportingProvider, VerificationToken,
+    FailParams, TcStateStarted, VerificationReportingProvider, VerificationToken,
 };
-use satrs::pus::{GenericRoutingError, PusRequestRouter};
+use satrs::pus::{ActiveRequestProvider, GenericRoutingError, PusRequestRouter};
 use satrs::queue::GenericSendError;
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusPacket;
-use satrs::TargetId;
+use satrs::ComponentId;
 use satrs_example::config::tmtc_err;
 
 #[allow(dead_code)]
@@ -27,21 +27,21 @@ pub enum Request {
 
 #[derive(Clone, Debug, new)]
 pub struct TargetedRequest {
-    pub(crate) target_id: TargetId,
+    pub(crate) target_id: ComponentId,
     pub(crate) request: Request,
 }
 
 #[derive(Clone, Debug)]
 pub struct RequestWithToken {
     pub(crate) targeted_request: TargetedRequest,
-    pub(crate) token: VerificationToken<TcStateAccepted>,
+    pub(crate) token: VerificationToken<TcStateStarted>,
 }
 
 impl RequestWithToken {
     pub fn new(
-        target_id: TargetId,
+        target_id: ComponentId,
         request: Request,
-        token: VerificationToken<TcStateAccepted>,
+        token: VerificationToken<TcStateStarted>,
     ) -> Self {
         Self {
             targeted_request: TargetedRequest::new(target_id, request),
@@ -51,15 +51,12 @@ impl RequestWithToken {
 }
 
 #[derive(Default, Clone)]
-pub struct GenericRequestRouter(pub HashMap<TargetId, mpsc::Sender<RequestWithToken>>);
+pub struct GenericRequestRouter(pub HashMap<ComponentId, mpsc::Sender<RequestWithToken>>);
 
 impl GenericRequestRouter {
-    fn handle_error_generic(
+    pub(crate) fn handle_error_generic(
         &self,
-        target_id: satrs::TargetId,
-        token: satrs::pus::verification::VerificationToken<
-            satrs::pus::verification::TcStateAccepted,
-        >,
+        active_request: &impl ActiveRequestProvider,
         tc: &PusTcReader,
         error: GenericRoutingError,
         time_stamp: &[u8],
@@ -74,29 +71,19 @@ impl GenericRequestRouter {
                 let mut fail_data: [u8; 8] = [0; 8];
                 fail_data.copy_from_slice(&id.to_be_bytes());
                 verif_reporter
-                    .start_failure(
-                        token,
+                    .completion_failure(
+                        active_request.token(),
                         FailParams::new(time_stamp, &tmtc_err::UNKNOWN_TARGET_ID, &fail_data),
                     )
                     .expect("Sending start failure failed");
             }
-            GenericRoutingError::SendError(_) => {
+            GenericRoutingError::Send(_) => {
                 let mut fail_data: [u8; 8] = [0; 8];
-                fail_data.copy_from_slice(&target_id.to_be_bytes());
+                fail_data.copy_from_slice(&active_request.target_id().to_be_bytes());
                 verif_reporter
-                    .start_failure(
-                        token,
+                    .completion_failure(
+                        active_request.token(),
                         FailParams::new(time_stamp, &tmtc_err::ROUTING_ERROR, &fail_data),
-                    )
-                    .expect("Sending start failure failed");
-            }
-            GenericRoutingError::NotEnoughAppData { expected, found } => {
-                let mut context_info = (found as u32).to_be_bytes().to_vec();
-                context_info.extend_from_slice(&(expected as u32).to_be_bytes());
-                verif_reporter
-                    .start_failure(
-                        token,
-                        FailParams::new(time_stamp, &tmtc_err::NOT_ENOUGH_APP_DATA, &context_info),
                     )
                     .expect("Sending start failure failed");
             }
@@ -108,9 +95,9 @@ impl PusRequestRouter<HkRequest> for GenericRequestRouter {
 
     fn route(
         &self,
-        target_id: TargetId,
+        target_id: ComponentId,
         hk_request: HkRequest,
-        token: VerificationToken<TcStateAccepted>,
+        token: VerificationToken<TcStateStarted>,
     ) -> Result<(), Self::Error> {
         if let Some(sender) = self.0.get(&target_id) {
             sender
@@ -119,22 +106,9 @@ impl PusRequestRouter<HkRequest> for GenericRequestRouter {
                     Request::Hk(hk_request),
                     token,
                 ))
-                .map_err(|_| GenericRoutingError::SendError(GenericSendError::RxDisconnected))?;
+                .map_err(|_| GenericRoutingError::Send(GenericSendError::RxDisconnected))?;
         }
         Ok(())
-    }
-    fn handle_error(
-        &self,
-        target_id: satrs::TargetId,
-        token: satrs::pus::verification::VerificationToken<
-            satrs::pus::verification::TcStateAccepted,
-        >,
-        tc: &PusTcReader,
-        error: GenericRoutingError,
-        time_stamp: &[u8],
-        verif_reporter: &impl VerificationReportingProvider,
-    ) {
-        self.handle_error_generic(target_id, token, tc, error, time_stamp, verif_reporter)
     }
 }
 
@@ -143,9 +117,9 @@ impl PusRequestRouter<ActionRequestWithId> for GenericRequestRouter {
 
     fn route(
         &self,
-        target_id: TargetId,
+        target_id: ComponentId,
         action_request: ActionRequestWithId,
-        token: VerificationToken<TcStateAccepted>,
+        token: VerificationToken<TcStateStarted>,
     ) -> Result<(), Self::Error> {
         if let Some(sender) = self.0.get(&target_id) {
             sender
@@ -154,21 +128,8 @@ impl PusRequestRouter<ActionRequestWithId> for GenericRequestRouter {
                     Request::Action(action_request),
                     token,
                 ))
-                .map_err(|_| GenericRoutingError::SendError(GenericSendError::RxDisconnected))?;
+                .map_err(|_| GenericRoutingError::Send(GenericSendError::RxDisconnected))?;
         }
         Ok(())
-    }
-    fn handle_error(
-        &self,
-        target_id: satrs::TargetId,
-        token: satrs::pus::verification::VerificationToken<
-            satrs::pus::verification::TcStateAccepted,
-        >,
-        tc: &PusTcReader,
-        error: GenericRoutingError,
-        time_stamp: &[u8],
-        verif_reporter: &impl VerificationReportingProvider,
-    ) {
-        self.handle_error_generic(target_id, token, tc, error, time_stamp, verif_reporter)
     }
 }

@@ -35,7 +35,6 @@ pub mod hal;
 #[cfg(feature = "std")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod mode_tree;
-pub mod objects;
 pub mod pool;
 pub mod power;
 pub mod pus;
@@ -55,5 +54,5 @@ pub use spacepackets;
 
 pub use queue::ChannelId;
 
-/// Generic target ID type.
-pub type TargetId = u64;
+/// Generic component ID type.
+pub type ComponentId = u64;

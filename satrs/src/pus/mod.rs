@@ -6,7 +6,7 @@ use crate::pool::{StoreAddr, StoreError};
 use crate::pus::verification::{TcStateAccepted, TcStateToken, VerificationToken};
 use crate::queue::{GenericReceiveError, GenericSendError};
 use crate::request::{GenericMessage, RequestId};
-use crate::{ChannelId, TargetId};
+use crate::{ChannelId, ComponentId};
 use core::fmt::{Display, Formatter};
 use core::time::Duration;
 #[cfg(feature = "alloc")]
@@ -287,7 +287,7 @@ pub trait ActiveRequestMapProvider<V>: Sized {
 }
 
 pub trait ActiveRequestProvider {
-    fn target_id(&self) -> TargetId;
+    fn target_id(&self) -> ComponentId;
     fn token(&self) -> VerificationToken<TcStateStarted>;
     fn has_timed_out(&self) -> bool;
     fn timeout(&self) -> Duration;
@@ -300,25 +300,17 @@ pub trait PusRequestRouter<Request> {
 
     fn route(
         &self,
-        target_id: TargetId,
+        target_id: ComponentId,
         request: Request,
-        token: VerificationToken<TcStateAccepted>,
+        token: VerificationToken<TcStateStarted>,
     ) -> Result<(), Self::Error>;
-
-    fn handle_error(
-        &self,
-        target_id: TargetId,
-        token: VerificationToken<TcStateAccepted>,
-        tc: &PusTcReader,
-        error: Self::Error,
-        time_stamp: &[u8],
-        verif_reporter: &impl VerificationReportingProvider,
-    );
 }
 
 pub trait PusReplyHandler<ActiveRequestInfo: ActiveRequestProvider, ReplyType> {
     type Error;
 
+    /// This function handles a reply for a given PUS request and returns whether that request
+    /// is finished. A finished PUS request will be removed from the active request map.
     fn handle_reply(
         &mut self,
         reply: &GenericMessage<ReplyType>,
@@ -334,6 +326,7 @@ pub trait PusReplyHandler<ActiveRequestInfo: ActiveRequestProvider, ReplyType> {
         tm_sender: &impl EcssTmSenderCore,
     ) -> Result<(), Self::Error>;
 
+    /// Handle the timeout of an active request.
     fn handle_request_timeout(
         &mut self,
         active_request: &ActiveRequestInfo,
@@ -656,13 +649,14 @@ pub mod std_mod {
         GenericReceiveError, GenericSendError, PusTmWrapper, TryRecvTmtcError,
     };
     use crate::tmtc::tm_helper::SharedTmPool;
-    use crate::{ChannelId, TargetId};
+    use crate::{ChannelId, ComponentId};
     use alloc::vec::Vec;
     use core::time::Duration;
     use spacepackets::ecss::tc::PusTcReader;
     use spacepackets::ecss::tm::PusTmCreator;
-    use spacepackets::ecss::{PusError, WritablePusPacket};
+    use spacepackets::ecss::WritablePusPacket;
     use spacepackets::time::StdTimestampError;
+    use spacepackets::ByteConversionError;
     use std::string::String;
     use std::sync::mpsc;
     use std::sync::mpsc::TryRecvError;
@@ -1059,7 +1053,7 @@ pub mod std_mod {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ActivePusRequestStd {
-        target_id: TargetId,
+        target_id: ComponentId,
         token: VerificationToken<TcStateStarted>,
         start_time: std::time::Instant,
         timeout: Duration,
@@ -1067,7 +1061,7 @@ pub mod std_mod {
 
     impl ActivePusRequestStd {
         pub fn new(
-            target_id: TargetId,
+            target_id: ComponentId,
             token: VerificationToken<TcStateStarted>,
             timeout: Duration,
         ) -> Self {
@@ -1081,7 +1075,7 @@ pub mod std_mod {
     }
 
     impl ActiveRequestProvider for ActivePusRequestStd {
-        fn target_id(&self) -> TargetId {
+        fn target_id(&self) -> ComponentId {
             self.target_id
         }
         fn token(&self) -> VerificationToken<TcStateStarted> {
@@ -1102,37 +1096,52 @@ pub mod std_mod {
     // will be no_std soon, see https://github.com/rust-lang/rust/issues/103765 .
 
     #[derive(Debug, Clone, Error)]
-    pub enum GenericRoutingError {
-        #[error("not enough application data, expected at least {expected}, found {found}")]
-        NotEnoughAppData { expected: usize, found: usize },
-        #[error("Unknown target ID {0}")]
-        UnknownTargetId(TargetId),
-        #[error("Sending action request failed: {0}")]
-        SendError(GenericSendError),
+    pub enum PusTcFromMemError {
+        #[error("generic PUS error: {0}")]
+        EcssTmtc(#[from] EcssTmtcError),
+        #[error("invalid format of TC in memory: {0:?}")]
+        InvalidFormat(TcInMemory),
     }
 
     #[derive(Debug, Clone, Error)]
-    pub enum PusPacketHandlingError {
-        #[error("generic PUS error: {0}")]
-        Pus(#[from] PusError),
+    pub enum GenericRoutingError {
+        // #[error("not enough application data, expected at least {expected}, found {found}")]
+        // NotEnoughAppData { expected: usize, found: usize },
+        #[error("Unknown target ID {0}")]
+        UnknownTargetId(ComponentId),
+        #[error("Sending action request failed: {0}")]
+        Send(GenericSendError),
+    }
+
+    /// This error can be used for generic conversions from PUS Telecommands to request types.
+    ///
+    /// Please note that this error can also be used if no request is generated and the PUS
+    /// service, subservice and application data is used directly to perform some request.
+    #[derive(Debug, Clone, Error)]
+    pub enum GenericConversionError {
         #[error("wrong service number {0} for packet handler")]
         WrongService(u8),
         #[error("invalid subservice {0}")]
         InvalidSubservice(u8),
         #[error("not enough application data, expected at least {expected}, found {found}")]
         NotEnoughAppData { expected: usize, found: usize },
-        #[error("PUS packet too large, does not fit in buffer: {0}")]
-        PusPacketTooLarge(usize),
         #[error("invalid application data")]
         InvalidAppData(String),
-        #[error("invalid format of TC in memory: {0:?}")]
-        InvalidTcInMemoryFormat(TcInMemory),
-        #[error("generic ECSS tmtc error: {0}")]
-        EcssTmtc(#[from] EcssTmtcError),
+    }
+
+    /// Wrapper type which tries to encapsulate all possible errors when handling PUS packets.
+    #[derive(Debug, Clone, Error)]
+    pub enum PusPacketHandlingError {
+        #[error("error polling PUS TC packet: {0}")]
+        TcPolling(#[from] EcssTmtcError),
+        #[error("error generating PUS reader from memory: {0}")]
+        TcFromMem(#[from] PusTcFromMemError),
+        #[error("generic request conversion error: {0}")]
+        RequestConversion(#[from] GenericConversionError),
+        #[error("request routing error: {0}")]
+        RequestRouting(#[from] GenericRoutingError),
         #[error("invalid verification token")]
         InvalidVerificationToken,
-        #[error("request routing error: {0}")]
-        RequestRoutingError(#[from] GenericRoutingError),
         #[error("other error {0}")]
         Other(String),
     }
@@ -1166,19 +1175,24 @@ pub mod std_mod {
     }
 
     pub trait EcssTcInMemConverter {
-        fn cache_ecss_tc_in_memory(
-            &mut self,
-            possible_packet: &TcInMemory,
-        ) -> Result<(), PusPacketHandlingError>;
+        fn cache(&mut self, possible_packet: &TcInMemory) -> Result<(), PusTcFromMemError>;
 
         fn tc_slice_raw(&self) -> &[u8];
 
-        fn convert_ecss_tc_in_memory_to_reader(
+        fn cache_and_convert(
             &mut self,
             possible_packet: &TcInMemory,
-        ) -> Result<PusTcReader<'_>, PusPacketHandlingError> {
-            self.cache_ecss_tc_in_memory(possible_packet)?;
-            Ok(PusTcReader::new(self.tc_slice_raw())?.0)
+        ) -> Result<PusTcReader<'_>, PusTcFromMemError> {
+            self.cache(possible_packet)?;
+            Ok(PusTcReader::new(self.tc_slice_raw())
+                .map_err(EcssTmtcError::Pus)?
+                .0)
+        }
+
+        fn convert(&self) -> Result<PusTcReader<'_>, PusTcFromMemError> {
+            Ok(PusTcReader::new(self.tc_slice_raw())
+                .map_err(EcssTmtcError::Pus)?
+                .0)
         }
     }
 
@@ -1191,16 +1205,11 @@ pub mod std_mod {
     }
 
     impl EcssTcInMemConverter for EcssTcInVecConverter {
-        fn cache_ecss_tc_in_memory(
-            &mut self,
-            tc_in_memory: &TcInMemory,
-        ) -> Result<(), PusPacketHandlingError> {
+        fn cache(&mut self, tc_in_memory: &TcInMemory) -> Result<(), PusTcFromMemError> {
             self.pus_tc_raw = None;
             match tc_in_memory {
                 super::TcInMemory::StoreAddr(_) => {
-                    return Err(PusPacketHandlingError::InvalidTcInMemoryFormat(
-                        tc_in_memory.clone(),
-                    ));
+                    return Err(PusTcFromMemError::InvalidFormat(tc_in_memory.clone()));
                 }
                 super::TcInMemory::Vec(vec) => {
                     self.pus_tc_raw = Some(vec.clone());
@@ -1234,16 +1243,20 @@ pub mod std_mod {
             }
         }
 
-        pub fn copy_tc_to_buf(&mut self, addr: StoreAddr) -> Result<(), PusPacketHandlingError> {
+        pub fn copy_tc_to_buf(&mut self, addr: StoreAddr) -> Result<(), PusTcFromMemError> {
             // Keep locked section as short as possible.
             let mut tc_pool = self.shared_tc_store.write().map_err(|_| {
-                PusPacketHandlingError::EcssTmtc(EcssTmtcError::Store(StoreError::LockError))
+                PusTcFromMemError::EcssTmtc(EcssTmtcError::Store(StoreError::LockError))
             })?;
-            let tc_size = tc_pool
-                .len_of_data(&addr)
-                .map_err(|e| PusPacketHandlingError::EcssTmtc(EcssTmtcError::Store(e)))?;
+            let tc_size = tc_pool.len_of_data(&addr).map_err(EcssTmtcError::Store)?;
             if tc_size > self.pus_buf.len() {
-                return Err(PusPacketHandlingError::PusPacketTooLarge(tc_size));
+                return Err(
+                    EcssTmtcError::ByteConversion(ByteConversionError::ToSliceTooSmall {
+                        found: self.pus_buf.len(),
+                        expected: tc_size,
+                    })
+                    .into(),
+                );
             }
             let tc_guard = tc_pool.read_with_guard(addr);
             // TODO: Proper error handling.
@@ -1253,18 +1266,13 @@ pub mod std_mod {
     }
 
     impl EcssTcInMemConverter for EcssTcInSharedStoreConverter {
-        fn cache_ecss_tc_in_memory(
-            &mut self,
-            tc_in_memory: &TcInMemory,
-        ) -> Result<(), PusPacketHandlingError> {
+        fn cache(&mut self, tc_in_memory: &TcInMemory) -> Result<(), PusTcFromMemError> {
             match tc_in_memory {
                 super::TcInMemory::StoreAddr(addr) => {
                     self.copy_tc_to_buf(*addr)?;
                 }
                 super::TcInMemory::Vec(_) => {
-                    return Err(PusPacketHandlingError::InvalidTcInMemoryFormat(
-                        tc_in_memory.clone(),
-                    ));
+                    return Err(PusTcFromMemError::InvalidFormat(tc_in_memory.clone()));
                 }
             };
             Ok(())
@@ -1283,7 +1291,7 @@ pub mod std_mod {
         pub tc_receiver: TcReceiver,
         pub tm_sender: TmSender,
         pub tm_apid: u16,
-        pub verification_handler: VerificationReporter,
+        pub verif_reporter: VerificationReporter,
     }
 
     /// This is a high-level PUS packet handler helper.
@@ -1324,7 +1332,7 @@ pub mod std_mod {
                     tc_receiver,
                     tm_sender,
                     tm_apid,
-                    verification_handler,
+                    verif_reporter: verification_handler,
                 },
                 tc_in_mem_converter,
             }
@@ -1355,10 +1363,22 @@ pub mod std_mod {
                     }))
                 }
                 Err(e) => match e {
-                    TryRecvTmtcError::Tmtc(e) => Err(PusPacketHandlingError::EcssTmtc(e)),
+                    TryRecvTmtcError::Tmtc(e) => Err(PusPacketHandlingError::TcPolling(e)),
                     TryRecvTmtcError::Empty => Ok(None),
                 },
             }
+        }
+
+        pub fn verif_reporter(&self) -> &VerificationReporter {
+            &self.common.verif_reporter
+        }
+
+        pub fn tc_in_mem_converter(&self) -> &TcInMemConverter {
+            &self.tc_in_mem_converter
+        }
+
+        pub fn tc_in_mem_converter_mut(&mut self) -> &mut TcInMemConverter {
+            &mut self.tc_in_mem_converter
         }
     }
 
@@ -1423,7 +1443,7 @@ pub mod tests {
     };
     use crate::pus::verification::RequestId;
     use crate::tmtc::tm_helper::SharedTmPool;
-    use crate::TargetId;
+    use crate::ComponentId;
 
     use super::verification::std_mod::{
         VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
@@ -1434,9 +1454,9 @@ pub mod tests {
         VerificationReportingProvider, VerificationToken,
     };
     use super::{
-        EcssTcAndToken, EcssTcInSharedStoreConverter, EcssTcInVecConverter, GenericRoutingError,
-        MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError, PusServiceHelper,
-        TcInMemory, TmAsVecSenderWithId, TmAsVecSenderWithMpsc,
+        EcssTcAndToken, EcssTcInSharedStoreConverter, EcssTcInVecConverter, GenericConversionError,
+        GenericRoutingError, MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError,
+        PusServiceHelper, TcInMemory, TmAsVecSenderWithId, TmAsVecSenderWithMpsc,
         TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
     };
 
@@ -1732,7 +1752,9 @@ pub mod tests {
     impl<const SERVICE: u8> TestConverter<SERVICE> {
         pub fn check_service(&self, tc: &PusTcReader) -> Result<(), PusPacketHandlingError> {
             if tc.service() != SERVICE {
-                return Err(PusPacketHandlingError::WrongService(tc.service()));
+                return Err(PusPacketHandlingError::RequestConversion(
+                    GenericConversionError::WrongService(tc.service()),
+                ));
             }
             Ok(())
         }
@@ -1751,8 +1773,8 @@ pub mod tests {
     }
 
     pub struct TestRouter<REQUEST> {
-        pub routing_requests: RefCell<VecDeque<(TargetId, REQUEST)>>,
-        pub routing_errors: RefCell<VecDeque<(TargetId, GenericRoutingError)>>,
+        pub routing_requests: RefCell<VecDeque<(ComponentId, REQUEST)>>,
+        pub routing_errors: RefCell<VecDeque<(ComponentId, GenericRoutingError)>>,
         pub injected_routing_failure: RefCell<Option<GenericRoutingError>>,
     }
 
@@ -1776,7 +1798,7 @@ pub mod tests {
 
         pub fn handle_error(
             &self,
-            target_id: TargetId,
+            target_id: ComponentId,
             _token: VerificationToken<TcStateAccepted>,
             _tc: &PusTcReader,
             error: GenericRoutingError,
@@ -1792,7 +1814,7 @@ pub mod tests {
             self.routing_errors.borrow().is_empty()
         }
 
-        pub fn retrieve_next_routing_error(&mut self) -> (TargetId, GenericRoutingError) {
+        pub fn retrieve_next_routing_error(&mut self) -> (ComponentId, GenericRoutingError) {
             if self.routing_errors.borrow().is_empty() {
                 panic!("no routing request available");
             }
@@ -1807,7 +1829,7 @@ pub mod tests {
             self.routing_requests.borrow().is_empty()
         }
 
-        pub fn retrieve_next_request(&mut self) -> (TargetId, REQUEST) {
+        pub fn retrieve_next_request(&mut self) -> (ComponentId, REQUEST) {
             if self.routing_requests.borrow().is_empty() {
                 panic!("no routing request available");
             }

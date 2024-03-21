@@ -8,12 +8,12 @@ use satrs::pus::verification::{
 use satrs::pus::{
     ActivePusRequestStd, ActiveRequestProvider, DefaultActiveRequestMap, EcssTcAndToken,
     EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiverCore,
-    EcssTmSenderCore, EcssTmtcError, MpscTcReceiver, PusPacketHandlerResult,
-    PusPacketHandlingError, PusReplyHandler, PusServiceHelper, PusTcToRequestConverter,
+    EcssTmSenderCore, EcssTmtcError, GenericConversionError, MpscTcReceiver,
+    PusPacketHandlerResult, PusReplyHandler, PusServiceHelper, PusTcToRequestConverter,
     TmAsVecSenderWithId, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
     TmInSharedPoolSenderWithId,
 };
-use satrs::request::{TargetAndApidId, GenericMessage};
+use satrs::request::{GenericMessage, TargetAndApidId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{hk, PusPacket};
 use satrs::tmtc::tm_helper::SharedTmPool;
@@ -59,7 +59,7 @@ impl PusReplyHandler<ActivePusRequestStd, HkReply> for HkReplyHandler {
             HkReply::Ack => {
                 verification_handler
                     .completion_success(active_request.token(), time_stamp)
-                    .expect("Sending end success TM failed");
+                    .expect("sending completio success verification failed");
             }
         };
         Ok(true)
@@ -72,7 +72,13 @@ impl PusReplyHandler<ActivePusRequestStd, HkReply> for HkReplyHandler {
         time_stamp: &[u8],
         _tm_sender: &impl EcssTmSenderCore,
     ) -> Result<(), Self::Error> {
-        generic_pus_request_timeout_handler(active_request, verification_handler, time_stamp, "HK")
+        generic_pus_request_timeout_handler(
+            active_request,
+            verification_handler,
+            time_stamp,
+            "HK",
+        )?;
+        Ok(())
     }
 }
 
@@ -89,7 +95,7 @@ impl Default for ExampleHkRequestConverter {
 }
 
 impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for ExampleHkRequestConverter {
-    type Error = PusPacketHandlingError;
+    type Error = GenericConversionError;
 
     fn convert(
         &mut self,
@@ -112,7 +118,7 @@ impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for ExampleHkReques
                     ),
                 )
                 .expect("Sending start failure TM failed");
-            return Err(PusPacketHandlingError::NotEnoughAppData {
+            return Err(GenericConversionError::NotEnoughAppData {
                 expected: 4,
                 found: 0,
             });
@@ -128,7 +134,7 @@ impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for ExampleHkReques
             verif_reporter
                 .start_failure(token, FailParams::new(time_stamp, err, &user_data_len_raw))
                 .expect("Sending start failure TM failed");
-            return Err(PusPacketHandlingError::NotEnoughAppData {
+            return Err(GenericConversionError::NotEnoughAppData {
                 expected: 8,
                 found: 4,
             });
@@ -145,7 +151,7 @@ impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for ExampleHkReques
                     FailParams::new(time_stamp, &tmtc_err::INVALID_PUS_SUBSERVICE, &[subservice]),
                 )
                 .expect("Sending start failure TM failed");
-            return Err(PusPacketHandlingError::InvalidSubservice(subservice));
+            return Err(GenericConversionError::InvalidSubservice(subservice));
         }
         let request = match standard_subservice.unwrap() {
             hk::Subservice::TcEnableHkGeneration | hk::Subservice::TcEnableDiagGeneration => {
@@ -171,7 +177,7 @@ impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for ExampleHkReques
                             ),
                         )
                         .expect("Sending start failure TM failed");
-                    return Err(PusPacketHandlingError::NotEnoughAppData {
+                    return Err(GenericConversionError::NotEnoughAppData {
                         expected: 12,
                         found: user_data.len(),
                     });
@@ -192,12 +198,13 @@ impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for ExampleHkReques
                         ),
                     )
                     .expect("Sending start failure TM failed");
-                return Err(PusPacketHandlingError::InvalidSubservice(subservice));
+                return Err(GenericConversionError::InvalidSubservice(subservice));
             }
         };
         let token = verif_reporter
             .start_success(token, time_stamp)
-            .map_err(|e| e.0)?;
+            .expect("Sending start success verification failed");
+
         Ok((
             ActivePusRequestStd::new(target_id_and_apid.into(), token, self.timeout),
             request,
@@ -239,9 +246,11 @@ pub fn create_hk_service_static(
         DefaultActiveRequestMap::default(),
         HkReplyHandler::default(),
         request_router,
-        reply_receiver
+        reply_receiver,
     );
-    Pus3Wrapper { pus_3_handler }
+    Pus3Wrapper {
+        service: pus_3_handler,
+    }
 }
 
 pub fn create_hk_service_dynamic(
@@ -275,9 +284,11 @@ pub fn create_hk_service_dynamic(
         DefaultActiveRequestMap::default(),
         HkReplyHandler::default(),
         request_router,
-        reply_receiver
+        reply_receiver,
     );
-    Pus3Wrapper { pus_3_handler }
+    Pus3Wrapper {
+        service: pus_3_handler,
+    }
 }
 
 pub struct Pus3Wrapper<
@@ -286,7 +297,7 @@ pub struct Pus3Wrapper<
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
-    pub(crate) pus_3_handler: PusTargetedRequestService<
+    pub(crate) service: PusTargetedRequestService<
         TcReceiver,
         TmSender,
         TcInMemConverter,
@@ -307,8 +318,8 @@ impl<
         VerificationReporter: VerificationReportingProvider,
     > Pus3Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
-    pub fn handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
-        match self.pus_3_handler.handle_one_tc(time_stamp) {
+    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+        match self.service.poll_and_handle_next_tc(time_stamp) {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {
@@ -329,5 +340,15 @@ impl<
             }
         }
         false
+    }
+
+    pub fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> bool {
+        match self.service.poll_and_check_next_reply(time_stamp) {
+            Ok(packet_handled) => packet_handled,
+            Err(e) => {
+                log::warn!("PUS 3: Handling reply failed with error {e:?}");
+                false
+            }
+        }
     }
 }

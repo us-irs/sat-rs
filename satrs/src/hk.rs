@@ -1,7 +1,4 @@
-use crate::{
-    pus::verification::{TcStateAccepted, VerificationToken},
-    TargetId,
-};
+use crate::ComponentId;
 
 pub type CollectionIntervalFactor = u32;
 pub type UniqueId = u32;
@@ -16,25 +13,15 @@ pub enum HkRequest {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct TargetedHkRequest {
-    pub target_id: TargetId,
+    pub target_id: ComponentId,
     pub hk_request: HkRequest,
 }
 
 impl TargetedHkRequest {
-    pub fn new(target_id: TargetId, hk_request: HkRequest) -> Self {
+    pub fn new(target_id: ComponentId, hk_request: HkRequest) -> Self {
         Self {
             target_id,
             hk_request,
         }
     }
-}
-
-pub trait PusHkRequestRouter {
-    type Error;
-    fn route(
-        &self,
-        target_id: TargetId,
-        hk_request: HkRequest,
-        token: VerificationToken<TcStateAccepted>,
-    ) -> Result<(), Self::Error>;
 }

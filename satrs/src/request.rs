@@ -15,7 +15,7 @@ use spacepackets::{
     ByteConversionError, CcsdsPacket,
 };
 
-use crate::{queue::GenericTargetedMessagingError, ChannelId, TargetId};
+use crate::{queue::GenericTargetedMessagingError, ChannelId, ComponentId};
 
 /// Generic request ID type. Requests can be associated with an ID to have a unique identifier
 /// for them. This can be useful for tasks like tracking their progress.
@@ -35,11 +35,11 @@ impl TargetAndApidId {
         Self { apid, target }
     }
 
-    pub fn raw(&self) -> TargetId {
+    pub fn raw(&self) -> ComponentId {
         ((self.apid as u64) << 32) | (self.target as u64)
     }
 
-    pub fn full_target_id(&self) -> TargetId {
+    pub fn full_target_id(&self) -> ComponentId {
         self.raw()
     }
 

@@ -170,7 +170,7 @@ fn static_tmtc_pool_main() {
         shared_tc_pool.pool.clone(),
         pus_hk_rx,
         request_map,
-        pus_hk_reply_rx
+        pus_hk_reply_rx,
     );
     let mut pus_stack = PusStack::new(
         pus_hk_service,
@@ -390,7 +390,7 @@ fn dyn_tmtc_pool_main() {
         verif_reporter.clone(),
         pus_hk_rx,
         request_map,
-        pus_hk_reply_rx
+        pus_hk_reply_rx,
     );
     let mut pus_stack = PusStack::new(
         pus_hk_service,

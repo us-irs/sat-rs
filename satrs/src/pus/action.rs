@@ -2,7 +2,7 @@ use crate::{
     action::{ActionId, ActionRequest},
     params::Params,
     request::{GenericMessage, RequestId},
-    ChannelId, TargetId,
+    ChannelId,
 };
 
 use super::{verification::VerificationToken, ActivePusRequestStd, ActiveRequestProvider};
@@ -141,7 +141,10 @@ pub mod alloc_mod {
 pub mod std_mod {
     use std::sync::mpsc;
 
-    use crate::pus::{verification, DefaultActiveRequestMap};
+    use crate::{
+        pus::{verification, DefaultActiveRequestMap},
+        ComponentId,
+    };
 
     use super::*;
 
@@ -154,7 +157,7 @@ pub mod std_mod {
     impl ActiveRequestProvider for ActivePusActionRequestStd {
         delegate! {
             to self.common {
-                fn target_id(&self) -> TargetId;
+                fn target_id(&self) -> ComponentId;
                 fn token(&self) -> VerificationToken<verification::TcStateStarted>;
                 fn has_timed_out(&self) -> bool;
                 fn timeout(&self) -> core::time::Duration;
@@ -165,7 +168,7 @@ pub mod std_mod {
     impl ActivePusActionRequestStd {
         pub fn new(
             action_id: ActionId,
-            target_id: TargetId,
+            target_id: ComponentId,
             token: VerificationToken<verification::TcStateStarted>,
             timeout: core::time::Duration,
         ) -> Self {

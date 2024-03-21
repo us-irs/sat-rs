@@ -1,16 +1,17 @@
 use crate::requests::GenericRequestRouter;
 use crate::tmtc::MpscStoreAndSendError;
 use log::warn;
-use satrs::pus::action::ActivePusActionRequestStd;
-use satrs::pus::verification::{self, FailParams, VerificationReportingProvider};
+use satrs::pus::verification::{
+    self, FailParams, TcStateAccepted, VerificationReportingProvider, VerificationToken,
+};
 use satrs::pus::{
     ActiveRequestMapProvider, ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter,
-    EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError, GenericRoutingError,
-    PusPacketHandlerResult, PusPacketHandlingError, PusReplyHandler, PusRequestRouter,
-    PusServiceHelper, PusTcToRequestConverter, TcInMemory,
+    EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError, GenericConversionError,
+    GenericRoutingError, PusPacketHandlerResult, PusPacketHandlingError, PusReplyHandler,
+    PusRequestRouter, PusServiceHelper, PusTcToRequestConverter, TcInMemory,
 };
 use satrs::queue::GenericReceiveError;
-use satrs::request::{GenericMessage, MessageReceiver, MessageSender, MessageSenderAndReceiver};
+use satrs::request::GenericMessage;
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusServiceId;
 use satrs::spacepackets::time::cds::TimeProvider;
@@ -79,12 +80,32 @@ impl<VerificationReporter: VerificationReportingProvider> PusReceiver<Verificati
     }
 }
 
+/// This is a generic handler class for all PUS services where a PUS telecommand is converted
+/// to a targeted request.
+///
+/// The generic steps for this process are the following
+///
+///  1. Poll for TC packets
+///  2. Convert the raw packets to a [PusTcReader].
+///  3. Convert the PUS TC to a typed request using the [PusTcToRequestConverter].
+///  4. Route the requests using the [GenericRequestRouter].
+///  5. Add the request to the active request map using the [ActiveRequestMapProvider] abstraction.
+///  6. Check for replies which complete the forwarded request. The handler takes care of
+///     the verification process.
+///  7. Check for timeouts of active requests. Generally, the timeout on the service level should
+///     be highest expected timeout for the given target.
+///
+/// The handler exposes the following API:
+///
+///  1. [Self::handle_one_tc] which tries to poll and handle one TC packet, covering steps 1-5.
+///  2. [Self::check_one_reply] which tries to poll and handle one reply, covering step 6.
+///  3. [Self::check_for_request_timeouts] which checks for request timeouts, covering step 7.
 pub struct PusTargetedRequestService<
     TcReceiver: EcssTcReceiverCore,
     TmSender: EcssTmSenderCore,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
-    RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = PusPacketHandlingError>,
+    RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = GenericConversionError>,
     ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType, Error = EcssTmtcError>,
     ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestInfo>,
     ActiveRequestInfo: ActiveRequestProvider,
@@ -106,7 +127,7 @@ impl<
         TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
-        RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = PusPacketHandlingError>,
+        RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = GenericConversionError>,
         ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType, Error = EcssTmtcError>,
         ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestInfo>,
         ActiveRequestInfo: ActiveRequestProvider,
@@ -152,7 +173,7 @@ where
         }
     }
 
-    pub fn handle_one_tc(
+    pub fn poll_and_handle_next_tc(
         &mut self,
         time_stamp: &[u8],
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
@@ -161,52 +182,103 @@ where
             return Ok(PusPacketHandlerResult::Empty);
         }
         let ecss_tc_and_token = possible_packet.unwrap();
-        let tc = self
-            .service_helper
-            .tc_in_mem_converter
-            .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
-        let (request_info, request) = self.request_converter.convert(
+        self.service_helper
+            .tc_in_mem_converter_mut()
+            .cache(&ecss_tc_and_token.tc_in_memory)?;
+        let tc = self.service_helper.tc_in_mem_converter().convert()?;
+        let (request_info, request) = match self.request_converter.convert(
             ecss_tc_and_token.token,
             &tc,
             time_stamp,
-            &self.service_helper.common.verification_handler,
-        )?;
+            &self.service_helper.common.verif_reporter,
+        ) {
+            Ok((info, req)) => (info, req),
+            Err(e) => {
+                self.handle_conversion_to_request_error(&e, ecss_tc_and_token.token, time_stamp);
+                return Err(e.into());
+            }
+        };
         let verif_request_id = verification::RequestId::new(&tc);
-        if let Err(e) =
-            self.request_router
-                .route(request_info.target_id(), request, request_info.token())
+        //if let Err(e) =
+        match self
+            .request_router
+            .route(request_info.target_id(), request, request_info.token())
         {
-            let target_id = request_info.target_id();
-            self.active_request_map
-                .insert(&verif_request_id.into(), request_info);
-            self.request_router.handle_error(
-                target_id,
-                request_info.token(),
-                &tc,
-                e.clone(),
-                time_stamp,
-                &self.service_helper.common.verification_handler,
-            );
-            return Err(e.into());
+            Ok(()) => {
+                self.active_request_map
+                    .insert(&verif_request_id.into(), request_info);
+            }
+            Err(e) => {
+                self.request_router.handle_error_generic(
+                    &request_info,
+                    &tc,
+                    e,
+                    time_stamp,
+                    self.service_helper.verif_reporter(),
+                );
+            }
         }
         Ok(PusPacketHandlerResult::RequestHandled)
     }
 
-    pub fn check_one_reply(&mut self, time_stamp: &[u8]) -> Result<bool, EcssTmtcError> {
+    fn handle_conversion_to_request_error(
+        &mut self,
+        error: &GenericConversionError,
+        token: VerificationToken<TcStateAccepted>,
+        time_stamp: &[u8],
+    ) {
+        match error {
+            GenericConversionError::WrongService(service) => {
+                let service_slice: [u8; 1] = [*service];
+                self.service_helper
+                    .verif_reporter()
+                    .completion_failure(
+                        token,
+                        FailParams::new(time_stamp, &tmtc_err::INVALID_PUS_SERVICE, &service_slice),
+                    )
+                    .expect("Sending completion failure failed");
+            }
+            GenericConversionError::InvalidSubservice(subservice) => {
+                let subservice_slice: [u8; 1] = [*subservice];
+                self.service_helper
+                    .verif_reporter()
+                    .completion_failure(
+                        token,
+                        FailParams::new(
+                            time_stamp,
+                            &tmtc_err::INVALID_PUS_SUBSERVICE,
+                            &subservice_slice,
+                        ),
+                    )
+                    .expect("Sending completion failure failed");
+            }
+            GenericConversionError::NotEnoughAppData { expected, found } => {
+                let mut context_info = (*found as u32).to_be_bytes().to_vec();
+                context_info.extend_from_slice(&(*expected as u32).to_be_bytes());
+                self.service_helper
+                    .verif_reporter()
+                    .completion_failure(
+                        token,
+                        FailParams::new(time_stamp, &tmtc_err::NOT_ENOUGH_APP_DATA, &context_info),
+                    )
+                    .expect("Sending completion failure failed");
+            }
+            // Do nothing.. this is service-level and can not be handled generically here.
+            GenericConversionError::InvalidAppData(_) => (),
+        }
+    }
+
+    pub fn poll_and_check_next_reply(&mut self, time_stamp: &[u8]) -> Result<bool, EcssTmtcError> {
         match self.reply_receiver.try_recv() {
             Ok(reply) => {
                 self.handle_reply(&reply, time_stamp)?;
                 Ok(true)
             }
             Err(e) => match e {
-                mpsc::TryRecvError::Empty => {
-                    return Ok(false);
-                }
-                mpsc::TryRecvError::Disconnected => {
-                    return Err(EcssTmtcError::Receive(GenericReceiveError::TxDisconnected(
-                        None,
-                    )));
-                }
+                mpsc::TryRecvError::Empty => Ok(false),
+                mpsc::TryRecvError::Disconnected => Err(EcssTmtcError::Receive(
+                    GenericReceiveError::TxDisconnected(None),
+                )),
             },
         }
     }
@@ -220,6 +292,7 @@ where
         if active_req_opt.is_none() {
             self.reply_handler
                 .handle_unexpected_reply(reply, &self.service_helper.common.tm_sender)?;
+            return Ok(());
         }
         let active_request = active_req_opt.unwrap();
         let request_finished = self
@@ -227,7 +300,7 @@ where
             .handle_reply(
                 reply,
                 active_request,
-                &self.service_helper.common.verification_handler,
+                &self.service_helper.common.verif_reporter,
                 time_stamp,
                 &self.service_helper.common.tm_sender,
             )
@@ -270,7 +343,8 @@ pub fn generic_pus_request_timeout_handler(
                 &[],
             ),
         )
-        .map_err(|e| e.0)
+        .map_err(|e| e.0)?;
+    Ok(())
 }
 
 impl<VerificationReporter: VerificationReportingProvider> PusReceiver<VerificationReporter> {

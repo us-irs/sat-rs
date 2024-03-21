@@ -13,7 +13,7 @@ pub use std_mod::*;
 use crate::{
     queue::GenericTargetedMessagingError,
     request::{GenericMessage, MessageReceiver, MessageReceiverWithId, RequestId},
-    ChannelId, TargetId,
+    ChannelId, ComponentId,
 };
 
 pub type Mode = u32;
@@ -77,19 +77,19 @@ impl ModeAndSubmode {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TargetedModeCommand {
-    pub address: TargetId,
+    pub address: ComponentId,
     pub mode_submode: ModeAndSubmode,
 }
 
 impl TargetedModeCommand {
-    pub const fn new(address: TargetId, mode_submode: ModeAndSubmode) -> Self {
+    pub const fn new(address: ComponentId, mode_submode: ModeAndSubmode) -> Self {
         Self {
             address,
             mode_submode,
         }
     }
 
-    pub fn address(&self) -> TargetId {
+    pub fn address(&self) -> ComponentId {
         self.address
     }
 
@@ -118,7 +118,7 @@ pub enum ModeRequest {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TargetedModeRequest {
-    target_id: TargetId,
+    target_id: ComponentId,
     mode_request: ModeRequest,
 }
 

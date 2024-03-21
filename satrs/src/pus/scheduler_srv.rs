@@ -83,10 +83,10 @@ impl<
             return Ok(PusPacketHandlerResult::Empty);
         }
         let ecss_tc_and_token = possible_packet.unwrap();
-        let tc = self
-            .service_helper
-            .tc_in_mem_converter
-            .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
+        self.service_helper
+            .tc_in_mem_converter_mut()
+            .cache(&ecss_tc_and_token.tc_in_memory)?;
+        let tc = self.service_helper.tc_in_mem_converter().convert()?;
         let subservice = PusPacket::subservice(&tc);
         let standard_subservice = scheduling::Subservice::try_from(subservice);
         if standard_subservice.is_err() {
@@ -100,16 +100,14 @@ impl<
             scheduling::Subservice::TcEnableScheduling => {
                 let start_token = self
                     .service_helper
-                    .common
-                    .verification_handler
+                    .verif_reporter()
                     .start_success(ecss_tc_and_token.token, time_stamp)
                     .expect("Error sending start success");
 
                 self.scheduler.enable();
                 if self.scheduler.is_enabled() {
                     self.service_helper
-                        .common
-                        .verification_handler
+                        .verif_reporter()
                         .completion_success(start_token, time_stamp)
                         .expect("Error sending completion success");
                 } else {
@@ -121,16 +119,14 @@ impl<
             scheduling::Subservice::TcDisableScheduling => {
                 let start_token = self
                     .service_helper
-                    .common
-                    .verification_handler
+                    .verif_reporter()
                     .start_success(ecss_tc_and_token.token, time_stamp)
                     .expect("Error sending start success");
 
                 self.scheduler.disable();
                 if !self.scheduler.is_enabled() {
                     self.service_helper
-                        .common
-                        .verification_handler
+                        .verif_reporter()
                         .completion_success(start_token, time_stamp)
                         .expect("Error sending completion success");
                 } else {
@@ -142,8 +138,7 @@ impl<
             scheduling::Subservice::TcResetScheduling => {
                 let start_token = self
                     .service_helper
-                    .common
-                    .verification_handler
+                    .verif_reporter()
                     .start_success(ecss_tc_and_token.token, time_stamp)
                     .expect("Error sending start success");
 
@@ -152,8 +147,7 @@ impl<
                     .expect("Error resetting TC Pool");
 
                 self.service_helper
-                    .common
-                    .verification_handler
+                    .verif_reporter()
                     .completion_success(start_token, time_stamp)
                     .expect("Error sending completion success");
             }
@@ -161,7 +155,7 @@ impl<
                 let start_token = self
                     .service_helper
                     .common
-                    .verification_handler
+                    .verif_reporter
                     .start_success(ecss_tc_and_token.token, time_stamp)
                     .expect("error sending start success");
 
@@ -171,8 +165,7 @@ impl<
                     .expect("insertion of activity into pool failed");
 
                 self.service_helper
-                    .common
-                    .verification_handler
+                    .verif_reporter()
                     .completion_success(start_token, time_stamp)
                     .expect("sending completion success failed");
             }

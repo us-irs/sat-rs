@@ -150,22 +150,19 @@ impl<
                     let start_token = self
                         .pus17_handler
                         .service_helper
-                        .common
-                        .verification_handler
+                        .verif_reporter()
                         .start_success(token, &stamp_buf)
                         .expect("Error sending start success");
                     self.pus17_handler
                         .service_helper
-                        .common
-                        .verification_handler
+                        .verif_reporter()
                         .completion_success(start_token, &stamp_buf)
                         .expect("Error sending completion success");
                 } else {
                     let fail_data = [tc.subservice()];
                     self.pus17_handler
                         .service_helper
-                        .common
-                        .verification_handler
+                        .verif_reporter()
                         .start_failure(
                             token,
                             FailParams::new(

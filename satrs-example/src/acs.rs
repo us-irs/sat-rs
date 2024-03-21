@@ -88,12 +88,8 @@ impl<VerificationReporter: VerificationReportingProvider> AcsTask<VerificationRe
                         warn!("action request handling not implemented yet")
                     }
                 }
-                let started_token = self
-                    .verif_reporter
-                    .start_success(request.token, &self.timestamp)
-                    .expect("Sending start success failed");
                 self.verif_reporter
-                    .completion_success(started_token, &self.timestamp)
+                    .completion_success(request.token, &self.timestamp)
                     .expect("Sending completion success failed");
                 true
             }

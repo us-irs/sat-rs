@@ -1,11 +1,13 @@
 use core::cell::Cell;
 use std::{println, sync::mpsc};
 
+use satrs::action::ActionRequest;
 use satrs::mode::{
     ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler,
     ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestorAndHandlerMpscBounded,
     ModeRequestorBoundedMpsc,
 };
+use satrs::pus::action::ActionRequestWithId;
 use satrs::request::RequestId;
 use satrs::{
     mode::{ModeAndSubmode, ModeReply, ModeRequest},
@@ -46,11 +48,10 @@ struct TestDevice {
     pub mode_node: ModeRequestHandlerMpscBounded,
     pub mode_and_submode: ModeAndSubmode,
     pub mode_requestor_info: Option<(RequestId, ChannelId)>,
+    pub action_queue: mpsc::Receiver<GenericMessage<ActionRequest>>,
 }
 
-pub struct ModeLeafDeviceHelper {
-    // pub
-}
+pub struct ModeLeafDeviceHelper {}
 
 impl TestDevice {
     pub fn run(&mut self) {

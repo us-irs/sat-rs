@@ -13,9 +13,9 @@ use satrs::pus::verification::{
 };
 use satrs::pus::{
     ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
-    EcssTcInVecConverter, EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError, MpscTcReceiver,
-    PusPacketHandlerResult, PusPacketHandlingError, PusReplyHandler, PusServiceHelper,
-    PusTcToRequestConverter, TmAsVecSenderWithId, TmAsVecSenderWithMpsc,
+    EcssTcInVecConverter, EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError,
+    GenericConversionError, MpscTcReceiver, PusPacketHandlerResult, PusReplyHandler,
+    PusServiceHelper, PusTcToRequestConverter, TmAsVecSenderWithId, TmAsVecSenderWithMpsc,
     TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
 };
 use satrs::request::{GenericMessage, TargetAndApidId};
@@ -138,7 +138,7 @@ pub struct ExampleActionRequestConverter {}
 impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequestWithId>
     for ExampleActionRequestConverter
 {
-    type Error = PusPacketHandlingError;
+    type Error = GenericConversionError;
 
     fn convert(
         &mut self,
@@ -156,7 +156,7 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequestWithId>
                     FailParams::new_no_fail_data(time_stamp, &tmtc_err::NOT_ENOUGH_APP_DATA),
                 )
                 .expect("Sending start failure failed");
-            return Err(PusPacketHandlingError::NotEnoughAppData {
+            return Err(GenericConversionError::NotEnoughAppData {
                 expected: 8,
                 found: user_data.len(),
             });
@@ -166,7 +166,7 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequestWithId>
         if subservice == 128 {
             let token = verif_reporter
                 .start_success(token, time_stamp)
-                .map_err(|e| e.0)?;
+                .expect("sending start success verification failed");
             Ok((
                 ActivePusActionRequestStd::new(
                     action_id,
@@ -189,7 +189,7 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequestWithId>
                     FailParams::new_no_fail_data(time_stamp, &tmtc_err::INVALID_PUS_SUBSERVICE),
                 )
                 .expect("Sending start failure failed");
-            Err(PusPacketHandlingError::InvalidSubservice(subservice))
+            Err(GenericConversionError::InvalidSubservice(subservice))
         }
     }
 }
@@ -236,7 +236,7 @@ pub fn create_action_service_static(
         reply_receiver,
     );
     Pus8Wrapper {
-        action_request_handler,
+        service: action_request_handler,
     }
 }
 
@@ -277,7 +277,7 @@ pub fn create_action_service_dynamic(
         reply_receiver,
     );
     Pus8Wrapper {
-        action_request_handler,
+        service: action_request_handler,
     }
 }
 
@@ -287,7 +287,7 @@ pub struct Pus8Wrapper<
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
-    pub(crate) action_request_handler: PusTargetedRequestService<
+    pub(crate) service: PusTargetedRequestService<
         TcReceiver,
         TmSender,
         TcInMemConverter,
@@ -308,8 +308,8 @@ impl<
         VerificationReporter: VerificationReportingProvider,
     > Pus8Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
-    pub fn handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
-        match self.action_request_handler.handle_one_tc(time_stamp) {
+    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+        match self.service.poll_and_handle_next_tc(time_stamp) {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {
@@ -330,5 +330,15 @@ impl<
             }
         }
         false
+    }
+
+    pub fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> bool {
+        match self.service.poll_and_check_next_reply(time_stamp) {
+            Ok(packet_handled) => packet_handled,
+            Err(e) => {
+                log::warn!("PUS 8: Handling reply failed with error {e:?}");
+                false
+            }
+        }
     }
 }

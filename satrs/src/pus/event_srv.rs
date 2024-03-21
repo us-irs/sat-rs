@@ -2,12 +2,16 @@ use crate::events::EventU32;
 use crate::pus::event_man::{EventRequest, EventRequestWithToken};
 use crate::pus::verification::TcStateToken;
 use crate::pus::{PartialPusHandlingError, PusPacketHandlerResult, PusPacketHandlingError};
+use crate::queue::GenericSendError;
 use spacepackets::ecss::event::Subservice;
 use spacepackets::ecss::PusPacket;
 use std::sync::mpsc::Sender;
 
 use super::verification::VerificationReportingProvider;
-use super::{EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore, PusServiceHelper};
+use super::{
+    EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore, GenericConversionError,
+    GenericRoutingError, PusServiceHelper,
+};
 
 pub struct PusService5EventHandler<
     TcReceiver: EcssTcReceiverCore,
@@ -51,10 +55,10 @@ impl<
             return Ok(PusPacketHandlerResult::Empty);
         }
         let ecss_tc_and_token = possible_packet.unwrap();
-        let tc = self
-            .service_helper
-            .tc_in_mem_converter
-            .convert_ecss_tc_in_memory_to_reader(&ecss_tc_and_token.tc_in_memory)?;
+        self.service_helper
+            .tc_in_mem_converter_mut()
+            .cache(&ecss_tc_and_token.tc_in_memory)?;
+        let tc = self.service_helper.tc_in_mem_converter().convert()?;
         let subservice = tc.subservice();
         let srv = Subservice::try_from(subservice);
         if srv.is_err() {
@@ -63,55 +67,63 @@ impl<
                 ecss_tc_and_token.token,
             ));
         }
-        let handle_enable_disable_request = |enable: bool| {
-            if tc.user_data().len() < 4 {
-                return Err(PusPacketHandlingError::NotEnoughAppData {
-                    expected: 4,
-                    found: tc.user_data().len(),
-                });
-            }
-            let user_data = tc.user_data();
-            let event_u32 = EventU32::from(u32::from_be_bytes(user_data[0..4].try_into().unwrap()));
-            let start_token = self
-                .service_helper
-                .common
-                .verification_handler
-                .start_success(ecss_tc_and_token.token, time_stamp)
-                .map_err(|_| PartialPusHandlingError::Verification);
-            let partial_error = start_token.clone().err();
-            let mut token: TcStateToken = ecss_tc_and_token.token.into();
-            if let Ok(start_token) = start_token {
-                token = start_token.into();
-            }
-            let event_req_with_token = if enable {
-                EventRequestWithToken {
-                    request: EventRequest::Enable(event_u32),
-                    token,
+        let handle_enable_disable_request =
+            |enable: bool| -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+                if tc.user_data().len() < 4 {
+                    return Err(GenericConversionError::NotEnoughAppData {
+                        expected: 4,
+                        found: tc.user_data().len(),
+                    }
+                    .into());
                 }
-            } else {
-                EventRequestWithToken {
-                    request: EventRequest::Disable(event_u32),
-                    token,
+                let user_data = tc.user_data();
+                let event_u32 =
+                    EventU32::from(u32::from_be_bytes(user_data[0..4].try_into().unwrap()));
+                let start_token = self
+                    .service_helper
+                    .common
+                    .verif_reporter
+                    .start_success(ecss_tc_and_token.token, time_stamp)
+                    .map_err(|_| PartialPusHandlingError::Verification);
+                let partial_error = start_token.clone().err();
+                let mut token: TcStateToken = ecss_tc_and_token.token.into();
+                if let Ok(start_token) = start_token {
+                    token = start_token.into();
                 }
+                let event_req_with_token = if enable {
+                    EventRequestWithToken {
+                        request: EventRequest::Enable(event_u32),
+                        token,
+                    }
+                } else {
+                    EventRequestWithToken {
+                        request: EventRequest::Disable(event_u32),
+                        token,
+                    }
+                };
+                self.event_request_tx
+                    .send(event_req_with_token)
+                    .map_err(|_| {
+                        PusPacketHandlingError::RequestRouting(GenericRoutingError::Send(
+                            GenericSendError::RxDisconnected,
+                        ))
+                    })?;
+                if let Some(partial_error) = partial_error {
+                    return Ok(PusPacketHandlerResult::RequestHandledPartialSuccess(
+                        partial_error,
+                    ));
+                }
+                Ok(PusPacketHandlerResult::RequestHandled)
             };
-            self.event_request_tx
-                .send(event_req_with_token)
-                .map_err(|_| {
-                    PusPacketHandlingError::Other("Forwarding event request failed".into())
-                })?;
-            if let Some(partial_error) = partial_error {
-                return Ok(PusPacketHandlerResult::RequestHandledPartialSuccess(
-                    partial_error,
-                ));
-            }
-            Ok(PusPacketHandlerResult::RequestHandled)
-        };
+
         match srv.unwrap() {
             Subservice::TmInfoReport
             | Subservice::TmLowSeverityReport
             | Subservice::TmMediumSeverityReport
             | Subservice::TmHighSeverityReport => {
-                return Err(PusPacketHandlingError::InvalidSubservice(tc.subservice()))
+                return Err(PusPacketHandlingError::RequestConversion(
+                    GenericConversionError::WrongService(tc.subservice()),
+                ))
             }
             Subservice::TcEnableEventGeneration => {
                 handle_enable_disable_request(true)?;
@@ -151,7 +163,7 @@ mod tests {
     use crate::pus::verification::{
         RequestId, VerificationReporterWithSharedPoolMpscBoundedSender,
     };
-    use crate::pus::{MpscTcReceiver, TmInSharedPoolSenderWithBoundedMpsc};
+    use crate::pus::{GenericConversionError, MpscTcReceiver, TmInSharedPoolSenderWithBoundedMpsc};
     use crate::{
         events::EventU32,
         pus::{
@@ -298,7 +310,10 @@ mod tests {
         let result = test_harness.handle_one_tc();
         assert!(result.is_err());
         let result = result.unwrap_err();
-        if let PusPacketHandlingError::NotEnoughAppData { expected, found } = result {
+        if let PusPacketHandlingError::RequestConversion(
+            GenericConversionError::NotEnoughAppData { expected, found },
+        ) = result
+        {
             assert_eq!(expected, 4);
             assert_eq!(found, 3);
         } else {

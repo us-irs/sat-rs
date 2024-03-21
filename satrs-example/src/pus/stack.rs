@@ -18,8 +18,8 @@ pub struct PusStack<
     VerificationReporter: VerificationReportingProvider,
 > {
     event_srv: Pus5Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
-    hk_srv: Pus3Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
-    action_srv: Pus8Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+    hk_srv_wrapper: Pus3Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+    action_srv_wrapper: Pus8Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
     schedule_srv: Pus11Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
     test_srv: Service17CustomWrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
 }
@@ -45,10 +45,10 @@ impl<
     ) -> Self {
         Self {
             event_srv,
-            action_srv,
+            action_srv_wrapper: action_srv,
             schedule_srv,
             test_srv,
-            hk_srv,
+            hk_srv_wrapper: hk_srv,
         }
     }
 
@@ -59,18 +59,33 @@ impl<
             .to_vec()
             .unwrap();
         loop {
-            let mut all_queues_empty = true;
-            let mut is_srv_finished = |srv_handler_finished: bool| {
-                if !srv_handler_finished {
-                    all_queues_empty = false;
-                }
-            };
-            is_srv_finished(self.test_srv.handle_next_packet(&time_stamp));
-            is_srv_finished(self.schedule_srv.handle_next_packet(&time_stamp));
-            is_srv_finished(self.event_srv.handle_next_packet(&time_stamp));
-            is_srv_finished(self.action_srv.handle_next_packet(&time_stamp));
-            is_srv_finished(self.hk_srv.handle_next_packet(&time_stamp));
-            if all_queues_empty {
+            let mut nothing_to_do = true;
+            let mut is_srv_finished =
+                |tc_handling_done: bool, reply_handling_done: Option<bool>| {
+                    if !tc_handling_done
+                        || (reply_handling_done.is_some() && !reply_handling_done.unwrap())
+                    {
+                        nothing_to_do = false;
+                    }
+                };
+            is_srv_finished(self.test_srv.handle_next_packet(&time_stamp), None);
+            is_srv_finished(self.schedule_srv.handle_next_packet(&time_stamp), None);
+            is_srv_finished(self.event_srv.handle_next_packet(&time_stamp), None);
+            is_srv_finished(
+                self.action_srv_wrapper.poll_and_handle_next_tc(&time_stamp),
+                Some(
+                    self.action_srv_wrapper
+                        .poll_and_handle_next_reply(&time_stamp),
+                ),
+            );
+            is_srv_finished(
+                self.hk_srv_wrapper.poll_and_handle_next_tc(&time_stamp),
+                Some(self.hk_srv_wrapper.poll_and_handle_next_reply(&time_stamp)),
+            );
+            if nothing_to_do {
+                // Timeout checking is only done once.
+                self.action_srv_wrapper.service.check_for_request_timeouts();
+                self.hk_srv_wrapper.service.check_for_request_timeouts();
                 break;
             }
         }
