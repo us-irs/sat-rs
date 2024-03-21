@@ -3,7 +3,7 @@ use hashbrown::HashMap;
 
 use crate::{
     mode::{Mode, ModeAndSubmode, Submode},
-    ChannelId,
+    ComponentId,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -19,7 +19,7 @@ pub struct ModeTableEntry {
     /// Name of respective table entry.
     pub name: &'static str,
     /// Target channel ID.
-    pub channel_id: ChannelId,
+    pub channel_id: ComponentId,
     pub mode_submode: ModeAndSubmode,
     pub allowed_submode_mask: Option<Submode>,
     pub check_success: bool,

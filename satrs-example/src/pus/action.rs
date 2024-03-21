@@ -3,11 +3,11 @@ use satrs::action::{ActionRequest, ActionRequestVariant};
 use satrs::params::WritableToBeBytes;
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
 use satrs::pus::action::{
-    ActionReplyPus, ActionReplyPusWithActionId, ActionRequestWithId, ActivePusActionRequestStd,
+    ActionReplyPus, ActionReplyPusWithActionId, ActivePusActionRequestStd,
     DefaultActiveActionRequestMap,
 };
 use satrs::pus::verification::{
-    self, FailParams, FailParamsWithStep, TcStateAccepted,
+    FailParams, FailParamsWithStep, TcStateAccepted,
     VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
     VerificationReportingProvider, VerificationToken,
 };
@@ -22,8 +22,8 @@ use satrs::request::{GenericMessage, TargetAndApidId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{EcssEnumU16, PusPacket};
 use satrs::tmtc::tm_helper::SharedTmPool;
-use satrs::ChannelId;
-use satrs_example::config::{tmtc_err, TcReceiverId, TmSenderId, PUS_APID};
+use satrs::ComponentId;
+use satrs_example::config::{tmtc_err, ComponentIdList, PUS_APID};
 use std::sync::mpsc::{self};
 use std::time::Duration;
 
@@ -135,7 +135,7 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPusWithActionId> for 
 #[derive(Default)]
 pub struct ExampleActionRequestConverter {}
 
-impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequestWithId>
+impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest>
     for ExampleActionRequestConverter
 {
     type Error = GenericConversionError;
@@ -146,7 +146,7 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequestWithId>
         tc: &PusTcReader,
         time_stamp: &[u8],
         verif_reporter: &impl VerificationReportingProvider,
-    ) -> Result<(ActivePusActionRequestStd, ActionRequestWithId), Self::Error> {
+    ) -> Result<(ActivePusActionRequestStd, ActionRequest), Self::Error> {
         let subservice = tc.subservice();
         let user_data = tc.user_data();
         if user_data.len() < 8 {
@@ -174,13 +174,10 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequestWithId>
                     token,
                     Duration::from_secs(30),
                 ),
-                ActionRequestWithId {
-                    request_id: verification::RequestId::new(tc).into(),
-                    request: ActionRequest::new(
-                        action_id,
-                        ActionRequestVariant::VecData(user_data[8..].to_vec()),
-                    ),
-                },
+                ActionRequest::new(
+                    action_id,
+                    ActionRequestVariant::VecData(user_data[8..].to_vec()),
+                ),
             ))
         } else {
             verif_reporter
@@ -209,13 +206,13 @@ pub fn create_action_service_static(
     VerificationReporterWithSharedPoolMpscBoundedSender,
 > {
     let action_srv_tm_sender = TmInSharedPoolSenderWithId::new(
-        TmSenderId::PusAction as ChannelId,
+        ComponentIdList::PusAction as ComponentId,
         "PUS_8_TM_SENDER",
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
     let action_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusAction as ChannelId,
+        ComponentIdList::PusAction as ComponentId,
         "PUS_8_TC_RECV",
         pus_action_rx,
     );
@@ -253,12 +250,12 @@ pub fn create_action_service_dynamic(
     VerificationReporterWithVecMpscSender,
 > {
     let action_srv_tm_sender = TmAsVecSenderWithId::new(
-        TmSenderId::PusAction as ChannelId,
+        ComponentIdList::PusAction as ComponentId,
         "PUS_8_TM_SENDER",
         tm_funnel_tx.clone(),
     );
     let action_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusAction as ChannelId,
+        ComponentIdList::PusAction as ComponentId,
         "PUS_8_TC_RECV",
         pus_action_rx,
     );
@@ -296,7 +293,7 @@ pub struct Pus8Wrapper<
         ActionReplyHandler,
         DefaultActiveActionRequestMap,
         ActivePusActionRequestStd,
-        ActionRequestWithId,
+        ActionRequest,
         ActionReplyPusWithActionId,
     >,
 }

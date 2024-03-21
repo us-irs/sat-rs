@@ -15,7 +15,7 @@ use spacepackets::{
     ByteConversionError, CcsdsPacket,
 };
 
-use crate::{queue::GenericTargetedMessagingError, ChannelId, ComponentId};
+use crate::{queue::GenericTargetedMessagingError, ComponentId};
 
 /// Generic request ID type. Requests can be associated with an ID to have a unique identifier
 /// for them. This can be useful for tasks like tracking their progress.
@@ -91,13 +91,13 @@ impl fmt::Display for TargetAndApidId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GenericMessage<MSG> {
-    pub sender_id: ChannelId,
     pub request_id: RequestId,
+    pub sender_id: ComponentId,
     pub message: MSG,
 }
 
 impl<MSG> GenericMessage<MSG> {
-    pub fn new(request_id: RequestId, sender_id: ChannelId, message: MSG) -> Self {
+    pub fn new(request_id: RequestId, sender_id: ComponentId, message: MSG) -> Self {
         Self {
             request_id,
             sender_id,
@@ -133,19 +133,19 @@ impl<MSG, R: MessageReceiver<MSG>> MessageWithSenderIdReceiver<MSG, R> {
 }
 
 pub struct MessageReceiverWithId<MSG, R: MessageReceiver<MSG>> {
-    local_channel_id: ChannelId,
+    local_channel_id: ComponentId,
     reply_receiver: MessageWithSenderIdReceiver<MSG, R>,
 }
 
 impl<MSG, R: MessageReceiver<MSG>> MessageReceiverWithId<MSG, R> {
-    pub fn new(local_channel_id: ChannelId, reply_receiver: R) -> Self {
+    pub fn new(local_channel_id: ComponentId, reply_receiver: R) -> Self {
         Self {
             local_channel_id,
             reply_receiver: MessageWithSenderIdReceiver::from(reply_receiver),
         }
     }
 
-    pub fn local_channel_id(&self) -> ChannelId {
+    pub fn local_channel_id(&self) -> ComponentId {
         self.local_channel_id
     }
 }
@@ -169,7 +169,7 @@ pub mod alloc_mod {
     use hashbrown::HashMap;
 
     pub struct MessageSenderMap<MSG, S: MessageSender<MSG>>(
-        pub HashMap<ChannelId, S>,
+        pub HashMap<ComponentId, S>,
         pub(crate) PhantomData<MSG>,
     );
 
@@ -180,15 +180,15 @@ pub mod alloc_mod {
     }
 
     impl<MSG, S: MessageSender<MSG>> MessageSenderMap<MSG, S> {
-        pub fn add_message_target(&mut self, target_id: ChannelId, message_sender: S) {
+        pub fn add_message_target(&mut self, target_id: ComponentId, message_sender: S) {
             self.0.insert(target_id, message_sender);
         }
 
         pub fn send_message(
             &self,
             request_id: RequestId,
-            local_channel_id: ChannelId,
-            target_channel_id: ChannelId,
+            local_channel_id: ComponentId,
+            target_channel_id: ComponentId,
             message: MSG,
         ) -> Result<(), GenericTargetedMessagingError> {
             if self.0.contains_key(&target_channel_id) {
@@ -203,12 +203,12 @@ pub mod alloc_mod {
     }
 
     pub struct MessageSenderMapWithId<MSG, S: MessageSender<MSG>> {
-        pub local_channel_id: ChannelId,
+        pub local_channel_id: ComponentId,
         pub message_sender_map: MessageSenderMap<MSG, S>,
     }
 
     impl<MSG, S: MessageSender<MSG>> MessageSenderMapWithId<MSG, S> {
-        pub fn new(local_channel_id: ChannelId) -> Self {
+        pub fn new(local_channel_id: ComponentId) -> Self {
             Self {
                 local_channel_id,
                 message_sender_map: Default::default(),
@@ -218,7 +218,7 @@ pub mod alloc_mod {
         pub fn send_message(
             &self,
             request_id: RequestId,
-            target_channel_id: ChannelId,
+            target_channel_id: ComponentId,
             message: MSG,
         ) -> Result<(), GenericTargetedMessagingError> {
             self.message_sender_map.send_message(
@@ -229,14 +229,14 @@ pub mod alloc_mod {
             )
         }
 
-        pub fn add_message_target(&mut self, target_id: ChannelId, message_sender: S) {
+        pub fn add_message_target(&mut self, target_id: ComponentId, message_sender: S) {
             self.message_sender_map
                 .add_message_target(target_id, message_sender)
         }
     }
 
     pub struct MessageSenderAndReceiver<TO, FROM, S: MessageSender<TO>, R: MessageReceiver<FROM>> {
-        pub local_channel_id: ChannelId,
+        pub local_channel_id: ComponentId,
         pub message_sender_map: MessageSenderMap<TO, S>,
         pub message_receiver: MessageWithSenderIdReceiver<FROM, R>,
     }
@@ -244,7 +244,7 @@ pub mod alloc_mod {
     impl<TO, FROM, S: MessageSender<TO>, R: MessageReceiver<FROM>>
         MessageSenderAndReceiver<TO, FROM, S, R>
     {
-        pub fn new(local_channel_id: ChannelId, message_receiver: R) -> Self {
+        pub fn new(local_channel_id: ComponentId, message_receiver: R) -> Self {
             Self {
                 local_channel_id,
                 message_sender_map: Default::default(),
@@ -252,12 +252,12 @@ pub mod alloc_mod {
             }
         }
 
-        pub fn add_message_target(&mut self, target_id: ChannelId, message_sender: S) {
+        pub fn add_message_target(&mut self, target_id: ComponentId, message_sender: S) {
             self.message_sender_map
                 .add_message_target(target_id, message_sender)
         }
 
-        pub fn local_channel_id_generic(&self) -> ChannelId {
+        pub fn local_channel_id_generic(&self) -> ComponentId {
             self.local_channel_id
         }
 
@@ -265,7 +265,7 @@ pub mod alloc_mod {
         pub fn send_message(
             &self,
             request_id: RequestId,
-            target_channel_id: ChannelId,
+            target_channel_id: ComponentId,
             message: TO,
         ) -> Result<(), GenericTargetedMessagingError> {
             self.message_sender_map.send_message(
@@ -292,7 +292,7 @@ pub mod alloc_mod {
         S1: MessageSender<REPLY>,
         R1: MessageReceiver<REQUEST>,
     > {
-        pub local_channel_id: ChannelId,
+        pub local_channel_id: ComponentId,
         // These 2 are a functional group.
         pub request_sender_map: MessageSenderMap<REQUEST, S0>,
         pub reply_receiver: MessageWithSenderIdReceiver<REPLY, R0>,
@@ -310,7 +310,11 @@ pub mod alloc_mod {
             R1: MessageReceiver<REQUEST>,
         > RequestAndReplySenderAndReceiver<REQUEST, REPLY, S0, R0, S1, R1>
     {
-        pub fn new(local_channel_id: ChannelId, request_receiver: R1, reply_receiver: R0) -> Self {
+        pub fn new(
+            local_channel_id: ComponentId,
+            request_receiver: R1,
+            reply_receiver: R0,
+        ) -> Self {
             Self {
                 local_channel_id,
                 request_receiver: request_receiver.into(),
@@ -320,7 +324,7 @@ pub mod alloc_mod {
             }
         }
 
-        pub fn local_channel_id_generic(&self) -> ChannelId {
+        pub fn local_channel_id_generic(&self) -> ComponentId {
             self.local_channel_id
         }
     }
@@ -390,9 +394,9 @@ mod tests {
 
     use super::{GenericMessage, MessageReceiverWithId, MessageSenderMapWithId, TargetAndApidId};
 
-    const TEST_CHANNEL_ID_0: u32 = 1;
-    const TEST_CHANNEL_ID_1: u32 = 2;
-    const TEST_CHANNEL_ID_2: u32 = 3;
+    const TEST_CHANNEL_ID_0: u64 = 1;
+    const TEST_CHANNEL_ID_1: u64 = 2;
+    const TEST_CHANNEL_ID_2: u64 = 3;
 
     #[test]
     fn test_basic_target_id_with_apid() {

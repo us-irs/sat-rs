@@ -17,8 +17,8 @@ use satrs::request::{GenericMessage, TargetAndApidId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{hk, PusPacket};
 use satrs::tmtc::tm_helper::SharedTmPool;
-use satrs::ChannelId;
-use satrs_example::config::{hk_err, tmtc_err, TcReceiverId, TmSenderId, PUS_APID};
+use satrs::ComponentId;
+use satrs_example::config::{hk_err, tmtc_err, ComponentIdList, PUS_APID};
 use std::sync::mpsc::{self};
 use std::time::Duration;
 
@@ -227,13 +227,16 @@ pub fn create_hk_service_static(
     VerificationReporterWithSharedPoolMpscBoundedSender,
 > {
     let hk_srv_tm_sender = TmInSharedPoolSenderWithId::new(
-        TmSenderId::PusHk as ChannelId,
+        ComponentIdList::PusHk as ComponentId,
         "PUS_3_TM_SENDER",
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
-    let hk_srv_receiver =
-        MpscTcReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
+    let hk_srv_receiver = MpscTcReceiver::new(
+        ComponentIdList::PusHk as ComponentId,
+        "PUS_8_TC_RECV",
+        pus_hk_rx,
+    );
     let pus_3_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
             hk_srv_receiver,
@@ -266,12 +269,15 @@ pub fn create_hk_service_dynamic(
     VerificationReporterWithVecMpscSender,
 > {
     let hk_srv_tm_sender = TmAsVecSenderWithId::new(
-        TmSenderId::PusHk as ChannelId,
+        ComponentIdList::PusHk as ComponentId,
         "PUS_3_TM_SENDER",
         tm_funnel_tx.clone(),
     );
-    let hk_srv_receiver =
-        MpscTcReceiver::new(TcReceiverId::PusHk as ChannelId, "PUS_8_TC_RECV", pus_hk_rx);
+    let hk_srv_receiver = MpscTcReceiver::new(
+        ComponentIdList::PusHk as ComponentId,
+        "PUS_8_TC_RECV",
+        pus_hk_rx,
+    );
     let pus_3_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
             hk_srv_receiver,

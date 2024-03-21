@@ -13,7 +13,7 @@ use satrs::{
     mode::{ModeAndSubmode, ModeReply, ModeRequest},
     queue::GenericTargetedMessagingError,
     request::GenericMessage,
-    ChannelId,
+    ComponentId,
 };
 use std::string::{String, ToString};
 
@@ -47,7 +47,7 @@ struct TestDevice {
     pub name: String,
     pub mode_node: ModeRequestHandlerMpscBounded,
     pub mode_and_submode: ModeAndSubmode,
-    pub mode_requestor_info: Option<(RequestId, ChannelId)>,
+    pub mode_requestor_info: Option<(RequestId, ComponentId)>,
     pub action_queue: mpsc::Receiver<GenericMessage<ActionRequest>>,
 }
 
@@ -95,7 +95,7 @@ impl ModeRequestHandler for TestDevice {
     fn start_transition(
         &mut self,
         _request_id: RequestId,
-        _sender_id: ChannelId,
+        _sender_id: ComponentId,
         mode_and_submode: ModeAndSubmode,
     ) -> Result<(), ModeError> {
         self.mode_and_submode = mode_and_submode;
@@ -103,7 +103,7 @@ impl ModeRequestHandler for TestDevice {
         Ok(())
     }
 
-    fn announce_mode(&self, _request_id: RequestId, _sender_id: ChannelId, _recursive: bool) {
+    fn announce_mode(&self, _request_id: RequestId, _sender_id: ComponentId, _recursive: bool) {
         println!(
             "{}: announcing mode: {:?}",
             self.name, self.mode_and_submode
@@ -123,7 +123,7 @@ impl ModeRequestHandler for TestDevice {
 
 struct TestAssembly {
     pub mode_node: ModeRequestorAndHandlerMpscBounded,
-    pub mode_requestor_info: Option<(RequestId, ChannelId)>,
+    pub mode_requestor_info: Option<(RequestId, ComponentId)>,
     pub mode_and_submode: ModeAndSubmode,
     pub target_mode_and_submode: Option<ModeAndSubmode>,
 }
@@ -193,7 +193,7 @@ impl ModeRequestHandler for TestAssembly {
     fn start_transition(
         &mut self,
         request_id: RequestId,
-        sender_id: ChannelId,
+        sender_id: ComponentId,
         mode_and_submode: ModeAndSubmode,
     ) -> Result<(), ModeError> {
         self.mode_requestor_info = Some((request_id, sender_id));
@@ -201,7 +201,7 @@ impl ModeRequestHandler for TestAssembly {
         Ok(())
     }
 
-    fn announce_mode(&self, request_id: RequestId, _sender_id: ChannelId, recursive: bool) {
+    fn announce_mode(&self, request_id: RequestId, _sender_id: ComponentId, recursive: bool) {
         println!(
             "TestAssembly: Announcing mode (recursively: {}): {:?}",
             recursive, self.mode_and_submode

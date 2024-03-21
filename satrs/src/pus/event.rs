@@ -244,7 +244,7 @@ mod tests {
     use crate::events::{EventU32, Severity};
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::{EcssChannel, PusTmWrapper};
-    use crate::ChannelId;
+    use crate::ComponentId;
     use spacepackets::ByteConversionError;
     use std::cell::RefCell;
     use std::collections::VecDeque;
@@ -269,7 +269,7 @@ mod tests {
     }
 
     impl EcssChannel for TestSender {
-        fn channel_id(&self) -> ChannelId {
+        fn channel_id(&self) -> ComponentId {
             0
         }
     }

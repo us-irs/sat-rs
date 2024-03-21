@@ -11,7 +11,7 @@
 //! about events first:
 //!
 //! The event manager has a listener table abstracted by the [ListenerMapProvider], which maps
-//! listener groups identified by [ListenerKey]s to a [sender ID][ChannelId].
+//! listener groups identified by [ListenerKey]s to a [sender ID][ComponentId].
 //! It also contains a sender table abstracted by the [SenderMapProvider] which maps these sender
 //! IDs to concrete [EventSendProvider]s. A simple approach would be to use one send event provider
 //! for each OBSW thread and then subscribe for all interesting events for a particular thread
@@ -50,7 +50,7 @@ use crate::queue::GenericSendError;
 use core::marker::PhantomData;
 use core::slice::Iter;
 
-use crate::ChannelId;
+use crate::ComponentId;
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
@@ -74,7 +74,7 @@ pub type EventU32WithAuxData = EventWithAuxData<EventU32>;
 pub type EventU16WithAuxData = EventWithAuxData<EventU16>;
 
 pub trait EventSendProvider<EV: GenericEvent, AuxDataProvider = Params> {
-    fn channel_id(&self) -> ChannelId;
+    fn target_id(&self) -> ComponentId;
 
     fn send_no_data(&self, event: EV) -> Result<(), GenericSendError> {
         self.send(event, None)
@@ -95,8 +95,8 @@ pub trait ListenerMapProvider {
     #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
     fn get_listeners(&self) -> alloc::vec::Vec<ListenerKey>;
     fn contains_listener(&self, key: &ListenerKey) -> bool;
-    fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<ChannelId>>;
-    fn add_listener(&mut self, key: ListenerKey, sender_id: ChannelId) -> bool;
+    fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<ComponentId>>;
+    fn add_listener(&mut self, key: ListenerKey, sender_id: ComponentId) -> bool;
     fn remove_duplicates(&mut self, key: &ListenerKey);
 }
 
@@ -106,9 +106,9 @@ pub trait SenderMapProvider<
     Data = Params,
 >
 {
-    fn contains_send_event_provider(&self, id: &ChannelId) -> bool;
+    fn contains_send_event_provider(&self, target_id: &ComponentId) -> bool;
 
-    fn get_send_event_provider(&self, id: &ChannelId) -> Option<&EventSender>;
+    fn get_send_event_provider(&self, target_id: &ComponentId) -> Option<&EventSender>;
     fn add_send_event_provider(&mut self, send_provider: EventSender) -> bool;
 }
 
@@ -153,7 +153,7 @@ pub enum EventRoutingResult<EV: GenericEvent, AUX> {
 pub enum EventRoutingError {
     Send(GenericSendError),
     NoSendersForKey(ListenerKey),
-    NoSenderForId(ChannelId),
+    NoSenderForId(ComponentId),
 }
 
 #[derive(Debug)]
@@ -176,12 +176,12 @@ impl<
     }
 
     /// Subscribe for a unique event.
-    pub fn subscribe_single(&mut self, event: &Ev, sender_id: ChannelId) {
+    pub fn subscribe_single(&mut self, event: &Ev, sender_id: ComponentId) {
         self.update_listeners(ListenerKey::Single(event.raw_as_largest_type()), sender_id);
     }
 
     /// Subscribe for an event group.
-    pub fn subscribe_group(&mut self, group_id: LargestGroupIdRaw, sender_id: ChannelId) {
+    pub fn subscribe_group(&mut self, group_id: LargestGroupIdRaw, sender_id: ComponentId) {
         self.update_listeners(ListenerKey::Group(group_id), sender_id);
     }
 
@@ -189,7 +189,7 @@ impl<
     ///
     /// For example, this can be useful for a handler component which sends every event as
     /// a telemetry packet.
-    pub fn subscribe_all(&mut self, sender_id: ChannelId) {
+    pub fn subscribe_all(&mut self, sender_id: ComponentId) {
         self.update_listeners(ListenerKey::All, sender_id);
     }
 }
@@ -216,14 +216,14 @@ impl<
     pub fn add_sender(&mut self, send_provider: SP) {
         if !self
             .sender_map
-            .contains_send_event_provider(&send_provider.channel_id())
+            .contains_send_event_provider(&send_provider.target_id())
         {
             self.sender_map.add_send_event_provider(send_provider);
         }
     }
 
     /// Generic function to update the event subscribers.
-    fn update_listeners(&mut self, key: ListenerKey, sender_id: ChannelId) {
+    fn update_listeners(&mut self, key: ListenerKey, sender_id: ComponentId) {
         self.listener_map.add_listener(key, sender_id);
     }
 
@@ -342,7 +342,7 @@ pub mod alloc_mod {
     /// Simple implementation which uses a [HashMap] and a [Vec] internally.
     #[derive(Default)]
     pub struct DefaultListenerMap {
-        listeners: HashMap<ListenerKey, Vec<ChannelId>>,
+        listeners: HashMap<ListenerKey, Vec<ComponentId>>,
     }
 
     impl ListenerMapProvider for DefaultListenerMap {
@@ -358,11 +358,11 @@ pub mod alloc_mod {
             self.listeners.contains_key(key)
         }
 
-        fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<ChannelId>> {
+        fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<ComponentId>> {
             self.listeners.get(key).map(|vec| vec.iter())
         }
 
-        fn add_listener(&mut self, key: ListenerKey, sender_id: ChannelId) -> bool {
+        fn add_listener(&mut self, key: ListenerKey, sender_id: ComponentId) -> bool {
             if let Some(existing_list) = self.listeners.get_mut(&key) {
                 existing_list.push(sender_id);
             } else {
@@ -388,7 +388,7 @@ pub mod alloc_mod {
         EV: GenericEvent = EventU32,
         AUX = Params,
     > {
-        senders: HashMap<ChannelId, SP>,
+        senders: HashMap<ComponentId, SP>,
         phantom: PhantomData<(EV, AUX)>,
     }
 
@@ -406,18 +406,18 @@ pub mod alloc_mod {
     impl<SP: EventSendProvider<EV, AUX>, EV: GenericEvent, AUX> SenderMapProvider<SP, EV, AUX>
         for DefaultSenderMap<SP, EV, AUX>
     {
-        fn contains_send_event_provider(&self, id: &ChannelId) -> bool {
+        fn contains_send_event_provider(&self, id: &ComponentId) -> bool {
             self.senders.contains_key(id)
         }
 
-        fn get_send_event_provider(&self, id: &ChannelId) -> Option<&SP> {
+        fn get_send_event_provider(&self, id: &ComponentId) -> Option<&SP> {
             self.senders
                 .get(id)
-                .filter(|sender| sender.channel_id() == *id)
+                .filter(|sender| sender.target_id() == *id)
         }
 
         fn add_send_event_provider(&mut self, send_provider: SP) -> bool {
-            let id = send_provider.channel_id();
+            let id = send_provider.target_id();
             if self.senders.contains_key(&id) {
                 return false;
             }
@@ -458,19 +458,19 @@ pub mod std_mod {
     /// send events.
     #[derive(Clone)]
     pub struct EventSenderMpsc<Event: GenericEvent + Send> {
-        id: u32,
+        target_id: ComponentId,
         sender: mpsc::Sender<(Event, Option<Params>)>,
     }
 
     impl<Event: GenericEvent + Send> EventSenderMpsc<Event> {
-        pub fn new(id: u32, sender: mpsc::Sender<(Event, Option<Params>)>) -> Self {
-            Self { id, sender }
+        pub fn new(target_id: ComponentId, sender: mpsc::Sender<(Event, Option<Params>)>) -> Self {
+            Self { target_id, sender }
         }
     }
 
     impl<Event: GenericEvent + Send> EventSendProvider<Event> for EventSenderMpsc<Event> {
-        fn channel_id(&self) -> u32 {
-            self.id
+        fn target_id(&self) -> ComponentId {
+            self.target_id
         }
         fn send(&self, event: Event, aux_data: Option<Params>) -> Result<(), GenericSendError> {
             self.sender
@@ -483,19 +483,19 @@ pub mod std_mod {
     /// events. This has the advantage that the channel is bounded and thus more deterministic.
     #[derive(Clone)]
     pub struct EventSenderMpscBounded<Event: GenericEvent + Send> {
-        channel_id: u32,
+        target_id: ComponentId,
         sender: mpsc::SyncSender<(Event, Option<Params>)>,
         capacity: usize,
     }
 
     impl<Event: GenericEvent + Send> EventSenderMpscBounded<Event> {
         pub fn new(
-            channel_id: u32,
+            target_id: ComponentId,
             sender: mpsc::SyncSender<(Event, Option<Params>)>,
             capacity: usize,
         ) -> Self {
             Self {
-                channel_id,
+                target_id,
                 sender,
                 capacity,
             }
@@ -503,8 +503,8 @@ pub mod std_mod {
     }
 
     impl<Event: GenericEvent + Send> EventSendProvider<Event> for EventSenderMpscBounded<Event> {
-        fn channel_id(&self) -> u32 {
-            self.channel_id
+        fn target_id(&self) -> ComponentId {
+            self.target_id
         }
         fn send(&self, event: Event, aux_data: Option<Params>) -> Result<(), GenericSendError> {
             if let Err(e) = self.sender.try_send((event, aux_data)) {
@@ -577,11 +577,11 @@ mod tests {
         let event_grp_1_0 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
         let (single_event_sender, single_event_receiver) = channel();
         let single_event_listener = EventSenderMpsc::new(0, single_event_sender);
-        event_man.subscribe_single(&event_grp_0, single_event_listener.channel_id());
+        event_man.subscribe_single(&event_grp_0, single_event_listener.target_id());
         event_man.add_sender(single_event_listener);
         let (group_event_sender_0, group_event_receiver_0) = channel();
         let group_event_listener = EventU32SenderMpsc::new(1, group_event_sender_0);
-        event_man.subscribe_group(event_grp_1_0.group_id(), group_event_listener.channel_id());
+        event_man.subscribe_group(event_grp_1_0.group_id(), group_event_listener.target_id());
         event_man.add_sender(group_event_listener);
 
         // Test event with one listener
@@ -609,7 +609,7 @@ mod tests {
         let event_grp_0 = EventU32::new(Severity::INFO, 0, 0).unwrap();
         let (single_event_sender, single_event_receiver) = channel();
         let single_event_listener = EventSenderMpsc::new(0, single_event_sender);
-        event_man.subscribe_single(&event_grp_0, single_event_listener.channel_id());
+        event_man.subscribe_single(&event_grp_0, single_event_listener.target_id());
         event_man.add_sender(single_event_listener);
         event_sender
             .send((event_grp_0, Some(Params::Heapless((2_u32, 3_u32).into()))))
@@ -643,11 +643,11 @@ mod tests {
         let event_grp_0_and_1_listener = EventU32SenderMpsc::new(0, event_grp_0_sender);
         event_man.subscribe_group(
             event_grp_0.group_id(),
-            event_grp_0_and_1_listener.channel_id(),
+            event_grp_0_and_1_listener.target_id(),
         );
         event_man.subscribe_group(
             event_grp_1_0.group_id(),
-            event_grp_0_and_1_listener.channel_id(),
+            event_grp_0_and_1_listener.target_id(),
         );
         event_man.add_sender(event_grp_0_and_1_listener);
 
@@ -679,10 +679,10 @@ mod tests {
         let (event_0_tx_1, event_0_rx_1) = channel();
         let event_listener_0 = EventU32SenderMpsc::new(0, event_0_tx_0);
         let event_listener_1 = EventU32SenderMpsc::new(1, event_0_tx_1);
-        let event_listener_0_sender_id = event_listener_0.channel_id();
+        let event_listener_0_sender_id = event_listener_0.target_id();
         event_man.subscribe_single(&event_0, event_listener_0_sender_id);
         event_man.add_sender(event_listener_0);
-        let event_listener_1_sender_id = event_listener_1.channel_id();
+        let event_listener_1_sender_id = event_listener_1.target_id();
         event_man.subscribe_single(&event_0, event_listener_1_sender_id);
         event_man.add_sender(event_listener_1);
         event_sender
@@ -732,7 +732,7 @@ mod tests {
         let event_1 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
         let (event_0_tx_0, all_events_rx) = channel();
         let all_events_listener = EventU32SenderMpsc::new(0, event_0_tx_0);
-        event_man.subscribe_all(all_events_listener.channel_id());
+        event_man.subscribe_all(all_events_listener.target_id());
         event_man.add_sender(all_events_listener);
         event_sender
             .send((event_0, None))

@@ -16,8 +16,8 @@ use satrs::pus::{
     TmInSharedPoolSenderWithId,
 };
 use satrs::tmtc::tm_helper::SharedTmPool;
-use satrs::ChannelId;
-use satrs_example::config::{TcReceiverId, TmSenderId, PUS_APID};
+use satrs::ComponentId;
+use satrs_example::config::{ComponentIdList, PUS_APID};
 
 use crate::tmtc::PusTcSourceProviderSharedPool;
 
@@ -145,13 +145,13 @@ pub fn create_scheduler_service_static(
     VerificationReporterWithSharedPoolMpscBoundedSender,
 > {
     let sched_srv_tm_sender = TmInSharedPoolSenderWithId::new(
-        TmSenderId::PusSched as ChannelId,
+        ComponentIdList::PusSched as ComponentId,
         "PUS_11_TM_SENDER",
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
     let sched_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusSched as ChannelId,
+        ComponentIdList::PusSched as ComponentId,
         "PUS_11_TC_RECV",
         pus_sched_rx,
     );
@@ -188,12 +188,12 @@ pub fn create_scheduler_service_dynamic(
     VerificationReporterWithVecMpscSender,
 > {
     let sched_srv_tm_sender = TmAsVecSenderWithId::new(
-        TmSenderId::PusSched as ChannelId,
+        ComponentIdList::PusSched as ComponentId,
         "PUS_11_TM_SENDER",
         tm_funnel_tx,
     );
     let sched_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusSched as ChannelId,
+        ComponentIdList::PusSched as ComponentId,
         "PUS_11_TC_RECV",
         pus_sched_rx,
     );

@@ -17,9 +17,9 @@ use satrs::spacepackets::ecss::PusPacket;
 use satrs::spacepackets::time::cds::TimeProvider;
 use satrs::spacepackets::time::TimeWriter;
 use satrs::tmtc::tm_helper::SharedTmPool;
-use satrs::ChannelId;
+use satrs::ComponentId;
 use satrs::{events::EventU32, pus::EcssTcInSharedStoreConverter};
-use satrs_example::config::{tmtc_err, TcReceiverId, TmSenderId, PUS_APID, TEST_EVENT};
+use satrs_example::config::{tmtc_err, ComponentIdList, PUS_APID, TEST_EVENT};
 use std::sync::mpsc::{self, Sender};
 
 pub fn create_test_service_static(
@@ -36,13 +36,13 @@ pub fn create_test_service_static(
     VerificationReporterWithSharedPoolMpscBoundedSender,
 > {
     let test_srv_tm_sender = TmInSharedPoolSenderWithId::new(
-        TmSenderId::PusTest as ChannelId,
+        ComponentIdList::PusTest as ComponentId,
         "PUS_17_TM_SENDER",
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
     let test_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusTest as ChannelId,
+        ComponentIdList::PusTest as ComponentId,
         "PUS_17_TC_RECV",
         pus_test_rx,
     );
@@ -71,12 +71,12 @@ pub fn create_test_service_dynamic(
     VerificationReporterWithVecMpscSender,
 > {
     let test_srv_tm_sender = TmAsVecSenderWithId::new(
-        TmSenderId::PusTest as ChannelId,
+        ComponentIdList::PusTest as ComponentId,
         "PUS_17_TM_SENDER",
         tm_funnel_tx.clone(),
     );
     let test_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusTest as ChannelId,
+        ComponentIdList::PusTest as ComponentId,
         "PUS_17_TC_RECV",
         pus_test_rx,
     );

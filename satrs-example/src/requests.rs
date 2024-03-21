@@ -1,50 +1,42 @@
 use std::collections::HashMap;
 use std::sync::mpsc;
 
-use derive_new::new;
 use log::warn;
+use satrs::action::ActionRequest;
 use satrs::hk::HkRequest;
-use satrs::mode::ModeRequest;
-use satrs::pus::action::ActionRequestWithId;
 use satrs::pus::verification::{
     FailParams, TcStateStarted, VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{ActiveRequestProvider, GenericRoutingError, PusRequestRouter};
 use satrs::queue::GenericSendError;
+use satrs::request::{GenericMessage, RequestId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusPacket;
 use satrs::ComponentId;
 use satrs_example::config::tmtc_err;
 
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 #[non_exhaustive]
-pub enum Request {
+pub enum CompositeRequest {
     Hk(HkRequest),
-    Mode(ModeRequest),
-    Action(ActionRequestWithId),
-}
-
-#[derive(Clone, Debug, new)]
-pub struct TargetedRequest {
-    pub(crate) target_id: ComponentId,
-    pub(crate) request: Request,
+    Action(ActionRequest),
 }
 
 #[derive(Clone, Debug)]
 pub struct RequestWithToken {
-    pub(crate) targeted_request: TargetedRequest,
+    pub(crate) targeted_request: GenericMessage<CompositeRequest>,
     pub(crate) token: VerificationToken<TcStateStarted>,
 }
 
 impl RequestWithToken {
     pub fn new(
         target_id: ComponentId,
-        request: Request,
+        request_id: RequestId,
+        request: CompositeRequest,
         token: VerificationToken<TcStateStarted>,
     ) -> Self {
         Self {
-            targeted_request: TargetedRequest::new(target_id, request),
+            targeted_request: GenericMessage::new(request_id, target_id, request),
             token,
         }
     }
@@ -96,6 +88,7 @@ impl PusRequestRouter<HkRequest> for GenericRequestRouter {
     fn route(
         &self,
         target_id: ComponentId,
+        request_id: RequestId,
         hk_request: HkRequest,
         token: VerificationToken<TcStateStarted>,
     ) -> Result<(), Self::Error> {
@@ -103,7 +96,8 @@ impl PusRequestRouter<HkRequest> for GenericRequestRouter {
             sender
                 .send(RequestWithToken::new(
                     target_id,
-                    Request::Hk(hk_request),
+                    request_id,
+                    CompositeRequest::Hk(hk_request),
                     token,
                 ))
                 .map_err(|_| GenericRoutingError::Send(GenericSendError::RxDisconnected))?;
@@ -112,20 +106,22 @@ impl PusRequestRouter<HkRequest> for GenericRequestRouter {
     }
 }
 
-impl PusRequestRouter<ActionRequestWithId> for GenericRequestRouter {
+impl PusRequestRouter<ActionRequest> for GenericRequestRouter {
     type Error = GenericRoutingError;
 
     fn route(
         &self,
         target_id: ComponentId,
-        action_request: ActionRequestWithId,
+        request_id: RequestId,
+        action_request: ActionRequest,
         token: VerificationToken<TcStateStarted>,
     ) -> Result<(), Self::Error> {
         if let Some(sender) = self.0.get(&target_id) {
             sender
                 .send(RequestWithToken::new(
                     target_id,
-                    Request::Action(action_request),
+                    request_id,
+                    CompositeRequest::Action(action_request),
                     token,
                 ))
                 .map_err(|_| GenericRoutingError::Send(GenericSendError::RxDisconnected))?;

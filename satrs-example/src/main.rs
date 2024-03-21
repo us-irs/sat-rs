@@ -23,11 +23,13 @@ use satrs_example::config::pool::{create_sched_tc_pool, create_static_pools};
 use satrs_example::config::tasks::{
     FREQ_MS_AOCS, FREQ_MS_EVENT_HANDLING, FREQ_MS_PUS_STACK, FREQ_MS_UDP_TMTC,
 };
-use satrs_example::config::{RequestTargetId, TmSenderId, OBSW_SERVER_ADDR, PUS_APID, SERVER_PORT};
+use satrs_example::config::{
+    ComponentIdList, RequestTargetId, OBSW_SERVER_ADDR, PUS_APID, SERVER_PORT,
+};
 use tmtc::PusTcSourceProviderDynamic;
 use udp::DynamicUdpTmHandler;
 
-use crate::acs::AcsTask;
+// use crate::acs::AcsTask;
 use crate::ccsds::CcsdsReceiver;
 use crate::logger::setup_logger;
 use crate::pus::action::{create_action_service_dynamic, create_action_service_static};
@@ -47,7 +49,7 @@ use satrs::pus::verification::{VerificationReporterCfg, VerificationReporterWith
 use satrs::pus::{EcssTmSender, TmAsVecSenderWithId, TmInSharedPoolSenderWithId};
 use satrs::spacepackets::{time::cds::TimeProvider, time::TimeWriter};
 use satrs::tmtc::CcsdsDistributor;
-use satrs::ChannelId;
+use satrs::ComponentId;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{self, channel};
 use std::sync::{Arc, RwLock};
@@ -77,7 +79,7 @@ fn static_tmtc_pool_main() {
     // Every software component which needs to generate verification telemetry, receives a cloned
     // verification reporter.
     let verif_reporter = create_verification_reporter(TmInSharedPoolSenderWithId::new(
-        TmSenderId::PusVerification as ChannelId,
+        ComponentIdList::PusVerification as ComponentId,
         "verif_sender",
         shared_tm_pool.clone(),
         tm_funnel_tx.clone(),
@@ -105,7 +107,7 @@ fn static_tmtc_pool_main() {
     // in the sat-rs documentation.
     let mut event_handler = EventHandler::new(
         TmInSharedPoolSenderWithId::new(
-            TmSenderId::AllEvents as ChannelId,
+            ComponentIdList::EventManagement as ComponentId,
             "ALL_EVENTS_TX",
             shared_tm_pool.clone(),
             tm_funnel_tx.clone(),
@@ -209,6 +211,7 @@ fn static_tmtc_pool_main() {
     )
     .expect("tcp server creation failed");
 
+    /*
     let mut acs_task = AcsTask::new(
         TmInSharedPoolSenderWithId::new(
             TmSenderId::AcsSubsystem as ChannelId,
@@ -219,6 +222,7 @@ fn static_tmtc_pool_main() {
         acs_thread_rx,
         verif_reporter,
     );
+    */
 
     let mut tm_funnel = TmFunnelStatic::new(
         shared_tm_pool,
@@ -272,7 +276,7 @@ fn static_tmtc_pool_main() {
     let jh_aocs = thread::Builder::new()
         .name("AOCS".to_string())
         .spawn(move || loop {
-            acs_task.periodic_operation();
+            // acs_task.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_AOCS));
         })
         .unwrap();
@@ -312,7 +316,7 @@ fn dyn_tmtc_pool_main() {
     // Every software component which needs to generate verification telemetry, gets a cloned
     // verification reporter.
     let verif_reporter = create_verification_reporter(TmAsVecSenderWithId::new(
-        TmSenderId::PusVerification as ChannelId,
+        ComponentIdList::PusVerification as ComponentId,
         "verif_sender",
         tm_funnel_tx.clone(),
     ));
@@ -333,7 +337,7 @@ fn dyn_tmtc_pool_main() {
     // in the sat-rs documentation.
     let mut event_handler = EventHandler::new(
         TmAsVecSenderWithId::new(
-            TmSenderId::AllEvents as ChannelId,
+            ComponentIdList::EventManagement as ComponentId,
             "ALL_EVENTS_TX",
             tm_funnel_tx.clone(),
         ),
@@ -428,15 +432,17 @@ fn dyn_tmtc_pool_main() {
     )
     .expect("tcp server creation failed");
 
+    /*
     let mut acs_task = AcsTask::new(
         TmAsVecSenderWithId::new(
-            TmSenderId::AcsSubsystem as ChannelId,
+            TmSenderId::AcsSubsystem as ComponentId,
             "ACS_TASK_SENDER",
             tm_funnel_tx.clone(),
         ),
         acs_thread_rx,
         verif_reporter,
     );
+    */
     let mut tm_funnel = TmFunnelDynamic::new(sync_tm_tcp_source, tm_funnel_rx, tm_server_tx);
 
     info!("Starting TMTC and UDP task");
@@ -484,7 +490,7 @@ fn dyn_tmtc_pool_main() {
     let jh_aocs = thread::Builder::new()
         .name("AOCS".to_string())
         .spawn(move || loop {
-            acs_task.periodic_operation();
+            // acs_task.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_AOCS));
         })
         .unwrap();

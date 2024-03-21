@@ -15,8 +15,8 @@ use satrs::pus::{
     TmInSharedPoolSenderWithId,
 };
 use satrs::tmtc::tm_helper::SharedTmPool;
-use satrs::ChannelId;
-use satrs_example::config::{TcReceiverId, TmSenderId, PUS_APID};
+use satrs::ComponentId;
+use satrs_example::config::{ComponentIdList, PUS_APID};
 
 pub fn create_event_service_static(
     shared_tm_store: SharedTmPool,
@@ -32,13 +32,13 @@ pub fn create_event_service_static(
     VerificationReporterWithSharedPoolMpscBoundedSender,
 > {
     let event_srv_tm_sender = TmInSharedPoolSenderWithId::new(
-        TmSenderId::PusEvent as ChannelId,
+        ComponentIdList::EventManagement as ComponentId,
         "PUS_5_TM_SENDER",
         shared_tm_store.clone(),
         tm_funnel_tx.clone(),
     );
     let event_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusEvent as ChannelId,
+        ComponentIdList::EventManagement as ComponentId,
         "PUS_5_TC_RECV",
         pus_event_rx,
     );
@@ -69,12 +69,12 @@ pub fn create_event_service_dynamic(
     VerificationReporterWithVecMpscSender,
 > {
     let event_srv_tm_sender = TmAsVecSenderWithId::new(
-        TmSenderId::PusEvent as ChannelId,
+        ComponentIdList::EventManagement as ComponentId,
         "PUS_5_TM_SENDER",
         tm_funnel_tx,
     );
     let event_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusEvent as ChannelId,
+        ComponentIdList::EventManagement as ComponentId,
         "PUS_5_TC_RECV",
         pus_event_rx,
     );

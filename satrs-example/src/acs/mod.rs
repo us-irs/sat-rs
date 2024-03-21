@@ -1,26 +1,6 @@
-use std::sync::mpsc::{self, TryRecvError};
+mod mgm;
 
-use log::{info, warn};
-use satrs::pus::verification::VerificationReportingProvider;
-use satrs::pus::{EcssTmSender, PusTmWrapper};
-use satrs::request::TargetAndApidId;
-use satrs::spacepackets::ecss::hk::Subservice as HkSubservice;
-use satrs::{
-    hk::HkRequest,
-    spacepackets::{
-        ecss::tm::{PusTmCreator, PusTmSecondaryHeader},
-        time::cds::{DaysLen16Bits, TimeProvider},
-        SequenceFlags, SpHeader,
-    },
-};
-use satrs_example::config::{RequestTargetId, PUS_APID};
-
-use crate::{
-    hk::{AcsHkIds, HkUniqueId},
-    requests::{Request, RequestWithToken},
-    update_time,
-};
-
+/*
 pub struct AcsTask<VerificationReporter: VerificationReportingProvider> {
     timestamp: [u8; 7],
     time_provider: TimeProvider<DaysLen16Bits>,
@@ -112,3 +92,4 @@ impl<VerificationReporter: VerificationReportingProvider> AcsTask<VerificationRe
         }
     }
 }
+*/

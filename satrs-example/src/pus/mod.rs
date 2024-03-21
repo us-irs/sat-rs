@@ -199,15 +199,17 @@ where
                 return Err(e.into());
             }
         };
-        let verif_request_id = verification::RequestId::new(&tc);
+        let verif_request_id = verification::RequestId::new(&tc).raw();
         //if let Err(e) =
-        match self
-            .request_router
-            .route(request_info.target_id(), request, request_info.token())
-        {
+        match self.request_router.route(
+            request_info.target_id(),
+            verif_request_id,
+            request,
+            request_info.token(),
+        ) {
             Ok(()) => {
                 self.active_request_map
-                    .insert(&verif_request_id.into(), request_info);
+                    .insert(&verif_request_id, request_info);
             }
             Err(e) => {
                 self.request_router.handle_error_generic(

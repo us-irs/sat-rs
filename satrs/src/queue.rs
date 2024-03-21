@@ -4,6 +4,8 @@ use std::error::Error;
 #[cfg(feature = "std")]
 use std::sync::mpsc;
 
+use crate::ComponentId;
+
 /// Generic channel ID type.
 pub type ChannelId = u32;
 
@@ -12,7 +14,7 @@ pub type ChannelId = u32;
 pub enum GenericSendError {
     RxDisconnected,
     QueueFull(Option<u32>),
-    TargetDoesNotExist(ChannelId),
+    TargetDoesNotExist(ComponentId),
 }
 
 impl Display for GenericSendError {
@@ -38,7 +40,7 @@ impl Error for GenericSendError {}
 #[derive(Debug, Copy, Clone)]
 pub enum GenericReceiveError {
     Empty,
-    TxDisconnected(Option<ChannelId>),
+    TxDisconnected(Option<ComponentId>),
 }
 
 impl Display for GenericReceiveError {

@@ -94,27 +94,16 @@ pub mod hk_err {
     ];
 }
 
-#[allow(clippy::enum_variant_names)]
 #[derive(Copy, Clone, PartialEq, Eq)]
-pub enum TmSenderId {
+pub enum ComponentIdList {
     PusVerification = 0,
-    PusTest = 1,
-    PusEvent = 2,
-    PusHk = 3,
-    PusAction = 4,
-    PusSched = 5,
-    AllEvents = 6,
-    AcsSubsystem = 7,
+    EventManagement = 1,
+    PusTest = 2,
+    PusAction = 3,
+    PusSched = 4,
+    PusHk = 5,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum TcReceiverId {
-    PusTest = 1,
-    PusEvent = 2,
-    PusHk = 3,
-    PusAction = 4,
-    PusSched = 5,
-}
 pub mod pool {
     use super::*;
     pub fn create_static_pools() -> (StaticMemoryPool, StaticMemoryPool) {

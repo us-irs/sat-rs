@@ -1443,7 +1443,7 @@ pub mod tests {
         EcssChannel, PusTmWrapper, TmInSharedPoolSenderWithId, TmInSharedPoolSenderWithMpsc,
     };
     use crate::tmtc::tm_helper::SharedTmPool;
-    use crate::ChannelId;
+    use crate::ComponentId;
     use alloc::format;
     use alloc::sync::Arc;
     use hashbrown::HashMap;
@@ -1708,7 +1708,7 @@ pub mod tests {
     }
 
     impl EcssChannel for TestSender {
-        fn channel_id(&self) -> ChannelId {
+        fn channel_id(&self) -> ComponentId {
             0
         }
         fn name(&self) -> &'static str {

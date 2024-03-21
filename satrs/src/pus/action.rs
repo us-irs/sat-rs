@@ -2,7 +2,7 @@ use crate::{
     action::{ActionId, ActionRequest},
     params::Params,
     request::{GenericMessage, RequestId},
-    ChannelId,
+    ComponentId,
 };
 
 use super::{verification::VerificationToken, ActivePusRequestStd, ActiveRequestProvider};
@@ -61,7 +61,7 @@ pub type GenericActionReplyPus = GenericMessage<ActionReplyPusWithActionId>;
 impl GenericActionReplyPus {
     pub fn new_action_reply(
         request_id: RequestId,
-        sender_id: ChannelId,
+        sender_id: ComponentId,
         action_id: ActionId,
         reply: ActionReplyPus,
     ) -> Self {
@@ -82,7 +82,7 @@ pub mod alloc_mod {
         request::{
             GenericMessage, MessageReceiver, MessageSender, MessageSenderAndReceiver, RequestId,
         },
-        ChannelId,
+        ComponentId,
     };
 
     use super::ActionReplyPusWithActionId;
@@ -103,7 +103,7 @@ pub mod alloc_mod {
         pub fn send_action_reply(
             &self,
             request_id: RequestId,
-            target_id: ChannelId,
+            target_id: ComponentId,
             reply: ActionReplyPusWithActionId,
         ) -> Result<(), GenericTargetedMessagingError> {
             self.send_message(request_id, target_id, reply)
@@ -128,7 +128,7 @@ pub mod alloc_mod {
         pub fn send_action_request(
             &self,
             request_id: RequestId,
-            target_id: ChannelId,
+            target_id: ComponentId,
             request: ActionRequest,
         ) -> Result<(), GenericTargetedMessagingError> {
             self.send_message(request_id, target_id, request)

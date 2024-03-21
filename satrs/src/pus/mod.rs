@@ -6,7 +6,7 @@ use crate::pool::{StoreAddr, StoreError};
 use crate::pus::verification::{TcStateAccepted, TcStateToken, VerificationToken};
 use crate::queue::{GenericReceiveError, GenericSendError};
 use crate::request::{GenericMessage, RequestId};
-use crate::{ChannelId, ComponentId};
+use crate::ComponentId;
 use core::fmt::{Display, Formatter};
 use core::time::Duration;
 #[cfg(feature = "alloc")]
@@ -144,7 +144,7 @@ impl Error for EcssTmtcError {
 }
 pub trait EcssChannel: Send {
     /// Each sender can have an ID associated with it
-    fn channel_id(&self) -> ChannelId;
+    fn channel_id(&self) -> ComponentId;
     fn name(&self) -> &'static str {
         "unset"
     }
@@ -301,6 +301,7 @@ pub trait PusRequestRouter<Request> {
     fn route(
         &self,
         target_id: ComponentId,
+        request_id: RequestId,
         request: Request,
         token: VerificationToken<TcStateStarted>,
     ) -> Result<(), Self::Error>;
@@ -649,7 +650,7 @@ pub mod std_mod {
         GenericReceiveError, GenericSendError, PusTmWrapper, TryRecvTmtcError,
     };
     use crate::tmtc::tm_helper::SharedTmPool;
-    use crate::{ChannelId, ComponentId};
+    use crate::ComponentId;
     use alloc::vec::Vec;
     use core::time::Duration;
     use spacepackets::ecss::tc::PusTcReader;
@@ -724,14 +725,14 @@ pub mod std_mod {
 
     #[derive(Clone)]
     pub struct TmInSharedPoolSenderWithId<Sender: EcssTmSenderCore> {
-        channel_id: ChannelId,
+        channel_id: ComponentId,
         name: &'static str,
         shared_tm_store: SharedTmPool,
         sender: Sender,
     }
 
     impl<Sender: EcssTmSenderCore> EcssChannel for TmInSharedPoolSenderWithId<Sender> {
-        fn channel_id(&self) -> ChannelId {
+        fn channel_id(&self) -> ComponentId {
             self.channel_id
         }
 
@@ -758,7 +759,7 @@ pub mod std_mod {
 
     impl<Sender: EcssTmSenderCore> TmInSharedPoolSenderWithId<Sender> {
         pub fn new(
-            id: ChannelId,
+            id: ComponentId,
             name: &'static str,
             shared_tm_store: SharedTmPool,
             sender: Sender,
@@ -782,7 +783,7 @@ pub mod std_mod {
     /// going to be called with direct packets.
     #[derive(Clone)]
     pub struct TmAsVecSenderWithId<Sender: EcssTmSenderCore> {
-        id: ChannelId,
+        id: ComponentId,
         name: &'static str,
         sender: Sender,
     }
@@ -794,13 +795,13 @@ pub mod std_mod {
     }
 
     impl<Sender: EcssTmSenderCore> TmAsVecSenderWithId<Sender> {
-        pub fn new(id: u32, name: &'static str, sender: Sender) -> Self {
+        pub fn new(id: ComponentId, name: &'static str, sender: Sender) -> Self {
             Self { id, sender, name }
         }
     }
 
     impl<Sender: EcssTmSenderCore> EcssChannel for TmAsVecSenderWithId<Sender> {
-        fn channel_id(&self) -> ChannelId {
+        fn channel_id(&self) -> ComponentId {
             self.id
         }
         fn name(&self) -> &'static str {
@@ -818,13 +819,13 @@ pub mod std_mod {
     pub type TmAsVecSenderWithBoundedMpsc = TmAsVecSenderWithId<mpsc::SyncSender<Vec<u8>>>;
 
     pub struct MpscTcReceiver {
-        id: ChannelId,
+        id: ComponentId,
         name: &'static str,
         receiver: mpsc::Receiver<EcssTcAndToken>,
     }
 
     impl EcssChannel for MpscTcReceiver {
-        fn channel_id(&self) -> ChannelId {
+        fn channel_id(&self) -> ComponentId {
             self.id
         }
 
@@ -846,7 +847,7 @@ pub mod std_mod {
 
     impl MpscTcReceiver {
         pub fn new(
-            id: ChannelId,
+            id: ComponentId,
             name: &'static str,
             receiver: mpsc::Receiver<EcssTcAndToken>,
         ) -> Self {
@@ -903,14 +904,14 @@ pub mod std_mod {
         }
 
         pub struct CrossbeamTcReceiver {
-            id: ChannelId,
+            id: ComponentId,
             name: &'static str,
             receiver: cb::Receiver<EcssTcAndToken>,
         }
 
         impl CrossbeamTcReceiver {
             pub fn new(
-                id: ChannelId,
+                id: ComponentId,
                 name: &'static str,
                 receiver: cb::Receiver<EcssTcAndToken>,
             ) -> Self {
@@ -919,7 +920,7 @@ pub mod std_mod {
         }
 
         impl EcssChannel for CrossbeamTcReceiver {
-            fn channel_id(&self) -> ChannelId {
+            fn channel_id(&self) -> ComponentId {
                 self.id
             }
 

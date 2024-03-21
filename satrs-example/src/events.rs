@@ -14,9 +14,9 @@ use satrs::{
         verification::{TcStateStarted, VerificationReportingProvider, VerificationToken},
         EcssTmSender,
     },
-    spacepackets::time::cds::{self, TimeProvider},
+    spacepackets::time::cds::{self, TimeProvider}, ComponentId,
 };
-use satrs_example::config::PUS_APID;
+use satrs_example::config::{PUS_APID, ComponentIdList};
 
 use crate::update_time;
 
@@ -48,9 +48,9 @@ impl<VerificationReporter: VerificationReportingProvider> PusEventHandler<Verifi
         let pus_event_dispatcher =
             DefaultPusEventU32Dispatcher::new_with_default_backend(event_reporter);
         let pus_event_man_send_provider =
-            EventU32SenderMpscBounded::new(1, pus_event_man_tx, event_queue_cap);
+            EventU32SenderMpscBounded::new(ComponentIdList::EventManagement as ComponentId, pus_event_man_tx, event_queue_cap);
 
-        event_manager.subscribe_all(pus_event_man_send_provider.channel_id());
+        event_manager.subscribe_all(pus_event_man_send_provider.target_id());
         event_manager.add_sender(pus_event_man_send_provider);
 
         Self {
