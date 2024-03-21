@@ -46,7 +46,7 @@ impl<
         }
     }
 
-    pub fn handle_one_tc(
+    pub fn poll_and_handle_next_tc(
         &mut self,
         time_stamp: &[u8],
     ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
@@ -213,7 +213,7 @@ mod tests {
     impl SimplePusPacketHandler for Pus5HandlerWithStoreTester {
         fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
             let time_stamp = cds::TimeProvider::new_with_u16_days(0, 0).to_vec().unwrap();
-            self.handler.handle_one_tc(&time_stamp)
+            self.handler.poll_and_handle_next_tc(&time_stamp)
         }
     }
 

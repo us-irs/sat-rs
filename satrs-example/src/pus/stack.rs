@@ -53,6 +53,8 @@ impl<
     }
 
     pub fn periodic_operation(&mut self) {
+        // Release all telecommands which reached their release time before calling the service
+        // handlers.
         self.schedule_srv.release_tcs();
         let time_stamp = cds::TimeProvider::from_now_with_u16_days()
             .expect("time stamp generation error")
@@ -68,9 +70,9 @@ impl<
                         nothing_to_do = false;
                     }
                 };
-            is_srv_finished(self.test_srv.handle_next_packet(&time_stamp), None);
-            is_srv_finished(self.schedule_srv.handle_next_packet(&time_stamp), None);
-            is_srv_finished(self.event_srv.handle_next_packet(&time_stamp), None);
+            is_srv_finished(self.test_srv.poll_and_handle_next_packet(&time_stamp), None);
+            is_srv_finished(self.schedule_srv.poll_and_handle_next_tc(&time_stamp), None);
+            is_srv_finished(self.event_srv.poll_and_handle_next_tc(&time_stamp), None);
             is_srv_finished(
                 self.action_srv_wrapper.poll_and_handle_next_tc(&time_stamp),
                 Some(

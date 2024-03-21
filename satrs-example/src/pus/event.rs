@@ -52,7 +52,9 @@ pub fn create_event_service_static(
         ),
         event_request_tx,
     );
-    Pus5Wrapper { pus_5_handler }
+    Pus5Wrapper {
+        handler: pus_5_handler,
+    }
 }
 
 pub fn create_event_service_dynamic(
@@ -86,7 +88,9 @@ pub fn create_event_service_dynamic(
         ),
         event_request_tx,
     );
-    Pus5Wrapper { pus_5_handler }
+    Pus5Wrapper {
+        handler: pus_5_handler,
+    }
 }
 
 pub struct Pus5Wrapper<
@@ -95,7 +99,7 @@ pub struct Pus5Wrapper<
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
-    pub pus_5_handler:
+    pub handler:
         PusService5EventHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
 }
 
@@ -106,8 +110,8 @@ impl<
         VerificationReporter: VerificationReportingProvider,
     > Pus5Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
-    pub fn handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
-        match self.pus_5_handler.handle_one_tc(time_stamp) {
+    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+        match self.handler.poll_and_handle_next_tc(time_stamp) {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {

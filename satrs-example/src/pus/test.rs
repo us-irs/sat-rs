@@ -54,7 +54,7 @@ pub fn create_test_service_static(
         EcssTcInSharedStoreConverter::new(tc_pool, 2048),
     ));
     Service17CustomWrapper {
-        pus17_handler,
+        handler: pus17_handler,
         test_srv_event_sender: event_sender,
     }
 }
@@ -88,7 +88,7 @@ pub fn create_test_service_dynamic(
         EcssTcInVecConverter::default(),
     ));
     Service17CustomWrapper {
-        pus17_handler,
+        handler: pus17_handler,
         test_srv_event_sender: event_sender,
     }
 }
@@ -99,7 +99,7 @@ pub struct Service17CustomWrapper<
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
-    pub pus17_handler:
+    pub handler:
         PusService17TestHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
     pub test_srv_event_sender: Sender<(EventU32, Option<Params>)>,
 }
@@ -111,8 +111,8 @@ impl<
         VerificationReporter: VerificationReportingProvider,
     > Service17CustomWrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
-    pub fn handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
-        let res = self.pus17_handler.handle_one_tc(time_stamp);
+    pub fn poll_and_handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
+        let res = self.handler.poll_and_handle_next_tc(time_stamp);
         if res.is_err() {
             warn!("PUS17 handler failed with error {:?}", res.unwrap_err());
             return true;
@@ -133,7 +133,7 @@ impl<
             }
             PusPacketHandlerResult::CustomSubservice(subservice, token) => {
                 let (tc, _) = PusTcReader::new(
-                    self.pus17_handler
+                    self.handler
                         .service_helper
                         .tc_in_mem_converter
                         .tc_slice_raw(),
@@ -148,19 +148,19 @@ impl<
                         .send((TEST_EVENT.into(), None))
                         .expect("Sending test event failed");
                     let start_token = self
-                        .pus17_handler
+                        .handler
                         .service_helper
                         .verif_reporter()
                         .start_success(token, &stamp_buf)
                         .expect("Error sending start success");
-                    self.pus17_handler
+                    self.handler
                         .service_helper
                         .verif_reporter()
                         .completion_success(start_token, &stamp_buf)
                         .expect("Error sending completion success");
                 } else {
                     let fail_data = [tc.subservice()];
-                    self.pus17_handler
+                    self.handler
                         .service_helper
                         .verif_reporter()
                         .start_failure(

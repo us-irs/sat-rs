@@ -27,6 +27,7 @@ pub mod scheduler;
 pub mod stack;
 pub mod test;
 
+/// Simple router structure which forwards PUS telecommands to dedicated handlers.
 pub struct PusTcMpscRouter {
     pub test_service_receiver: Sender<EcssTcAndToken>,
     pub event_service_receiver: Sender<EcssTcAndToken>,

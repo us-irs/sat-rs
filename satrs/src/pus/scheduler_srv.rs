@@ -73,7 +73,7 @@ impl<
         &self.scheduler
     }
 
-    pub fn handle_one_tc(
+    pub fn poll_and_handle_next_tc(
         &mut self,
         time_stamp: &[u8],
         sched_tc_pool: &mut (impl PoolProvider + ?Sized),
@@ -279,7 +279,7 @@ mod tests {
         pub fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
             let time_stamp = cds::TimeProvider::new_with_u16_days(0, 0).to_vec().unwrap();
             self.handler
-                .handle_one_tc(&time_stamp, &mut self.sched_tc_pool)
+                .poll_and_handle_next_tc(&time_stamp, &mut self.sched_tc_pool)
         }
     }
 
@@ -351,7 +351,7 @@ mod tests {
         let time_stamp = cds::TimeProvider::new_with_u16_days(0, 0).to_vec().unwrap();
         test_harness
             .handler
-            .handle_one_tc(&time_stamp, &mut test_harness.sched_tc_pool)
+            .poll_and_handle_next_tc(&time_stamp, &mut test_harness.sched_tc_pool)
             .unwrap();
         test_harness.check_next_verification_tm(1, request_id);
         test_harness.check_next_verification_tm(3, request_id);
