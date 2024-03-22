@@ -91,9 +91,23 @@ configuration variables in your `settings.json`:
 ## Commanding with Python
 
 When the SW is running on the Discovery board, you can command the MCU via a serial interface,
-using COBS encoded CCSDS packets.
+using COBS encoded PUS packets.
  
-TODO:
-  - How and where to connect serial interface on the MCU
-  - How to set up Python venv (or at least strongly recommend it) and install deps
-  - How to copy `def_tmtc_conf.json` to `tmtc_conf.json` and adapt it for custom serial port
+It is recommended to use a virtual environment to do this. To set up one in the command line,
+you can use `python3 -m venv venv` on Unix systems or `py -m venv venv` on Windows systems.
+After doing this, you can check the [venv tutorial](https://docs.python.org/3/tutorial/venv.html)
+on how to activate the environment and then use the following command to install the required
+dependency:
+
+```sh
+pip install -r requirements.txt
+```
+
+The packets are exchanged using a dedicated serial interface. You can use any generic USB-to-UART
+converter device with the TX pin connected to the PA3 pin and the RX pin connected to the PA2 pin.
+
+A default configuration file for the python application is provided and can be used by running
+
+```sh
+cp def_tmtc_conf.json tmtc_conf.json
+```
