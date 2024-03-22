@@ -10,7 +10,7 @@ use crate::ComponentId;
 pub type ChannelId = u32;
 
 /// Generic error type for sending something via a message queue.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum GenericSendError {
     RxDisconnected,
     QueueFull(Option<u32>),
@@ -37,7 +37,7 @@ impl Display for GenericSendError {
 impl Error for GenericSendError {}
 
 /// Generic error type for sending something via a message queue.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum GenericReceiveError {
     Empty,
     TxDisconnected(Option<ComponentId>),

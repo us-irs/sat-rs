@@ -357,4 +357,8 @@ impl<
             }
         }
     }
+
+    pub fn check_for_request_timeouts(&mut self) {
+        self.service.check_for_request_timeouts();
+    }
 }

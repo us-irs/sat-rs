@@ -8,7 +8,7 @@ use satrs::{
 
 use super::{
     action::Pus8Wrapper, event::Pus5Wrapper, hk::Pus3Wrapper, scheduler::Pus11Wrapper,
-    test::Service17CustomWrapper,
+    test::Service17CustomWrapper, TargetedPusService,
 };
 
 pub struct PusStack<
@@ -86,8 +86,8 @@ impl<
             );
             if nothing_to_do {
                 // Timeout checking is only done once.
-                self.action_srv_wrapper.service.check_for_request_timeouts();
-                self.hk_srv_wrapper.service.check_for_request_timeouts();
+                self.action_srv_wrapper.check_for_request_timeouts();
+                self.hk_srv_wrapper.check_for_request_timeouts();
                 break;
             }
         }

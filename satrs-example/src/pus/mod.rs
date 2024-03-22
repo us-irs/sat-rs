@@ -81,6 +81,13 @@ impl<VerificationReporter: VerificationReportingProvider> PusReceiver<Verificati
     }
 }
 
+pub trait TargetedPusService {
+    /// Returns [true] if the packet handling is finished.
+    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool;
+    fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> bool;
+    fn check_for_request_timeouts(&mut self);
+}
+
 /// This is a generic handler class for all PUS services where a PUS telecommand is converted
 /// to a targeted request.
 ///
@@ -200,7 +207,6 @@ where
             }
         };
         let verif_request_id = verification::RequestId::new(&tc).raw();
-        //if let Err(e) =
         match self.request_router.route(
             request_info.target_id(),
             verif_request_id,
@@ -275,10 +281,10 @@ where
         match self.reply_receiver.try_recv() {
             Ok(reply) => {
                 self.handle_reply(&reply, time_stamp)?;
-                Ok(true)
+                Ok(false)
             }
             Err(e) => match e {
-                mpsc::TryRecvError::Empty => Ok(false),
+                mpsc::TryRecvError::Empty => Ok(true),
                 mpsc::TryRecvError::Disconnected => Err(EcssTmtcError::Receive(
                     GenericReceiveError::TxDisconnected(None),
                 )),
@@ -432,5 +438,52 @@ impl<VerificationReporter: VerificationReportingProvider> PusReceiver<Verificati
             }
         }
         Ok(PusPacketHandlerResult::RequestHandled)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+
+    use satrs::{
+        pus::{
+            verification::VerificationReporterWithVecMpscSender, ActiveRequestMapProvider,
+            EcssTcInVecConverter, MpscTcReceiver, TmAsVecSenderWithMpsc,
+        },
+        request::TargetAndApidId,
+    };
+
+    use crate::requests::CompositeRequestWithToken;
+
+    use super::*;
+
+    pub const TEST_APID: u16 = 0x23;
+    pub const TEST_APID_TARGET_ID: u32 = 5;
+    pub const TARGET_ID: TargetAndApidId = TargetAndApidId::new(TEST_APID, TEST_APID_TARGET_ID);
+
+    pub struct TargetedPusRequestTestbench<
+        RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = GenericConversionError>,
+        ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType, Error = EcssTmtcError>,
+        ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestInfo>,
+        ActiveRequestInfo: ActiveRequestProvider,
+        RequestType,
+        ReplyType,
+    > {
+        pub service: PusTargetedRequestService<
+            MpscTcReceiver,
+            TmAsVecSenderWithMpsc,
+            EcssTcInVecConverter,
+            VerificationReporterWithVecMpscSender,
+            RequestConverter,
+            ReplyHandler,
+            ActiveRequestMap,
+            ActiveRequestInfo,
+            RequestType,
+            ReplyType,
+        >,
+        pub verif_reporter: VerificationReporterWithVecMpscSender,
+        pub tm_funnel_rx: mpsc::Receiver<Vec<u8>>,
+        pub pus_packet_tx: mpsc::Sender<EcssTcAndToken>,
+        pub reply_tx: mpsc::Sender<GenericMessage<ReplyType>>,
+        pub request_rx: mpsc::Receiver<CompositeRequestWithToken>,
     }
 }

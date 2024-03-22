@@ -23,12 +23,12 @@ pub enum CompositeRequest {
 }
 
 #[derive(Clone, Debug)]
-pub struct RequestWithToken {
+pub struct CompositeRequestWithToken {
     pub(crate) targeted_request: GenericMessage<CompositeRequest>,
     pub(crate) token: VerificationToken<TcStateStarted>,
 }
 
-impl RequestWithToken {
+impl CompositeRequestWithToken {
     pub fn new(
         target_id: ComponentId,
         request_id: RequestId,
@@ -43,7 +43,7 @@ impl RequestWithToken {
 }
 
 #[derive(Default, Clone)]
-pub struct GenericRequestRouter(pub HashMap<ComponentId, mpsc::Sender<RequestWithToken>>);
+pub struct GenericRequestRouter(pub HashMap<ComponentId, mpsc::Sender<CompositeRequestWithToken>>);
 
 impl GenericRequestRouter {
     pub(crate) fn handle_error_generic(
@@ -94,7 +94,7 @@ impl PusRequestRouter<HkRequest> for GenericRequestRouter {
     ) -> Result<(), Self::Error> {
         if let Some(sender) = self.0.get(&target_id) {
             sender
-                .send(RequestWithToken::new(
+                .send(CompositeRequestWithToken::new(
                     target_id,
                     request_id,
                     CompositeRequest::Hk(hk_request),
@@ -117,8 +117,9 @@ impl PusRequestRouter<ActionRequest> for GenericRequestRouter {
         token: VerificationToken<TcStateStarted>,
     ) -> Result<(), Self::Error> {
         if let Some(sender) = self.0.get(&target_id) {
+            println!("routed action request");
             sender
-                .send(RequestWithToken::new(
+                .send(CompositeRequestWithToken::new(
                     target_id,
                     request_id,
                     CompositeRequest::Action(action_request),

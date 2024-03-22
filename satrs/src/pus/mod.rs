@@ -60,7 +60,7 @@ impl<'tm> From<PusTmCreator<'tm>> for PusTmWrapper<'tm> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EcssTmtcError {
     Store(StoreError),
     ByteConversion(ByteConversionError),
@@ -658,6 +658,7 @@ pub mod std_mod {
     use spacepackets::ecss::WritablePusPacket;
     use spacepackets::time::StdTimestampError;
     use spacepackets::ByteConversionError;
+    use std::println;
     use std::string::String;
     use std::sync::mpsc;
     use std::sync::mpsc::TryRecvError;

@@ -30,3 +30,6 @@ path = "../satrs-mib"
 [features]
 dyn_tmtc = []
 default = ["dyn_tmtc"]
+
+[dev-dependencies]
+env_logger = "0.11"

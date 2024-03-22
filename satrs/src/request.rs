@@ -31,7 +31,7 @@ pub struct TargetAndApidId {
 }
 
 impl TargetAndApidId {
-    pub fn new(apid: Apid, target: u32) -> Self {
+    pub const fn new(apid: Apid, target: u32) -> Self {
         Self { apid, target }
     }
 

@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use crate::requests::GenericRequestRouter;
 
-use super::{generic_pus_request_timeout_handler, PusTargetedRequestService};
+use super::{generic_pus_request_timeout_handler, PusTargetedRequestService, TargetedPusService};
 
 pub struct ActionReplyHandler {
     fail_data_buf: [u8; 128],
@@ -167,6 +167,11 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest>
             let token = verif_reporter
                 .start_success(token, time_stamp)
                 .expect("sending start success verification failed");
+            let req_variant = if user_data.len() == 8 {
+                ActionRequestVariant::NoData
+            } else {
+                ActionRequestVariant::VecData(user_data[8..].to_vec())
+            };
             Ok((
                 ActivePusActionRequestStd::new(
                     action_id,
@@ -174,10 +179,7 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest>
                     token,
                     Duration::from_secs(30),
                 ),
-                ActionRequest::new(
-                    action_id,
-                    ActionRequestVariant::VecData(user_data[8..].to_vec()),
-                ),
+                ActionRequest::new(action_id, req_variant),
             ))
         } else {
             verif_reporter
@@ -303,9 +305,11 @@ impl<
         TmSender: EcssTmSenderCore,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
-    > Pus8Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
+    > TargetedPusService
+    for Pus8Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
-    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+    /// Returns [true] if the packet handling is finished.
+    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
         match self.service.poll_and_handle_next_tc(time_stamp) {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
@@ -329,7 +333,7 @@ impl<
         false
     }
 
-    pub fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> bool {
+    fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> bool {
         match self.service.poll_and_check_next_reply(time_stamp) {
             Ok(packet_handled) => packet_handled,
             Err(e) => {
@@ -337,5 +341,199 @@ impl<
                 false
             }
         }
+    }
+
+    fn check_for_request_timeouts(&mut self) {
+        self.service.check_for_request_timeouts();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use satrs::{
+        pus::verification::VerificationReporterCfg,
+        spacepackets::{
+            ecss::{
+                tc::{PusTcCreator, PusTcSecondaryHeader},
+                tm::PusTmReader,
+                WritablePusPacket,
+            },
+            CcsdsPacket, SpHeader,
+        },
+    };
+
+    use crate::{
+        pus::tests::{TargetedPusRequestTestbench, TARGET_ID, TEST_APID, TEST_APID_TARGET_ID},
+        requests::CompositeRequest,
+    };
+
+    use super::*;
+
+    impl
+        TargetedPusRequestTestbench<
+            ExampleActionRequestConverter,
+            ActionReplyHandler,
+            DefaultActiveActionRequestMap,
+            ActivePusActionRequestStd,
+            ActionRequest,
+            ActionReplyPusWithActionId,
+        >
+    {
+        pub fn new_for_action() -> Self {
+            env_logger::init();
+            let target_and_apid_id = TargetAndApidId::new(TEST_APID, TEST_APID_TARGET_ID);
+            let (tm_funnel_tx, tm_funnel_rx) = mpsc::channel();
+            let (pus_action_tx, pus_action_rx) = mpsc::channel();
+            let (action_reply_tx, action_reply_rx) = mpsc::channel();
+            let (action_req_tx, action_req_rx) = mpsc::channel();
+            let verif_reporter_cfg = VerificationReporterCfg::new(TEST_APID, 2, 2, 64).unwrap();
+            let tm_as_vec_sender =
+                TmAsVecSenderWithMpsc::new(1, "VERIF_SENDER", tm_funnel_tx.clone());
+            let verif_reporter =
+                VerificationReporterWithVecMpscSender::new(&verif_reporter_cfg, tm_as_vec_sender);
+            let mut generic_req_router = GenericRequestRouter::default();
+            generic_req_router
+                .0
+                .insert(target_and_apid_id.into(), action_req_tx);
+            let action_srv_tm_sender =
+                TmAsVecSenderWithId::new(0, "TESTBENCH", tm_funnel_tx.clone());
+            let action_srv_receiver = MpscTcReceiver::new(0, "TESTBENCH", pus_action_rx);
+            Self {
+                service: PusTargetedRequestService::new(
+                    PusServiceHelper::new(
+                        action_srv_receiver,
+                        action_srv_tm_sender.clone(),
+                        PUS_APID,
+                        verif_reporter.clone(),
+                        EcssTcInVecConverter::default(),
+                    ),
+                    ExampleActionRequestConverter::default(),
+                    DefaultActiveActionRequestMap::default(),
+                    ActionReplyHandler::default(),
+                    generic_req_router,
+                    action_reply_rx,
+                ),
+                verif_reporter,
+                pus_packet_tx: pus_action_tx,
+                tm_funnel_rx,
+                reply_tx: action_reply_tx,
+                request_rx: action_req_rx,
+            }
+        }
+
+        pub fn verify_packet_verification(&self, subservice: u8) {
+            let next_tm = self.tm_funnel_rx.try_recv().unwrap();
+            let verif_tm = PusTmReader::new(&next_tm, 7).unwrap().0;
+            assert_eq!(verif_tm.apid(), TEST_APID);
+            assert_eq!(verif_tm.service(), 1);
+            assert_eq!(verif_tm.subservice(), subservice);
+        }
+
+        pub fn verify_tm_empty(&self) {
+            let packet = self.tm_funnel_rx.try_recv();
+            if let Err(mpsc::TryRecvError::Empty) = packet {
+            } else {
+                let tm = packet.unwrap();
+                let unexpected_tm = PusTmReader::new(&tm, 7).unwrap().0;
+                panic!("unexpected TM packet {unexpected_tm:?}");
+            }
+        }
+
+        pub fn verify_next_tc_is_handled_properly(&mut self, time_stamp: &[u8]) {
+            let result = self.service.poll_and_handle_next_tc(time_stamp);
+            assert!(result.is_ok());
+            let result = result.unwrap();
+            match result {
+                PusPacketHandlerResult::RequestHandled => (),
+                _ => panic!("unexpected result {result:?}"),
+            }
+        }
+
+        pub fn verify_all_tcs_handled(&mut self, time_stamp: &[u8]) {
+            let result = self.service.poll_and_handle_next_tc(time_stamp);
+            assert!(result.is_ok());
+            let result = result.unwrap();
+            match result {
+                PusPacketHandlerResult::Empty => (),
+                _ => panic!("unexpected result {result:?}"),
+            }
+        }
+
+        pub fn verify_next_reply_is_handled_properly(&mut self, time_stamp: &[u8]) {
+            let result = self.service.poll_and_check_next_reply(time_stamp);
+            assert!(result.is_ok());
+            assert!(!result.unwrap());
+        }
+
+        pub fn verify_all_replies_handled(&mut self, time_stamp: &[u8]) {
+            let result = self.service.poll_and_check_next_reply(time_stamp);
+            assert!(result.is_ok());
+            assert!(result.unwrap());
+        }
+
+        pub fn add_tc(&mut self, tc: &PusTcCreator) {
+            let token = self.verif_reporter.add_tc(tc);
+            let accepted_token = self
+                .verif_reporter
+                .acceptance_success(token, &[0; 7])
+                .expect("TC acceptance failed");
+            let next_tm = self.tm_funnel_rx.try_recv().unwrap();
+            let verif_tm = PusTmReader::new(&next_tm, 7).unwrap().0;
+            assert_eq!(verif_tm.apid(), TEST_APID);
+            assert_eq!(verif_tm.service(), 1);
+            assert_eq!(verif_tm.subservice(), 1);
+            if let Err(mpsc::TryRecvError::Empty) = self.tm_funnel_rx.try_recv() {
+            } else {
+                let unexpected_tm = PusTmReader::new(&next_tm, 7).unwrap().0;
+                panic!("unexpected TM packet {unexpected_tm:?}");
+            }
+            self.pus_packet_tx
+                .send(EcssTcAndToken::new(tc.to_vec().unwrap(), accepted_token))
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn test_basic_request() {
+        let mut testbench = TargetedPusRequestTestbench::new_for_action();
+        // Create a basic action request and verify forwarding.
+        let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let sec_header = PusTcSecondaryHeader::new_simple(8, 128);
+        let action_id = 5_u32;
+        let mut app_data: [u8; 8] = [0; 8];
+        app_data[0..4].copy_from_slice(&TEST_APID_TARGET_ID.to_be_bytes());
+        app_data[4..8].copy_from_slice(&action_id.to_be_bytes());
+        let pus8_packet = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
+        testbench.add_tc(&pus8_packet);
+        let time_stamp: [u8; 7] = [0; 7];
+        testbench.verify_next_tc_is_handled_properly(&time_stamp);
+        testbench.verify_all_tcs_handled(&time_stamp);
+
+        testbench.verify_packet_verification(3);
+
+        let possible_req = testbench.request_rx.try_recv();
+        assert!(possible_req.is_ok());
+        let req = possible_req.unwrap();
+        if let CompositeRequest::Action(action_req) = req.targeted_request.message {
+            assert_eq!(action_req.action_id, action_id);
+            assert_eq!(action_req.variant, ActionRequestVariant::NoData);
+            let action_reply =
+                ActionReplyPusWithActionId::new(action_id, ActionReplyPus::Completed);
+            testbench
+                .reply_tx
+                .send(GenericMessage::new(
+                    req.targeted_request.request_id,
+                    TARGET_ID.into(),
+                    action_reply,
+                ))
+                .unwrap();
+        } else {
+            panic!("unexpected request type");
+        }
+        testbench.verify_next_reply_is_handled_properly(&time_stamp);
+        testbench.verify_all_replies_handled(&time_stamp);
+
+        testbench.verify_packet_verification(7);
+        testbench.verify_tm_empty();
     }
 }
