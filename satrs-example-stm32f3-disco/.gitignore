@@ -1,3 +1,4 @@
 /target
 /itm.txt
 /.cargo/config*
+/.vscode

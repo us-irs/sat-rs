@@ -11,6 +11,18 @@ used by the [Rust Embedded Book](https://docs.rust-embedded.org/book/intro/hardw
 [Rust Discovery](https://docs.rust-embedded.org/discovery/f3discovery/) book as an introduction
 to embedded Rust.
 
+If you would like to access the ITM log output, you need to connect the PB3 pin to the CN3 pin
+of the SWD header like [shown here](https://docs.rust-embedded.org/discovery/f3discovery/06-hello-world/index.html).
+
+## Pre-Requisites
+
+Make sure the following tools are installed:
+
+1. `openocd`: This is the debug server used to debug the STM32F3. You can install this from
+   [`xPacks`](https://xpack.github.io/dev-tools/openocd/install/). You can also use the one provided
+   by a STM32Cube installation.
+2. A debugger like `arm-none-eabi-gdb` or `gdb-multiarch`.
+
 ## Preparing Rust and the repository
 
 Building an application requires the `thumbv7em-none-eabihf` cross-compiler toolchain.
@@ -42,13 +54,25 @@ cargo build
 
 ## Flashing and Debugging from the command line
 
-TODO
+Make sure you have `openocd` and `itmdump` installed first.
+
+1. Configure a runner inside your `.cargo/config.toml` file by uncommenting an appropriate line
+   depending on the application you want to use for debugging
+2. Start `openocd` inside the project folder. This will start `openocd` with the provided
+   `openocd.cfg` configuration file.
+3. Use `cargo run` to flash and debug the application in your terminal
+4. Use  `itmdump -F -f itm.txt` to print the logs received from the STM32F3 device. Please note
+   that the PB3 and CN3 pin of the SWD header need to be connected for this to work.
 
 ## Debugging with VS Code
 
 The STM32F3-Discovery comes with an on-board ST-Link so all that is required to flash and debug
 the board is a Mini-USB cable. The code in this repository was debugged using `openocd`
 and the VS Code [`Cortex-Debug` plugin](https://marketplace.visualstudio.com/items?itemName=marus25.cortex-debug).
+Make sure to install this plugin first.
+
+Sample configuration files are provided inside the `vscode` folder.
+Use `cp vscode .vscode -r` to use them for your project.
 
 Some sample configuration files for VS Code were provided as well. You can simply use `Run` and `Debug`
 to automatically rebuild and flash your application.
