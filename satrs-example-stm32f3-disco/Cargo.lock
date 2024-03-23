@@ -65,6 +65,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bxcan"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40ac3d0c0a542d0ab5521211f873f62706a7136df415676f676d347e5a41dd80"
+dependencies = [
+ "bitflags",
+ "embedded-hal",
+ "nb 1.1.0",
+ "vcell",
+]
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -665,7 +677,7 @@ dependencies = [
  "panic-itm",
  "satrs",
  "stm32f3-discovery",
- "stm32f3xx-hal",
+ "stm32f3xx-hal 0.11.0-alpha.0",
  "systick-monotonic",
 ]
 
@@ -770,6 +782,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "stm32f3"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b28b37228ef3fa47956af38c6abd756e912f244c1657f14e66d42fc8d74ea96f"
+dependencies = [
+ "bare-metal 1.0.0",
+ "cortex-m",
+ "cortex-m-rt",
+ "vcell",
+]
+
+[[package]]
 name = "stm32f3-discovery"
 version = "0.8.0-alpha.0"
 source = "git+https://github.com/robamu/stm32f3-discovery?branch=all_features#7b1d21b0463331ada405ceed876c93e82b987a9f"
@@ -778,7 +802,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "lsm303dlhc",
- "stm32f3xx-hal",
+ "stm32f3xx-hal 0.10.0-alpha.0",
  "switch-hal",
 ]
 
@@ -788,7 +812,7 @@ version = "0.10.0-alpha.0"
 source = "git+https://github.com/robamu/stm32f3xx-hal?branch=all_features#c9b3a4fcaaf48f8264475de2b34387597211478e"
 dependencies = [
  "bare-metal 1.0.0",
- "bxcan",
+ "bxcan 0.6.2",
  "cfg-if",
  "cortex-m",
  "cortex-m-rt",
@@ -801,7 +825,31 @@ dependencies = [
  "rtcc",
  "slice-group-by",
  "stm32-usbd",
- "stm32f3",
+ "stm32f3 0.14.0",
+ "void",
+]
+
+[[package]]
+name = "stm32f3xx-hal"
+version = "0.11.0-alpha.0"
+source = "git+https://github.com/robamu/stm32f3xx-hal?branch=update-test#ffe912dddebb9c50c1871de35b993bb5b8cacccf"
+dependencies = [
+ "bxcan 0.7.0",
+ "cfg-if",
+ "cortex-m",
+ "cortex-m-rt",
+ "critical-section",
+ "embedded-dma",
+ "embedded-hal",
+ "embedded-time",
+ "enumset",
+ "nb 1.1.0",
+ "num-traits",
+ "paste",
+ "rtcc",
+ "slice-group-by",
+ "stm32-usbd",
+ "stm32f3 0.15.1",
  "void",
 ]
 

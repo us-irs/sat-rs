@@ -29,7 +29,7 @@ version = "0.1.3-alpha.0"
 
 [dependencies.stm32f3xx-hal]
 git = "https://github.com/robamu/stm32f3xx-hal"
-version = "0.10.0-alpha.0"
+version = "0.11.0-alpha.0"
 features = ["stm32f303xc", "rt", "enumset"]
 branch = "all_features"
 # Can be used in workspace to develop and update HAL
