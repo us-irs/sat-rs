@@ -1,4 +1,5 @@
 /venv
+/.tmtc-history.txt
 /log
 /.idea/*
 !/.idea/runConfigurations

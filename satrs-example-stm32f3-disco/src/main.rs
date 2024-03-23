@@ -501,7 +501,6 @@ mod app {
                         stamp_buf,
                     )
                     .unwrap();
-                // let mem_block = poolmod::TM::alloc().unwrap().init([0u8; MAX_TM_LEN]);
                 let sender = TmSender::new(TmPacket::new(), tgt);
                 if let Err(e) = verif_reporter.send_step_or_completion_success(sendable, &sender) {
                     warn!(target: tgt, "Sending completion success failed: {:?}", e.0);
