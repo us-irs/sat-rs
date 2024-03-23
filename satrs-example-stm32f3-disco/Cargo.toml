@@ -31,14 +31,14 @@ version = "0.1.3-alpha.0"
 git = "https://github.com/robamu/stm32f3xx-hal"
 version = "0.11.0-alpha.0"
 features = ["stm32f303xc", "rt", "enumset"]
-branch = "all_features"
+branch = "complete-dma-update"
 # Can be used in workspace to develop and update HAL
 # path = "../stm32f3xx-hal"
 
 [dependencies.stm32f3-discovery]
 git = "https://github.com/robamu/stm32f3-discovery"
 version = "0.8.0-alpha.0"
-branch = "all_features"
+branch = "complete-dma-update-hal"
 # Can be used in workspace to develop and update BSP
 # path = "../stm32f3-discovery"
 

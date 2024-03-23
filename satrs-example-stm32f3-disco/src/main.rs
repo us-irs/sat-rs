@@ -166,7 +166,7 @@ mod app {
     use stm32f3_discovery::leds::Direction;
     use stm32f3_discovery::leds::Leds;
     use stm32f3xx_hal::prelude::*;
-    use stm32f3xx_hal::Toggle;
+    use stm32f3xx_hal::Switch;
 
     use stm32f3_discovery::switch_hal::OutputSwitch;
     #[allow(dead_code)]
@@ -246,9 +246,9 @@ mod app {
             clocks,
             &mut rcc.apb1,
         );
-        usart2.configure_rx_interrupt(RxEvent::Idle, Toggle::On);
+        usart2.configure_rx_interrupt(RxEvent::Idle, Switch::On);
         // This interrupt is enabled to re-schedule new transfers in the interrupt handler immediately.
-        usart2.configure_tx_interrupt(TxEvent::TransmissionComplete, Toggle::On);
+        usart2.configure_tx_interrupt(TxEvent::TransmissionComplete, Switch::On);
 
         let dma1 = cx.device.DMA1.split(&mut rcc.ahb);
         let (tx_serial, mut rx_serial) = usart2.split();
@@ -309,26 +309,30 @@ mod app {
         if let Some(vec) = TM_REQUESTS.dequeue() {
             cx.shared.tx_transfer.lock(|tx_state| match tx_state {
                 UartTxState::Idle(tx) => {
+                    let encoded_len;
                     //debug!(target: "serial_tx_handler", "bytes: {:x?}", &buf[0..len]);
                     // Safety: We only copy the data into the TX DMA buffer in this task.
                     // If the DMA is active, another branch will be taken.
-                    let mut_tx_dma_buf = unsafe { &mut DMA_TX_BUF };
-                    // 0 sentinel value as start marker
-                    mut_tx_dma_buf[0] = 0;
-                    // Should never panic, we accounted for the overhead.
-                    // Write into transfer buffer directly, no need for intermediate
-                    // encoding buffer.
-                    let encoded_len = cobs::encode(&vec[0..vec.len()], &mut mut_tx_dma_buf[1..]);
-                    // 0 end marker
-                    mut_tx_dma_buf[encoded_len + 1] = 0;
+                    unsafe {
+                        // 0 sentinel value as start marker
+                        DMA_TX_BUF[0] = 0;
+                        encoded_len = cobs::encode(&vec[0..vec.len()], &mut DMA_TX_BUF[1..]);
+                        // Should never panic, we accounted for the overhead.
+                        // Write into transfer buffer directly, no need for intermediate
+                        // encoding buffer.
+                        // 0 end marker
+                        DMA_TX_BUF[encoded_len + 1] = 0;
+                    }
                     //debug!(target: "serial_tx_handler", "Sending {} bytes", encoded_len + 2);
                     //debug!("sent: {:x?}", &mut_tx_dma_buf[0..encoded_len + 2]);
                     let tx_idle = tx.take().unwrap();
                     // Transfer completion and re-scheduling of new TX transfers will be done
                     // by the IRQ handler.
-                    let transfer = tx_idle
-                        .tx
-                        .write_all(&mut_tx_dma_buf[0..encoded_len + 2], tx_idle.dma_channel);
+                    // SAFETY: The DMA is the exclusive writer to the DMA buffer now.
+                    let transfer = tx_idle.tx.write_all(
+                        unsafe { &DMA_TX_BUF[0..encoded_len + 2] },
+                        tx_idle.dma_channel,
+                    );
                     *tx_state = UartTxState::Transmitting(Some(transfer));
                     // The memory block is automatically returned to the pool when it is dropped.
                 }
@@ -484,7 +488,8 @@ mod app {
                 let sec_header = PusTmSecondaryHeader::new_simple(17, 2, stamp_buf);
                 let ping_reply = PusTmCreator::new(&mut sp_header, sec_header, &[], true);
                 let mut tm_packet = TmPacket::new();
-                tm_packet.resize(ping_reply.len_written(), 0)
+                tm_packet
+                    .resize(ping_reply.len_written(), 0)
                     .expect("vec resize failed");
                 ping_reply.write_to_bytes(&mut tm_packet).unwrap();
                 if TM_REQUESTS.enqueue(tm_packet).is_err() {

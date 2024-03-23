@@ -55,17 +55,6 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bxcan"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b13b4b2ea9ab2ba924063ebb86ad895cb79f4a79bf90f27949eb20c335b30f9"
-dependencies = [
- "bitflags",
- "nb 1.1.0",
- "vcell",
-]
-
-[[package]]
-name = "bxcan"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40ac3d0c0a542d0ab5521211f873f62706a7136df415676f676d347e5a41dd80"
@@ -677,7 +666,7 @@ dependencies = [
  "panic-itm",
  "satrs",
  "stm32f3-discovery",
- "stm32f3xx-hal 0.11.0-alpha.0",
+ "stm32f3xx-hal",
  "systick-monotonic",
 ]
 
@@ -771,18 +760,6 @@ dependencies = [
 
 [[package]]
 name = "stm32f3"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "265cda62ac13307414de4aca58dbbbd8038ddba85cffbb335823aa216f2e3200"
-dependencies = [
- "bare-metal 1.0.0",
- "cortex-m",
- "cortex-m-rt",
- "vcell",
-]
-
-[[package]]
-name = "stm32f3"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b28b37228ef3fa47956af38c6abd756e912f244c1657f14e66d42fc8d74ea96f"
@@ -796,45 +773,22 @@ dependencies = [
 [[package]]
 name = "stm32f3-discovery"
 version = "0.8.0-alpha.0"
-source = "git+https://github.com/robamu/stm32f3-discovery?branch=all_features#7b1d21b0463331ada405ceed876c93e82b987a9f"
+source = "git+https://github.com/robamu/stm32f3-discovery?branch=complete-dma-update-hal#5ccacae07ceff02d7d3649df67a6a0ba2a144752"
 dependencies = [
  "accelerometer",
  "cortex-m",
  "cortex-m-rt",
  "lsm303dlhc",
- "stm32f3xx-hal 0.10.0-alpha.0",
+ "stm32f3xx-hal",
  "switch-hal",
 ]
 
 [[package]]
 name = "stm32f3xx-hal"
-version = "0.10.0-alpha.0"
-source = "git+https://github.com/robamu/stm32f3xx-hal?branch=all_features#c9b3a4fcaaf48f8264475de2b34387597211478e"
-dependencies = [
- "bare-metal 1.0.0",
- "bxcan 0.6.2",
- "cfg-if",
- "cortex-m",
- "cortex-m-rt",
- "embedded-dma",
- "embedded-hal",
- "embedded-time",
- "enumset",
- "nb 1.1.0",
- "paste",
- "rtcc",
- "slice-group-by",
- "stm32-usbd",
- "stm32f3 0.14.0",
- "void",
-]
-
-[[package]]
-name = "stm32f3xx-hal"
 version = "0.11.0-alpha.0"
-source = "git+https://github.com/robamu/stm32f3xx-hal?branch=update-test#ffe912dddebb9c50c1871de35b993bb5b8cacccf"
+source = "git+https://github.com/robamu/stm32f3xx-hal?branch=complete-dma-update#f3c3b81b91ecd9498eb133f2cda0b061ce9c9d98"
 dependencies = [
- "bxcan 0.7.0",
+ "bxcan",
  "cfg-if",
  "cortex-m",
  "cortex-m-rt",
@@ -849,7 +803,7 @@ dependencies = [
  "rtcc",
  "slice-group-by",
  "stm32-usbd",
- "stm32f3 0.15.1",
+ "stm32f3",
  "void",
 ]
 
