@@ -17,7 +17,7 @@ use log::info;
 use pus::test::create_test_service_dynamic;
 use satrs::hal::std::tcp_server::ServerConfig;
 use satrs::hal::std::udp_server::UdpTcServer;
-use satrs::request::TargetAndApidId;
+use satrs::request::{GenericMessage, TargetAndApidId};
 use satrs::tmtc::tm_helper::SharedTmPool;
 use satrs_example::config::pool::{create_sched_tc_pool, create_static_pools};
 use satrs_example::config::tasks::{
@@ -38,7 +38,7 @@ use crate::pus::hk::{create_hk_service_dynamic, create_hk_service_static};
 use crate::pus::scheduler::{create_scheduler_service_dynamic, create_scheduler_service_static};
 use crate::pus::test::create_test_service_static;
 use crate::pus::{PusReceiver, PusTcMpscRouter};
-use crate::requests::{CompositeRequestWithToken, GenericRequestRouter};
+use crate::requests::{CompositeRequest, GenericRequestRouter};
 use crate::tcp::{SyncTcpTmSource, TcpTask};
 use crate::tmtc::{
     PusTcSourceProviderSharedPool, SharedTcPool, TcSourceTaskDynamic, TcSourceTaskStatic,
@@ -86,7 +86,7 @@ fn static_tmtc_pool_main() {
     ));
 
     let acs_target_id = TargetAndApidId::new(PUS_APID, RequestTargetId::AcsSubsystem as u32);
-    let (acs_thread_tx, acs_thread_rx) = channel::<CompositeRequestWithToken>();
+    let (acs_thread_tx, acs_thread_rx) = channel::<GenericMessage<CompositeRequest>>();
     // Some request are targetable. This map is used to retrieve sender handles based on a target ID.
     let mut request_map = GenericRequestRouter::default();
     request_map.0.insert(acs_target_id.into(), acs_thread_tx);
@@ -322,7 +322,7 @@ fn dyn_tmtc_pool_main() {
     ));
 
     let acs_target_id = TargetAndApidId::new(PUS_APID, RequestTargetId::AcsSubsystem as u32);
-    let (acs_thread_tx, acs_thread_rx) = channel::<CompositeRequestWithToken>();
+    let (acs_thread_tx, acs_thread_rx) = channel::<GenericMessage<CompositeRequest>>();
     // Some request are targetable. This map is used to retrieve sender handles based on a target ID.
     let mut request_map = GenericRequestRouter::default();
     request_map.0.insert(acs_target_id.into(), acs_thread_tx);

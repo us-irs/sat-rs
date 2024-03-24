@@ -7,7 +7,7 @@ use satrs::pus::action::{
     DefaultActiveActionRequestMap,
 };
 use satrs::pus::verification::{
-    FailParams, FailParamsWithStep, TcStateAccepted,
+    FailParams, FailParamsWithStep, TcStateAccepted, TcStateStarted,
     VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
     VerificationReportingProvider, VerificationToken,
 };
@@ -63,12 +63,16 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPusWithActionId> for 
         time_stamp: &[u8],
         _tm_sender: &impl EcssTmSenderCore,
     ) -> Result<bool, Self::Error> {
+        let verif_token: VerificationToken<TcStateStarted> = active_request
+            .token()
+            .try_into()
+            .expect("invalid token state");
         let remove_entry = match &reply.message.variant {
             ActionReplyPus::CompletionFailed { error_code, params } => {
                 let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
                 verification_handler
                     .completion_failure(
-                        active_request.token(),
+                        verif_token,
                         FailParams::new(
                             time_stamp,
                             error_code,
@@ -86,7 +90,7 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPusWithActionId> for 
                 let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
                 verification_handler
                     .step_failure(
-                        active_request.token(),
+                        verif_token,
                         FailParamsWithStep::new(
                             time_stamp,
                             &EcssEnumU16::new(*step),
@@ -99,13 +103,13 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPusWithActionId> for 
             }
             ActionReplyPus::Completed => {
                 verification_handler
-                    .completion_success(active_request.token(), time_stamp)
+                    .completion_success(verif_token, time_stamp)
                     .map_err(|e| e.0)?;
                 true
             }
             ActionReplyPus::StepSuccess { step } => {
                 verification_handler.step_success(
-                    &active_request.token(),
+                    &verif_token,
                     time_stamp,
                     EcssEnumU16::new(*step),
                 )?;
@@ -164,9 +168,6 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest>
         let target_id_and_apid = TargetAndApidId::from_pus_tc(tc).unwrap();
         let action_id = u32::from_be_bytes(user_data[4..8].try_into().unwrap());
         if subservice == 128 {
-            let token = verif_reporter
-                .start_success(token, time_stamp)
-                .expect("sending start success verification failed");
             let req_variant = if user_data.len() == 8 {
                 ActionRequestVariant::NoData
             } else {
@@ -176,7 +177,7 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest>
                 ActivePusActionRequestStd::new(
                     action_id,
                     target_id_and_apid.into(),
-                    token,
+                    token.into(),
                     Duration::from_secs(30),
                 ),
                 ActionRequest::new(action_id, req_variant),
@@ -219,6 +220,7 @@ pub fn create_action_service_static(
         pus_action_rx,
     );
     let action_request_handler = PusTargetedRequestService::new(
+        ComponentIdList::PusAction as ComponentId,
         PusServiceHelper::new(
             action_srv_receiver,
             action_srv_tm_sender.clone(),
@@ -262,6 +264,7 @@ pub fn create_action_service_dynamic(
         pus_action_rx,
     );
     let action_request_handler = PusTargetedRequestService::new(
+        ComponentIdList::PusAction as ComponentId,
         PusServiceHelper::new(
             action_srv_receiver,
             action_srv_tm_sender.clone(),
@@ -400,6 +403,7 @@ mod tests {
             let action_srv_receiver = MpscTcReceiver::new(0, "TESTBENCH", pus_action_rx);
             Self {
                 service: PusTargetedRequestService::new(
+                    0,
                     PusServiceHelper::new(
                         action_srv_receiver,
                         action_srv_tm_sender.clone(),
@@ -514,7 +518,7 @@ mod tests {
         let possible_req = testbench.request_rx.try_recv();
         assert!(possible_req.is_ok());
         let req = possible_req.unwrap();
-        if let CompositeRequest::Action(action_req) = req.targeted_request.message {
+        if let CompositeRequest::Action(action_req) = req.message {
             assert_eq!(action_req.action_id, action_id);
             assert_eq!(action_req.variant, ActionRequestVariant::NoData);
             let action_reply =
@@ -522,7 +526,7 @@ mod tests {
             testbench
                 .reply_tx
                 .send(GenericMessage::new(
-                    req.targeted_request.request_id,
+                    req.request_id,
                     TARGET_ID.into(),
                     action_reply,
                 ))
@@ -535,5 +539,25 @@ mod tests {
 
         testbench.verify_packet_verification(7);
         testbench.verify_tm_empty();
+    }
+
+    #[test]
+    fn test_basic_request_routing_error() {
+        let mut testbench = TargetedPusRequestTestbench::new_for_action();
+        // Create a basic action request and verify forwarding.
+        let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let sec_header = PusTcSecondaryHeader::new_simple(8, 128);
+        let action_id = 5_u32;
+        let mut app_data: [u8; 8] = [0; 8];
+        // Invalid ID, routing should fail.
+        app_data[0..4].copy_from_slice(&(TEST_APID_TARGET_ID + 1).to_be_bytes());
+        app_data[4..8].copy_from_slice(&action_id.to_be_bytes());
+        let pus8_packet = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
+        testbench.add_tc(&pus8_packet);
+        let time_stamp: [u8; 7] = [0; 7];
+
+        let result = testbench.service.poll_and_handle_next_tc(&time_stamp);
+        assert!(result.is_err());
+        // Verify the correct result and completion failure.
     }
 }

@@ -144,7 +144,7 @@ impl Error for EcssTmtcError {
 }
 pub trait EcssChannel: Send {
     /// Each sender can have an ID associated with it
-    fn channel_id(&self) -> ComponentId;
+    fn id(&self) -> ComponentId;
     fn name(&self) -> &'static str {
         "unset"
     }
@@ -288,7 +288,8 @@ pub trait ActiveRequestMapProvider<V>: Sized {
 
 pub trait ActiveRequestProvider {
     fn target_id(&self) -> ComponentId;
-    fn token(&self) -> VerificationToken<TcStateStarted>;
+    fn token(&self) -> TcStateToken;
+    fn set_token(&mut self, token: TcStateToken);
     fn has_timed_out(&self) -> bool;
     fn timeout(&self) -> Duration;
 }
@@ -300,10 +301,10 @@ pub trait PusRequestRouter<Request> {
 
     fn route(
         &self,
-        target_id: ComponentId,
         request_id: RequestId,
+        source_id: ComponentId,
+        target_id: ComponentId,
         request: Request,
-        token: VerificationToken<TcStateStarted>,
     ) -> Result<(), Self::Error>;
 }
 
@@ -658,7 +659,6 @@ pub mod std_mod {
     use spacepackets::ecss::WritablePusPacket;
     use spacepackets::time::StdTimestampError;
     use spacepackets::ByteConversionError;
-    use std::println;
     use std::string::String;
     use std::sync::mpsc;
     use std::sync::mpsc::TryRecvError;
@@ -667,7 +667,7 @@ pub mod std_mod {
     #[cfg(feature = "crossbeam")]
     pub use cb_mod::*;
 
-    use super::verification::{TcStateStarted, VerificationReportingProvider};
+    use super::verification::{TcStateStarted, TcStateToken, VerificationReportingProvider};
     use super::{AcceptedEcssTcAndToken, ActiveRequestProvider, TcInMemory};
 
     impl From<mpsc::SendError<StoreAddr>> for EcssTmtcError {
@@ -733,7 +733,7 @@ pub mod std_mod {
     }
 
     impl<Sender: EcssTmSenderCore> EcssChannel for TmInSharedPoolSenderWithId<Sender> {
-        fn channel_id(&self) -> ComponentId {
+        fn id(&self) -> ComponentId {
             self.channel_id
         }
 
@@ -802,7 +802,7 @@ pub mod std_mod {
     }
 
     impl<Sender: EcssTmSenderCore> EcssChannel for TmAsVecSenderWithId<Sender> {
-        fn channel_id(&self) -> ComponentId {
+        fn id(&self) -> ComponentId {
             self.id
         }
         fn name(&self) -> &'static str {
@@ -826,7 +826,7 @@ pub mod std_mod {
     }
 
     impl EcssChannel for MpscTcReceiver {
-        fn channel_id(&self) -> ComponentId {
+        fn id(&self) -> ComponentId {
             self.id
         }
 
@@ -840,7 +840,7 @@ pub mod std_mod {
             self.receiver.try_recv().map_err(|e| match e {
                 TryRecvError::Empty => TryRecvTmtcError::Empty,
                 TryRecvError::Disconnected => TryRecvTmtcError::Tmtc(EcssTmtcError::from(
-                    GenericReceiveError::TxDisconnected(Some(self.channel_id())),
+                    GenericReceiveError::TxDisconnected(Some(self.id())),
                 )),
             })
         }
@@ -1056,7 +1056,7 @@ pub mod std_mod {
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ActivePusRequestStd {
         target_id: ComponentId,
-        token: VerificationToken<TcStateStarted>,
+        token: TcStateToken,
         start_time: std::time::Instant,
         timeout: Duration,
     }
@@ -1064,12 +1064,12 @@ pub mod std_mod {
     impl ActivePusRequestStd {
         pub fn new(
             target_id: ComponentId,
-            token: VerificationToken<TcStateStarted>,
+            token: impl Into<TcStateToken>,
             timeout: Duration,
         ) -> Self {
             Self {
                 target_id,
-                token,
+                token: token.into(),
                 start_time: std::time::Instant::now(),
                 timeout,
             }
@@ -1080,12 +1080,15 @@ pub mod std_mod {
         fn target_id(&self) -> ComponentId {
             self.target_id
         }
-        fn token(&self) -> VerificationToken<TcStateStarted> {
+        fn token(&self) -> TcStateToken {
             self.token
         }
 
         fn timeout(&self) -> Duration {
             self.timeout
+        }
+        fn set_token(&mut self, token: TcStateToken) {
+            self.token = token;
         }
 
         fn has_timed_out(&self) -> bool {

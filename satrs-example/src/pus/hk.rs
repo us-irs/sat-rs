@@ -2,8 +2,9 @@ use log::{error, warn};
 use satrs::hk::{CollectionIntervalFactor, HkRequest};
 use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
 use satrs::pus::verification::{
-    FailParams, TcStateAccepted, VerificationReporterWithSharedPoolMpscBoundedSender,
-    VerificationReporterWithVecMpscSender, VerificationReportingProvider, VerificationToken,
+    FailParams, TcStateAccepted, TcStateStarted,
+    VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
+    VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
     ActivePusRequestStd, ActiveRequestProvider, DefaultActiveRequestMap, EcssTcAndToken,
@@ -55,10 +56,14 @@ impl PusReplyHandler<ActivePusRequestStd, HkReply> for HkReplyHandler {
         time_stamp: &[u8],
         _tm_sender: &impl EcssTmSenderCore,
     ) -> Result<bool, Self::Error> {
+        let started_token: VerificationToken<TcStateStarted> = active_request
+            .token()
+            .try_into()
+            .expect("invalid token state");
         match reply.message {
             HkReply::Ack => {
                 verification_handler
-                    .completion_success(active_request.token(), time_stamp)
+                    .completion_success(started_token, time_stamp)
                     .expect("sending completio success verification failed");
             }
         };
@@ -201,10 +206,6 @@ impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for ExampleHkReques
                 return Err(GenericConversionError::InvalidSubservice(subservice));
             }
         };
-        let token = verif_reporter
-            .start_success(token, time_stamp)
-            .expect("Sending start success verification failed");
-
         Ok((
             ActivePusRequestStd::new(target_id_and_apid.into(), token, self.timeout),
             request,
@@ -238,6 +239,7 @@ pub fn create_hk_service_static(
         pus_hk_rx,
     );
     let pus_3_handler = PusTargetedRequestService::new(
+        ComponentIdList::PusHk as ComponentId,
         PusServiceHelper::new(
             hk_srv_receiver,
             hk_srv_tm_sender,
@@ -279,6 +281,7 @@ pub fn create_hk_service_dynamic(
         pus_hk_rx,
     );
     let pus_3_handler = PusTargetedRequestService::new(
+        ComponentIdList::PusHk as ComponentId,
         PusServiceHelper::new(
             hk_srv_receiver,
             hk_srv_tm_sender,
@@ -361,4 +364,9 @@ impl<
     pub fn check_for_request_timeouts(&mut self) {
         self.service.check_for_request_timeouts();
     }
+}
+
+#[cfg(test)]
+pub mod tests {
+    // TODO: Add unittests for HK converter.
 }

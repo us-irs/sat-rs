@@ -5,7 +5,7 @@ use log::warn;
 use satrs::action::ActionRequest;
 use satrs::hk::HkRequest;
 use satrs::pus::verification::{
-    FailParams, TcStateStarted, VerificationReportingProvider, VerificationToken,
+    FailParams, TcStateAccepted, VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{ActiveRequestProvider, GenericRoutingError, PusRequestRouter};
 use satrs::queue::GenericSendError;
@@ -22,12 +22,12 @@ pub enum CompositeRequest {
     Action(ActionRequest),
 }
 
-#[derive(Clone, Debug)]
-pub struct CompositeRequestWithToken {
-    pub(crate) targeted_request: GenericMessage<CompositeRequest>,
-    pub(crate) token: VerificationToken<TcStateStarted>,
-}
+//#[derive(Clone, Debug)]
+// pub struct CompositeRequestWithToken {
+//pub(crate) targeted_request: GenericMessage<CompositeRequest>,
+//}
 
+/*
 impl CompositeRequestWithToken {
     pub fn new(
         target_id: ComponentId,
@@ -41,9 +41,12 @@ impl CompositeRequestWithToken {
         }
     }
 }
+*/
 
 #[derive(Default, Clone)]
-pub struct GenericRequestRouter(pub HashMap<ComponentId, mpsc::Sender<CompositeRequestWithToken>>);
+pub struct GenericRequestRouter(
+    pub HashMap<ComponentId, mpsc::Sender<GenericMessage<CompositeRequest>>>,
+);
 
 impl GenericRequestRouter {
     pub(crate) fn handle_error_generic(
@@ -58,13 +61,17 @@ impl GenericRequestRouter {
             "Routing request for service {} failed: {error:?}",
             tc.service()
         );
+        let accepted_token: VerificationToken<TcStateAccepted> = active_request
+            .token()
+            .try_into()
+            .expect("token is not in accepted state");
         match error {
             GenericRoutingError::UnknownTargetId(id) => {
                 let mut fail_data: [u8; 8] = [0; 8];
                 fail_data.copy_from_slice(&id.to_be_bytes());
                 verif_reporter
                     .completion_failure(
-                        active_request.token(),
+                        accepted_token,
                         FailParams::new(time_stamp, &tmtc_err::UNKNOWN_TARGET_ID, &fail_data),
                     )
                     .expect("Sending start failure failed");
@@ -74,7 +81,7 @@ impl GenericRequestRouter {
                 fail_data.copy_from_slice(&active_request.target_id().to_be_bytes());
                 verif_reporter
                     .completion_failure(
-                        active_request.token(),
+                        accepted_token,
                         FailParams::new(time_stamp, &tmtc_err::ROUTING_ERROR, &fail_data),
                     )
                     .expect("Sending start failure failed");
@@ -87,22 +94,22 @@ impl PusRequestRouter<HkRequest> for GenericRequestRouter {
 
     fn route(
         &self,
-        target_id: ComponentId,
         request_id: RequestId,
+        source_id: ComponentId,
+        target_id: ComponentId,
         hk_request: HkRequest,
-        token: VerificationToken<TcStateStarted>,
     ) -> Result<(), Self::Error> {
         if let Some(sender) = self.0.get(&target_id) {
             sender
-                .send(CompositeRequestWithToken::new(
-                    target_id,
+                .send(GenericMessage::new(
                     request_id,
+                    source_id,
                     CompositeRequest::Hk(hk_request),
-                    token,
                 ))
                 .map_err(|_| GenericRoutingError::Send(GenericSendError::RxDisconnected))?;
+            return Ok(());
         }
-        Ok(())
+        Err(GenericRoutingError::UnknownTargetId(target_id))
     }
 }
 
@@ -111,22 +118,21 @@ impl PusRequestRouter<ActionRequest> for GenericRequestRouter {
 
     fn route(
         &self,
-        target_id: ComponentId,
         request_id: RequestId,
+        source_id: ComponentId,
+        target_id: ComponentId,
         action_request: ActionRequest,
-        token: VerificationToken<TcStateStarted>,
     ) -> Result<(), Self::Error> {
         if let Some(sender) = self.0.get(&target_id) {
-            println!("routed action request");
             sender
-                .send(CompositeRequestWithToken::new(
-                    target_id,
+                .send(GenericMessage::new(
                     request_id,
+                    source_id,
                     CompositeRequest::Action(action_request),
-                    token,
                 ))
                 .map_err(|_| GenericRoutingError::Send(GenericSendError::RxDisconnected))?;
+            return Ok(());
         }
-        Ok(())
+        Err(GenericRoutingError::UnknownTargetId(target_id))
     }
 }

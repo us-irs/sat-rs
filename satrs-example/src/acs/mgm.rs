@@ -7,7 +7,7 @@ use satrs::request::GenericMessage;
 use satrs::ComponentId;
 
 use crate::pus::hk::HkReply;
-use crate::requests::CompositeRequestWithToken;
+use crate::requests::CompositeRequest;
 
 pub trait SpiInterface {
     type Error;
@@ -27,7 +27,7 @@ pub struct MgmHandler<ComInterface: SpiInterface, TmSender: EcssTmSenderCore> {
     mode_request_receiver: mpsc::Receiver<GenericMessage<ModeRequest>>,
     mode_reply_sender_to_pus: mpsc::Sender<GenericMessage<ModeReply>>,
     mode_reply_sender_to_parent: mpsc::Sender<GenericMessage<ModeReply>>,
-    composite_request_receiver: mpsc::Receiver<CompositeRequestWithToken>,
+    composite_request_receiver: mpsc::Receiver<GenericMessage<CompositeRequest>>,
     hk_reply_sender: mpsc::Sender<GenericMessage<HkReply>>,
     hk_tm_sender: TmSender,
     mode: ModeAndSubmode,

@@ -142,7 +142,10 @@ pub mod std_mod {
     use std::sync::mpsc;
 
     use crate::{
-        pus::{verification, DefaultActiveRequestMap},
+        pus::{
+            verification::{self, TcStateToken},
+            DefaultActiveRequestMap,
+        },
         ComponentId,
     };
 
@@ -158,7 +161,8 @@ pub mod std_mod {
         delegate! {
             to self.common {
                 fn target_id(&self) -> ComponentId;
-                fn token(&self) -> VerificationToken<verification::TcStateStarted>;
+                fn token(&self) -> verification::TcStateToken;
+                fn set_token(&mut self, token: verification::TcStateToken);
                 fn has_timed_out(&self) -> bool;
                 fn timeout(&self) -> core::time::Duration;
             }
@@ -169,7 +173,7 @@ pub mod std_mod {
         pub fn new(
             action_id: ActionId,
             target_id: ComponentId,
-            token: VerificationToken<verification::TcStateStarted>,
+            token: TcStateToken,
             timeout: core::time::Duration,
         ) -> Self {
             Self {

@@ -2,7 +2,8 @@ use crate::requests::GenericRequestRouter;
 use crate::tmtc::MpscStoreAndSendError;
 use log::warn;
 use satrs::pus::verification::{
-    self, FailParams, TcStateAccepted, VerificationReportingProvider, VerificationToken,
+    self, FailParams, TcStateAccepted, TcStateStarted, VerificationReportingProvider,
+    VerificationToken,
 };
 use satrs::pus::{
     ActiveRequestMapProvider, ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter,
@@ -16,6 +17,7 @@ use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusServiceId;
 use satrs::spacepackets::time::cds::TimeProvider;
 use satrs::spacepackets::time::TimeWriter;
+use satrs::ComponentId;
 use satrs_example::config::{tmtc_err, CustomPusServiceId};
 use std::fmt::Debug;
 use std::sync::mpsc::{self, Sender};
@@ -120,6 +122,7 @@ pub struct PusTargetedRequestService<
     RequestType,
     ReplyType,
 > {
+    pub id: ComponentId,
     pub service_helper:
         PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
     pub request_router: GenericRequestRouter,
@@ -158,6 +161,7 @@ where
     GenericRequestRouter: PusRequestRouter<RequestType, Error = GenericRoutingError>,
 {
     pub fn new(
+        id: ComponentId,
         service_helper: PusServiceHelper<
             TcReceiver,
             TmSender,
@@ -171,6 +175,7 @@ where
         reply_receiver: mpsc::Receiver<GenericMessage<ReplyType>>,
     ) -> Self {
         Self {
+            id,
             service_helper,
             request_converter,
             active_request_map,
@@ -194,7 +199,7 @@ where
             .tc_in_mem_converter_mut()
             .cache(&ecss_tc_and_token.tc_in_memory)?;
         let tc = self.service_helper.tc_in_mem_converter().convert()?;
-        let (request_info, request) = match self.request_converter.convert(
+        let (mut request_info, request) = match self.request_converter.convert(
             ecss_tc_and_token.token,
             &tc,
             time_stamp,
@@ -206,14 +211,24 @@ where
                 return Err(e.into());
             }
         };
+        let accepted_token: VerificationToken<TcStateAccepted> = request_info
+            .token()
+            .try_into()
+            .expect("token not in expected accepted state");
         let verif_request_id = verification::RequestId::new(&tc).raw();
         match self.request_router.route(
-            request_info.target_id(),
             verif_request_id,
+            self.id,
+            request_info.target_id(),
             request,
-            request_info.token(),
         ) {
             Ok(()) => {
+                let started_token = self
+                    .service_helper
+                    .verif_reporter()
+                    .start_success(accepted_token, time_stamp)
+                    .expect("Start success failure");
+                request_info.set_token(started_token.into());
                 self.active_request_map
                     .insert(&verif_request_id, request_info);
             }
@@ -221,10 +236,11 @@ where
                 self.request_router.handle_error_generic(
                     &request_info,
                     &tc,
-                    e,
+                    e.clone(),
                     time_stamp,
                     self.service_helper.verif_reporter(),
                 );
+                return Err(e.into());
             }
         }
         Ok(PusPacketHandlerResult::RequestHandled)
@@ -336,6 +352,8 @@ where
     }
 }
 
+/// Generic timeout handling: Handle the verification failure with a dedicated return code
+/// and also log the error.
 pub fn generic_pus_request_timeout_handler(
     active_request: &(impl ActiveRequestProvider + Debug),
     verification_handler: &impl VerificationReportingProvider,
@@ -343,9 +361,13 @@ pub fn generic_pus_request_timeout_handler(
     service_str: &'static str,
 ) -> Result<(), EcssTmtcError> {
     log::warn!("timeout for active request {active_request:?} on {service_str} service");
+    let started_token: VerificationToken<TcStateStarted> = active_request
+        .token()
+        .try_into()
+        .expect("token not in expected started state");
     verification_handler
         .completion_failure(
-            active_request.token(),
+            started_token,
             FailParams::new(
                 time_stamp,
                 &satrs_example::config::tmtc_err::REQUEST_TIMEOUT,
@@ -452,7 +474,7 @@ pub(crate) mod tests {
         request::TargetAndApidId,
     };
 
-    use crate::requests::CompositeRequestWithToken;
+    use crate::requests::CompositeRequest;
 
     use super::*;
 
@@ -484,6 +506,6 @@ pub(crate) mod tests {
         pub tm_funnel_rx: mpsc::Receiver<Vec<u8>>,
         pub pus_packet_tx: mpsc::Sender<EcssTcAndToken>,
         pub reply_tx: mpsc::Sender<GenericMessage<ReplyType>>,
-        pub request_rx: mpsc::Receiver<CompositeRequestWithToken>,
+        pub request_rx: mpsc::Receiver<GenericMessage<CompositeRequest>>,
     }
 }
