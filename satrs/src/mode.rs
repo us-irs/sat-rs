@@ -27,7 +27,7 @@ pub struct ModeAndSubmode {
 }
 
 impl ModeAndSubmode {
-    const RAW_LEN: usize = size_of::<Mode>() + size_of::<Submode>();
+    pub const RAW_LEN: usize = size_of::<Mode>() + size_of::<Submode>();
 
     pub const fn new_mode_only(mode: Mode) -> Self {
         Self { mode, submode: 0 }
@@ -131,6 +131,7 @@ pub enum ModeReply {
     ModeReply(ModeAndSubmode),
     // Can not reach the commanded mode. Contains a reason as a [ResultU16].
     CantReachMode(ResultU16),
+    /// We are in the wrong mode for unknown reasons. Contains the expected and reached mode.
     WrongMode {
         expected: ModeAndSubmode,
         reached: ModeAndSubmode,

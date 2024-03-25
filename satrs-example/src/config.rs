@@ -29,6 +29,7 @@ pub const AOCS_APID: u16 = 1;
 pub enum GroupId {
     Tmtc = 0,
     Hk = 1,
+    Mode = 2,
 }
 
 pub const OBSW_SERVER_ADDR: Ipv4Addr = Ipv4Addr::UNSPECIFIED;
@@ -92,6 +93,13 @@ pub mod hk_err {
         UNKNOWN_TARGET_ID_EXT,
         COLLECTION_INTERVAL_MISSING_EXT,
     ];
+}
+
+pub mod mode_err {
+    use super::*;
+
+    #[resultcode]
+    pub const WRONG_MODE: ResultU16 = ResultU16::new(GroupId::Mode as u8, 0);
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]

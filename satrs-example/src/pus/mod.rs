@@ -25,6 +25,7 @@ use std::sync::mpsc::{self, Sender};
 pub mod action;
 pub mod event;
 pub mod hk;
+pub mod mode;
 pub mod scheduler;
 pub mod stack;
 pub mod test;
