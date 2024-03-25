@@ -16,6 +16,7 @@ from spacepackets.ecss.pus_1_verification import UnpackParams, Service1Tm
 from tmtccmd import TcHandlerBase, ProcedureParamsWrapper
 from tmtccmd.core.base import BackendRequest
 from tmtccmd.core.ccsds_backend import QueueWrapper
+from tmtccmd.logging import add_colorlog_console_logger
 from tmtccmd.pus import VerificationWrapper
 from tmtccmd.tmtc import CcsdsTmHandler, SpecificApidHandlerBase
 from tmtccmd.com import ComInterface
@@ -44,8 +45,6 @@ from tmtccmd.tmtc import (
 from tmtccmd.pus.s5_fsfw_event import Service5Tm
 from tmtccmd.util import FileSeqCountProvider, PusFileSeqCountProvider
 from tmtccmd.util.obj_id import ObjectIdDictT
-
-# from tmtccmd.util.tmtc_printer import FsfwTmTcPrinter
 
 _LOGGER = logging.getLogger()
 
@@ -215,10 +214,11 @@ class TcHandler(TcHandlerBase):
             cmd_path = def_proc.cmd_path
             if cmd_path == "/ping":
                 q.add_log_cmd("Sending PUS ping telecommand")
-                return q.add_pus_tc(PusTelecommand(service=17, subservice=1))
+                q.add_pus_tc(PusTelecommand(service=17, subservice=1))
 
 
 def main():
+    add_colorlog_console_logger(_LOGGER)
     tmtccmd.init_printout(False)
     hook_obj = SatRsConfigHook(json_cfg_path=default_json_path())
     parser_wrapper = PreArgsParsingWrapper()
