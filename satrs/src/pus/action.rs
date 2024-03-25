@@ -5,9 +5,6 @@ use crate::{
     ComponentId,
 };
 
-use super::{ActivePusRequestStd, ActiveRequestProvider};
-
-use delegate::delegate;
 use satrs_shared::res_code::ResultU16;
 
 #[cfg(feature = "std")]
@@ -144,7 +141,7 @@ pub mod std_mod {
     use crate::{
         pus::{
             verification::{self, TcStateToken},
-            DefaultActiveRequestMap,
+            ActivePusRequestStd, ActiveRequestProvider, DefaultActiveRequestMap,
         },
         ComponentId,
     };
@@ -158,7 +155,7 @@ pub mod std_mod {
     }
 
     impl ActiveRequestProvider for ActivePusActionRequestStd {
-        delegate! {
+        delegate::delegate! {
             to self.common {
                 fn target_id(&self) -> ComponentId;
                 fn token(&self) -> verification::TcStateToken;
