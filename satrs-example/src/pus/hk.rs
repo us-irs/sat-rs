@@ -369,16 +369,12 @@ impl<
 #[cfg(test)]
 mod tests {
     use satrs::{
-        pus::{
-            test_util::TEST_APID,
-            verification::{
-                test_util::{SharedVerificationMap, TestVerificationReporter},
-                VerificationReportingProvider,
-            },
-            PusTcToRequestConverter,
-        },
+        hk::HkRequest,
+        pus::{test_util::TEST_APID, ActiveRequestProvider},
+        request::TargetAndApidId,
         spacepackets::{
             ecss::{
+                hk::Subservice,
                 tc::{PusTcCreator, PusTcReader},
                 WritablePusPacket,
             },
@@ -386,21 +382,42 @@ mod tests {
         },
     };
 
+    use crate::pus::tests::ConverterTestbench;
+
     use super::ExampleHkRequestConverter;
 
     #[test]
-    fn test_hk_converter() {
-        let shared_verif_map = SharedVerificationMap::default();
-        let mut test_verif_reporter = TestVerificationReporter::new(shared_verif_map.clone());
-        let mut converter = ExampleHkRequestConverter::default();
+    fn test_hk_converter_one_shot_req() {
+        let mut hk_bench = ConverterTestbench::new(ExampleHkRequestConverter::default());
         let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
-        let ping = PusTcCreator::new_simple(&mut sp_header, 3, 25, Some(&[1, 2, 3, 4]), true);
-        let token = test_verif_reporter.add_tc(&ping);
-        let accepted_token = test_verif_reporter
-            .acceptance_success(token, &[])
-            .expect("acceptance failed");
-        let pus_tc_raw = ping.to_vec().unwrap();
+
+        let target_id = 2_u32;
+        let unique_id = 5_u32;
+        let mut app_data: [u8; 8] = [0; 8];
+        app_data[0..4].copy_from_slice(&target_id.to_be_bytes());
+        app_data[4..8].copy_from_slice(&unique_id.to_be_bytes());
+
+        let hk_req = PusTcCreator::new_simple(
+            &mut sp_header,
+            3,
+            Subservice::TcGenerateOneShotHk as u8,
+            Some(&app_data),
+            true,
+        );
+        let accepted_token = hk_bench.add_tc(&hk_req);
+        let pus_tc_raw = hk_req.to_vec().unwrap();
         let pus_tc_reader = PusTcReader::new(&pus_tc_raw).expect("invalid pus tc");
-        converter.convert(accepted_token, &pus_tc_reader.0, &[], &test_verif_reporter);
+        let (active_req, req) = hk_bench
+            .convert(accepted_token, &pus_tc_reader.0, &[])
+            .expect("conversion failed");
+        assert_eq!(
+            active_req.target_id(),
+            TargetAndApidId::new(TEST_APID, target_id).into()
+        );
+        if let HkRequest::OneShot(id) = req {
+            assert_eq!(id, unique_id);
+        } else {
+            panic!("unexpected HK request")
+        }
     }
 }

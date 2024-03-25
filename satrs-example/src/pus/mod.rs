@@ -468,10 +468,14 @@ pub(crate) mod tests {
 
     use satrs::{
         pus::{
-            verification::VerificationReporterWithVecMpscSender, ActiveRequestMapProvider,
-            EcssTcInVecConverter, MpscTcReceiver, TmAsVecSenderWithMpsc,
+            verification::{
+                test_util::{SharedVerificationMap, TestVerificationReporter},
+                VerificationReporterWithVecMpscSender,
+            },
+            ActiveRequestMapProvider, EcssTcInVecConverter, MpscTcReceiver, TmAsVecSenderWithMpsc,
         },
         request::TargetAndApidId,
+        spacepackets::ecss::tc::PusTcCreator,
     };
 
     use crate::requests::CompositeRequest;
@@ -481,6 +485,52 @@ pub(crate) mod tests {
     pub const TEST_APID: u16 = 0x23;
     pub const TEST_APID_TARGET_ID: u32 = 5;
     pub const TARGET_ID: TargetAndApidId = TargetAndApidId::new(TEST_APID, TEST_APID_TARGET_ID);
+
+    pub struct ConverterTestbench<
+        Converter: PusTcToRequestConverter<ActiveRequestInfo, Request, Error = GenericConversionError>,
+        ActiveRequestInfo: ActiveRequestProvider,
+        Request,
+    > {
+        pub shared_verif_map: SharedVerificationMap,
+        pub verif_reporter: TestVerificationReporter,
+        pub converter: Converter,
+        phantom: std::marker::PhantomData<(ActiveRequestInfo, Request)>,
+    }
+
+    impl<
+            Converter: PusTcToRequestConverter<ActiveRequestInfo, Request, Error = GenericConversionError>,
+            ActiveRequestInfo: ActiveRequestProvider,
+            Request,
+        > ConverterTestbench<Converter, ActiveRequestInfo, Request>
+    {
+        pub fn new(converter: Converter) -> Self {
+            let shared_verif_map = SharedVerificationMap::default();
+            let test_verif_reporter = TestVerificationReporter::new(shared_verif_map.clone());
+            Self {
+                shared_verif_map,
+                verif_reporter: test_verif_reporter,
+                converter,
+                phantom: std::marker::PhantomData,
+            }
+        }
+
+        pub fn add_tc(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted> {
+            let token = self.verif_reporter.add_tc(tc);
+            self.verif_reporter
+                .acceptance_success(token, &[])
+                .expect("acceptance failed")
+        }
+
+        pub fn convert(
+            &mut self,
+            token: VerificationToken<TcStateAccepted>,
+            tc_reader: &PusTcReader,
+            time_stamp: &[u8],
+        ) -> Result<(ActiveRequestInfo, Request), Converter::Error> {
+            self.converter
+                .convert(token, tc_reader, time_stamp, &self.verif_reporter)
+        }
+    }
 
     pub struct TargetedPusRequestTestbench<
         RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = GenericConversionError>,
