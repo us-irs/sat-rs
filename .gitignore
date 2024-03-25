@@ -3,5 +3,7 @@ target/
 /Cargo.lock
 output.log
 
+output.log
+
 /.idea/*
 !/.idea/runConfigurations
