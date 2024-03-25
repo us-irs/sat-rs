@@ -11,7 +11,8 @@ proc CDSWOConfigure { CDCPUFreqHz CDSWOFreqHz CDSWOOutput } {
     # Alternative option: Pipe ITM output into itm.txt file
     # tpiu config internal itm.txt uart off $CDCPUFreqHz
 
-    # Default option so SWO display of VS code works.
+    # Default option so SWO display of VS code works. Please note that this might not be required
+    # anymore starting at openocd v0.12.0
     tpiu config internal $CDSWOOutput uart off $CDCPUFreqHz $CDSWOFreqHz
     itm port 0 on
 }

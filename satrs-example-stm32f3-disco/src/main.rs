@@ -4,35 +4,33 @@ extern crate panic_itm;
 
 use rtic::app;
 
-use heapless::{
-    mpmc::Q16,
-    pool,
-    pool::singleton::{Box, Pool},
-};
+use heapless::{mpmc::Q8, Vec};
 #[allow(unused_imports)]
 use itm_logger::{debug, info, logger_init, warn};
-use satrs_core::spacepackets::{ecss::PusPacket, tm::PusTm};
-use satrs_core::{
-    pus::{EcssTmErrorWithSend, EcssTmSenderCore},
-    seq_count::SequenceCountProviderCore,
+use rtic_monotonics::systick::fugit::TimerInstantU32;
+use rtic_monotonics::systick::ExtU32;
+use satrs::seq_count::SequenceCountProviderCore;
+use satrs::{
+    pool::StoreError,
+    pus::{EcssChannel, EcssTmSenderCore, EcssTmtcError, PusTmWrapper},
+    spacepackets::{ecss::PusPacket, ecss::WritablePusPacket},
 };
 use stm32f3xx_hal::dma::dma1;
 use stm32f3xx_hal::gpio::{PushPull, AF7, PA2, PA3};
 use stm32f3xx_hal::pac::USART2;
 use stm32f3xx_hal::serial::{Rx, RxEvent, Serial, SerialDmaRx, SerialDmaTx, Tx, TxEvent};
-use systick_monotonic::{fugit::Duration, Systick};
 
 const UART_BAUD: u32 = 115200;
-const BLINK_FREQ_MS: u64 = 1000;
-const TX_HANDLER_FREQ_MS: u64 = 20;
-const MIN_DELAY_BETWEEN_TX_PACKETS_MS: u16 = 5;
-const MAX_TC_LEN: usize = 200;
-const MAX_TM_LEN: usize = 200;
+const BLINK_FREQ_MS: u32 = 1000;
+const TX_HANDLER_FREQ_MS: u32 = 20;
+const MIN_DELAY_BETWEEN_TX_PACKETS_MS: u32 = 5;
+const MAX_TC_LEN: usize = 128;
+const MAX_TM_LEN: usize = 128;
 pub const PUS_APID: u16 = 0x02;
 
 type TxType = Tx<USART2, PA2<AF7<PushPull>>>;
 type RxType = Rx<USART2, PA3<AF7<PushPull>>>;
-type MsDuration = Duration<u64, 1, 1000>;
+type InstantFugit = TimerInstantU32<1000>;
 type TxDmaTransferType = SerialDmaTx<&'static [u8], dma1::C7, TxType>;
 type RxDmaTransferType = SerialDmaRx<&'static mut [u8], dma1::C6, RxType>;
 
@@ -51,10 +49,12 @@ static mut DMA_TX_BUF: [u8; TM_BUF_LEN] = [0; TM_BUF_LEN];
 // transfer buffer.
 static mut DMA_RX_BUF: [u8; TC_BUF_LEN] = [0; TC_BUF_LEN];
 
-static TX_REQUESTS: Q16<(Box<poolmod::TM>, usize)> = Q16::new();
+type TmPacket = Vec<u8, MAX_TM_LEN>;
+type TcPacket = Vec<u8, MAX_TC_LEN>;
 
-const TC_POOL_SLOTS: usize = 12;
-const TM_POOL_SLOTS: usize = 12;
+static TM_REQUESTS: Q8<TmPacket> = Q8::new();
+
+use core::cell::RefCell;
 use core::sync::atomic::{AtomicU16, Ordering};
 
 pub struct SeqCountProviderAtomicRef {
@@ -88,70 +88,56 @@ impl SequenceCountProviderCore<u16> for SeqCountProviderAtomicRef {
 static SEQ_COUNT_PROVIDER: SeqCountProviderAtomicRef =
     SeqCountProviderAtomicRef::new(Ordering::Relaxed);
 
-// Otherwise, warnings because of heapless pool macro.
-#[allow(non_camel_case_types)]
-mod poolmod {
-    use super::*;
-    // Must hold full TC length including COBS overhead.
-    pool!(TC: [u8; TC_BUF_LEN]);
-    // Only encoded at the end, so no need to account for COBS overhead.
-    pool!(TM: [u8; MAX_TM_LEN]);
-}
-
 pub struct TxIdle {
     tx: TxType,
     dma_channel: dma1::C7,
 }
 
-#[derive(Debug)]
-pub enum TmStoreError {
-    StoreFull,
-    StoreSlotsTooSmall,
-}
-
-impl From<TmStoreError> for EcssTmErrorWithSend<TmStoreError> {
-    fn from(value: TmStoreError) -> Self {
-        Self::SendError(value)
-    }
-}
-
 pub struct TmSender {
-    mem_block: Option<Box<poolmod::TM>>,
+    vec: Option<RefCell<Vec<u8, MAX_TM_LEN>>>,
     ctx: &'static str,
 }
 
 impl TmSender {
-    pub fn new(mem_block: Box<poolmod::TM>, ctx: &'static str) -> Self {
+    pub fn new(tm_packet: TmPacket, ctx: &'static str) -> Self {
         Self {
-            mem_block: Some(mem_block),
+            vec: Some(RefCell::new(tm_packet)),
             ctx,
         }
     }
 }
 
-impl EcssTmSenderCore for TmSender {
-    type Error = TmStoreError;
+impl EcssChannel for TmSender {
+    fn id(&self) -> satrs::ChannelId {
+        0
+    }
+}
 
-    fn send_tm(
-        &mut self,
-        tm: PusTm,
-    ) -> Result<(), satrs_core::pus::EcssTmErrorWithSend<Self::Error>> {
-        let mem_block = self.mem_block.take();
-        if mem_block.is_none() {
+impl EcssTmSenderCore for TmSender {
+    fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
+        let vec = self.vec.as_ref();
+        if vec.is_none() {
             panic!("send_tm should only be called once");
         }
-        let mut mem_block = mem_block.unwrap();
-        if tm.len_packed() > MAX_TM_LEN {
-            return Err(EcssTmErrorWithSend::SendError(
-                TmStoreError::StoreSlotsTooSmall,
-            ));
+        let vec_ref = vec.unwrap();
+        let mut vec = vec_ref.borrow_mut();
+        match tm {
+            PusTmWrapper::InStore(addr) => return Err(EcssTmtcError::CantSendAddr(addr)),
+            PusTmWrapper::Direct(tm) => {
+                if tm.len_written() > MAX_TM_LEN {
+                    return Err(EcssTmtcError::Store(StoreError::DataTooLarge(
+                        tm.len_written(),
+                    )));
+                }
+                vec.resize(tm.len_written(), 0).expect("vec resize failed");
+                tm.write_to_bytes(vec.as_mut_slice())?;
+                info!(target: self.ctx, "Sending TM[{},{}] with size {}", tm.service(), tm.subservice(), tm.len_written());
+                drop(vec);
+                TM_REQUESTS
+                    .enqueue(vec_ref.take())
+                    .map_err(|_| EcssTmtcError::Store(StoreError::StoreFull(0)))?;
+            }
         }
-        tm.write_to_bytes(mem_block.as_mut_slice())
-            .map_err(|e| EcssTmErrorWithSend::EcssTmError(e.into()))?;
-        info!(target: self.ctx, "Sending TM[{},{}] with size {}", tm.service(), tm.subservice(), tm.len_packed());
-        TX_REQUESTS
-            .enqueue((mem_block, tm.len_packed()))
-            .map_err(|_| TmStoreError::StoreFull)?;
         Ok(())
     }
 }
@@ -163,33 +149,37 @@ pub enum UartTxState {
     Transmitting(Option<TxDmaTransferType>),
 }
 
-#[app(device = stm32f3xx_hal::pac, peripherals = true, dispatchers = [TIM20_BRK, TIM20_UP, TIM20_TRG_COM])]
+pub struct UartTxShared {
+    last_completed: Option<InstantFugit>,
+    state: UartTxState,
+}
+
+#[app(device = stm32f3xx_hal::pac, peripherals = true)]
 mod app {
     use super::*;
     use core::slice::Iter;
     use cortex_m::iprintln;
-    use satrs_core::pus::verification::FailParams;
-    use satrs_core::pus::verification::VerificationReporterCore;
-    use satrs_core::spacepackets::{
-        ecss::EcssEnumU16,
-        tc::PusTc,
-        time::cds::P_FIELD_BASE,
-        tm::{PusTm, PusTmSecondaryHeader},
-        CcsdsPacket, SpHeader,
+    use rtic_monotonics::systick::Systick;
+    use rtic_monotonics::Monotonic;
+    use satrs::pus::verification::FailParams;
+    use satrs::pus::verification::VerificationReporterCore;
+    use satrs::spacepackets::{
+        ecss::tc::PusTcReader, ecss::tm::PusTmCreator, ecss::tm::PusTmSecondaryHeader,
+        ecss::EcssEnumU16, time::cds::P_FIELD_BASE, CcsdsPacket, SpHeader,
     };
     #[allow(unused_imports)]
     use stm32f3_discovery::leds::Direction;
     use stm32f3_discovery::leds::Leds;
     use stm32f3xx_hal::prelude::*;
-    use stm32f3xx_hal::Toggle;
 
     use stm32f3_discovery::switch_hal::OutputSwitch;
+    use stm32f3xx_hal::Switch;
     #[allow(dead_code)]
     type SerialType = Serial<USART2, (PA2<AF7<PushPull>>, PA3<AF7<PushPull>>)>;
 
     #[shared]
     struct Shared {
-        tx_transfer: UartTxState,
+        tx_shared: UartTxShared,
         rx_transfer: Option<RxDmaTransferType>,
     }
 
@@ -201,17 +191,14 @@ mod app {
         curr_dir: Iter<'static, Direction>,
     }
 
-    #[monotonic(binds = SysTick, default = true)]
-    type MonoTimer = Systick<1000>;
-
-    #[init(local = [
-        tc_pool_mem: [u8; TC_BUF_LEN * TC_POOL_SLOTS] = [0; TC_BUF_LEN * TC_POOL_SLOTS],
-        tm_pool_mem: [u8; MAX_TM_LEN * TM_POOL_SLOTS] = [0; MAX_TM_LEN * TM_POOL_SLOTS]
-    ])]
-    fn init(mut cx: init::Context) -> (Shared, Local, init::Monotonics) {
+    #[init]
+    fn init(mut cx: init::Context) -> (Shared, Local) {
         let mut rcc = cx.device.RCC.constrain();
 
-        let mono = Systick::new(cx.core.SYST, 8_000_000);
+        // Initialize the systick interrupt & obtain the token to prove that we did
+        let systick_mono_token = rtic_monotonics::create_systick_token!();
+        Systick::start(cx.core.SYST, 8_000_000, systick_mono_token);
+
         logger_init();
         let mut flash = cx.device.FLASH.constrain();
         let clocks = rcc
@@ -220,15 +207,16 @@ mod app {
             .sysclk(8.MHz())
             .pclk1(8.MHz())
             .freeze(&mut flash.acr);
+
+        // Set up monotonic timer.
+        //let mono_timer = MonoTimer::new(cx.core.DWT, clocks, &mut cx.core.DCB);
+
         // setup ITM output
         iprintln!(
             &mut cx.core.ITM.stim[0],
             "Starting sat-rs demo application for the STM32F3-Discovery"
         );
         let mut gpioe = cx.device.GPIOE.split(&mut rcc.ahb);
-        // Assign memory to the pools.
-        poolmod::TC::grow(cx.local.tc_pool_mem);
-        poolmod::TM::grow(cx.local.tm_pool_mem);
 
         let verif_reporter = VerificationReporterCore::new(PUS_APID).unwrap();
 
@@ -264,106 +252,138 @@ mod app {
             clocks,
             &mut rcc.apb1,
         );
-        usart2.configure_rx_interrupt(RxEvent::Idle, Toggle::On);
+        usart2.configure_rx_interrupt(RxEvent::Idle, Switch::On);
         // This interrupt is enabled to re-schedule new transfers in the interrupt handler immediately.
-        usart2.configure_tx_interrupt(TxEvent::TransmissionComplete, Toggle::On);
+        usart2.configure_tx_interrupt(TxEvent::TransmissionComplete, Switch::On);
 
         let dma1 = cx.device.DMA1.split(&mut rcc.ahb);
-        let (tx_serial, mut rx_serial) = usart2.split();
+        let (mut tx_serial, mut rx_serial) = usart2.split();
 
         // This interrupt is immediately triggered, clear it. It will only be reset
         // by the hardware when data is received on RX (RXNE event)
         rx_serial.clear_event(RxEvent::Idle);
+        // For some reason, this is also immediately triggered..
+        tx_serial.clear_event(TxEvent::TransmissionComplete);
         let rx_transfer = rx_serial.read_exact(unsafe { DMA_RX_BUF.as_mut_slice() }, dma1.ch6);
         info!(target: "init", "Spawning tasks");
         blink::spawn().unwrap();
         serial_tx_handler::spawn().unwrap();
         (
             Shared {
-                tx_transfer: UartTxState::Idle(Some(TxIdle {
-                    tx: tx_serial,
-                    dma_channel: dma1.ch7,
-                })),
+                tx_shared: UartTxShared {
+                    last_completed: None,
+                    state: UartTxState::Idle(Some(TxIdle {
+                        tx: tx_serial,
+                        dma_channel: dma1.ch7,
+                    })),
+                },
                 rx_transfer: Some(rx_transfer),
             },
             Local {
+                //timer: mono_timer,
                 leds,
                 last_dir: Direction::North,
                 curr_dir: Direction::iter(),
                 verif_reporter,
             },
-            init::Monotonics(mono),
         )
     }
 
     #[task(local = [leds, curr_dir, last_dir])]
-    fn blink(cx: blink::Context) {
-        let toggle_leds = |dir: &Direction| {
-            let leds = cx.local.leds;
-            let last_led = leds.for_direction(*cx.local.last_dir);
+    async fn blink(cx: blink::Context) {
+        let blink::LocalResources {
+            leds,
+            curr_dir,
+            last_dir,
+            ..
+        } = cx.local;
+        let mut toggle_leds = |dir: &Direction| {
+            let last_led = leds.for_direction(*last_dir);
             last_led.off().ok();
             let led = leds.for_direction(*dir);
             led.on().ok();
-            *cx.local.last_dir = *dir;
+            *last_dir = *dir;
         };
-
-        match cx.local.curr_dir.next() {
-            Some(dir) => {
-                toggle_leds(dir);
+        loop {
+            match curr_dir.next() {
+                Some(dir) => {
+                    toggle_leds(dir);
+                }
+                None => {
+                    *curr_dir = Direction::iter();
+                    toggle_leds(curr_dir.next().unwrap());
+                }
             }
-            None => {
-                *cx.local.curr_dir = Direction::iter();
-                toggle_leds(cx.local.curr_dir.next().unwrap());
-            }
+            Systick::delay(BLINK_FREQ_MS.millis()).await;
         }
-        blink::spawn_after(MsDuration::from_ticks(BLINK_FREQ_MS)).unwrap();
     }
 
     #[task(
-        shared = [tx_transfer],
-        local = []
+        shared = [tx_shared],
     )]
-    fn serial_tx_handler(mut cx: serial_tx_handler::Context) {
-        if let Some((buf, len)) = TX_REQUESTS.dequeue() {
-            cx.shared.tx_transfer.lock(|tx_state| match tx_state {
-                UartTxState::Idle(tx) => {
-                    //debug!(target: "serial_tx_handler", "bytes: {:x?}", &buf[0..len]);
-                    // Safety: We only copy the data into the TX DMA buffer in this task.
-                    // If the DMA is active, another branch will be taken.
-                    let mut_tx_dma_buf = unsafe { &mut DMA_TX_BUF };
-                    // 0 sentinel value as start marker
-                    mut_tx_dma_buf[0] = 0;
-                    // Should never panic, we accounted for the overhead.
-                    // Write into transfer buffer directly, no need for intermediate
-                    // encoding buffer.
-                    let encoded_len = cobs::encode(&buf[0..len], &mut mut_tx_dma_buf[1..]);
-                    // 0 end marker
-                    mut_tx_dma_buf[encoded_len + 1] = 0;
-                    //debug!(target: "serial_tx_handler", "Sending {} bytes", encoded_len + 2);
-                    //debug!("sent: {:x?}", &mut_tx_dma_buf[0..encoded_len + 2]);
-                    let tx_idle = tx.take().unwrap();
-                    // Transfer completion and re-scheduling of new TX transfers will be done
-                    // by the IRQ handler.
-                    let transfer = tx_idle
-                        .tx
-                        .write_all(&mut_tx_dma_buf[0..encoded_len + 2], tx_idle.dma_channel);
-                    *tx_state = UartTxState::Transmitting(Some(transfer));
-                    // The memory block is automatically returned to the pool when it is dropped.
+    async fn serial_tx_handler(mut cx: serial_tx_handler::Context) {
+        loop {
+            let is_idle = cx.shared.tx_shared.lock(|tx_shared| {
+                if let UartTxState::Idle(_) = tx_shared.state {
+                    return true;
                 }
-                UartTxState::Transmitting(_) => {
-                    // This is a SW configuration error. Only the ISR which
-                    // detects transfer completion should be able to spawn a new
-                    // task, and that ISR should set the state to IDLE.
-                    panic!("invalid internal tx state detected")
-                }
-            })
-        } else {
-            cx.shared.tx_transfer.lock(|tx_state| {
-                if let UartTxState::Idle(_) = tx_state {
-                    serial_tx_handler::spawn_after(MsDuration::from_ticks(TX_HANDLER_FREQ_MS))
-                        .unwrap();
-                }
+                false
             });
+            if is_idle {
+                let last_completed = cx.shared.tx_shared.lock(|shared| shared.last_completed);
+                if let Some(last_completed) = last_completed {
+                    let elapsed_ms = (Systick::now() - last_completed).to_millis();
+                    if elapsed_ms < MIN_DELAY_BETWEEN_TX_PACKETS_MS {
+                        Systick::delay((MIN_DELAY_BETWEEN_TX_PACKETS_MS - elapsed_ms).millis())
+                            .await;
+                    }
+                }
+            } else {
+                // Check for completion after 1 ms
+                Systick::delay(1.millis()).await;
+                continue;
+            }
+            if let Some(vec) = TM_REQUESTS.dequeue() {
+                cx.shared
+                    .tx_shared
+                    .lock(|tx_shared| match &mut tx_shared.state {
+                        UartTxState::Idle(tx) => {
+                            let encoded_len;
+                            //debug!(target: "serial_tx_handler", "bytes: {:x?}", &buf[0..len]);
+                            // Safety: We only copy the data into the TX DMA buffer in this task.
+                            // If the DMA is active, another branch will be taken.
+                            unsafe {
+                                // 0 sentinel value as start marker
+                                DMA_TX_BUF[0] = 0;
+                                encoded_len =
+                                    cobs::encode(&vec[0..vec.len()], &mut DMA_TX_BUF[1..]);
+                                // Should never panic, we accounted for the overhead.
+                                // Write into transfer buffer directly, no need for intermediate
+                                // encoding buffer.
+                                // 0 end marker
+                                DMA_TX_BUF[encoded_len + 1] = 0;
+                            }
+                            //debug!(target: "serial_tx_handler", "Sending {} bytes", encoded_len + 2);
+                            //debug!("sent: {:x?}", &mut_tx_dma_buf[0..encoded_len + 2]);
+                            let tx_idle = tx.take().unwrap();
+                            // Transfer completion and re-scheduling of new TX transfers will be done
+                            // by the IRQ handler.
+                            // SAFETY: The DMA is the exclusive writer to the DMA buffer now.
+                            let transfer = tx_idle.tx.write_all(
+                                unsafe { &DMA_TX_BUF[0..encoded_len + 2] },
+                                tx_idle.dma_channel,
+                            );
+                            tx_shared.state = UartTxState::Transmitting(Some(transfer));
+                            // The memory block is automatically returned to the pool when it is dropped.
+                        }
+                        UartTxState::Transmitting(_) => (),
+                    });
+                // Check for completion after 1 ms
+                Systick::delay(1.millis()).await;
+                continue;
+            }
+            // Nothing to do, and we are idle.
+            Systick::delay(TX_HANDLER_FREQ_MS.millis()).await;
         }
     }
 
@@ -375,14 +395,14 @@ mod app {
             verif_reporter
         ],
     )]
-    fn serial_rx_handler(
+    async fn serial_rx_handler(
         cx: serial_rx_handler::Context,
-        received_packet: Box<poolmod::TC>,
-        rx_len: usize,
+        received_packet: Vec<u8, MAX_TC_LEN>,
     ) {
+        info!("running rx handler");
         let tgt: &'static str = "serial_rx_handler";
         cx.local.stamp_buf[0] = P_FIELD_BASE;
-        info!(target: tgt, "Received packet with {} bytes", rx_len);
+        info!(target: tgt, "Received packet with {} bytes", received_packet.len());
         let decode_buf = cx.local.decode_buf;
         let packet = received_packet.as_slice();
         let mut start_idx = None;
@@ -403,7 +423,7 @@ mod app {
         match cobs::decode(&received_packet.as_slice()[start_idx..], decode_buf) {
             Ok(len) => {
                 info!(target: tgt, "Decoded packet length: {}", len);
-                let pus_tc = PusTc::from_bytes(decode_buf);
+                let pus_tc = PusTcReader::new(decode_buf);
                 let verif_reporter = cx.local.verif_reporter;
                 match pus_tc {
                     Ok((tc, tc_len)) => handle_tc(
@@ -429,7 +449,7 @@ mod app {
     }
 
     fn handle_tc(
-        tc: PusTc,
+        tc: PusTcReader,
         tc_len: usize,
         verif_reporter: &mut VerificationReporterCore,
         src_data_buf: &mut [u8; MAX_TM_LEN],
@@ -451,30 +471,23 @@ mod app {
                 .acceptance_failure(
                     src_data_buf,
                     token,
-                    &SEQ_COUNT_PROVIDER,
-                    FailParams::new(stamp_buf, &EcssEnumU16::new(0), None),
+                    SEQ_COUNT_PROVIDER.get(),
+                    0,
+                    FailParams::new(stamp_buf, &EcssEnumU16::new(0), &[]),
                 )
                 .unwrap();
-            let mem_block = poolmod::TM::alloc().unwrap().init([0u8; MAX_TM_LEN]);
-            let mut sender = TmSender::new(mem_block, tgt);
-            if let Err(e) =
-                verif_reporter.send_acceptance_failure(sendable, &SEQ_COUNT_PROVIDER, &mut sender)
-            {
+            let sender = TmSender::new(TmPacket::new(), tgt);
+            if let Err(e) = verif_reporter.send_acceptance_failure(sendable, &sender) {
                 warn!(target: tgt, "Sending acceptance failure failed: {:?}", e.0);
             };
             return;
         }
         let sendable = verif_reporter
-            .acceptance_success(src_data_buf, token, &SEQ_COUNT_PROVIDER, stamp_buf)
+            .acceptance_success(src_data_buf, token, SEQ_COUNT_PROVIDER.get(), 0, stamp_buf)
             .unwrap();
 
-        let mem_block = poolmod::TM::alloc().unwrap().init([0u8; MAX_TM_LEN]);
-        let mut sender = TmSender::new(mem_block, tgt);
-        let accepted_token = match verif_reporter.send_acceptance_success(
-            sendable,
-            &SEQ_COUNT_PROVIDER,
-            &mut sender,
-        ) {
+        let sender = TmSender::new(TmPacket::new(), tgt);
+        let accepted_token = match verif_reporter.send_acceptance_success(sendable, &sender) {
             Ok(token) => token,
             Err(e) => {
                 warn!(target: "serial_rx_handler", "Sending acceptance success failed: {:?}", e.0);
@@ -485,15 +498,17 @@ mod app {
         if tc.service() == 17 {
             if tc.subservice() == 1 {
                 let sendable = verif_reporter
-                    .start_success(src_data_buf, accepted_token, &SEQ_COUNT_PROVIDER, stamp_buf)
+                    .start_success(
+                        src_data_buf,
+                        accepted_token,
+                        SEQ_COUNT_PROVIDER.get(),
+                        0,
+                        stamp_buf,
+                    )
                     .unwrap();
-                let mem_block = poolmod::TM::alloc().unwrap().init([0u8; MAX_TM_LEN]);
-                let mut sender = TmSender::new(mem_block, tgt);
-                let started_token = match verif_reporter.send_start_success(
-                    sendable,
-                    &SEQ_COUNT_PROVIDER,
-                    &mut sender,
-                ) {
+                // let mem_block = poolmod::TM::alloc().unwrap().init([0u8; MAX_TM_LEN]);
+                let sender = TmSender::new(TmPacket::new(), tgt);
+                let started_token = match verif_reporter.send_start_success(sendable, &sender) {
                     Ok(token) => token,
                     Err(e) => {
                         warn!(target: tgt, "Sending acceptance success failed: {:?}", e.0);
@@ -507,24 +522,28 @@ mod app {
                 let mut sp_header =
                     SpHeader::tc_unseg(PUS_APID, SEQ_COUNT_PROVIDER.get(), 0).unwrap();
                 let sec_header = PusTmSecondaryHeader::new_simple(17, 2, stamp_buf);
-                let ping_reply = PusTm::new(&mut sp_header, sec_header, None, true);
-                let mut mem_block = poolmod::TM::alloc().unwrap().init([0u8; MAX_TM_LEN]);
-                let reply_len = ping_reply.write_to_bytes(mem_block.as_mut_slice()).unwrap();
-                if TX_REQUESTS.enqueue((mem_block, reply_len)).is_err() {
+                let ping_reply = PusTmCreator::new(&mut sp_header, sec_header, &[], true);
+                let mut tm_packet = TmPacket::new();
+                tm_packet
+                    .resize(ping_reply.len_written(), 0)
+                    .expect("vec resize failed");
+                ping_reply.write_to_bytes(&mut tm_packet).unwrap();
+                if TM_REQUESTS.enqueue(tm_packet).is_err() {
                     warn!(target: tgt, "TC queue full");
                     return;
                 }
                 SEQ_COUNT_PROVIDER.increment();
                 let sendable = verif_reporter
-                    .completion_success(src_data_buf, started_token, &SEQ_COUNT_PROVIDER, stamp_buf)
+                    .completion_success(
+                        src_data_buf,
+                        started_token,
+                        SEQ_COUNT_PROVIDER.get(),
+                        0,
+                        stamp_buf,
+                    )
                     .unwrap();
-                let mem_block = poolmod::TM::alloc().unwrap().init([0u8; MAX_TM_LEN]);
-                let mut sender = TmSender::new(mem_block, tgt);
-                if let Err(e) = verif_reporter.send_step_or_completion_success(
-                    sendable,
-                    &SEQ_COUNT_PROVIDER,
-                    &mut sender,
-                ) {
+                let sender = TmSender::new(TmPacket::new(), tgt);
+                if let Err(e) = verif_reporter.send_step_or_completion_success(sendable, &sender) {
                     warn!(target: tgt, "Sending completion success failed: {:?}", e.0);
                 }
             } else {
@@ -535,23 +554,23 @@ mod app {
 
     #[task(binds = DMA1_CH6, shared = [rx_transfer])]
     fn rx_dma_isr(mut cx: rx_dma_isr::Context) {
+        let mut tc_packet = TcPacket::new();
         cx.shared.rx_transfer.lock(|rx_transfer| {
             let rx_ref = rx_transfer.as_ref().unwrap();
             if rx_ref.is_complete() {
                 let uart_rx_owned = rx_transfer.take().unwrap();
                 let (buf, c, rx) = uart_rx_owned.stop();
                 // The received data is transferred to another task now to avoid any processing overhead
-                // during the interrupt. There are multiple ways to do this, we use a memory pool here
+                // during the interrupt. There are multiple ways to do this, we use a stack allocaed vector here
                 // to do this.
-                let mut mem_block = poolmod::TC::alloc()
-                    .expect("allocating memory block for rx failed")
-                    .init([0u8; TC_BUF_LEN]);
-                // Copy data into memory pool.
-                mem_block.copy_from_slice(buf);
+                tc_packet.resize(buf.len(), 0).expect("vec resize failed");
+                tc_packet.copy_from_slice(buf);
+
+                // Start the next transfer as soon as possible.
                 *rx_transfer = Some(rx.read_exact(buf, c));
-                // Only send owning pointer to pool memory and the received packet length.
-                serial_rx_handler::spawn(mem_block, TC_BUF_LEN)
-                    .expect("spawning rx handler task failed");
+
+                // Send the vector to a regular task.
+                serial_rx_handler::spawn(tc_packet).expect("spawning rx handler task failed");
                 // If this happens, there is a high chance that the maximum packet length was
                 // exceeded. Circular mode is not used here, so data might be missed.
                 warn!(
@@ -562,23 +581,26 @@ mod app {
         });
     }
 
-    #[task(binds = USART2_EXTI26, shared = [rx_transfer, tx_transfer])]
+    #[task(binds = USART2_EXTI26, shared = [rx_transfer, tx_shared])]
     fn serial_isr(mut cx: serial_isr::Context) {
-        cx.shared.tx_transfer.lock(|tx_state| match tx_state {
-            UartTxState::Idle(_) => (),
-            UartTxState::Transmitting(transfer) => {
-                let transfer_ref = transfer.as_ref().unwrap();
-                if transfer_ref.is_complete() {
-                    let transfer = transfer.take().unwrap();
-                    let (_, dma_channel, tx) = transfer.stop();
-                    *tx_state = UartTxState::Idle(Some(TxIdle { tx, dma_channel }));
-                    serial_tx_handler::spawn_after(MsDuration::from_ticks(
-                        MIN_DELAY_BETWEEN_TX_PACKETS_MS.into(),
-                    ))
-                    .unwrap();
+        cx.shared
+            .tx_shared
+            .lock(|tx_shared| match &mut tx_shared.state {
+                UartTxState::Idle(_) => (),
+                UartTxState::Transmitting(transfer) => {
+                    let transfer_ref = transfer.as_ref().unwrap();
+                    if transfer_ref.is_complete() {
+                        let transfer = transfer.take().unwrap();
+                        let (_, dma_channel, mut tx) = transfer.stop();
+                        tx.clear_event(TxEvent::TransmissionComplete);
+                        tx_shared.state = UartTxState::Idle(Some(TxIdle { tx, dma_channel }));
+                        // We cache the last completed time to ensure that there is a minimum delay between consecutive
+                        // transferred packets.
+                        tx_shared.last_completed = Some(Systick::now());
+                    }
                 }
-            }
-        });
+            });
+        let mut tc_packet = TcPacket::new();
         cx.shared.rx_transfer.lock(|rx_transfer| {
             let rx_transfer_ref = rx_transfer.as_ref().unwrap();
             // Received a partial packet.
@@ -586,17 +608,15 @@ mod app {
                 let rx_transfer_owned = rx_transfer.take().unwrap();
                 let (buf, ch, mut rx, rx_len) = rx_transfer_owned.stop_and_return_received_bytes();
                 // The received data is transferred to another task now to avoid any processing overhead
-                // during the interrupt. There are multiple ways to do this, we use a memory pool here
-                // to do this.
-                let mut mem_block = poolmod::TC::alloc()
-                    .expect("allocating memory block for rx failed")
-                    .init([0u8; TC_BUF_LEN]);
-                // Copy data into memory pool.
-                mem_block[0..rx_len as usize].copy_from_slice(&buf[0..rx_len as usize]);
+                // during the interrupt. There are multiple ways to do this, we use a stack
+                // allocated vector to do this.
+                tc_packet
+                    .resize(rx_len as usize, 0)
+                    .expect("vec resize failed");
+                tc_packet[0..rx_len as usize].copy_from_slice(&buf[0..rx_len as usize]);
                 rx.clear_event(RxEvent::Idle);
-                // Only send owning pointer to pool memory and the received packet length.
-                serial_rx_handler::spawn(mem_block, rx_len as usize)
-                    .expect("spawning rx handler task failed");
+                info!("spawning rx task");
+                serial_rx_handler::spawn(tc_packet).expect("spawning rx handler failed");
                 *rx_transfer = Some(rx.read_exact(buf, ch));
             }
         });
