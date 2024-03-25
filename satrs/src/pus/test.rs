@@ -151,9 +151,9 @@ pub type PusService17TestHandlerStaticWithBoundedMpsc = PusService17TestHandler<
 
 #[cfg(test)]
 mod tests {
+    use crate::pus::test_util::{PusTestHarness, SimplePusPacketHandler, TEST_APID};
     use crate::pus::tests::{
-        PusServiceHandlerWithSharedStoreCommon, PusServiceHandlerWithVecCommon, PusTestHarness,
-        SimplePusPacketHandler, TEST_APID,
+        PusServiceHandlerWithSharedStoreCommon, PusServiceHandlerWithVecCommon,
     };
     use crate::pus::verification::std_mod::{
         VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,

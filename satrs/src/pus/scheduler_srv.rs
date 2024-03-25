@@ -225,11 +225,11 @@ pub type PusService11SchedHandlerStaticWithBoundedMpsc<PusScheduler> = PusServic
 #[cfg(test)]
 mod tests {
     use crate::pool::{StaticMemoryPool, StaticPoolConfig};
-    use crate::pus::tests::TEST_APID;
+    use crate::pus::test_util::{PusTestHarness, TEST_APID};
     use crate::pus::verification::VerificationReporterWithSharedPoolMpscBoundedSender;
     use crate::pus::{
         scheduler::{self, PusSchedulerProvider, TcInfo},
-        tests::{PusServiceHandlerWithSharedStoreCommon, PusTestHarness},
+        tests::PusServiceHandlerWithSharedStoreCommon,
         verification::{RequestId, TcStateAccepted, VerificationToken},
         EcssTcInSharedStoreConverter,
     };

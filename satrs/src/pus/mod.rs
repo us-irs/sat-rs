@@ -40,7 +40,7 @@ pub use alloc_mod::*;
 #[cfg(feature = "std")]
 pub use std_mod::*;
 
-use self::verification::{TcStateStarted, VerificationReportingProvider};
+use self::verification::VerificationReportingProvider;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PusTmWrapper<'tm> {
@@ -667,7 +667,7 @@ pub mod std_mod {
     #[cfg(feature = "crossbeam")]
     pub use cb_mod::*;
 
-    use super::verification::{TcStateStarted, TcStateToken, VerificationReportingProvider};
+    use super::verification::{TcStateToken, VerificationReportingProvider};
     use super::{AcceptedEcssTcAndToken, ActiveRequestProvider, TcInMemory};
 
     impl From<mpsc::SendError<StoreAddr>> for EcssTmtcError {
@@ -1429,6 +1429,33 @@ pub(crate) fn source_buffer_large_enough(cap: usize, len: usize) -> Result<(), E
     Ok(())
 }
 
+#[cfg(any(feature = "test_util", test))]
+pub mod test_util {
+    use spacepackets::ecss::{tc::PusTcCreator, tm::PusTmReader};
+
+    use super::{
+        verification::{self, TcStateAccepted, VerificationToken},
+        PusPacketHandlerResult, PusPacketHandlingError,
+    };
+
+    pub const TEST_APID: u16 = 0x101;
+
+    pub trait PusTestHarness {
+        fn send_tc(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted>;
+        fn read_next_tm(&mut self) -> PusTmReader<'_>;
+        fn check_no_tm_available(&self) -> bool;
+        fn check_next_verification_tm(
+            &self,
+            subservice: u8,
+            expected_request_id: verification::RequestId,
+        );
+    }
+
+    pub trait SimplePusPacketHandler {
+        fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use core::cell::RefCell;
@@ -1450,22 +1477,17 @@ pub mod tests {
     use crate::tmtc::tm_helper::SharedTmPool;
     use crate::ComponentId;
 
+    use super::test_util::TEST_APID;
+
     use super::verification::std_mod::{
         VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
     };
-    use super::verification::tests::{SharedVerificationMap, TestVerificationReporter};
+    use super::verification::test_util::{SharedVerificationMap, TestVerificationReporter};
     use super::verification::{
         TcStateAccepted, VerificationReporterCfg, VerificationReporterWithSender,
         VerificationReportingProvider, VerificationToken,
     };
-    use super::{
-        EcssTcAndToken, EcssTcInSharedStoreConverter, EcssTcInVecConverter, GenericConversionError,
-        GenericRoutingError, MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError,
-        PusServiceHelper, TcInMemory, TmAsVecSenderWithId, TmAsVecSenderWithMpsc,
-        TmInSharedPoolSenderWithBoundedMpsc, TmInSharedPoolSenderWithId,
-    };
-
-    pub const TEST_APID: u16 = 0x101;
+    use super::*;
 
     #[derive(Debug, Eq, PartialEq, Clone)]
     pub(crate) struct CommonTmInfo {
@@ -1474,17 +1496,6 @@ pub mod tests {
         pub msg_counter: u16,
         pub dest_id: u16,
         pub time_stamp: [u8; 7],
-    }
-
-    pub trait PusTestHarness {
-        fn send_tc(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted>;
-        fn read_next_tm(&mut self) -> PusTmReader<'_>;
-        fn check_no_tm_available(&self) -> bool;
-        fn check_next_verification_tm(&self, subservice: u8, expected_request_id: RequestId);
-    }
-
-    pub trait SimplePusPacketHandler {
-        fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
     }
 
     impl CommonTmInfo {

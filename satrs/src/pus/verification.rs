@@ -209,12 +209,35 @@ impl<T> From<VerificationErrorWithToken<T>> for VerificationOrSendErrorWithToken
         VerificationOrSendErrorWithToken(value.0, value.1)
     }
 }
+
 /// Support token to allow type-state programming. This prevents calling the verification
 /// steps in an invalid order.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct VerificationToken<STATE> {
     state: PhantomData<STATE>,
     req_id: RequestId,
+}
+
+impl<STATE> VerificationToken<STATE> {
+    fn new(req_id: RequestId) -> VerificationToken<TcStateNone> {
+        VerificationToken {
+            state: PhantomData,
+            req_id,
+        }
+    }
+
+    /// Create a verification token with a state. This can be useful for test purposes.
+    /// For general purposes, it is recommended to use the API exposed by verification handlers.
+    pub fn new_accepted_state(req_id: RequestId) -> VerificationToken<TcStateAccepted> {
+        VerificationToken {
+            state: PhantomData,
+            req_id,
+        }
+    }
+
+    pub fn req_id(&self) -> RequestId {
+        self.req_id
+    }
 }
 
 pub trait WasAtLeastAccepted {}
@@ -287,19 +310,6 @@ impl From<VerificationToken<TcStateStarted>> for TcStateToken {
 impl From<VerificationToken<TcStateCompleted>> for TcStateToken {
     fn from(t: VerificationToken<TcStateCompleted>) -> Self {
         TcStateToken::Completed(t)
-    }
-}
-
-impl<STATE> VerificationToken<STATE> {
-    fn new(req_id: RequestId) -> VerificationToken<TcStateNone> {
-        VerificationToken {
-            state: PhantomData,
-            req_id,
-        }
-    }
-
-    pub fn req_id(&self) -> RequestId {
-        self.req_id
     }
 }
 
@@ -1430,40 +1440,15 @@ pub mod std_mod {
         VerificationReporterWithVecSender<mpsc::SyncSender<alloc::vec::Vec<u8>>>;
 }
 
-#[cfg(test)]
-pub mod tests {
-    use crate::pool::{PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
-    use crate::pus::tests::CommonTmInfo;
-    use crate::pus::verification::{
-        EcssTmSenderCore, EcssTmtcError, FailParams, FailParamsWithStep, RequestId, TcStateNone,
-        VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
-        VerificationToken,
-    };
-    use crate::pus::{
-        EcssChannel, PusTmWrapper, TmInSharedPoolSenderWithId, TmInSharedPoolSenderWithMpsc,
-    };
-    use crate::tmtc::tm_helper::SharedTmPool;
-    use crate::ComponentId;
-    use alloc::format;
-    use alloc::sync::Arc;
+#[cfg(any(feature = "test_util", test))]
+pub mod test_util {
+    use core::cell::RefCell;
+    use std::sync::Mutex;
+
+    use alloc::{sync::Arc, vec::Vec};
     use hashbrown::HashMap;
-    use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
-    use spacepackets::ecss::tm::PusTmReader;
-    use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, PusError, PusPacket};
-    use spacepackets::util::UnsignedEnum;
-    use spacepackets::{ByteConversionError, CcsdsPacket, SpHeader};
-    use std::cell::RefCell;
-    use std::collections::VecDeque;
-    use std::sync::{mpsc, Mutex};
-    use std::time::Duration;
-    use std::vec;
-    use std::vec::Vec;
 
-    use super::VerificationReportingProvider;
-
-    fn is_send<T: Send>(_: &T) {}
-    #[allow(dead_code)]
-    fn is_sync<T: Sync>(_: &T) {}
+    use super::*;
 
     #[derive(Clone)]
     pub struct VerificationStatus {
@@ -1691,8 +1676,42 @@ pub mod tests {
             false
         }
     }
+}
 
-    const TEST_APID: u16 = 0x02;
+#[cfg(test)]
+pub mod tests {
+    use crate::pool::{PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
+    use crate::pus::test_util::TEST_APID;
+    use crate::pus::tests::CommonTmInfo;
+    use crate::pus::verification::{
+        EcssTmSenderCore, EcssTmtcError, FailParams, FailParamsWithStep, RequestId, TcStateNone,
+        VerificationReporter, VerificationReporterCfg, VerificationReporterWithSender,
+        VerificationToken,
+    };
+    use crate::pus::{
+        EcssChannel, PusTmWrapper, TmInSharedPoolSenderWithId, TmInSharedPoolSenderWithMpsc,
+    };
+    use crate::tmtc::tm_helper::SharedTmPool;
+    use crate::ComponentId;
+    use alloc::format;
+    use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
+    use spacepackets::ecss::tm::PusTmReader;
+    use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU8, PusError, PusPacket};
+    use spacepackets::util::UnsignedEnum;
+    use spacepackets::{ByteConversionError, CcsdsPacket, SpHeader};
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+    use std::sync::mpsc;
+    use std::time::Duration;
+    use std::vec;
+    use std::vec::Vec;
+
+    use super::VerificationReportingProvider;
+
+    fn is_send<T: Send>(_: &T) {}
+    #[allow(dead_code)]
+    fn is_sync<T: Sync>(_: &T) {}
+
     const EMPTY_STAMP: [u8; 7] = [0; 7];
 
     #[derive(Debug, Eq, PartialEq, Clone)]

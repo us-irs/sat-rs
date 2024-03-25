@@ -1,3 +1,5 @@
+// TODO: Remove this at a later stage.
+#![allow(dead_code)]
 use std::sync::mpsc::{self};
 use std::sync::{Arc, Mutex};
 

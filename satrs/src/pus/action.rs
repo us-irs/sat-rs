@@ -5,7 +5,7 @@ use crate::{
     ComponentId,
 };
 
-use super::{verification::VerificationToken, ActivePusRequestStd, ActiveRequestProvider};
+use super::{ActivePusRequestStd, ActiveRequestProvider};
 
 use delegate::delegate;
 use satrs_shared::res_code::ResultU16;

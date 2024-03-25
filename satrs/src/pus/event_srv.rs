@@ -159,7 +159,7 @@ mod tests {
     use std::sync::mpsc::{self, Sender};
 
     use crate::pus::event_man::EventRequest;
-    use crate::pus::tests::SimplePusPacketHandler;
+    use crate::pus::test_util::{PusTestHarness, SimplePusPacketHandler, TEST_APID};
     use crate::pus::verification::{
         RequestId, VerificationReporterWithSharedPoolMpscBoundedSender,
     };
@@ -168,7 +168,7 @@ mod tests {
         events::EventU32,
         pus::{
             event_man::EventRequestWithToken,
-            tests::{PusServiceHandlerWithSharedStoreCommon, PusTestHarness, TEST_APID},
+            tests::PusServiceHandlerWithSharedStoreCommon,
             verification::{TcStateAccepted, VerificationToken},
             EcssTcInSharedStoreConverter, PusPacketHandlerResult, PusPacketHandlingError,
         },

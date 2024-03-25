@@ -367,6 +367,40 @@ impl<
 }
 
 #[cfg(test)]
-pub mod tests {
-    // TODO: Add unittests for HK converter.
+mod tests {
+    use satrs::{
+        pus::{
+            test_util::TEST_APID,
+            verification::{
+                test_util::{SharedVerificationMap, TestVerificationReporter},
+                VerificationReportingProvider,
+            },
+            PusTcToRequestConverter,
+        },
+        spacepackets::{
+            ecss::{
+                tc::{PusTcCreator, PusTcReader},
+                WritablePusPacket,
+            },
+            SpHeader,
+        },
+    };
+
+    use super::ExampleHkRequestConverter;
+
+    #[test]
+    fn test_hk_converter() {
+        let shared_verif_map = SharedVerificationMap::default();
+        let mut test_verif_reporter = TestVerificationReporter::new(shared_verif_map.clone());
+        let mut converter = ExampleHkRequestConverter::default();
+        let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let ping = PusTcCreator::new_simple(&mut sp_header, 3, 25, Some(&[1, 2, 3, 4]), true);
+        let token = test_verif_reporter.add_tc(&ping);
+        let accepted_token = test_verif_reporter
+            .acceptance_success(token, &[])
+            .expect("acceptance failed");
+        let pus_tc_raw = ping.to_vec().unwrap();
+        let pus_tc_reader = PusTcReader::new(&pus_tc_raw).expect("invalid pus tc");
+        converter.convert(accepted_token, &pus_tc_reader.0, &[], &test_verif_reporter);
+    }
 }

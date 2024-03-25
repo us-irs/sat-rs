@@ -383,7 +383,7 @@ mod tests {
         >
     {
         pub fn new_for_action() -> Self {
-            env_logger::init();
+            let _ = env_logger::builder().is_test(true).try_init();
             let target_and_apid_id = TargetAndApidId::new(TEST_APID, TEST_APID_TARGET_ID);
             let (tm_funnel_tx, tm_funnel_rx) = mpsc::channel();
             let (pus_action_tx, pus_action_rx) = mpsc::channel();
