@@ -371,7 +371,7 @@ mod tests {
     use satrs::{
         hk::HkRequest,
         pus::{test_util::TEST_APID, ActiveRequestProvider},
-        request::TargetAndApidId,
+        request::{GenericMessage, TargetAndApidId},
         spacepackets::{
             ecss::{
                 hk::Subservice,
@@ -382,15 +382,14 @@ mod tests {
         },
     };
 
-    use crate::pus::tests::ConverterTestbench;
+    use crate::pus::tests::{PusConverterTestbench, ReplyHandlerTestbench};
 
-    use super::ExampleHkRequestConverter;
+    use super::{ExampleHkRequestConverter, HkReply, HkReplyHandler};
 
     #[test]
     fn test_hk_converter_one_shot_req() {
-        let mut hk_bench = ConverterTestbench::new(ExampleHkRequestConverter::default());
+        let mut hk_bench = PusConverterTestbench::new(ExampleHkRequestConverter::default());
         let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
-
         let target_id = 2_u32;
         let unique_id = 5_u32;
         let mut app_data: [u8; 8] = [0; 8];
@@ -420,4 +419,17 @@ mod tests {
             panic!("unexpected HK request")
         }
     }
+
+    #[test]
+    fn test_hk_reply_handler() {
+        let mut reply_testbench = ReplyHandlerTestbench::new(HkReplyHandler::default());
+        let sender_id = 2_u64;
+        let target_id = 3_u64;
+        let (req_id, active_req) = reply_testbench.add_tc(TEST_APID, target_id, &[]);
+        let reply = GenericMessage::new(req_id.into(), sender_id, HkReply::Ack);
+        let result = reply_testbench.handle_reply(&reply, &active_req, &[]);
+        assert!(result.is_ok());
+    }
+
+    // TODO: Add more tests.
 }

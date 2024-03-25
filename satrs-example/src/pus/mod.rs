@@ -466,6 +466,7 @@ impl<VerificationReporter: VerificationReportingProvider> PusReceiver<Verificati
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::time::Duration;
 
     use satrs::{
         pus::{
@@ -473,10 +474,14 @@ pub(crate) mod tests {
                 test_util::{SharedVerificationMap, TestVerificationReporter},
                 VerificationReporterWithVecMpscSender,
             },
-            ActiveRequestMapProvider, EcssTcInVecConverter, MpscTcReceiver, TmAsVecSenderWithMpsc,
+            ActivePusRequestStd, ActiveRequestMapProvider, EcssTcInVecConverter, MpscTcReceiver,
+            TmAsVecSenderWithMpsc,
         },
         request::TargetAndApidId,
-        spacepackets::ecss::tc::PusTcCreator,
+        spacepackets::{
+            ecss::tc::{PusTcCreator, PusTcSecondaryHeader},
+            SpHeader,
+        },
     };
 
     use crate::requests::CompositeRequest;
@@ -487,7 +492,86 @@ pub(crate) mod tests {
     pub const TEST_APID_TARGET_ID: u32 = 5;
     pub const TARGET_ID: TargetAndApidId = TargetAndApidId::new(TEST_APID, TEST_APID_TARGET_ID);
 
-    pub struct ConverterTestbench<
+    // Testbench dedicated to the testing of [PusReplyHandler]s
+    pub struct ReplyHandlerTestbench<
+        ReplyHandler: PusReplyHandler<ActiveRequestInfo, Reply, Error = EcssTmtcError>,
+        ActiveRequestInfo: ActiveRequestProvider,
+        Reply,
+    > {
+        pub shared_verif_map: SharedVerificationMap,
+        pub verif_reporter: TestVerificationReporter,
+        pub reply_handler: ReplyHandler,
+        pub tm_receiver: mpsc::Receiver<Vec<u8>>,
+        tm_sender: TmAsVecSenderWithMpsc,
+        phantom: std::marker::PhantomData<(ActiveRequestInfo, Reply)>,
+    }
+
+    impl<
+            ReplyHandler: PusReplyHandler<ActiveRequestInfo, Reply, Error = EcssTmtcError>,
+            ActiveRequestInfo: ActiveRequestProvider,
+            Reply,
+        > ReplyHandlerTestbench<ReplyHandler, ActiveRequestInfo, Reply>
+    {
+        pub fn new(reply_handler: ReplyHandler) -> Self {
+            let shared_verif_map = SharedVerificationMap::default();
+            let test_verif_reporter = TestVerificationReporter::new(shared_verif_map.clone());
+            let (tm_sender, tm_receiver) = mpsc::channel();
+            Self {
+                shared_verif_map,
+                verif_reporter: test_verif_reporter,
+                reply_handler,
+                tm_sender: TmAsVecSenderWithMpsc::new(0, "TEST_SENDER", tm_sender),
+                tm_receiver,
+                phantom: std::marker::PhantomData,
+            }
+        }
+
+        pub fn add_tc(
+            &mut self,
+            apid: u16,
+            target_id: ComponentId,
+            time_stamp: &[u8],
+        ) -> (verification::RequestId, ActivePusRequestStd) {
+            let mut sp_header = SpHeader::tc_unseg(apid, 0, 0).unwrap();
+            let sec_header_dummy = PusTcSecondaryHeader::new_simple(0, 0);
+            let init = self.verif_reporter.add_tc(&PusTcCreator::new(
+                &mut sp_header,
+                sec_header_dummy,
+                &[],
+                true,
+            ));
+            let accepted = self
+                .verif_reporter
+                .acceptance_success(init, time_stamp)
+                .expect("acceptance failed");
+            let started = self
+                .verif_reporter
+                .start_success(accepted, time_stamp)
+                .expect("start failed");
+            (
+                started.req_id(),
+                ActivePusRequestStd::new(target_id, started, Duration::from_secs(30)),
+            )
+        }
+
+        pub fn handle_reply(
+            &mut self,
+            reply: &GenericMessage<Reply>,
+            active_request: &ActiveRequestInfo,
+            time_stamp: &[u8],
+        ) -> Result<bool, ReplyHandler::Error> {
+            self.reply_handler.handle_reply(
+                reply,
+                active_request,
+                &self.verif_reporter,
+                time_stamp,
+                &self.tm_sender,
+            )
+        }
+    }
+
+    // Testbench dedicated to the testing of [PusTcToRequestConverter]s
+    pub struct PusConverterTestbench<
         Converter: PusTcToRequestConverter<ActiveRequestInfo, Request, Error = GenericConversionError>,
         ActiveRequestInfo: ActiveRequestProvider,
         Request,
@@ -502,7 +586,7 @@ pub(crate) mod tests {
             Converter: PusTcToRequestConverter<ActiveRequestInfo, Request, Error = GenericConversionError>,
             ActiveRequestInfo: ActiveRequestProvider,
             Request,
-        > ConverterTestbench<Converter, ActiveRequestInfo, Request>
+        > PusConverterTestbench<Converter, ActiveRequestInfo, Request>
     {
         pub fn new(converter: Converter) -> Self {
             let shared_verif_map = SharedVerificationMap::default();

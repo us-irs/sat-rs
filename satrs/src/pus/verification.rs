@@ -141,6 +141,11 @@ impl RequestId {
 
     /// This allows extracting the request ID from a given PUS telecommand.
     pub fn new(tc: &(impl CcsdsPacket + IsPusTelecommand)) -> Self {
+        Self::new_from_ccsds_tc(tc)
+    }
+
+    /// Extract the request ID from a CCSDS TC packet.
+    pub fn new_from_ccsds_tc(tc: &impl CcsdsPacket) -> Self {
         RequestId {
             version_number: tc.ccsds_version(),
             packet_id: tc.packet_id(),
@@ -226,7 +231,13 @@ impl<STATE> VerificationToken<STATE> {
         }
     }
 
-    /// Create a verification token with a state. This can be useful for test purposes.
+    pub fn req_id(&self) -> RequestId {
+        self.req_id
+    }
+}
+
+impl VerificationToken<TcStateAccepted> {
+    /// Create a verification token with the accepted state. This can be useful for test purposes.
     /// For general purposes, it is recommended to use the API exposed by verification handlers.
     pub fn new_accepted_state(req_id: RequestId) -> VerificationToken<TcStateAccepted> {
         VerificationToken {
@@ -234,9 +245,16 @@ impl<STATE> VerificationToken<STATE> {
             req_id,
         }
     }
+}
 
-    pub fn req_id(&self) -> RequestId {
-        self.req_id
+impl VerificationToken<TcStateStarted> {
+    /// Create a verification token with the started state. This can be useful for test purposes.
+    /// For general purposes, it is recommended to use the API exposed by verification handlers.
+    pub fn new_started_state(req_id: RequestId) -> VerificationToken<TcStateStarted> {
+        VerificationToken {
+            state: PhantomData,
+            req_id,
+        }
     }
 }
 

@@ -1080,6 +1080,7 @@ pub mod std_mod {
         fn target_id(&self) -> ComponentId {
             self.target_id
         }
+
         fn token(&self) -> TcStateToken {
             self.token
         }

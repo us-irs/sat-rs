@@ -195,3 +195,6 @@ impl PusTcToRequestConverter<ActivePusRequestStd, ModeRequest> for ExampleModeRe
         }
     }
 }
+
+#[cfg(test)]
+mod tests {}
