@@ -199,7 +199,7 @@ impl PusTcToRequestConverter<ActivePusRequestStd, ModeRequest> for ModeRequestCo
 #[cfg(test)]
 mod tests {
     use satrs::{
-        mode::ModeRequest,
+        mode::{ModeAndSubmode, ModeRequest},
         pus::mode::Subservice,
         spacepackets::{
             ecss::tc::{PusTcCreator, PusTcSecondaryHeader},
@@ -212,12 +212,11 @@ mod tests {
     use super::ModeRequestConverter;
 
     #[test]
-    fn mode_converter_set_mode_request() {
+    fn mode_converter_read_mode_request() {
         let mut testbench = PusConverterTestbench::new(ModeRequestConverter::default());
         let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
         let sec_header = PusTcSecondaryHeader::new_simple(200, Subservice::TcReadMode as u8);
         let mut app_data: [u8; 4] = [0; 4];
-        // Invalid ID, routing should fail.
         app_data[0..4].copy_from_slice(&TEST_APID_TARGET_ID.to_be_bytes());
         let tc = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
         let token = testbench.add_tc(&tc);
@@ -226,4 +225,54 @@ mod tests {
             .expect("conversion has failed");
         assert_eq!(req, ModeRequest::ReadMode);
     }
+
+    #[test]
+    fn mode_converter_set_mode_request() {
+        let mut testbench = PusConverterTestbench::new(ModeRequestConverter::default());
+        let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let sec_header = PusTcSecondaryHeader::new_simple(200, Subservice::TcSetMode as u8);
+        let mut app_data: [u8; 4 + ModeAndSubmode::RAW_LEN] = [0; 4 + ModeAndSubmode::RAW_LEN];
+        let mode_and_submode = ModeAndSubmode::new(2, 1);
+        app_data[0..4].copy_from_slice(&TEST_APID_TARGET_ID.to_be_bytes());
+        mode_and_submode.write_to_be_bytes(&mut app_data[4..]).unwrap();
+        let tc = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
+        let token = testbench.add_tc(&tc);
+        let (_active_req, req) = testbench
+            .convert(token, &[], TEST_APID, TEST_APID_TARGET_ID)
+            .expect("conversion has failed");
+        assert_eq!(req, ModeRequest::SetMode(mode_and_submode));
+
+    }
+
+    #[test]
+    fn mode_converter_announce_mode() {
+        let mut testbench = PusConverterTestbench::new(ModeRequestConverter::default());
+        let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let sec_header = PusTcSecondaryHeader::new_simple(200, Subservice::TcAnnounceMode as u8);
+        let mut app_data: [u8; 4] = [0; 4];
+        app_data[0..4].copy_from_slice(&TEST_APID_TARGET_ID.to_be_bytes());
+        let tc = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
+        let token = testbench.add_tc(&tc);
+        let (_active_req, req) = testbench
+            .convert(token, &[], TEST_APID, TEST_APID_TARGET_ID)
+            .expect("conversion has failed");
+        assert_eq!(req, ModeRequest::AnnounceMode);
+    }
+
+    #[test]
+    fn mode_converter_announce_mode_recursively() {
+        let mut testbench = PusConverterTestbench::new(ModeRequestConverter::default());
+        let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let sec_header = PusTcSecondaryHeader::new_simple(200, Subservice::TcAnnounceModeRecursive as u8);
+        let mut app_data: [u8; 4] = [0; 4];
+        app_data[0..4].copy_from_slice(&TEST_APID_TARGET_ID.to_be_bytes());
+        let tc = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
+        let token = testbench.add_tc(&tc);
+        let (_active_req, req) = testbench
+            .convert(token, &[], TEST_APID, TEST_APID_TARGET_ID)
+            .expect("conversion has failed");
+        assert_eq!(req, ModeRequest::AnnounceModeRecursive);
+    }
+
+    // TODO: Add reply handler tests.
 }

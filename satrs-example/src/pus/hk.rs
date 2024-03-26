@@ -450,12 +450,82 @@ mod tests {
 
     #[test]
     fn hk_conversion_disable_periodic_generation() {
-        // TODO: Implement
+        let mut hk_bench = PusConverterTestbench::new(HkRequestConverter::default());
+        let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let target_id = TEST_APID_TARGET_ID;
+        let unique_id = 5_u32;
+        let mut app_data: [u8; 8] = [0; 8];
+        app_data[0..4].copy_from_slice(&target_id.to_be_bytes());
+        app_data[4..8].copy_from_slice(&unique_id.to_be_bytes());
+        let mut generic_check = |tc: &PusTcCreator| {
+            let accepted_token = hk_bench.add_tc(tc);
+            let (_active_req, req) = hk_bench
+                .convert(accepted_token, &[], TEST_APID, TEST_APID_TARGET_ID)
+                .expect("conversion failed");
+            if let HkRequest::Disable(id) = req {
+                assert_eq!(id, unique_id);
+            } else {
+                panic!("unexpected HK request")
+            }
+        };
+        let tc0 = PusTcCreator::new_simple(
+            &mut sp_header,
+            3,
+            Subservice::TcDisableHkGeneration as u8,
+            Some(&app_data),
+            true,
+        );
+        generic_check(&tc0);
+        let tc1 = PusTcCreator::new_simple(
+            &mut sp_header,
+            3,
+            Subservice::TcDisableDiagGeneration as u8,
+            Some(&app_data),
+            true,
+        );
+        generic_check(&tc1);
     }
 
     #[test]
     fn hk_conversion_modify_interval() {
-        // TODO: Implement
+        let mut hk_bench = PusConverterTestbench::new(HkRequestConverter::default());
+        let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let target_id = TEST_APID_TARGET_ID;
+        let unique_id = 5_u32;
+        let mut app_data: [u8; 12] = [0; 12];
+        let collection_interval_factor = 5_u32;
+        app_data[0..4].copy_from_slice(&target_id.to_be_bytes());
+        app_data[4..8].copy_from_slice(&unique_id.to_be_bytes());
+        app_data[8..12].copy_from_slice(&collection_interval_factor.to_be_bytes());
+
+        let mut generic_check = |tc: &PusTcCreator| {
+            let accepted_token = hk_bench.add_tc(tc);
+            let (_active_req, req) = hk_bench
+                .convert(accepted_token, &[], TEST_APID, TEST_APID_TARGET_ID)
+                .expect("conversion failed");
+            if let HkRequest::ModifyCollectionInterval(id, interval_factor) = req {
+                assert_eq!(id, unique_id);
+                assert_eq!(interval_factor, collection_interval_factor);
+            } else {
+                panic!("unexpected HK request")
+            }
+        };
+        let tc0 = PusTcCreator::new_simple(
+            &mut sp_header,
+            3,
+            Subservice::TcModifyHkCollectionInterval as u8,
+            Some(&app_data),
+            true,
+        );
+        generic_check(&tc0);
+        let tc1 = PusTcCreator::new_simple(
+            &mut sp_header,
+            3,
+            Subservice::TcModifyDiagCollectionInterval as u8,
+            Some(&app_data),
+            true,
+        );
+        generic_check(&tc1);
     }
 
     #[test]
@@ -471,5 +541,5 @@ mod tests {
         reply_testbench.verif_reporter.check_completed(&req_id);
     }
 
-    // TODO: Add more tests for reply handler.
+    // TODO: Add more tests for reply handler: Request timeout and unrequested reply.
 }

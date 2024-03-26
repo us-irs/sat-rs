@@ -648,4 +648,14 @@ mod tests {
     fn reply_handling_step_failure() {
         // TODO: Implement
     }
+
+    #[test]
+    fn reply_handling_unrequested_reply() {
+        // TODO: Implement
+    }
+
+    #[test]
+    fn reply_handling_reply_timeout() {
+        // TODO: Implement
+    }
 }
