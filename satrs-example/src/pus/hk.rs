@@ -404,10 +404,8 @@ mod tests {
             true,
         );
         let accepted_token = hk_bench.add_tc(&hk_req);
-        let pus_tc_raw = hk_req.to_vec().unwrap();
-        let pus_tc_reader = PusTcReader::new(&pus_tc_raw).expect("invalid pus tc");
         let (active_req, req) = hk_bench
-            .convert(accepted_token, &pus_tc_reader.0, &[])
+            .convert(accepted_token, &[])
             .expect("conversion failed");
         assert_eq!(
             active_req.target_id(),

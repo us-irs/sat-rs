@@ -264,7 +264,7 @@ mod tests {
         let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
         let ping_tc = PusTcCreator::new_no_app_data(&mut sp_header, sec_header, true);
         let token = test_harness.send_tc(&ping_tc);
-        let request_id = token.req_id();
+        let request_id = token.request_id();
         let result = test_harness.handle_one_tc();
         assert!(result.is_ok());
         // We should see 4 replies in the TM queue now: Acceptance TM, Start TM, ping reply and

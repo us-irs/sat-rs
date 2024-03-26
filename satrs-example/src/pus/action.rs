@@ -366,7 +366,10 @@ mod tests {
     };
 
     use crate::{
-        pus::tests::{TargetedPusRequestTestbench, TARGET_ID, TEST_APID, TEST_APID_TARGET_ID},
+        pus::tests::{
+            PusConverterTestbench, TargetedPusRequestTestbench, TARGET_ID, TEST_APID,
+            TEST_APID_TARGET_ID,
+        },
         requests::CompositeRequest,
     };
 
@@ -561,5 +564,72 @@ mod tests {
         // Verify the correct result and completion failure.
     }
 
-    // TODO: Add more dedicated tests using the dedicated converter and reply handler testbenches.
+    #[test]
+    fn converter_action_req_no_data() {
+        let mut testbench = PusConverterTestbench::new(ExampleActionRequestConverter::default());
+        let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let sec_header = PusTcSecondaryHeader::new_simple(8, 128);
+        let action_id = 5_u32;
+        let mut app_data: [u8; 8] = [0; 8];
+        // Invalid ID, routing should fail.
+        app_data[0..4].copy_from_slice(&TEST_APID_TARGET_ID.to_be_bytes());
+        app_data[4..8].copy_from_slice(&action_id.to_be_bytes());
+        let pus8_packet = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
+        let token = testbench.add_tc(&pus8_packet);
+        let result = testbench.convert(token, &[]);
+        assert!(result.is_ok());
+        let (active_req, request) = result.unwrap();
+        if let ActionRequestVariant::NoData = request.variant {
+            assert_eq!(request.action_id, action_id);
+            assert_eq!(active_req.action_id, action_id);
+            assert_eq!(
+                active_req.target_id(),
+                TargetAndApidId::new(TEST_APID, TEST_APID_TARGET_ID).raw()
+            );
+            assert_eq!(
+                active_req.token().request_id(),
+                testbench.request_id().unwrap()
+            );
+        } else {
+            panic!("unexpected action request variant");
+        }
+    }
+
+    #[test]
+    fn converter_action_req_with_data() {
+        let mut testbench = PusConverterTestbench::new(ExampleActionRequestConverter::default());
+        let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let sec_header = PusTcSecondaryHeader::new_simple(8, 128);
+        let action_id = 5_u32;
+        let mut app_data: [u8; 16] = [0; 16];
+        // Invalid ID, routing should fail.
+        app_data[0..4].copy_from_slice(&TEST_APID_TARGET_ID.to_be_bytes());
+        app_data[4..8].copy_from_slice(&action_id.to_be_bytes());
+        for i in 0..8 {
+            app_data[i + 8] = i as u8;
+        }
+        let pus8_packet = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
+        let token = testbench.add_tc(&pus8_packet);
+        let result = testbench.convert(token, &[]);
+        assert!(result.is_ok());
+        let (active_req, request) = result.unwrap();
+        if let ActionRequestVariant::VecData(vec) = request.variant {
+            assert_eq!(request.action_id, action_id);
+            assert_eq!(active_req.action_id, action_id);
+            assert_eq!(
+                active_req.target_id(),
+                TargetAndApidId::new(TEST_APID, TEST_APID_TARGET_ID).raw()
+            );
+            assert_eq!(
+                active_req.token().request_id(),
+                testbench.request_id().unwrap()
+            );
+            assert_eq!(vec, app_data[8..].to_vec());
+        } else {
+            panic!("unexpected action request variant");
+        }
+    }
+
+    #[test]
+    fn reply_handling_completion_success() {}
 }

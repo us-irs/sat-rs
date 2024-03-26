@@ -231,7 +231,7 @@ mod tests {
             .expect("writing test event failed");
         let ping_tc = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
         let token = test_harness.send_tc(&ping_tc);
-        let request_id = token.req_id();
+        let request_id = token.request_id();
         test_harness.handle_one_tc().unwrap();
         test_harness.check_next_verification_tm(1, request_id);
         test_harness.check_next_verification_tm(3, request_id);

@@ -479,7 +479,10 @@ pub(crate) mod tests {
         },
         request::TargetAndApidId,
         spacepackets::{
-            ecss::tc::{PusTcCreator, PusTcSecondaryHeader},
+            ecss::{
+                tc::{PusTcCreator, PusTcSecondaryHeader},
+                WritablePusPacket,
+            },
             SpHeader,
         },
     };
@@ -549,7 +552,7 @@ pub(crate) mod tests {
                 .start_success(accepted, time_stamp)
                 .expect("start failed");
             (
-                started.req_id(),
+                started.request_id(),
                 ActivePusRequestStd::new(target_id, started, Duration::from_secs(30)),
             )
         }
@@ -579,6 +582,8 @@ pub(crate) mod tests {
         pub shared_verif_map: SharedVerificationMap,
         pub verif_reporter: TestVerificationReporter,
         pub converter: Converter,
+        current_request_id: Option<verification::RequestId>,
+        current_packet: Option<Vec<u8>>,
         phantom: std::marker::PhantomData<(ActiveRequestInfo, Request)>,
     }
 
@@ -595,25 +600,39 @@ pub(crate) mod tests {
                 shared_verif_map,
                 verif_reporter: test_verif_reporter,
                 converter,
+                current_request_id: None,
+                current_packet: None,
                 phantom: std::marker::PhantomData,
             }
         }
 
         pub fn add_tc(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted> {
             let token = self.verif_reporter.add_tc(tc);
+            self.current_request_id = Some(verification::RequestId::new(tc));
+            self.current_packet = Some(tc.to_vec().unwrap());
             self.verif_reporter
                 .acceptance_success(token, &[])
                 .expect("acceptance failed")
         }
 
+        pub fn request_id(&self) -> Option<verification::RequestId> {
+            self.current_request_id
+        }
+
         pub fn convert(
             &mut self,
             token: VerificationToken<TcStateAccepted>,
-            tc_reader: &PusTcReader,
             time_stamp: &[u8],
         ) -> Result<(ActiveRequestInfo, Request), Converter::Error> {
+            if self.current_packet.is_none() {
+                return Err(GenericConversionError::InvalidAppData(
+                    "call add_tc first".to_string(),
+                ));
+            }
+            let current_packet = self.current_packet.take().unwrap();
+            let tc_reader = PusTcReader::new(&current_packet).unwrap();
             self.converter
-                .convert(token, tc_reader, time_stamp, &self.verif_reporter)
+                .convert(token, &tc_reader.0, time_stamp, &self.verif_reporter)
         }
     }
 

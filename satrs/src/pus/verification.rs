@@ -220,19 +220,19 @@ impl<T> From<VerificationErrorWithToken<T>> for VerificationOrSendErrorWithToken
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct VerificationToken<STATE> {
     state: PhantomData<STATE>,
-    req_id: RequestId,
+    request_id: RequestId,
 }
 
 impl<STATE> VerificationToken<STATE> {
     fn new(req_id: RequestId) -> VerificationToken<TcStateNone> {
         VerificationToken {
             state: PhantomData,
-            req_id,
+            request_id: req_id,
         }
     }
 
-    pub fn req_id(&self) -> RequestId {
-        self.req_id
+    pub fn request_id(&self) -> RequestId {
+        self.request_id
     }
 }
 
@@ -242,7 +242,7 @@ impl VerificationToken<TcStateAccepted> {
     pub fn new_accepted_state(req_id: RequestId) -> VerificationToken<TcStateAccepted> {
         VerificationToken {
             state: PhantomData,
-            req_id,
+            request_id: req_id,
         }
     }
 }
@@ -253,7 +253,7 @@ impl VerificationToken<TcStateStarted> {
     pub fn new_started_state(req_id: RequestId) -> VerificationToken<TcStateStarted> {
         VerificationToken {
             state: PhantomData,
-            req_id,
+            request_id: req_id,
         }
     }
 }
@@ -281,6 +281,17 @@ pub enum TcStateToken {
     Accepted(VerificationToken<TcStateAccepted>),
     Started(VerificationToken<TcStateStarted>),
     Completed(VerificationToken<TcStateCompleted>),
+}
+
+impl TcStateToken {
+    pub fn request_id(&self) -> RequestId {
+        match self {
+            TcStateToken::None(token) => token.request_id(),
+            TcStateToken::Accepted(token) => token.request_id(),
+            TcStateToken::Started(token) => token.request_id(),
+            TcStateToken::Completed(token) => token.request_id(),
+        }
+    }
 }
 
 impl From<VerificationToken<TcStateNone>> for TcStateToken {
@@ -440,7 +451,7 @@ impl<'src_data> VerificationSendable<'src_data, TcStateNone, VerifSuccess> {
     pub fn send_success_acceptance_success(self) -> VerificationToken<TcStateAccepted> {
         VerificationToken {
             state: PhantomData,
-            req_id: self.token.unwrap().req_id(),
+            request_id: self.token.unwrap().request_id(),
         }
     }
 }
@@ -449,7 +460,7 @@ impl<'src_data> VerificationSendable<'src_data, TcStateAccepted, VerifSuccess> {
     pub fn send_success_start_success(self) -> VerificationToken<TcStateStarted> {
         VerificationToken {
             state: PhantomData,
-            req_id: self.token.unwrap().req_id(),
+            request_id: self.token.unwrap().request_id(),
         }
     }
 }
@@ -588,7 +599,7 @@ impl VerificationReporterCore {
                 subservice,
                 seq_count,
                 msg_count,
-                &token.req_id,
+                &token.request_id,
                 time_stamp,
                 None::<&dyn EcssEnumeration>,
             )
@@ -618,7 +629,7 @@ impl VerificationReporterCore {
                 subservice,
                 seq_count,
                 msg_count,
-                &token.req_id,
+                &token.request_id,
                 step,
                 params,
             )
@@ -788,7 +799,7 @@ impl VerificationReporterCore {
                 Subservice::TmStepSuccess.into(),
                 seq_count,
                 msg_count,
-                &token.req_id,
+                &token.request_id,
                 time_stamp,
                 Some(&step),
             )?,
@@ -816,7 +827,7 @@ impl VerificationReporterCore {
                 Subservice::TmStepFailure.into(),
                 seq_count,
                 msg_count,
-                &token.req_id,
+                &token.request_id,
                 Some(params.step),
                 &params.params,
             )
@@ -1509,7 +1520,7 @@ pub mod test_util {
             );
             VerificationToken {
                 state: core::marker::PhantomData,
-                req_id,
+                request_id: req_id,
             }
         }
 
@@ -1522,16 +1533,16 @@ pub mod test_util {
             super::VerificationOrSendErrorWithToken<TcStateNone>,
         > {
             let verif_map = self.verification_map.lock().unwrap();
-            match verif_map.borrow_mut().get_mut(&token.req_id) {
+            match verif_map.borrow_mut().get_mut(&token.request_id) {
                 Some(entry) => entry.accepted = Some(true),
                 None => panic!(
                     "unexpected acceptance success for request ID {}",
-                    token.req_id()
+                    token.request_id()
                 ),
             };
             Ok(VerificationToken {
                 state: core::marker::PhantomData,
-                req_id: token.req_id,
+                request_id: token.request_id,
             })
         }
 
@@ -1541,7 +1552,7 @@ pub mod test_util {
             params: FailParams,
         ) -> Result<(), super::VerificationOrSendErrorWithToken<TcStateNone>> {
             let verif_map = self.verification_map.lock().unwrap();
-            match verif_map.borrow_mut().get_mut(&token.req_id) {
+            match verif_map.borrow_mut().get_mut(&token.request_id) {
                 Some(entry) => {
                     entry.accepted = Some(false);
                     entry.failure_data = Some(params.failure_data.to_vec());
@@ -1549,7 +1560,7 @@ pub mod test_util {
                 }
                 None => panic!(
                     "unexpected acceptance failure for request ID {}",
-                    token.req_id()
+                    token.request_id()
                 ),
             };
             Ok(())
@@ -1564,13 +1575,16 @@ pub mod test_util {
             super::VerificationOrSendErrorWithToken<super::TcStateAccepted>,
         > {
             let verif_map = self.verification_map.lock().unwrap();
-            match verif_map.borrow_mut().get_mut(&token.req_id) {
+            match verif_map.borrow_mut().get_mut(&token.request_id) {
                 Some(entry) => entry.started = Some(true),
-                None => panic!("unexpected start success for request ID {}", token.req_id()),
+                None => panic!(
+                    "unexpected start success for request ID {}",
+                    token.request_id()
+                ),
             };
             Ok(VerificationToken {
                 state: core::marker::PhantomData,
-                req_id: token.req_id,
+                request_id: token.request_id,
             })
         }
 
@@ -1580,13 +1594,16 @@ pub mod test_util {
             params: FailParams,
         ) -> Result<(), super::VerificationOrSendErrorWithToken<super::TcStateAccepted>> {
             let verif_map = self.verification_map.lock().unwrap();
-            match verif_map.borrow_mut().get_mut(&token.req_id) {
+            match verif_map.borrow_mut().get_mut(&token.request_id) {
                 Some(entry) => {
                     entry.started = Some(false);
                     entry.failure_data = Some(params.failure_data.to_vec());
                     entry.fail_enum = Some(params.failure_code.value());
                 }
-                None => panic!("unexpected start failure for request ID {}", token.req_id()),
+                None => panic!(
+                    "unexpected start failure for request ID {}",
+                    token.request_id()
+                ),
             };
             Ok(())
         }
@@ -1598,12 +1615,15 @@ pub mod test_util {
             step: impl spacepackets::ecss::EcssEnumeration,
         ) -> Result<(), EcssTmtcError> {
             let verif_map = self.verification_map.lock().unwrap();
-            match verif_map.borrow_mut().get_mut(&token.req_id) {
+            match verif_map.borrow_mut().get_mut(&token.request_id) {
                 Some(entry) => {
                     entry.step = step.value().try_into().unwrap();
                     entry.step_status = Some(true);
                 }
-                None => panic!("unexpected start success for request ID {}", token.req_id()),
+                None => panic!(
+                    "unexpected start success for request ID {}",
+                    token.request_id()
+                ),
             };
             Ok(())
         }
@@ -1614,14 +1634,17 @@ pub mod test_util {
             params: FailParamsWithStep,
         ) -> Result<(), super::VerificationOrSendErrorWithToken<super::TcStateStarted>> {
             let verif_map = self.verification_map.lock().unwrap();
-            match verif_map.borrow_mut().get_mut(&token.req_id) {
+            match verif_map.borrow_mut().get_mut(&token.request_id) {
                 Some(entry) => {
                     entry.step_status = Some(false);
                     entry.step = params.step.value().try_into().unwrap();
                     entry.failure_data = Some(params.params.failure_data.to_vec());
                     entry.fail_enum = Some(params.params.failure_code.value());
                 }
-                None => panic!("unexpected start success for request ID {}", token.req_id()),
+                None => panic!(
+                    "unexpected start success for request ID {}",
+                    token.request_id()
+                ),
             };
             Ok(())
         }
@@ -1632,11 +1655,11 @@ pub mod test_util {
             _time_stamp: &[u8],
         ) -> Result<(), super::VerificationOrSendErrorWithToken<TcState>> {
             let verif_map = self.verification_map.lock().unwrap();
-            match verif_map.borrow_mut().get_mut(&token.req_id) {
+            match verif_map.borrow_mut().get_mut(&token.request_id) {
                 Some(entry) => entry.completed = Some(true),
                 None => panic!(
                     "unexpected acceptance success for request ID {}",
-                    token.req_id()
+                    token.request_id()
                 ),
             };
             Ok(())
@@ -1648,7 +1671,7 @@ pub mod test_util {
             params: FailParams,
         ) -> Result<(), super::VerificationOrSendErrorWithToken<TcState>> {
             let verif_map = self.verification_map.lock().unwrap();
-            match verif_map.borrow_mut().get_mut(&token.req_id) {
+            match verif_map.borrow_mut().get_mut(&token.request_id) {
                 Some(entry) => {
                     entry.completed = Some(false);
                     entry.failure_data = Some(params.failure_data.to_vec());
@@ -1656,7 +1679,7 @@ pub mod test_util {
                 }
                 None => panic!(
                     "unexpected acceptance success for request ID {}",
-                    token.req_id()
+                    token.request_id()
                 ),
             };
             Ok(())
@@ -1887,7 +1910,7 @@ pub mod tests {
         let mut sender = TestSender::default();
         b.vr.acceptance_success(tok, &sender, &EMPTY_STAMP)
             .expect("Sending acceptance success failed");
-        acceptance_check(&mut sender, &tok.req_id);
+        acceptance_check(&mut sender, &tok.request_id);
     }
 
     #[test]
@@ -1896,7 +1919,7 @@ pub mod tests {
         b.helper
             .acceptance_success(tok, &EMPTY_STAMP)
             .expect("Sending acceptance success failed");
-        acceptance_check(&mut b.helper.sender, &tok.req_id);
+        acceptance_check(&mut b.helper.sender, &tok.request_id);
     }
 
     fn acceptance_fail_check(sender: &mut TestSender, req_id: RequestId, stamp_buf: [u8; 7]) {
@@ -1927,7 +1950,7 @@ pub mod tests {
         let fail_params = FailParams::new_no_fail_data(stamp_buf.as_slice(), &fail_code);
         b.vr.acceptance_failure(tok, &sender, fail_params)
             .expect("Sending acceptance success failed");
-        acceptance_fail_check(&mut sender, tok.req_id, stamp_buf);
+        acceptance_fail_check(&mut sender, tok.request_id, stamp_buf);
     }
 
     #[test]
@@ -1940,7 +1963,7 @@ pub mod tests {
         b.helper
             .acceptance_failure(tok, fail_params)
             .expect("Sending acceptance success failed");
-        acceptance_fail_check(&mut b.helper.sender, tok.req_id, stamp_buf);
+        acceptance_fail_check(&mut b.helper.sender, tok.request_id, stamp_buf);
     }
 
     #[test]
@@ -1996,7 +2019,7 @@ pub mod tests {
                 time_stamp: EMPTY_STAMP,
             },
             additional_data: Some([10, 0, 0, 0, 12].to_vec()),
-            req_id: tok.req_id,
+            req_id: tok.request_id,
         };
         let mut service_queue = sender.service_queue.borrow_mut();
         assert_eq!(service_queue.len(), 1);
@@ -2051,7 +2074,7 @@ pub mod tests {
                 .expect("Sending acceptance success failed");
         b.vr.start_failure(accepted_token, &sender, fail_params)
             .expect("Start failure failure");
-        start_fail_check(&mut sender, tok.req_id, fail_data_raw);
+        start_fail_check(&mut sender, tok.request_id, fail_data_raw);
     }
 
     #[test]
@@ -2070,7 +2093,7 @@ pub mod tests {
         b.helper
             .start_failure(accepted_token, fail_params)
             .expect("Start failure failure");
-        start_fail_check(&mut b.helper.sender, tok.req_id, fail_data_raw);
+        start_fail_check(&mut b.helper.sender, tok.request_id, fail_data_raw);
     }
 
     fn step_success_check(sender: &mut TestSender, req_id: RequestId) {
@@ -2147,7 +2170,7 @@ pub mod tests {
         b.vr.step_success(&started_token, &sender, &EMPTY_STAMP, EcssEnumU8::new(1))
             .expect("Sending step 1 success failed");
         assert_eq!(sender.service_queue.borrow().len(), 4);
-        step_success_check(&mut sender, tok.req_id);
+        step_success_check(&mut sender, tok.request_id);
     }
 
     #[test]
@@ -2168,7 +2191,7 @@ pub mod tests {
             .step_success(&started_token, &EMPTY_STAMP, EcssEnumU8::new(1))
             .expect("Sending step 1 success failed");
         assert_eq!(b.helper.sender.service_queue.borrow().len(), 4);
-        step_success_check(&mut b.helper.sender, tok.req_id);
+        step_success_check(&mut b.helper.sender, tok.request_id);
     }
 
     fn check_step_failure(sender: &mut TestSender, req_id: RequestId, fail_data_raw: [u8; 4]) {
@@ -2242,7 +2265,7 @@ pub mod tests {
     fn test_step_failure() {
         let (b, tok) = base_init(false);
         let mut sender = TestSender::default();
-        let req_id = tok.req_id;
+        let req_id = tok.request_id;
         let fail_code = EcssEnumU32::new(0x1020);
         let fail_data: f32 = -22.3232;
         let mut fail_data_raw = [0; 4];
@@ -2271,7 +2294,7 @@ pub mod tests {
     #[test]
     fn test_steps_failure_with_helper() {
         let (mut b, tok) = base_with_helper_init();
-        let req_id = tok.req_id;
+        let req_id = tok.request_id;
         let fail_code = EcssEnumU32::new(0x1020);
         let fail_data: f32 = -22.3232;
         let mut fail_data_raw = [0; 4];
@@ -2351,7 +2374,7 @@ pub mod tests {
     fn test_completion_failure() {
         let (b, tok) = base_init(false);
         let mut sender = TestSender::default();
-        let req_id = tok.req_id;
+        let req_id = tok.request_id;
         let fail_code = EcssEnumU32::new(0x1020);
         let fail_params = FailParams::new_no_fail_data(&EMPTY_STAMP, &fail_code);
 
@@ -2369,7 +2392,7 @@ pub mod tests {
     #[test]
     fn test_completion_failure_with_helper() {
         let (mut b, tok) = base_with_helper_init();
-        let req_id = tok.req_id;
+        let req_id = tok.request_id;
         let fail_code = EcssEnumU32::new(0x1020);
         let fail_params = FailParams::new_no_fail_data(&EMPTY_STAMP, &fail_code);
 
@@ -2443,7 +2466,7 @@ pub mod tests {
                 .expect("Sending start success failed");
         b.vr.completion_success(started_token, &sender, &EMPTY_STAMP)
             .expect("Sending completion success failed");
-        completion_success_check(&mut sender, tok.req_id);
+        completion_success_check(&mut sender, tok.request_id);
     }
 
     #[test]
@@ -2460,7 +2483,7 @@ pub mod tests {
         b.helper
             .completion_success(started_token, &EMPTY_STAMP)
             .expect("Sending completion success failed");
-        completion_success_check(&mut b.helper.sender, tok.req_id);
+        completion_success_check(&mut b.helper.sender, tok.request_id);
     }
 
     #[test]

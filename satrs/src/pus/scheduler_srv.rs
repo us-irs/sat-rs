@@ -347,7 +347,7 @@ mod tests {
         let enable_scheduling = PusTcCreator::new(&mut reply_header, tc_header, &[0; 7], true);
         let token = test_harness.send_tc(&enable_scheduling);
 
-        let request_id = token.req_id();
+        let request_id = token.request_id();
         let time_stamp = cds::TimeProvider::new_with_u16_days(0, 0).to_vec().unwrap();
         test_harness
             .handler
@@ -408,7 +408,7 @@ mod tests {
         );
         let token = test_harness.send_tc(&enable_scheduling);
 
-        let request_id = token.req_id();
+        let request_id = token.request_id();
         test_harness.handle_one_tc().unwrap();
         test_harness.check_next_verification_tm(1, request_id);
         test_harness.check_next_verification_tm(3, request_id);
