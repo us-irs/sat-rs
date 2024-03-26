@@ -130,9 +130,9 @@ impl PusReplyHandler<ActivePusRequestStd, ModeReply> for ModeReplyHandler {
 }
 
 #[derive(Default)]
-pub struct ExampleModeRequestConverter {}
+pub struct ModeRequestConverter {}
 
-impl PusTcToRequestConverter<ActivePusRequestStd, ModeRequest> for ExampleModeRequestConverter {
+impl PusTcToRequestConverter<ActivePusRequestStd, ModeRequest> for ModeRequestConverter {
     type Error = GenericConversionError;
 
     fn convert(
@@ -197,4 +197,33 @@ impl PusTcToRequestConverter<ActivePusRequestStd, ModeRequest> for ExampleModeRe
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use satrs::{
+        mode::ModeRequest,
+        pus::mode::Subservice,
+        spacepackets::{
+            ecss::tc::{PusTcCreator, PusTcSecondaryHeader},
+            SpHeader,
+        },
+    };
+
+    use crate::pus::tests::{PusConverterTestbench, TEST_APID, TEST_APID_TARGET_ID};
+
+    use super::ModeRequestConverter;
+
+    #[test]
+    fn mode_converter_set_mode_request() {
+        let mut testbench = PusConverterTestbench::new(ModeRequestConverter::default());
+        let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let sec_header = PusTcSecondaryHeader::new_simple(200, Subservice::TcReadMode as u8);
+        let mut app_data: [u8; 4] = [0; 4];
+        // Invalid ID, routing should fail.
+        app_data[0..4].copy_from_slice(&TEST_APID_TARGET_ID.to_be_bytes());
+        let tc = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
+        let token = testbench.add_tc(&tc);
+        let (_active_req, req) = testbench
+            .convert(token, &[], TEST_APID, TEST_APID_TARGET_ID)
+            .expect("conversion has failed");
+        assert_eq!(req, ModeRequest::ReadMode);
+    }
+}

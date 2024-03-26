@@ -137,11 +137,9 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPusWithActionId> for 
 }
 
 #[derive(Default)]
-pub struct ExampleActionRequestConverter {}
+pub struct ActionRequestConverter {}
 
-impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest>
-    for ExampleActionRequestConverter
-{
+impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest> for ActionRequestConverter {
     type Error = GenericConversionError;
 
     fn convert(
@@ -228,7 +226,7 @@ pub fn create_action_service_static(
             verif_reporter.clone(),
             EcssTcInSharedStoreConverter::new(tc_pool.clone(), 2048),
         ),
-        ExampleActionRequestConverter::default(),
+        ActionRequestConverter::default(),
         // TODO: Implementation which does not use run-time allocation? Maybe something like
         // a bounded wrapper which pre-allocates using [HashMap::with_capacity]..
         DefaultActiveActionRequestMap::default(),
@@ -272,7 +270,7 @@ pub fn create_action_service_dynamic(
             verif_reporter.clone(),
             EcssTcInVecConverter::default(),
         ),
-        ExampleActionRequestConverter::default(),
+        ActionRequestConverter::default(),
         DefaultActiveActionRequestMap::default(),
         ActionReplyHandler::default(),
         action_router,
@@ -294,7 +292,7 @@ pub struct Pus8Wrapper<
         TmSender,
         TcInMemConverter,
         VerificationReporter,
-        ExampleActionRequestConverter,
+        ActionRequestConverter,
         ActionReplyHandler,
         DefaultActiveActionRequestMap,
         ActivePusActionRequestStd,
@@ -367,8 +365,8 @@ mod tests {
 
     use crate::{
         pus::tests::{
-            PusConverterTestbench, TargetedPusRequestTestbench, TARGET_ID, TEST_APID,
-            TEST_APID_TARGET_ID,
+            PusConverterTestbench, ReplyHandlerTestbench, TargetedPusRequestTestbench, TARGET_ID,
+            TEST_APID, TEST_APID_TARGET_ID,
         },
         requests::CompositeRequest,
     };
@@ -377,7 +375,7 @@ mod tests {
 
     impl
         TargetedPusRequestTestbench<
-            ExampleActionRequestConverter,
+            ActionRequestConverter,
             ActionReplyHandler,
             DefaultActiveActionRequestMap,
             ActivePusActionRequestStd,
@@ -414,7 +412,7 @@ mod tests {
                         verif_reporter.clone(),
                         EcssTcInVecConverter::default(),
                     ),
-                    ExampleActionRequestConverter::default(),
+                    ActionRequestConverter::default(),
                     DefaultActiveActionRequestMap::default(),
                     ActionReplyHandler::default(),
                     generic_req_router,
@@ -501,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn test_basic_request() {
+    fn basic_request() {
         let mut testbench = TargetedPusRequestTestbench::new_for_action();
         // Create a basic action request and verify forwarding.
         let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
@@ -545,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn test_basic_request_routing_error() {
+    fn basic_request_routing_error() {
         let mut testbench = TargetedPusRequestTestbench::new_for_action();
         // Create a basic action request and verify forwarding.
         let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
@@ -566,7 +564,7 @@ mod tests {
 
     #[test]
     fn converter_action_req_no_data() {
-        let mut testbench = PusConverterTestbench::new(ExampleActionRequestConverter::default());
+        let mut testbench = PusConverterTestbench::new(ActionRequestConverter::default());
         let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
         let sec_header = PusTcSecondaryHeader::new_simple(8, 128);
         let action_id = 5_u32;
@@ -576,7 +574,7 @@ mod tests {
         app_data[4..8].copy_from_slice(&action_id.to_be_bytes());
         let pus8_packet = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
         let token = testbench.add_tc(&pus8_packet);
-        let result = testbench.convert(token, &[]);
+        let result = testbench.convert(token, &[], TEST_APID, TEST_APID_TARGET_ID);
         assert!(result.is_ok());
         let (active_req, request) = result.unwrap();
         if let ActionRequestVariant::NoData = request.variant {
@@ -597,7 +595,7 @@ mod tests {
 
     #[test]
     fn converter_action_req_with_data() {
-        let mut testbench = PusConverterTestbench::new(ExampleActionRequestConverter::default());
+        let mut testbench = PusConverterTestbench::new(ActionRequestConverter::default());
         let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
         let sec_header = PusTcSecondaryHeader::new_simple(8, 128);
         let action_id = 5_u32;
@@ -610,20 +608,12 @@ mod tests {
         }
         let pus8_packet = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
         let token = testbench.add_tc(&pus8_packet);
-        let result = testbench.convert(token, &[]);
+        let result = testbench.convert(token, &[], TEST_APID, TEST_APID_TARGET_ID);
         assert!(result.is_ok());
         let (active_req, request) = result.unwrap();
         if let ActionRequestVariant::VecData(vec) = request.variant {
             assert_eq!(request.action_id, action_id);
             assert_eq!(active_req.action_id, action_id);
-            assert_eq!(
-                active_req.target_id(),
-                TargetAndApidId::new(TEST_APID, TEST_APID_TARGET_ID).raw()
-            );
-            assert_eq!(
-                active_req.token().request_id(),
-                testbench.request_id().unwrap()
-            );
             assert_eq!(vec, app_data[8..].to_vec());
         } else {
             panic!("unexpected action request variant");
@@ -631,5 +621,31 @@ mod tests {
     }
 
     #[test]
-    fn reply_handling_completion_success() {}
+    fn reply_handling_completion_success() {
+        let mut testbench = ReplyHandlerTestbench::new(ActionReplyHandler::default());
+        let action_id = 5_u32;
+        let (req_id, active_req) = testbench.add_tc(TEST_APID, TEST_APID_TARGET_ID, &[]);
+        let active_action_req =
+            ActivePusActionRequestStd::new_from_common_req(action_id, active_req);
+        let reply = ActionReplyPusWithActionId::new(action_id, ActionReplyPus::Completed);
+        let generic_reply = GenericMessage::new(req_id.into(), 0, reply);
+        let result = testbench.handle_reply(&generic_reply, &active_action_req, &[]);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn reply_handling_completion_failure() {
+        // TODO: Implement
+    }
+
+    #[test]
+    fn reply_handling_step_success() {
+        // TODO: Implement
+    }
+
+    #[test]
+    fn reply_handling_step_failure() {
+        // TODO: Implement
+    }
 }

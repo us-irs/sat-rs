@@ -167,6 +167,10 @@ pub mod std_mod {
     }
 
     impl ActivePusActionRequestStd {
+        pub fn new_from_common_req(action_id: ActionId, common: ActivePusRequestStd) -> Self {
+            Self { action_id, common }
+        }
+
         pub fn new(
             action_id: ActionId,
             target_id: ComponentId,

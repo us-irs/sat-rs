@@ -87,11 +87,11 @@ impl PusReplyHandler<ActivePusRequestStd, HkReply> for HkReplyHandler {
     }
 }
 
-pub struct ExampleHkRequestConverter {
+pub struct HkRequestConverter {
     timeout: Duration,
 }
 
-impl Default for ExampleHkRequestConverter {
+impl Default for HkRequestConverter {
     fn default() -> Self {
         Self {
             timeout: Duration::from_secs(60),
@@ -99,7 +99,7 @@ impl Default for ExampleHkRequestConverter {
     }
 }
 
-impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for ExampleHkRequestConverter {
+impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for HkRequestConverter {
     type Error = GenericConversionError;
 
     fn convert(
@@ -247,7 +247,7 @@ pub fn create_hk_service_static(
             verif_reporter.clone(),
             EcssTcInSharedStoreConverter::new(tc_pool, 2048),
         ),
-        ExampleHkRequestConverter::default(),
+        HkRequestConverter::default(),
         DefaultActiveRequestMap::default(),
         HkReplyHandler::default(),
         request_router,
@@ -289,7 +289,7 @@ pub fn create_hk_service_dynamic(
             verif_reporter.clone(),
             EcssTcInVecConverter::default(),
         ),
-        ExampleHkRequestConverter::default(),
+        HkRequestConverter::default(),
         DefaultActiveRequestMap::default(),
         HkReplyHandler::default(),
         request_router,
@@ -311,7 +311,7 @@ pub struct Pus3Wrapper<
         TmSender,
         TcInMemConverter,
         VerificationReporter,
-        ExampleHkRequestConverter,
+        HkRequestConverter,
         HkReplyHandler,
         DefaultActiveRequestMap<ActivePusRequestStd>,
         ActivePusRequestStd,
@@ -370,27 +370,23 @@ impl<
 mod tests {
     use satrs::{
         hk::HkRequest,
-        pus::{test_util::TEST_APID, ActiveRequestProvider},
-        request::{GenericMessage, TargetAndApidId},
+        pus::test_util::TEST_APID,
+        request::GenericMessage,
         spacepackets::{
-            ecss::{
-                hk::Subservice,
-                tc::{PusTcCreator, PusTcReader},
-                WritablePusPacket,
-            },
+            ecss::{hk::Subservice, tc::PusTcCreator},
             SpHeader,
         },
     };
 
-    use crate::pus::tests::{PusConverterTestbench, ReplyHandlerTestbench};
+    use crate::pus::tests::{PusConverterTestbench, ReplyHandlerTestbench, TEST_APID_TARGET_ID};
 
-    use super::{ExampleHkRequestConverter, HkReply, HkReplyHandler};
+    use super::{HkReply, HkReplyHandler, HkRequestConverter};
 
     #[test]
-    fn test_hk_converter_one_shot_req() {
-        let mut hk_bench = PusConverterTestbench::new(ExampleHkRequestConverter::default());
+    fn hk_converter_one_shot_req() {
+        let mut hk_bench = PusConverterTestbench::new(HkRequestConverter::default());
         let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
-        let target_id = 2_u32;
+        let target_id = TEST_APID_TARGET_ID;
         let unique_id = 5_u32;
         let mut app_data: [u8; 8] = [0; 8];
         app_data[0..4].copy_from_slice(&target_id.to_be_bytes());
@@ -404,13 +400,9 @@ mod tests {
             true,
         );
         let accepted_token = hk_bench.add_tc(&hk_req);
-        let (active_req, req) = hk_bench
-            .convert(accepted_token, &[])
+        let (_active_req, req) = hk_bench
+            .convert(accepted_token, &[], TEST_APID, TEST_APID_TARGET_ID)
             .expect("conversion failed");
-        assert_eq!(
-            active_req.target_id(),
-            TargetAndApidId::new(TEST_APID, target_id).into()
-        );
         if let HkRequest::OneShot(id) = req {
             assert_eq!(id, unique_id);
         } else {
@@ -419,15 +411,65 @@ mod tests {
     }
 
     #[test]
-    fn test_hk_reply_handler() {
+    fn hk_converter_enable_periodic_generation() {
+        let mut hk_bench = PusConverterTestbench::new(HkRequestConverter::default());
+        let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+        let target_id = TEST_APID_TARGET_ID;
+        let unique_id = 5_u32;
+        let mut app_data: [u8; 8] = [0; 8];
+        app_data[0..4].copy_from_slice(&target_id.to_be_bytes());
+        app_data[4..8].copy_from_slice(&unique_id.to_be_bytes());
+        let mut generic_check = |tc: &PusTcCreator| {
+            let accepted_token = hk_bench.add_tc(tc);
+            let (_active_req, req) = hk_bench
+                .convert(accepted_token, &[], TEST_APID, TEST_APID_TARGET_ID)
+                .expect("conversion failed");
+            if let HkRequest::Enable(id) = req {
+                assert_eq!(id, unique_id);
+            } else {
+                panic!("unexpected HK request")
+            }
+        };
+        let tc0 = PusTcCreator::new_simple(
+            &mut sp_header,
+            3,
+            Subservice::TcEnableHkGeneration as u8,
+            Some(&app_data),
+            true,
+        );
+        generic_check(&tc0);
+        let tc1 = PusTcCreator::new_simple(
+            &mut sp_header,
+            3,
+            Subservice::TcEnableDiagGeneration as u8,
+            Some(&app_data),
+            true,
+        );
+        generic_check(&tc1);
+    }
+
+    #[test]
+    fn hk_conversion_disable_periodic_generation() {
+        // TODO: Implement
+    }
+
+    #[test]
+    fn hk_conversion_modify_interval() {
+        // TODO: Implement
+    }
+
+    #[test]
+    fn hk_reply_handler() {
         let mut reply_testbench = ReplyHandlerTestbench::new(HkReplyHandler::default());
         let sender_id = 2_u64;
-        let target_id = 3_u64;
-        let (req_id, active_req) = reply_testbench.add_tc(TEST_APID, target_id, &[]);
+        let apid_target_id = 3_u32;
+        let (req_id, active_req) = reply_testbench.add_tc(TEST_APID, apid_target_id, &[]);
         let reply = GenericMessage::new(req_id.into(), sender_id, HkReply::Ack);
         let result = reply_testbench.handle_reply(&reply, &active_req, &[]);
         assert!(result.is_ok());
+        assert!(result.unwrap());
+        reply_testbench.verif_reporter.check_completed(&req_id);
     }
 
-    // TODO: Add more tests.
+    // TODO: Add more tests for reply handler.
 }

@@ -532,7 +532,7 @@ pub(crate) mod tests {
         pub fn add_tc(
             &mut self,
             apid: u16,
-            target_id: ComponentId,
+            apid_target: u32,
             time_stamp: &[u8],
         ) -> (verification::RequestId, ActivePusRequestStd) {
             let mut sp_header = SpHeader::tc_unseg(apid, 0, 0).unwrap();
@@ -553,7 +553,11 @@ pub(crate) mod tests {
                 .expect("start failed");
             (
                 started.request_id(),
-                ActivePusRequestStd::new(target_id, started, Duration::from_secs(30)),
+                ActivePusRequestStd::new(
+                    TargetAndApidId::new(apid, apid_target).raw(),
+                    started,
+                    Duration::from_secs(30),
+                ),
             )
         }
 
@@ -623,6 +627,8 @@ pub(crate) mod tests {
             &mut self,
             token: VerificationToken<TcStateAccepted>,
             time_stamp: &[u8],
+            expected_apid: u16,
+            expected_apid_target: u32,
         ) -> Result<(ActiveRequestInfo, Request), Converter::Error> {
             if self.current_packet.is_none() {
                 return Err(GenericConversionError::InvalidAppData(
@@ -631,8 +637,18 @@ pub(crate) mod tests {
             }
             let current_packet = self.current_packet.take().unwrap();
             let tc_reader = PusTcReader::new(&current_packet).unwrap();
-            self.converter
-                .convert(token, &tc_reader.0, time_stamp, &self.verif_reporter)
+            let (active_info, request) =
+                self.converter
+                    .convert(token, &tc_reader.0, time_stamp, &self.verif_reporter)?;
+            assert_eq!(
+                active_info.token().request_id(),
+                self.request_id().expect("no request id is set")
+            );
+            assert_eq!(
+                active_info.target_id(),
+                TargetAndApidId::new(expected_apid, expected_apid_target).raw()
+            );
+            Ok((active_info, request))
         }
     }
 
