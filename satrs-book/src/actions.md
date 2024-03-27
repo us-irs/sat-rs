@@ -15,7 +15,7 @@ action commanding could look like.
 2. Target ID and Action String based. The target ID is the same as in the first proposal, but
    the unique action is identified by a string.
 
-The framework provides an `ActionRequest` abstraction to model both of these cases.
+The library provides an `ActionRequest` abstraction to model both of these cases.
 
 ## Commanding with ECSS PUS 8
 

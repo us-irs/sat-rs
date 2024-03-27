@@ -1,13 +1,14 @@
-# Framework Design
+# Library Design
 
 Satellites and space systems in general are complex systems with a wide range of requirements for
-both the hardware and the software. Consequently, the general design of the framework is centered
+both the hardware and the software. Consequently, the general design of the library is centered
 around many light-weight components which try to impose as few restrictions as possible on how to
-solve certain problems.
+solve certain problems. This is also the reason why sat-rs is explicitely called a library
+instead of a framework.
 
 There are still a lot of common patterns and architectures across these systems where guidance
 of how to solve a problem and a common structure would still be extremely useful to avoid pitfalls
-which were already solved and to avoid boilerplate code. This framework tries to provide this
+which were already solved and to avoid boilerplate code. This library tries to provide this
 structure and guidance the following way:
 
 1. Providing this book which explains the architecture and design patterns in respect to common
@@ -18,7 +19,7 @@ structure and guidance the following way:
 3. Providing a good test suite. This includes both unittests and integration tests. The integration
    tests can also serve as smaller usage examples than the large `satrs-example` application.
 
-This framework has special support for standards used in the space industry. This especially
+This library has special support for standards used in the space industry. This especially
 includes standards provided by Consultative Committee for Space Data Systems (CCSDS) and European
 Cooperation for Space Standardization (ECSS). It does not enforce using any of those standards,
 but it is always recommended to use some sort of standard for interoperability.
@@ -30,10 +31,10 @@ Flying Laptop Project by the University of Stuttgart with Airbus Defence and Spa
 It has flight heritage through the 2 mssions [FLP](https://www.irs.uni-stuttgart.de/en/research/satellitetechnology-and-instruments/smallsatelliteprogram/flying-laptop/)
 and [EIVE](https://www.irs.uni-stuttgart.de/en/research/satellitetechnology-and-instruments/smallsatelliteprogram/EIVE/).
 Therefore, a lot of the design concepts were ported more or less unchanged to the `sat-rs`
-framework.
+library.
 FLP is a medium-size small satellite with a higher budget and longer development time than EIVE,
 which allowed to build a highly reliable system while EIVE is a smaller 6U+ cubesat which had a
-shorter development cycle and was built using cheaper COTS components. This framework also tries
+shorter development cycle and was built using cheaper COTS components. This library also tries
 to accumulate the knowledge of developing the OBSW and operating the satellite for both these
 different systems and provide a solution for a wider range of small satellite systems.
 
