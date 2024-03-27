@@ -20,7 +20,7 @@ components.
 1. [UDP TMTC Server](https://docs.rs/satrs/latest/satrs/hal/host/udp_server/index.html).
    UDP is already packet based which makes it an excellent fit for exchanging space packets.
 2. [TCP TMTC Server Components](https://docs.rs/satrs/latest/satrs/hal/std/tcp_server/index.html).
-   TCP is a stream based protocol, so the framework provides building blocks to parse telemetry
+   TCP is a stream based protocol, so the library provides building blocks to parse telemetry
    from an arbitrary bytestream. Two concrete implementations are provided:
     - [TCP spacepackets server](https://docs.rs/satrs/latest/satrs/hal/std/tcp_server/struct.TcpSpacepacketsServer.html)
       to parse tightly packed CCSDS Spacepackets.
