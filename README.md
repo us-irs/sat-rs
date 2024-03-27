@@ -8,11 +8,16 @@
 sat-rs
 =========
 
-This is the repository of the sat-rs framework. Its primary goal is to provide re-usable components
+This is the repository of the sat-rs library. Its primary goal is to provide re-usable components
 to write on-board software for remote systems like rovers or satellites. It is specifically written
 for the special requirements for these systems. You can find an overview of the project and the
 link to the [more high-level sat-rs book](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/)
 at the [IRS software projects website](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/).
+
+This is early-stage software. Important features are missing. New releases
+with breaking changes are released regularly, with all changes documented inside respective
+changelog files. You should only use this library if your are willing to work in this
+environment.
 
 A lot of the architecture and general design considerations are based on the
 [FSFW](https://egit.irs.uni-stuttgart.de/fsfw/fsfw) C++ framework which has flight heritage
