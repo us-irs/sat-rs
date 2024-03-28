@@ -234,14 +234,15 @@ mod tests {
         let mut app_data: [u8; 4 + ModeAndSubmode::RAW_LEN] = [0; 4 + ModeAndSubmode::RAW_LEN];
         let mode_and_submode = ModeAndSubmode::new(2, 1);
         app_data[0..4].copy_from_slice(&TEST_APID_TARGET_ID.to_be_bytes());
-        mode_and_submode.write_to_be_bytes(&mut app_data[4..]).unwrap();
+        mode_and_submode
+            .write_to_be_bytes(&mut app_data[4..])
+            .unwrap();
         let tc = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);
         let token = testbench.add_tc(&tc);
         let (_active_req, req) = testbench
             .convert(token, &[], TEST_APID, TEST_APID_TARGET_ID)
             .expect("conversion has failed");
         assert_eq!(req, ModeRequest::SetMode(mode_and_submode));
-
     }
 
     #[test]
@@ -263,7 +264,8 @@ mod tests {
     fn mode_converter_announce_mode_recursively() {
         let mut testbench = PusConverterTestbench::new(ModeRequestConverter::default());
         let mut sp_header = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
-        let sec_header = PusTcSecondaryHeader::new_simple(200, Subservice::TcAnnounceModeRecursive as u8);
+        let sec_header =
+            PusTcSecondaryHeader::new_simple(200, Subservice::TcAnnounceModeRecursive as u8);
         let mut app_data: [u8; 4] = [0; 4];
         app_data[0..4].copy_from_slice(&TEST_APID_TARGET_ID.to_be_bytes());
         let tc = PusTcCreator::new(&mut sp_header, sec_header, &app_data, true);

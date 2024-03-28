@@ -69,7 +69,10 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPusWithActionId> for 
             .expect("invalid token state");
         let remove_entry = match &reply.message.variant {
             ActionReplyPus::CompletionFailed { error_code, params } => {
-                let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
+                let mut fail_data_len = 0;
+                if let Some(params) = params {
+                    fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
+                }
                 verification_handler
                     .completion_failure(
                         verif_token,
@@ -87,7 +90,10 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPusWithActionId> for 
                 step,
                 params,
             } => {
-                let fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
+                let mut fail_data_len = 0;
+                if let Some(params) = params {
+                    fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
+                }
                 verification_handler
                     .step_failure(
                         verif_token,
@@ -353,6 +359,7 @@ impl<
 mod tests {
     use satrs::{
         pus::verification::VerificationReporterCfg,
+        res_code::ResultU16,
         spacepackets::{
             ecss::{
                 tc::{PusTcCreator, PusTcSecondaryHeader},
@@ -632,21 +639,81 @@ mod tests {
         let result = testbench.handle_reply(&generic_reply, &active_action_req, &[]);
         assert!(result.is_ok());
         assert!(result.unwrap());
+        testbench
+            .verif_reporter
+            .assert_full_completion_success(&req_id, None);
     }
 
     #[test]
     fn reply_handling_completion_failure() {
-        // TODO: Implement
+        let mut testbench = ReplyHandlerTestbench::new(ActionReplyHandler::default());
+        let action_id = 5_u32;
+        let (req_id, active_req) = testbench.add_tc(TEST_APID, TEST_APID_TARGET_ID, &[]);
+        let active_action_req =
+            ActivePusActionRequestStd::new_from_common_req(action_id, active_req);
+        let error_code = ResultU16::new(2, 3);
+        let reply = ActionReplyPusWithActionId::new(
+            action_id,
+            ActionReplyPus::CompletionFailed {
+                error_code,
+                params: None,
+            },
+        );
+        let generic_reply = GenericMessage::new(req_id.into(), 0, reply);
+        let result = testbench.handle_reply(&generic_reply, &active_action_req, &[]);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+        testbench
+            .verif_reporter
+            .assert_completion_failure(&req_id, None, error_code.raw() as u64);
     }
 
     #[test]
     fn reply_handling_step_success() {
-        // TODO: Implement
+        let mut testbench = ReplyHandlerTestbench::new(ActionReplyHandler::default());
+        let action_id = 5_u32;
+        let (req_id, active_req) = testbench.add_tc(TEST_APID, TEST_APID_TARGET_ID, &[]);
+        let active_action_req =
+            ActivePusActionRequestStd::new_from_common_req(action_id, active_req);
+        let reply =
+            ActionReplyPusWithActionId::new(action_id, ActionReplyPus::StepSuccess { step: 1 });
+        let generic_reply = GenericMessage::new(req_id.into(), 0, reply);
+        let result = testbench.handle_reply(&generic_reply, &active_action_req, &[]);
+        assert!(result.is_ok());
+        // Entry should not be removed, completion not done yet.
+        assert!(!result.unwrap());
+        let verif_info = testbench.verif_reporter.verification_info(&req_id);
+        assert!(verif_info.is_some());
+        let verif_info = verif_info.unwrap();
+        assert!(verif_info.step_status.unwrap());
+        assert_eq!(verif_info.step, 1);
     }
 
     #[test]
     fn reply_handling_step_failure() {
-        // TODO: Implement
+        let mut testbench = ReplyHandlerTestbench::new(ActionReplyHandler::default());
+        let action_id = 5_u32;
+        let (req_id, active_req) = testbench.add_tc(TEST_APID, TEST_APID_TARGET_ID, &[]);
+        let active_action_req =
+            ActivePusActionRequestStd::new_from_common_req(action_id, active_req);
+        let error_code = ResultU16::new(2, 3);
+        let reply = ActionReplyPusWithActionId::new(
+            action_id,
+            ActionReplyPus::StepFailed {
+                error_code,
+                step: 1,
+                params: None,
+            },
+        );
+        let generic_reply = GenericMessage::new(req_id.into(), 0, reply);
+        let result = testbench.handle_reply(&generic_reply, &active_action_req, &[]);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+        let verif_info = testbench.verif_reporter.verification_info(&req_id);
+        assert!(verif_info.is_some());
+        let verif_info = verif_info.unwrap();
+        assert!(!verif_info.step_status.unwrap());
+        assert_eq!(verif_info.step, 1);
     }
 
     #[test]

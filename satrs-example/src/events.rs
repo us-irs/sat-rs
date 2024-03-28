@@ -21,6 +21,8 @@ use satrs_example::config::{ComponentIdList, PUS_APID};
 
 use crate::update_time;
 
+/// The PUS event handler subscribes for all events and converts them into ECSS PUS 5 event
+/// packets. It also handles the verification completion of PUS event service requests.
 pub struct PusEventHandler<VerificationReporter: VerificationReportingProvider> {
     event_request_rx: mpsc::Receiver<EventRequestWithToken>,
     pus_event_dispatcher: DefaultPusEventU32Dispatcher<()>,
@@ -30,8 +32,6 @@ pub struct PusEventHandler<VerificationReporter: VerificationReportingProvider> 
     timestamp: [u8; 7],
     verif_handler: VerificationReporter,
 }
-/*
-*/
 
 impl<VerificationReporter: VerificationReportingProvider> PusEventHandler<VerificationReporter> {
     pub fn new(
@@ -115,6 +115,8 @@ impl<VerificationReporter: VerificationReportingProvider> PusEventHandler<Verifi
     }
 }
 
+/// This is a thin wrapper around the event manager which also caches the sender component
+/// used to send events to the event manager.
 pub struct EventManagerWrapper {
     event_manager: EventManagerWithBoundedMpsc,
     event_sender: mpsc::Sender<(EventU32, Option<Params>)>,
@@ -132,6 +134,7 @@ impl EventManagerWrapper {
         }
     }
 
+    // Returns a cached event sender to send events to the event manager for routing.
     pub fn clone_event_sender(&self) -> mpsc::Sender<(EventU32, Option<Params>)> {
         self.event_sender.clone()
     }

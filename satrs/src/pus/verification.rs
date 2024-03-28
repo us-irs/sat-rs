@@ -1709,12 +1709,52 @@ pub mod test_util {
             false
         }
 
-        pub fn check_completed(&self, req_id: &RequestId) -> bool {
+        fn generic_completion_checks(
+            entry: &VerificationStatus,
+            step: Option<u16>,
+            completion_success: bool,
+        ) {
+            assert!(entry.accepted.unwrap());
+            assert!(entry.started.unwrap());
+            if let Some(step) = step {
+                assert!(entry.step_status.unwrap());
+                assert_eq!(entry.step, step);
+            } else {
+                assert!(entry.step_status.is_none());
+            }
+            assert_eq!(entry.completed.unwrap(), completion_success);
+        }
+
+        pub fn assert_full_completion_success(&self, req_id: &RequestId, step: Option<u16>) {
             let verif_map = self.verification_map.lock().unwrap();
             if let Some(entry) = verif_map.borrow().get(req_id) {
-                return entry.completed.unwrap_or(false);
+                Self::generic_completion_checks(entry, step, true);
+                return;
             }
-            false
+            panic!("request not in verification map");
+        }
+
+        pub fn assert_completion_failure(
+            &self,
+            req_id: &RequestId,
+            step: Option<u16>,
+            error_code: u64,
+        ) {
+            let verif_map = self.verification_map.lock().unwrap();
+            if let Some(entry) = verif_map.borrow().get(req_id) {
+                Self::generic_completion_checks(entry, step, false);
+                assert_eq!(entry.fail_enum.unwrap(), error_code);
+                return;
+            }
+            panic!("request not in verification map");
+        }
+
+        pub fn completion_status(&self, req_id: &RequestId) -> Option<bool> {
+            let verif_map = self.verification_map.lock().unwrap();
+            if let Some(entry) = verif_map.borrow().get(req_id) {
+                return entry.completed;
+            }
+            panic!("request not in verification map");
         }
     }
 }

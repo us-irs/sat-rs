@@ -32,12 +32,12 @@ pub enum ActionReplyPus {
     },
     CompletionFailed {
         error_code: ResultU16,
-        params: Params,
+        params: Option<Params>,
     },
     StepFailed {
         error_code: ResultU16,
         step: u16,
-        params: Params,
+        params: Option<Params>,
     },
 }
 

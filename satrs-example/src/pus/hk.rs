@@ -538,7 +538,10 @@ mod tests {
         let result = reply_testbench.handle_reply(&reply, &active_req, &[]);
         assert!(result.is_ok());
         assert!(result.unwrap());
-        reply_testbench.verif_reporter.check_completed(&req_id);
+        assert!(reply_testbench
+            .verif_reporter
+            .completion_status(&req_id)
+            .unwrap());
     }
 
     // TODO: Add more tests for reply handler: Request timeout and unrequested reply.
