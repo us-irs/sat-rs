@@ -1,17 +1,15 @@
 #![no_std]
 #![no_main]
+use satrs_example_stm32f3_disco as _;
 
-extern crate panic_itm;
-
-use cortex_m_rt::entry;
-
+use stm32f3_discovery::leds::Leds;
 use stm32f3_discovery::stm32f3xx_hal::delay::Delay;
 use stm32f3_discovery::stm32f3xx_hal::{pac, prelude::*};
-use stm32f3_discovery::leds::Leds;
 use stm32f3_discovery::switch_hal::{OutputSwitch, ToggleableOutputSwitch};
 
-#[entry]
-fn main()-> ! {
+#[cortex_m_rt::entry]
+fn main() -> ! {
+    defmt::println!("STM32F3 Discovery Blinky");
     let dp = pac::Peripherals::take().unwrap();
     let mut rcc = dp.RCC.constrain();
     let cp = cortex_m::Peripherals::take().unwrap();
@@ -30,49 +28,49 @@ fn main()-> ! {
         gpioe.pe14,
         gpioe.pe15,
         &mut gpioe.moder,
-        &mut gpioe.otyper
+        &mut gpioe.otyper,
     );
     let delay_ms = 200u16;
     loop {
-        leds.ld3.toggle().ok();
+        leds.ld3_n.toggle().ok();
         delay.delay_ms(delay_ms);
-        leds.ld3.toggle().ok();
+        leds.ld3_n.toggle().ok();
         delay.delay_ms(delay_ms);
 
         //explicit on/off
-        leds.ld4.on().ok();
+        leds.ld4_nw.on().ok();
         delay.delay_ms(delay_ms);
-        leds.ld4.off().ok();
-        delay.delay_ms(delay_ms);
-
-        leds.ld5.on().ok();
-        delay.delay_ms(delay_ms);
-        leds.ld5.off().ok();
+        leds.ld4_nw.off().ok();
         delay.delay_ms(delay_ms);
 
-        leds.ld6.on().ok();
+        leds.ld5_ne.on().ok();
         delay.delay_ms(delay_ms);
-        leds.ld6.off().ok();
-        delay.delay_ms(delay_ms);
-        
-        leds.ld7.on().ok();
-        delay.delay_ms(delay_ms);
-        leds.ld7.off().ok();
-        delay.delay_ms(delay_ms);
-        
-        leds.ld8.on().ok();
-        delay.delay_ms(delay_ms);
-        leds.ld8.off().ok();
-        delay.delay_ms(delay_ms);
-        
-        leds.ld9.on().ok();
-        delay.delay_ms(delay_ms);
-        leds.ld9.off().ok();
+        leds.ld5_ne.off().ok();
         delay.delay_ms(delay_ms);
 
-        leds.ld10.on().ok();
+        leds.ld6_w.on().ok();
         delay.delay_ms(delay_ms);
-        leds.ld10.off().ok();
+        leds.ld6_w.off().ok();
+        delay.delay_ms(delay_ms);
+
+        leds.ld7_e.on().ok();
+        delay.delay_ms(delay_ms);
+        leds.ld7_e.off().ok();
+        delay.delay_ms(delay_ms);
+
+        leds.ld8_sw.on().ok();
+        delay.delay_ms(delay_ms);
+        leds.ld8_sw.off().ok();
+        delay.delay_ms(delay_ms);
+
+        leds.ld9_se.on().ok();
+        delay.delay_ms(delay_ms);
+        leds.ld9_se.off().ok();
+        delay.delay_ms(delay_ms);
+
+        leds.ld10_s.on().ok();
+        delay.delay_ms(delay_ms);
+        leds.ld10_s.off().ok();
         delay.delay_ms(delay_ms);
     }
 }

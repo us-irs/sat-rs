@@ -32,3 +32,6 @@ rustflags = [
 [build]
 # comment out the following line if you intend to run unit tests on host machine
 target = "thumbv7em-none-eabihf" # Cortex-M4F and Cortex-M7F (with FPU)
+
+[env]
+DEFMT_LOG = "info"
