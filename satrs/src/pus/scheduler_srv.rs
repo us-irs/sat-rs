@@ -14,7 +14,7 @@ use crate::pool::PoolProvider;
 use crate::pus::{PusPacketHandlerResult, PusPacketHandlingError};
 use alloc::string::ToString;
 use spacepackets::ecss::{scheduling, PusPacket};
-use spacepackets::time::cds::TimeProvider;
+use spacepackets::time::cds::CdsTime;
 
 /// This is a helper class for [std] environments to handle generic PUS 11 (scheduling service)
 /// packets. This handler is able to handle the most important PUS requests for a scheduling
@@ -168,7 +168,7 @@ impl<
 
                 // let mut pool = self.sched_tc_pool.write().expect("locking pool failed");
                 self.scheduler
-                    .insert_wrapped_tc::<TimeProvider>(&tc, sched_tc_pool)
+                    .insert_wrapped_tc::<CdsTime>(&tc, sched_tc_pool)
                     .expect("insertion of activity into pool failed");
 
                 self.service_helper
@@ -303,7 +303,7 @@ mod tests {
     }
 
     impl PusSchedulerProvider for TestScheduler {
-        type TimeProvider = cds::TimeProvider;
+        type TimeProvider = cds::CdsTime;
 
         fn reset(
             &mut self,
@@ -329,7 +329,7 @@ mod tests {
 
         fn insert_unwrapped_and_stored_tc(
             &mut self,
-            _time_stamp: spacepackets::time::UnixTimestamp,
+            _time_stamp: spacepackets::time::UnixTime,
             info: crate::pus::scheduler::TcInfo,
         ) -> Result<(), crate::pus::scheduler::ScheduleError> {
             self.inserted_tcs.push_back(info);
@@ -390,7 +390,7 @@ mod tests {
         let mut sec_header = PusTcSecondaryHeader::new_simple(17, 1);
         let ping_tc = PusTcCreator::new(&mut reply_header, sec_header, &[], true);
         let req_id_ping_tc = scheduler::RequestId::from_tc(&ping_tc);
-        let stamper = cds::TimeProvider::from_now_with_u16_days().expect("time provider failed");
+        let stamper = cds::CdsTime::now_with_u16_days().expect("time provider failed");
         let mut sched_app_data: [u8; 64] = [0; 64];
         let mut written_len = stamper.write_to_bytes(&mut sched_app_data).unwrap();
         let ping_raw = ping_tc.to_vec().expect("generating raw tc failed");

@@ -14,7 +14,7 @@ use satrs::{
         verification::{TcStateStarted, VerificationReportingProvider, VerificationToken},
         EcssTmSender,
     },
-    spacepackets::time::cds::{self, TimeProvider},
+    spacepackets::time::cds::{self, CdsTime},
 };
 use satrs_example::config::PUS_APID;
 
@@ -25,7 +25,7 @@ pub struct PusEventHandler<VerificationReporter: VerificationReportingProvider> 
     pus_event_dispatcher: DefaultPusEventU32Dispatcher<()>,
     pus_event_man_rx: mpsc::Receiver<(EventU32, Option<Params>)>,
     tm_sender: Box<dyn EcssTmSender>,
-    time_provider: TimeProvider,
+    time_provider: CdsTime,
     timestamp: [u8; 7],
     verif_handler: VerificationReporter,
 }
@@ -57,7 +57,7 @@ impl<VerificationReporter: VerificationReportingProvider> PusEventHandler<Verifi
             event_request_rx,
             pus_event_dispatcher,
             pus_event_man_rx,
-            time_provider: cds::TimeProvider::new_with_u16_days(0, 0),
+            time_provider: cds::CdsTime::new_with_u16_days(0, 0),
             timestamp: [0; 7],
             verif_handler,
             tm_sender: Box::new(tm_sender),

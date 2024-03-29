@@ -45,7 +45,7 @@ use crate::udp::{StaticUdpTmHandler, UdpTmtcServer};
 use satrs::pus::event_man::EventRequestWithToken;
 use satrs::pus::verification::{VerificationReporterCfg, VerificationReporterWithSender};
 use satrs::pus::{EcssTmSender, TmAsVecSenderWithId, TmInSharedPoolSenderWithId};
-use satrs::spacepackets::{time::cds::TimeProvider, time::TimeWriter};
+use satrs::spacepackets::{time::cds::CdsTime, time::TimeWriter};
 use satrs::tmtc::CcsdsDistributor;
 use satrs::ChannelId;
 use std::net::{IpAddr, SocketAddr};
@@ -513,7 +513,7 @@ fn main() {
     dyn_tmtc_pool_main();
 }
 
-pub fn update_time(time_provider: &mut TimeProvider, timestamp: &mut [u8]) {
+pub fn update_time(time_provider: &mut CdsTime, timestamp: &mut [u8]) {
     time_provider
         .update_from_now()
         .expect("Could not get current time");

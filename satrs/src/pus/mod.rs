@@ -40,19 +40,19 @@ pub use alloc_mod::*;
 pub use std_mod::*;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum PusTmWrapper<'tm> {
+pub enum PusTmWrapper<'time, 'src_data> {
     InStore(StoreAddr),
-    Direct(PusTmCreator<'tm>),
+    Direct(PusTmCreator<'time, 'src_data>),
 }
 
-impl From<StoreAddr> for PusTmWrapper<'_> {
+impl From<StoreAddr> for PusTmWrapper<'_, '_> {
     fn from(value: StoreAddr) -> Self {
         Self::InStore(value)
     }
 }
 
-impl<'tm> From<PusTmCreator<'tm>> for PusTmWrapper<'tm> {
-    fn from(value: PusTmCreator<'tm>) -> Self {
+impl<'time, 'src_data> From<PusTmCreator<'time, 'src_data>> for PusTmWrapper<'time, 'src_data> {
+    fn from(value: PusTmCreator<'time, 'src_data>) -> Self {
         Self::Direct(value)
     }
 }
@@ -380,7 +380,7 @@ pub mod std_mod {
     use spacepackets::ecss::tc::PusTcReader;
     use spacepackets::ecss::tm::PusTmCreator;
     use spacepackets::ecss::{PusError, WritablePusPacket};
-    use spacepackets::time::cds::TimeProvider;
+    use spacepackets::time::cds::CdsTime;
     use spacepackets::time::StdTimestampError;
     use spacepackets::time::TimeWriter;
     use std::string::String;
@@ -860,8 +860,7 @@ pub mod std_mod {
         partial_error: &mut Option<PartialPusHandlingError>,
     ) -> [u8; 7] {
         let mut time_stamp: [u8; 7] = [0; 7];
-        let time_provider =
-            TimeProvider::from_now_with_u16_days().map_err(PartialPusHandlingError::Time);
+        let time_provider = CdsTime::now_with_u16_days().map_err(PartialPusHandlingError::Time);
         if let Ok(time_provider) = time_provider {
             // Can't fail, we have a buffer with the exact required size.
             time_provider.write_to_bytes(&mut time_stamp).unwrap();
@@ -981,15 +980,16 @@ pub mod std_mod {
         >;
 }
 
-pub(crate) fn source_buffer_large_enough(cap: usize, len: usize) -> Result<(), EcssTmtcError> {
+pub(crate) fn source_buffer_large_enough(
+    cap: usize,
+    len: usize,
+) -> Result<(), ByteConversionError> {
     if len > cap {
-        return Err(
-            PusError::ByteConversion(ByteConversionError::ToSliceTooSmall {
-                found: cap,
-                expected: len,
-            })
-            .into(),
-        );
+        return Err(ByteConversionError::ToSliceTooSmall {
+            found: cap,
+            expected: len,
+        }
+        .into());
     }
     Ok(())
 }

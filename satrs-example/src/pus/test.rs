@@ -14,7 +14,7 @@ use satrs::pus::{
 };
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusPacket;
-use satrs::spacepackets::time::cds::TimeProvider;
+use satrs::spacepackets::time::cds::CdsTime;
 use satrs::spacepackets::time::TimeWriter;
 use satrs::tmtc::tm_helper::SharedTmPool;
 use satrs::ChannelId;
@@ -139,7 +139,7 @@ impl<
                         .tc_slice_raw(),
                 )
                 .unwrap();
-                let time_stamper = TimeProvider::from_now_with_u16_days().unwrap();
+                let time_stamper = CdsTime::now_with_u16_days().unwrap();
                 let mut stamp_buf: [u8; 7] = [0; 7];
                 time_stamper.write_to_bytes(&mut stamp_buf).unwrap();
                 if subservice == 128 {

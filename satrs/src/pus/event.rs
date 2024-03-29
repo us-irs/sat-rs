@@ -2,6 +2,7 @@ use crate::pus::{source_buffer_large_enough, EcssTmtcError};
 use spacepackets::ecss::tm::PusTmCreator;
 use spacepackets::ecss::tm::PusTmSecondaryHeader;
 use spacepackets::ecss::{EcssEnumeration, PusError};
+use spacepackets::ByteConversionError;
 use spacepackets::{SpHeader, MAX_APID};
 
 use crate::pus::EcssTmSenderCore;
@@ -9,145 +10,125 @@ use crate::pus::EcssTmSenderCore;
 pub use alloc_mod::EventReporter;
 pub use spacepackets::ecss::event::*;
 
-pub struct EventReporterBase {
-    msg_count: u16,
+pub struct EventReportCreator {
     apid: u16,
     pub dest_id: u16,
 }
 
-impl EventReporterBase {
+impl EventReportCreator {
     pub fn new(apid: u16) -> Option<Self> {
         if apid > MAX_APID {
             return None;
         }
         Some(Self {
-            msg_count: 0,
+            // msg_count: 0,
             dest_id: 0,
             apid,
         })
     }
 
-    pub fn event_info(
+    pub fn event_info<'time, 'src_data>(
         &mut self,
-        buf: &mut [u8],
-        sender: &mut (impl EcssTmSenderCore + ?Sized),
-        time_stamp: &[u8],
+        src_data_buf: &'src_data mut [u8],
+        time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
-        aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcError> {
+        aux_data: Option<&'src_data [u8]>,
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.generate_and_send_generic_tm(
-            buf,
+            src_data_buf,
             Subservice::TmInfoReport,
-            sender,
             time_stamp,
             event_id,
             aux_data,
         )
     }
 
-    pub fn event_low_severity(
+    pub fn event_low_severity<'time, 'src_data>(
         &mut self,
-        buf: &mut [u8],
-        sender: &mut (impl EcssTmSenderCore + ?Sized),
-        time_stamp: &[u8],
+        src_data_buf: &'src_data mut [u8],
+        time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
-        aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcError> {
+        aux_data: Option<&'src_data [u8]>,
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.generate_and_send_generic_tm(
-            buf,
+            src_data_buf,
             Subservice::TmLowSeverityReport,
-            sender,
             time_stamp,
             event_id,
             aux_data,
         )
     }
 
-    pub fn event_medium_severity(
+    pub fn event_medium_severity<'time, 'src_data>(
         &mut self,
-        buf: &mut [u8],
-        sender: &mut (impl EcssTmSenderCore + ?Sized),
-        time_stamp: &[u8],
+        buf: &'src_data mut [u8],
+        time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
-        aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcError> {
+        aux_data: Option<&'src_data [u8]>,
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.generate_and_send_generic_tm(
             buf,
             Subservice::TmMediumSeverityReport,
-            sender,
             time_stamp,
             event_id,
             aux_data,
         )
     }
 
-    pub fn event_high_severity(
+    pub fn event_high_severity<'time, 'src_data>(
         &mut self,
-        buf: &mut [u8],
-        sender: &mut (impl EcssTmSenderCore + ?Sized),
-        time_stamp: &[u8],
+        src_data_buf: &'src_data mut [u8],
+        time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
-        aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcError> {
+        aux_data: Option<&'src_data [u8]>,
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.generate_and_send_generic_tm(
-            buf,
+            src_data_buf,
             Subservice::TmHighSeverityReport,
-            sender,
             time_stamp,
             event_id,
             aux_data,
         )
     }
 
-    fn generate_and_send_generic_tm(
+    fn generate_and_send_generic_tm<'time, 'src_data>(
         &mut self,
-        buf: &mut [u8],
+        src_data_buf: &'src_data mut [u8],
         subservice: Subservice,
-        sender: &mut (impl EcssTmSenderCore + ?Sized),
-        time_stamp: &[u8],
+        time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
-        aux_data: Option<&[u8]>,
-    ) -> Result<(), EcssTmtcError> {
-        let tm = self.generate_generic_event_tm(buf, subservice, time_stamp, event_id, aux_data)?;
-        sender.send_tm(tm.into())?;
-        self.msg_count += 1;
-        Ok(())
+        aux_data: Option<&'src_data [u8]>,
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
+        self.generate_generic_event_tm(src_data_buf, subservice, time_stamp, event_id, aux_data)
     }
 
-    fn generate_generic_event_tm<'a>(
-        &'a self,
-        buf: &'a mut [u8],
+    fn generate_generic_event_tm<'time, 'src_data>(
+        &self,
+        src_data_buf: &'src_data mut [u8],
         subservice: Subservice,
-        time_stamp: &'a [u8],
+        time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
-        aux_data: Option<&[u8]>,
-    ) -> Result<PusTmCreator, EcssTmtcError> {
+        aux_data: Option<&'src_data [u8]>,
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         let mut src_data_len = event_id.size();
         if let Some(aux_data) = aux_data {
             src_data_len += aux_data.len();
         }
-        source_buffer_large_enough(buf.len(), src_data_len)?;
+        source_buffer_large_enough(src_data_buf.len(), src_data_len)?;
         let mut sp_header = SpHeader::tm_unseg(self.apid, 0, 0).unwrap();
-        let sec_header = PusTmSecondaryHeader::new(
-            5,
-            subservice.into(),
-            self.msg_count,
-            self.dest_id,
-            Some(time_stamp),
-        );
+        let sec_header =
+            PusTmSecondaryHeader::new(5, subservice.into(), 0, self.dest_id, Some(time_stamp));
         let mut current_idx = 0;
-        event_id
-            .write_to_be_bytes(&mut buf[0..event_id.size()])
-            .map_err(PusError::ByteConversion)?;
+        event_id.write_to_be_bytes(&mut src_data_buf[0..event_id.size()])?;
         current_idx += event_id.size();
         if let Some(aux_data) = aux_data {
-            buf[current_idx..current_idx + aux_data.len()].copy_from_slice(aux_data);
+            src_data_buf[current_idx..current_idx + aux_data.len()].copy_from_slice(aux_data);
             current_idx += aux_data.len();
         }
         Ok(PusTmCreator::new(
             &mut sp_header,
             sec_header,
-            &buf[0..current_idx],
+            &src_data_buf[0..current_idx],
             true,
         ))
     }
@@ -161,12 +142,12 @@ mod alloc_mod {
 
     pub struct EventReporter {
         source_data_buf: Vec<u8>,
-        pub reporter: EventReporterBase,
+        pub reporter: EventReportCreator,
     }
 
     impl EventReporter {
         pub fn new(apid: u16, max_event_id_and_aux_data_size: usize) -> Option<Self> {
-            let reporter = EventReporterBase::new(apid)?;
+            let reporter = EventReportCreator::new(apid)?;
             Some(Self {
                 source_data_buf: vec![0; max_event_id_and_aux_data_size],
                 reporter,
@@ -179,13 +160,17 @@ mod alloc_mod {
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
         ) -> Result<(), EcssTmtcError> {
-            self.reporter.event_info(
-                self.source_data_buf.as_mut_slice(),
-                sender,
-                time_stamp,
-                event_id,
-                aux_data,
-            )
+            let tm_creator = self
+                .reporter
+                .event_info(
+                    self.source_data_buf.as_mut_slice(),
+                    time_stamp,
+                    event_id,
+                    aux_data,
+                )
+                .map_err(PusError::ByteConversion)?;
+            sender.send_tm(tm_creator.into())?;
+            Ok(())
         }
 
         pub fn event_low_severity(
@@ -195,13 +180,17 @@ mod alloc_mod {
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
         ) -> Result<(), EcssTmtcError> {
-            self.reporter.event_low_severity(
-                self.source_data_buf.as_mut_slice(),
-                sender,
-                time_stamp,
-                event_id,
-                aux_data,
-            )
+            let tm_creator = self
+                .reporter
+                .event_low_severity(
+                    self.source_data_buf.as_mut_slice(),
+                    time_stamp,
+                    event_id,
+                    aux_data,
+                )
+                .map_err(PusError::ByteConversion)?;
+            sender.send_tm(tm_creator.into())?;
+            Ok(())
         }
 
         pub fn event_medium_severity(
@@ -211,13 +200,17 @@ mod alloc_mod {
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
         ) -> Result<(), EcssTmtcError> {
-            self.reporter.event_medium_severity(
-                self.source_data_buf.as_mut_slice(),
-                sender,
-                time_stamp,
-                event_id,
-                aux_data,
-            )
+            let tm_creator = self
+                .reporter
+                .event_medium_severity(
+                    self.source_data_buf.as_mut_slice(),
+                    time_stamp,
+                    event_id,
+                    aux_data,
+                )
+                .map_err(PusError::ByteConversion)?;
+            sender.send_tm(tm_creator.into())?;
+            Ok(())
         }
 
         pub fn event_high_severity(
@@ -227,13 +220,17 @@ mod alloc_mod {
             event_id: impl EcssEnumeration,
             aux_data: Option<&[u8]>,
         ) -> Result<(), EcssTmtcError> {
-            self.reporter.event_high_severity(
-                self.source_data_buf.as_mut_slice(),
-                sender,
-                time_stamp,
-                event_id,
-                aux_data,
-            )
+            let tm_creator = self
+                .reporter
+                .event_high_severity(
+                    self.source_data_buf.as_mut_slice(),
+                    time_stamp,
+                    event_id,
+                    aux_data,
+                )
+                .map_err(PusError::ByteConversion)?;
+            sender.send_tm(tm_creator.into())?;
+            Ok(())
         }
     }
 }
