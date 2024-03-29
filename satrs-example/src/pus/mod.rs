@@ -6,7 +6,7 @@ use satrs::pus::{
 };
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusServiceId;
-use satrs::spacepackets::time::cds::TimeProvider;
+use satrs::spacepackets::time::cds::CdsTime;
 use satrs::spacepackets::time::TimeWriter;
 use satrs_example::config::{tmtc_err, CustomPusServiceId};
 use std::sync::mpsc::Sender;
@@ -33,14 +33,14 @@ pub struct PusReceiver<VerificationReporter: VerificationReportingProvider> {
 }
 
 struct TimeStampHelper {
-    stamper: TimeProvider,
+    stamper: CdsTime,
     time_stamp: [u8; 7],
 }
 
 impl TimeStampHelper {
     pub fn new() -> Self {
         Self {
-            stamper: TimeProvider::new_with_u16_days(0, 0),
+            stamper: CdsTime::new_with_u16_days(0, 0),
             time_stamp: [0; 7],
         }
     }

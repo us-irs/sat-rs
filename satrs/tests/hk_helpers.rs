@@ -2,7 +2,7 @@
 use core::mem::size_of;
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::{PfcReal, PfcUnsigned, Ptc};
-use spacepackets::time::cds::TimeProvider;
+use spacepackets::time::cds::CdsTime;
 use spacepackets::time::{CcsdsTimeProvider, TimeWriter};
 
 enum NumOfParamsInfo {
@@ -36,7 +36,7 @@ struct TestMgmHkWithIndividualValidity {
 
 #[derive(Serialize, Deserialize)]
 struct TestMgmHkWithGroupValidity {
-    last_valid_stamp: TimeProvider,
+    last_valid_stamp: CdsTime,
     valid: bool,
     temp: f32,
     mgm_vals: [u16; 3],
@@ -150,7 +150,7 @@ pub fn main() {
     // The easiest and probably best approach, trading off big advantages for TM downlink capacity:
     // Use a JSON format
     let mgm_hk_group_validity = TestMgmHkWithGroupValidity {
-        last_valid_stamp: TimeProvider::from_now_with_u16_days().unwrap(),
+        last_valid_stamp: CdsTime::now_with_u16_days().unwrap(),
         valid: false,
         temp: 20.0,
         mgm_vals: [0x1f1f, 0x2f2f, 0x3f3f],

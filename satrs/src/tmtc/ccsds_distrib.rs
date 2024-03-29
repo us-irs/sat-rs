@@ -22,7 +22,7 @@
 //! use satrs::tmtc::{ReceivesTc, ReceivesTcCore};
 //! use spacepackets::{CcsdsPacket, SpHeader};
 //! use spacepackets::ecss::WritablePusPacket;
-//! use spacepackets::ecss::tc::{PusTc, PusTcCreator};
+//! use spacepackets::ecss::tc::PusTcCreator;
 //!
 //! #[derive (Default)]
 //! struct ConcreteApidHandler {

@@ -87,8 +87,8 @@ use delegate::delegate;
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::tc::IsPusTelecommand;
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
-use spacepackets::ecss::{EcssEnumeration, PusError, WritablePusPacket};
-use spacepackets::{CcsdsPacket, PacketId, PacketSequenceCtrl};
+use spacepackets::ecss::{EcssEnumeration, PusError};
+use spacepackets::{ByteConversionError, CcsdsPacket, PacketId, PacketSequenceCtrl};
 use spacepackets::{SpHeader, MAX_APID};
 
 pub use crate::seq_count::SeqCountProviderSimple;
@@ -328,87 +328,6 @@ impl<'stamp, 'fargs> FailParamsWithStep<'stamp, 'fargs> {
     }
 }
 
-#[derive(Clone)]
-pub struct VerificationReporterCore {
-    pub dest_id: u16,
-    apid: u16,
-}
-
-pub enum VerifSuccess {}
-pub enum VerifFailure {}
-
-/// Abstraction for a sendable PUS TM. The user is expected to send the TM packet to a TM sink.
-///
-/// This struct generally mutably borrows the source data buffer.
-pub struct VerificationSendable<'src_data, State, SuccessOrFailure> {
-    token: Option<VerificationToken<State>>,
-    pus_tm: Option<PusTmCreator<'src_data>>,
-    phantom: PhantomData<SuccessOrFailure>,
-}
-
-impl<'src_data, State, SuccessOrFailure> VerificationSendable<'src_data, State, SuccessOrFailure> {
-    pub(crate) fn new(pus_tm: PusTmCreator<'src_data>, token: VerificationToken<State>) -> Self {
-        Self {
-            token: Some(token),
-            pus_tm: Some(pus_tm),
-            phantom: PhantomData,
-        }
-    }
-    pub(crate) fn new_no_token(pus_tm: PusTmCreator<'src_data>) -> Self {
-        Self {
-            token: None,
-            pus_tm: Some(pus_tm),
-            phantom: PhantomData,
-        }
-    }
-
-    pub fn len_packed(&self) -> usize {
-        self.pus_tm.as_ref().unwrap().len_written()
-    }
-
-    pub fn pus_tm(&self) -> &PusTmCreator<'src_data> {
-        self.pus_tm.as_ref().unwrap()
-    }
-
-    pub fn pus_tm_mut(&mut self) -> &mut PusTmCreator<'src_data> {
-        self.pus_tm.as_mut().unwrap()
-    }
-}
-
-impl<'src_data, State> VerificationSendable<'src_data, State, VerifFailure> {
-    pub fn send_success_verif_failure(self) {}
-}
-
-impl<'src_data, State> VerificationSendable<'src_data, State, VerifFailure> {
-    pub fn send_failure(self) -> (PusTmCreator<'src_data>, VerificationToken<State>) {
-        (self.pus_tm.unwrap(), self.token.unwrap())
-    }
-}
-
-impl<'src_data> VerificationSendable<'src_data, TcStateNone, VerifSuccess> {
-    pub fn send_success_acceptance_success(self) -> VerificationToken<TcStateAccepted> {
-        VerificationToken {
-            state: PhantomData,
-            req_id: self.token.unwrap().req_id(),
-        }
-    }
-}
-
-impl<'src_data> VerificationSendable<'src_data, TcStateAccepted, VerifSuccess> {
-    pub fn send_success_start_success(self) -> VerificationToken<TcStateStarted> {
-        VerificationToken {
-            state: PhantomData,
-            req_id: self.token.unwrap().req_id(),
-        }
-    }
-}
-
-impl<'src_data, TcState: WasAtLeastAccepted + Copy>
-    VerificationSendable<'src_data, TcState, VerifSuccess>
-{
-    pub fn send_success_step_or_completion_success(self) {}
-}
-
 pub trait VerificationReportingProvider {
     fn add_tc(
         &mut self,
@@ -423,25 +342,25 @@ pub trait VerificationReportingProvider {
         &self,
         token: VerificationToken<TcStateNone>,
         time_stamp: &[u8],
-    ) -> Result<VerificationToken<TcStateAccepted>, VerificationOrSendErrorWithToken<TcStateNone>>;
+    ) -> Result<VerificationToken<TcStateAccepted>, EcssTmtcError>;
 
     fn acceptance_failure(
         &self,
         token: VerificationToken<TcStateNone>,
         params: FailParams,
-    ) -> Result<(), VerificationOrSendErrorWithToken<TcStateNone>>;
+    ) -> Result<(), EcssTmtcError>;
 
     fn start_success(
         &self,
         token: VerificationToken<TcStateAccepted>,
         time_stamp: &[u8],
-    ) -> Result<VerificationToken<TcStateStarted>, VerificationOrSendErrorWithToken<TcStateAccepted>>;
+    ) -> Result<VerificationToken<TcStateStarted>, EcssTmtcError>;
 
     fn start_failure(
         &self,
         token: VerificationToken<TcStateAccepted>,
         params: FailParams,
-    ) -> Result<(), VerificationOrSendErrorWithToken<TcStateAccepted>>;
+    ) -> Result<(), EcssTmtcError>;
 
     fn step_success(
         &self,
@@ -454,29 +373,35 @@ pub trait VerificationReportingProvider {
         &self,
         token: VerificationToken<TcStateStarted>,
         params: FailParamsWithStep,
-    ) -> Result<(), VerificationOrSendErrorWithToken<TcStateStarted>>;
+    ) -> Result<(), EcssTmtcError>;
 
     fn completion_success<TcState: WasAtLeastAccepted + Copy>(
         &self,
         token: VerificationToken<TcState>,
         time_stamp: &[u8],
-    ) -> Result<(), VerificationOrSendErrorWithToken<TcState>>;
+    ) -> Result<(), EcssTmtcError>;
 
     fn completion_failure<TcState: WasAtLeastAccepted + Copy>(
         &self,
         token: VerificationToken<TcState>,
         params: FailParams,
-    ) -> Result<(), VerificationOrSendErrorWithToken<TcState>>;
+    ) -> Result<(), EcssTmtcError>;
 }
 
-/// Primary verification handler. It provides an API to send PUS 1 verification telemetry packets
-/// and verify the various steps of telecommand handling as specified in the PUS standard.
+/// Primary verification handler. It provides an API to generate PUS 1 verification telemetry
+/// packets and verify the various steps of telecommand handling as specified in the PUS standard.
 ///
 /// This is the core component which can be used without [`alloc`] support. Please note that
 /// the buffer passed to the API exposes by this struct will be used to serialize the source data.
 /// This buffer may not be re-used to serialize the whole telemetry because that would overwrite
 /// the source data itself.
-impl VerificationReporterCore {
+#[derive(Clone)]
+pub struct VerificationReportCreator {
+    pub dest_id: u16,
+    apid: u16,
+}
+
+impl VerificationReportCreator {
     pub fn new(apid: u16) -> Option<Self> {
         if apid > MAX_APID {
             return None;
@@ -519,36 +444,30 @@ impl VerificationReporterCore {
         VerificationToken::<TcStateNone>::new(req_id)
     }
 
-    fn sendable_success_no_step<'src_data, State: Copy>(
+    fn success_verification_no_step<'time, 'src_data, State: Copy>(
         &self,
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
         token: VerificationToken<State>,
         seq_count: u16,
         msg_count: u16,
-        time_stamp: &'src_data [u8],
-    ) -> Result<
-        VerificationSendable<'src_data, State, VerifSuccess>,
-        VerificationErrorWithToken<State>,
-    > {
-        Ok(VerificationSendable::new(
-            self.create_pus_verif_success_tm(
-                src_data_buf,
-                subservice,
-                seq_count,
-                msg_count,
-                &token.req_id,
-                time_stamp,
-                None::<&dyn EcssEnumeration>,
-            )
-            .map_err(|e| VerificationErrorWithToken(e, token))?,
-            token,
-        ))
+        time_stamp: &'time [u8],
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
+        let tm_creator = self.create_pus_verif_success_tm(
+            src_data_buf,
+            subservice,
+            seq_count,
+            msg_count,
+            &token.req_id,
+            time_stamp,
+            None::<&dyn EcssEnumeration>,
+        )?;
+        Ok(tm_creator)
     }
 
     // Internal helper function, too many arguments is acceptable for this case.
     #[allow(clippy::too_many_arguments)]
-    fn sendable_failure_no_step<'src_data, State: Copy>(
+    fn failure_verification_no_step<'time, 'src_data, State: Copy>(
         &self,
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
@@ -556,85 +475,62 @@ impl VerificationReporterCore {
         seq_count: u16,
         msg_count: u16,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
-        params: &FailParams<'src_data, '_>,
-    ) -> Result<
-        VerificationSendable<'src_data, State, VerifFailure>,
-        VerificationErrorWithToken<State>,
-    > {
-        Ok(VerificationSendable::new(
-            self.create_pus_verif_fail_tm(
-                src_data_buf,
-                subservice,
-                seq_count,
-                msg_count,
-                &token.req_id,
-                step,
-                params,
-            )
-            .map_err(|e| VerificationErrorWithToken(e, token))?,
-            token,
-        ))
+        params: &FailParams<'time, '_>,
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
+        let tm_creator = self.create_pus_verif_fail_tm(
+            src_data_buf,
+            subservice,
+            seq_count,
+            msg_count,
+            &token.req_id,
+            step,
+            params,
+        )?;
+        Ok(tm_creator)
     }
 
     /// Package a PUS TM\[1, 1\] packet, see 8.1.2.1 of the PUS standard.
-    pub fn acceptance_success<'src_data>(
+    pub fn acceptance_success<'time, 'src_data>(
         &self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcStateNone>,
         seq_count: u16,
         msg_count: u16,
-        time_stamp: &'src_data [u8],
+        time_stamp: &'time [u8],
     ) -> Result<
-        VerificationSendable<'src_data, TcStateNone, VerifSuccess>,
-        VerificationErrorWithToken<TcStateNone>,
+        (
+            PusTmCreator<'time, 'src_data>,
+            VerificationToken<TcStateAccepted>,
+        ),
+        ByteConversionError,
     > {
-        self.sendable_success_no_step(
+        let tm_creator = self.success_verification_no_step(
             src_data_buf,
             Subservice::TmAcceptanceSuccess.into(),
             token,
             seq_count,
             msg_count,
             time_stamp,
-        )
-    }
-
-    pub fn send_acceptance_success(
-        &self,
-        mut sendable: VerificationSendable<'_, TcStateNone, VerifSuccess>,
-        sender: &(impl EcssTmSenderCore + ?Sized),
-    ) -> Result<VerificationToken<TcStateAccepted>, VerificationOrSendErrorWithToken<TcStateNone>>
-    {
-        sender
-            .send_tm(sendable.pus_tm.take().unwrap().into())
-            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
-        Ok(sendable.send_success_acceptance_success())
-    }
-
-    pub fn send_acceptance_failure(
-        &self,
-        mut sendable: VerificationSendable<'_, TcStateNone, VerifFailure>,
-        sender: &(impl EcssTmSenderCore + ?Sized),
-    ) -> Result<(), VerificationOrSendErrorWithToken<TcStateNone>> {
-        sender
-            .send_tm(sendable.pus_tm.take().unwrap().into())
-            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
-        sendable.send_success_verif_failure();
-        Ok(())
+        )?;
+        Ok((
+            tm_creator,
+            VerificationToken {
+                state: PhantomData,
+                req_id: token.req_id,
+            },
+        ))
     }
 
     /// Package a PUS TM\[1, 2\] packet, see 8.1.2.2 of the PUS standard.
-    pub fn acceptance_failure<'src_data>(
+    pub fn acceptance_failure<'time, 'src_data>(
         &self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcStateNone>,
         seq_count: u16,
         msg_count: u16,
-        params: FailParams<'src_data, '_>,
-    ) -> Result<
-        VerificationSendable<'src_data, TcStateNone, VerifFailure>,
-        VerificationErrorWithToken<TcStateNone>,
-    > {
-        self.sendable_failure_no_step(
+        params: FailParams<'time, '_>,
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
+        self.failure_verification_no_step(
             src_data_buf,
             Subservice::TmAcceptanceFailure.into(),
             token,
@@ -648,55 +544,50 @@ impl VerificationReporterCore {
     /// Package and send a PUS TM\[1, 3\] packet, see 8.1.2.3 of the PUS standard.
     ///
     /// Requires a token previously acquired by calling [Self::acceptance_success].
-    pub fn start_success<'src_data>(
+    pub fn start_success<'time, 'src_data>(
         &self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcStateAccepted>,
         seq_count: u16,
         msg_count: u16,
-        time_stamp: &'src_data [u8],
+        time_stamp: &'time [u8],
     ) -> Result<
-        VerificationSendable<'src_data, TcStateAccepted, VerifSuccess>,
-        VerificationErrorWithToken<TcStateAccepted>,
+        (
+            PusTmCreator<'time, 'src_data>,
+            VerificationToken<TcStateStarted>,
+        ),
+        ByteConversionError,
     > {
-        self.sendable_success_no_step(
+        let tm_creator = self.success_verification_no_step(
             src_data_buf,
             Subservice::TmStartSuccess.into(),
             token,
             seq_count,
             msg_count,
             time_stamp,
-        )
-    }
-
-    pub fn send_start_success(
-        &self,
-        mut sendable: VerificationSendable<'_, TcStateAccepted, VerifSuccess>,
-        sender: &(impl EcssTmSenderCore + ?Sized),
-    ) -> Result<VerificationToken<TcStateStarted>, VerificationOrSendErrorWithToken<TcStateAccepted>>
-    {
-        sender
-            .send_tm(sendable.pus_tm.take().unwrap().into())
-            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
-        Ok(sendable.send_success_start_success())
+        )?;
+        Ok((
+            tm_creator,
+            VerificationToken {
+                state: PhantomData,
+                req_id: token.req_id,
+            },
+        ))
     }
 
     /// Package and send a PUS TM\[1, 4\] packet, see 8.1.2.4 of the PUS standard.
     ///
     /// Requires a token previously acquired by calling [Self::acceptance_success]. It consumes
     /// the token because verification handling is done.
-    pub fn start_failure<'src_data>(
+    pub fn start_failure<'time, 'src_data>(
         &self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcStateAccepted>,
         seq_count: u16,
         msg_count: u16,
-        params: FailParams<'src_data, '_>,
-    ) -> Result<
-        VerificationSendable<'src_data, TcStateAccepted, VerifFailure>,
-        VerificationErrorWithToken<TcStateAccepted>,
-    > {
-        self.sendable_failure_no_step(
+        params: FailParams<'time, '_>,
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
+        self.failure_verification_no_step(
             src_data_buf,
             Subservice::TmStartFailure.into(),
             token,
@@ -707,89 +598,65 @@ impl VerificationReporterCore {
         )
     }
 
-    pub fn send_start_failure(
-        &self,
-        mut sendable: VerificationSendable<'_, TcStateAccepted, VerifFailure>,
-        sender: &(impl EcssTmSenderCore + ?Sized),
-    ) -> Result<(), VerificationOrSendErrorWithToken<TcStateAccepted>> {
-        sender
-            .send_tm(sendable.pus_tm.take().unwrap().into())
-            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
-        sendable.send_success_verif_failure();
-        Ok(())
-    }
-
     /// Package and send a PUS TM\[1, 5\] packet, see 8.1.2.5 of the PUS standard.
     ///
     /// Requires a token previously acquired by calling [Self::start_success].
-    pub fn step_success<'src_data>(
+    pub fn step_success<'time, 'src_data>(
         &self,
         src_data_buf: &'src_data mut [u8],
         token: &VerificationToken<TcStateStarted>,
         seq_count: u16,
         msg_count: u16,
-        time_stamp: &'src_data [u8],
+        time_stamp: &'time [u8],
         step: impl EcssEnumeration,
-    ) -> Result<VerificationSendable<'src_data, TcStateStarted, VerifSuccess>, EcssTmtcError> {
-        Ok(VerificationSendable::new_no_token(
-            self.create_pus_verif_success_tm(
-                src_data_buf,
-                Subservice::TmStepSuccess.into(),
-                seq_count,
-                msg_count,
-                &token.req_id,
-                time_stamp,
-                Some(&step),
-            )?,
-        ))
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
+        self.create_pus_verif_success_tm(
+            src_data_buf,
+            Subservice::TmStepSuccess.into(),
+            seq_count,
+            msg_count,
+            &token.req_id,
+            time_stamp,
+            Some(&step),
+        )
     }
 
     /// Package and send a PUS TM\[1, 6\] packet, see 8.1.2.6 of the PUS standard.
     ///
     /// Requires a token previously acquired by calling [Self::start_success]. It consumes the
     /// token because verification handling is done.
-    pub fn step_failure<'src_data>(
+    pub fn step_failure<'time, 'src_data>(
         &self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcStateStarted>,
         seq_count: u16,
         msg_count: u16,
-        params: FailParamsWithStep<'src_data, '_>,
-    ) -> Result<
-        VerificationSendable<'src_data, TcStateStarted, VerifFailure>,
-        VerificationErrorWithToken<TcStateStarted>,
-    > {
-        Ok(VerificationSendable::new(
-            self.create_pus_verif_fail_tm(
-                src_data_buf,
-                Subservice::TmStepFailure.into(),
-                seq_count,
-                msg_count,
-                &token.req_id,
-                Some(params.step),
-                &params.bp,
-            )
-            .map_err(|e| VerificationErrorWithToken(e, token))?,
-            token,
-        ))
+        params: FailParamsWithStep<'time, '_>,
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
+        self.create_pus_verif_fail_tm(
+            src_data_buf,
+            Subservice::TmStepFailure.into(),
+            seq_count,
+            msg_count,
+            &token.req_id,
+            Some(params.step),
+            &params.bp,
+        )
     }
 
     /// Package and send a PUS TM\[1, 7\] packet, see 8.1.2.7 of the PUS standard.
     ///
     /// Requires a token previously acquired by calling [Self::start_success]. It consumes the
     /// token because verification handling is done.
-    pub fn completion_success<'src_data, TcState: WasAtLeastAccepted + Copy>(
+    pub fn completion_success<'time, 'src_data, TcState: WasAtLeastAccepted + Copy>(
         &self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcState>,
         seq_counter: u16,
         msg_counter: u16,
-        time_stamp: &'src_data [u8],
-    ) -> Result<
-        VerificationSendable<'src_data, TcState, VerifSuccess>,
-        VerificationErrorWithToken<TcState>,
-    > {
-        self.sendable_success_no_step(
+        time_stamp: &'time [u8],
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
+        self.success_verification_no_step(
             src_data_buf,
             Subservice::TmCompletionSuccess.into(),
             token,
@@ -803,18 +670,15 @@ impl VerificationReporterCore {
     ///
     /// Requires a token previously acquired by calling [Self::start_success]. It consumes the
     /// token because verification handling is done.
-    pub fn completion_failure<'src_data, TcState: WasAtLeastAccepted + Copy>(
+    pub fn completion_failure<'time, 'src_data, TcState: WasAtLeastAccepted + Copy>(
         &self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcState>,
         seq_count: u16,
         msg_count: u16,
-        params: FailParams<'src_data, '_>,
-    ) -> Result<
-        VerificationSendable<'src_data, TcState, VerifFailure>,
-        VerificationErrorWithToken<TcState>,
-    > {
-        self.sendable_failure_no_step(
+        params: FailParams<'time, '_>,
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
+        self.failure_verification_no_step(
             src_data_buf,
             Subservice::TmCompletionFailure.into(),
             token,
@@ -825,42 +689,18 @@ impl VerificationReporterCore {
         )
     }
 
-    pub fn send_step_or_completion_success<TcState: WasAtLeastAccepted + Copy>(
-        &self,
-        mut sendable: VerificationSendable<'_, TcState, VerifSuccess>,
-        sender: &(impl EcssTmSenderCore + ?Sized),
-    ) -> Result<(), VerificationOrSendErrorWithToken<TcState>> {
-        sender
-            .send_tm(sendable.pus_tm.take().unwrap().into())
-            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
-        sendable.send_success_step_or_completion_success();
-        Ok(())
-    }
-
-    pub fn send_step_or_completion_failure<TcState: WasAtLeastAccepted + Copy>(
-        &self,
-        mut sendable: VerificationSendable<'_, TcState, VerifFailure>,
-        sender: &(impl EcssTmSenderCore + ?Sized),
-    ) -> Result<(), VerificationOrSendErrorWithToken<TcState>> {
-        sender
-            .send_tm(sendable.pus_tm.take().unwrap().into())
-            .map_err(|e| VerificationOrSendErrorWithToken(e, sendable.token.unwrap()))?;
-        sendable.send_success_verif_failure();
-        Ok(())
-    }
-
     // Internal helper function, too many arguments is acceptable for this case.
     #[allow(clippy::too_many_arguments)]
-    fn create_pus_verif_success_tm<'src_data>(
+    fn create_pus_verif_success_tm<'time, 'src_data>(
         &self,
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
         seq_count: u16,
         msg_counter: u16,
         req_id: &RequestId,
-        time_stamp: &'src_data [u8],
+        time_stamp: &'time [u8],
         step: Option<&(impl EcssEnumeration + ?Sized)>,
-    ) -> Result<PusTmCreator<'src_data>, EcssTmtcError> {
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         let mut source_data_len = size_of::<u32>();
         if let Some(step) = step {
             source_data_len += step.size();
@@ -887,7 +727,7 @@ impl VerificationReporterCore {
 
     // Internal helper function, too many arguments is acceptable for this case.
     #[allow(clippy::too_many_arguments)]
-    fn create_pus_verif_fail_tm<'src_data>(
+    fn create_pus_verif_fail_tm<'time, 'src_data>(
         &self,
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
@@ -895,8 +735,8 @@ impl VerificationReporterCore {
         msg_counter: u16,
         req_id: &RequestId,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
-        params: &FailParams<'src_data, '_>,
-    ) -> Result<PusTmCreator<'src_data>, EcssTmtcError> {
+        params: &FailParams<'time, '_>,
+    ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         let mut idx = 0;
         let mut source_data_len = RequestId::SIZE_AS_BYTES + params.failure_code.size();
         if let Some(step) = step {
@@ -914,8 +754,7 @@ impl VerificationReporterCore {
         }
         params
             .failure_code
-            .write_to_be_bytes(&mut src_data_buf[idx..idx + params.failure_code.size()])
-            .map_err(PusError::ByteConversion)?;
+            .write_to_be_bytes(&mut src_data_buf[idx..idx + params.failure_code.size()])?;
         idx += params.failure_code.size();
         src_data_buf[idx..idx + params.failure_data.len()].copy_from_slice(params.failure_data);
         let mut sp_header = SpHeader::tm_unseg(self.apid(), seq_count, 0).unwrap();
@@ -929,15 +768,15 @@ impl VerificationReporterCore {
         ))
     }
 
-    fn create_pus_verif_tm_base<'src_data>(
+    fn create_pus_verif_tm_base<'time, 'src_data>(
         &self,
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
         msg_counter: u16,
         sp_header: &mut SpHeader,
-        time_stamp: &'src_data [u8],
+        time_stamp: &'time [u8],
         source_data_len: usize,
-    ) -> PusTmCreator<'src_data> {
+    ) -> PusTmCreator<'time, 'src_data> {
         let tm_sec_header =
             PusTmSecondaryHeader::new(1, subservice, msg_counter, self.dest_id, Some(time_stamp));
         PusTmCreator::new(
@@ -953,7 +792,7 @@ impl VerificationReporterCore {
 pub mod alloc_mod {
     use super::*;
     use crate::{
-        pus::{TmAsVecSenderWithId, TmInSharedPoolSenderWithId},
+        pus::{PusTmWrapper, TmAsVecSenderWithId, TmInSharedPoolSenderWithId},
         seq_count::SequenceCountProvider,
     };
     use core::cell::RefCell;
@@ -994,12 +833,12 @@ pub mod alloc_mod {
         source_data_buf: RefCell<alloc::vec::Vec<u8>>,
         pub seq_count_provider: Option<alloc::boxed::Box<dyn SequenceCountProvider<u16> + Send>>,
         pub msg_count_provider: Option<alloc::boxed::Box<dyn SequenceCountProvider<u16> + Send>>,
-        pub reporter: VerificationReporterCore,
+        pub reporter: VerificationReportCreator,
     }
 
     impl VerificationReporter {
         pub fn new(cfg: &VerificationReporterCfg) -> Self {
-            let reporter = VerificationReporterCore::new(cfg.apid).unwrap();
+            let reporter = VerificationReportCreator::new(cfg.apid).unwrap();
             Self {
                 source_data_buf: RefCell::new(alloc::vec![
                     0;
@@ -1035,8 +874,7 @@ pub mod alloc_mod {
             token: VerificationToken<TcStateNone>,
             sender: &(impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
-        ) -> Result<VerificationToken<TcStateAccepted>, VerificationOrSendErrorWithToken<TcStateNone>>
-        {
+        ) -> Result<VerificationToken<TcStateAccepted>, EcssTmtcError> {
             let seq_count = self
                 .seq_count_provider
                 .as_ref()
@@ -1046,14 +884,18 @@ pub mod alloc_mod {
                 .as_ref()
                 .map_or(0, |v| v.get_and_increment());
             let mut source_data_buf = self.source_data_buf.borrow_mut();
-            let sendable = self.reporter.acceptance_success(
-                source_data_buf.as_mut_slice(),
-                token,
-                seq_count,
-                msg_count,
-                time_stamp,
-            )?;
-            self.reporter.send_acceptance_success(sendable, sender)
+            let (tm_creator, token) = self
+                .reporter
+                .acceptance_success(
+                    source_data_buf.as_mut_slice(),
+                    token,
+                    seq_count,
+                    msg_count,
+                    time_stamp,
+                )
+                .map_err(PusError::ByteConversion)?;
+            sender.send_tm(PusTmWrapper::Direct(tm_creator))?;
+            Ok(token)
         }
 
         /// Package and send a PUS TM\[1, 2\] packet, see 8.1.2.2 of the PUS standard
@@ -1062,7 +904,7 @@ pub mod alloc_mod {
             token: VerificationToken<TcStateNone>,
             sender: &(impl EcssTmSenderCore + ?Sized),
             params: FailParams,
-        ) -> Result<(), VerificationOrSendErrorWithToken<TcStateNone>> {
+        ) -> Result<(), EcssTmtcError> {
             let seq_count = self
                 .seq_count_provider
                 .as_ref()
@@ -1072,14 +914,12 @@ pub mod alloc_mod {
                 .as_ref()
                 .map_or(0, |v| v.get_and_increment());
             let mut buf = self.source_data_buf.borrow_mut();
-            let sendable = self.reporter.acceptance_failure(
-                buf.as_mut_slice(),
-                token,
-                seq_count,
-                msg_count,
-                params,
-            )?;
-            self.reporter.send_acceptance_failure(sendable, sender)
+            let sendable = self
+                .reporter
+                .acceptance_failure(buf.as_mut_slice(), token, seq_count, msg_count, params)
+                .map_err(PusError::ByteConversion)?;
+            sender.send_tm(PusTmWrapper::Direct(sendable))?;
+            Ok(())
         }
 
         /// Package and send a PUS TM\[1, 3\] packet, see 8.1.2.3 of the PUS standard.
@@ -1090,10 +930,7 @@ pub mod alloc_mod {
             token: VerificationToken<TcStateAccepted>,
             sender: &(impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
-        ) -> Result<
-            VerificationToken<TcStateStarted>,
-            VerificationOrSendErrorWithToken<TcStateAccepted>,
-        > {
+        ) -> Result<VerificationToken<TcStateStarted>, EcssTmtcError> {
             let seq_count = self
                 .seq_count_provider
                 .as_ref()
@@ -1103,14 +940,13 @@ pub mod alloc_mod {
                 .as_ref()
                 .map_or(0, |v| v.get_and_increment());
             let mut buf = self.source_data_buf.borrow_mut();
-            let sendable = self.reporter.start_success(
-                buf.as_mut_slice(),
-                token,
-                seq_count,
-                msg_count,
-                time_stamp,
-            )?;
-            self.reporter.send_start_success(sendable, sender)
+            let (tm_creator, started_token) = self
+                .reporter
+                .start_success(buf.as_mut_slice(), token, seq_count, msg_count, time_stamp)
+                .map_err(PusError::ByteConversion)?;
+            sender.send_tm(PusTmWrapper::Direct(tm_creator))?;
+            Ok(started_token)
+            //self.reporter.send_start_success(sendable, sender)
         }
 
         /// Package and send a PUS TM\[1, 4\] packet, see 8.1.2.4 of the PUS standard.
@@ -1122,7 +958,7 @@ pub mod alloc_mod {
             token: VerificationToken<TcStateAccepted>,
             sender: &(impl EcssTmSenderCore + ?Sized),
             params: FailParams,
-        ) -> Result<(), VerificationOrSendErrorWithToken<TcStateAccepted>> {
+        ) -> Result<(), EcssTmtcError> {
             let seq_count = self
                 .seq_count_provider
                 .as_ref()
@@ -1132,14 +968,12 @@ pub mod alloc_mod {
                 .as_ref()
                 .map_or(0, |v| v.get_and_increment());
             let mut buf = self.source_data_buf.borrow_mut();
-            let sendable = self.reporter.start_failure(
-                buf.as_mut_slice(),
-                token,
-                seq_count,
-                msg_count,
-                params,
-            )?;
-            self.reporter.send_start_failure(sendable, sender)
+            let sendable = self
+                .reporter
+                .start_failure(buf.as_mut_slice(), token, seq_count, msg_count, params)
+                .map_err(PusError::ByteConversion)?;
+            sender.send_tm(PusTmWrapper::Direct(sendable))?;
+            Ok(())
         }
 
         /// Package and send a PUS TM\[1, 5\] packet, see 8.1.2.5 of the PUS standard.
@@ -1161,17 +995,19 @@ pub mod alloc_mod {
                 .as_ref()
                 .map_or(0, |v| v.get_and_increment());
             let mut buf = self.source_data_buf.borrow_mut();
-            let sendable = self.reporter.step_success(
-                buf.as_mut_slice(),
-                token,
-                seq_count,
-                msg_count,
-                time_stamp,
-                step,
-            )?;
-            self.reporter
-                .send_step_or_completion_success(sendable, sender)
-                .map_err(|e| e.0)
+            let sendable = self
+                .reporter
+                .step_success(
+                    buf.as_mut_slice(),
+                    token,
+                    seq_count,
+                    msg_count,
+                    time_stamp,
+                    step,
+                )
+                .map_err(PusError::ByteConversion)?;
+            sender.send_tm(PusTmWrapper::Direct(sendable))?;
+            Ok(())
         }
 
         /// Package and send a PUS TM\[1, 6\] packet, see 8.1.2.6 of the PUS standard.
@@ -1183,7 +1019,7 @@ pub mod alloc_mod {
             token: VerificationToken<TcStateStarted>,
             sender: &(impl EcssTmSenderCore + ?Sized),
             params: FailParamsWithStep,
-        ) -> Result<(), VerificationOrSendErrorWithToken<TcStateStarted>> {
+        ) -> Result<(), EcssTmtcError> {
             let seq_count = self
                 .seq_count_provider
                 .as_ref()
@@ -1193,15 +1029,12 @@ pub mod alloc_mod {
                 .as_ref()
                 .map_or(0, |v| v.get_and_increment());
             let mut buf = self.source_data_buf.borrow_mut();
-            let sendable = self.reporter.step_failure(
-                buf.as_mut_slice(),
-                token,
-                seq_count,
-                msg_count,
-                params,
-            )?;
-            self.reporter
-                .send_step_or_completion_failure(sendable, sender)
+            let sendable = self
+                .reporter
+                .step_failure(buf.as_mut_slice(), token, seq_count, msg_count, params)
+                .map_err(PusError::ByteConversion)?;
+            sender.send_tm(PusTmWrapper::Direct(sendable))?;
+            Ok(())
         }
 
         /// Package and send a PUS TM\[1, 7\] packet, see 8.1.2.7 of the PUS standard.
@@ -1213,7 +1046,7 @@ pub mod alloc_mod {
             token: VerificationToken<TcState>,
             sender: &(impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
-        ) -> Result<(), VerificationOrSendErrorWithToken<TcState>> {
+        ) -> Result<(), EcssTmtcError> {
             let seq_count = self
                 .seq_count_provider
                 .as_ref()
@@ -1223,15 +1056,12 @@ pub mod alloc_mod {
                 .as_ref()
                 .map_or(0, |v| v.get_and_increment());
             let mut buf = self.source_data_buf.borrow_mut();
-            let sendable = self.reporter.completion_success(
-                buf.as_mut_slice(),
-                token,
-                seq_count,
-                msg_count,
-                time_stamp,
-            )?;
-            self.reporter
-                .send_step_or_completion_success(sendable, sender)
+            let sendable = self
+                .reporter
+                .completion_success(buf.as_mut_slice(), token, seq_count, msg_count, time_stamp)
+                .map_err(PusError::ByteConversion)?;
+            sender.send_tm(PusTmWrapper::Direct(sendable))?;
+            Ok(())
         }
 
         /// Package and send a PUS TM\[1, 8\] packet, see 8.1.2.8 of the PUS standard.
@@ -1243,7 +1073,7 @@ pub mod alloc_mod {
             token: VerificationToken<TcState>,
             sender: &(impl EcssTmSenderCore + ?Sized),
             params: FailParams,
-        ) -> Result<(), VerificationOrSendErrorWithToken<TcState>> {
+        ) -> Result<(), EcssTmtcError> {
             let seq_count = self
                 .seq_count_provider
                 .as_ref()
@@ -1253,15 +1083,12 @@ pub mod alloc_mod {
                 .as_ref()
                 .map_or(0, |v| v.get_and_increment());
             let mut buf = self.source_data_buf.borrow_mut();
-            let sendable = self.reporter.completion_failure(
-                buf.as_mut_slice(),
-                token,
-                seq_count,
-                msg_count,
-                params,
-            )?;
-            self.reporter
-                .send_step_or_completion_failure(sendable, sender)
+            let sendable = self
+                .reporter
+                .completion_failure(buf.as_mut_slice(), token, seq_count, msg_count, params)
+                .map_err(PusError::ByteConversion)?;
+            sender.send_tm(PusTmWrapper::Direct(sendable))?;
+            Ok(())
         }
     }
 
@@ -1310,8 +1137,7 @@ pub mod alloc_mod {
             &self,
             token: VerificationToken<TcStateNone>,
             time_stamp: &[u8],
-        ) -> Result<VerificationToken<TcStateAccepted>, VerificationOrSendErrorWithToken<TcStateNone>>
-        {
+        ) -> Result<VerificationToken<TcStateAccepted>, EcssTmtcError> {
             self.reporter
                 .acceptance_success(token, &self.sender, time_stamp)
         }
@@ -1320,7 +1146,7 @@ pub mod alloc_mod {
             &self,
             token: VerificationToken<TcStateNone>,
             params: FailParams,
-        ) -> Result<(), VerificationOrSendErrorWithToken<TcStateNone>> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter
                 .acceptance_failure(token, &self.sender, params)
         }
@@ -1329,10 +1155,7 @@ pub mod alloc_mod {
             &self,
             token: VerificationToken<TcStateAccepted>,
             time_stamp: &[u8],
-        ) -> Result<
-            VerificationToken<TcStateStarted>,
-            VerificationOrSendErrorWithToken<TcStateAccepted>,
-        > {
+        ) -> Result<VerificationToken<TcStateStarted>, EcssTmtcError> {
             self.reporter.start_success(token, &self.sender, time_stamp)
         }
 
@@ -1340,7 +1163,7 @@ pub mod alloc_mod {
             &self,
             token: VerificationToken<TcStateAccepted>,
             params: FailParams,
-        ) -> Result<(), VerificationOrSendErrorWithToken<TcStateAccepted>> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter.start_failure(token, &self.sender, params)
         }
 
@@ -1358,7 +1181,7 @@ pub mod alloc_mod {
             &self,
             token: VerificationToken<TcStateStarted>,
             params: FailParamsWithStep,
-        ) -> Result<(), VerificationOrSendErrorWithToken<TcStateStarted>> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter.step_failure(token, &self.sender, params)
         }
 
@@ -1366,7 +1189,7 @@ pub mod alloc_mod {
             &self,
             token: VerificationToken<TcState>,
             time_stamp: &[u8],
-        ) -> Result<(), VerificationOrSendErrorWithToken<TcState>> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter
                 .completion_success(token, &self.sender, time_stamp)
         }
@@ -1375,7 +1198,7 @@ pub mod alloc_mod {
             &self,
             token: VerificationToken<TcState>,
             params: FailParams,
-        ) -> Result<(), VerificationOrSendErrorWithToken<TcState>> {
+        ) -> Result<(), EcssTmtcError> {
             self.reporter
                 .completion_failure(token, &self.sender, params)
         }
@@ -1490,10 +1313,7 @@ pub mod tests {
             &self,
             token: VerificationToken<TcStateNone>,
             _time_stamp: &[u8],
-        ) -> Result<
-            VerificationToken<super::TcStateAccepted>,
-            super::VerificationOrSendErrorWithToken<TcStateNone>,
-        > {
+        ) -> Result<VerificationToken<super::TcStateAccepted>, EcssTmtcError> {
             let verif_map = self.verification_map.lock().unwrap();
             match verif_map.borrow_mut().get_mut(&token.req_id) {
                 Some(entry) => entry.accepted = Some(true),
@@ -1512,7 +1332,7 @@ pub mod tests {
             &self,
             token: VerificationToken<TcStateNone>,
             params: FailParams,
-        ) -> Result<(), super::VerificationOrSendErrorWithToken<TcStateNone>> {
+        ) -> Result<(), EcssTmtcError> {
             let verif_map = self.verification_map.lock().unwrap();
             match verif_map.borrow_mut().get_mut(&token.req_id) {
                 Some(entry) => {
@@ -1532,10 +1352,7 @@ pub mod tests {
             &self,
             token: VerificationToken<super::TcStateAccepted>,
             _time_stamp: &[u8],
-        ) -> Result<
-            VerificationToken<super::TcStateStarted>,
-            super::VerificationOrSendErrorWithToken<super::TcStateAccepted>,
-        > {
+        ) -> Result<VerificationToken<super::TcStateStarted>, EcssTmtcError> {
             let verif_map = self.verification_map.lock().unwrap();
             match verif_map.borrow_mut().get_mut(&token.req_id) {
                 Some(entry) => entry.started = Some(true),
@@ -1551,7 +1368,7 @@ pub mod tests {
             &self,
             token: VerificationToken<super::TcStateAccepted>,
             params: FailParams,
-        ) -> Result<(), super::VerificationOrSendErrorWithToken<super::TcStateAccepted>> {
+        ) -> Result<(), EcssTmtcError> {
             let verif_map = self.verification_map.lock().unwrap();
             match verif_map.borrow_mut().get_mut(&token.req_id) {
                 Some(entry) => {
@@ -1585,7 +1402,7 @@ pub mod tests {
             &self,
             token: VerificationToken<super::TcStateStarted>,
             _params: FailParamsWithStep,
-        ) -> Result<(), super::VerificationOrSendErrorWithToken<super::TcStateStarted>> {
+        ) -> Result<(), EcssTmtcError> {
             let verif_map = self.verification_map.lock().unwrap();
             match verif_map.borrow_mut().get_mut(&token.req_id) {
                 Some(entry) => {
@@ -1600,7 +1417,7 @@ pub mod tests {
             &self,
             token: VerificationToken<TcState>,
             _time_stamp: &[u8],
-        ) -> Result<(), super::VerificationOrSendErrorWithToken<TcState>> {
+        ) -> Result<(), EcssTmtcError> {
             let verif_map = self.verification_map.lock().unwrap();
             match verif_map.borrow_mut().get_mut(&token.req_id) {
                 Some(entry) => entry.completed = Some(true),
@@ -1616,7 +1433,7 @@ pub mod tests {
             &self,
             token: VerificationToken<TcState>,
             params: FailParams,
-        ) -> Result<(), super::VerificationOrSendErrorWithToken<TcState>> {
+        ) -> Result<(), EcssTmtcError> {
             let verif_map = self.verification_map.lock().unwrap();
             match verif_map.borrow_mut().get_mut(&token.req_id) {
                 Some(entry) => {
@@ -1860,8 +1677,7 @@ pub mod tests {
         let res = b.helper.acceptance_failure(tok, fail_params);
         assert!(res.is_err());
         let err_with_token = res.unwrap_err();
-        assert_eq!(err_with_token.1, tok);
-        match err_with_token.0 {
+        match err_with_token {
             EcssTmtcError::Pus(PusError::ByteConversion(e)) => match e {
                 ByteConversionError::ToSliceTooSmall { found, expected } => {
                     assert_eq!(
@@ -1875,7 +1691,7 @@ pub mod tests {
                 }
             },
             _ => {
-                panic!("{}", format!("Unexpected error {:?}", err_with_token.0))
+                panic!("{}", format!("Unexpected error {:?}", err_with_token))
             }
         }
     }

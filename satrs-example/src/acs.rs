@@ -9,7 +9,7 @@ use satrs::{
     hk::HkRequest,
     spacepackets::{
         ecss::tm::{PusTmCreator, PusTmSecondaryHeader},
-        time::cds::{DaysLen16Bits, TimeProvider},
+        time::cds::{CdsTime, DaysLen16Bits},
         SequenceFlags, SpHeader,
     },
 };
@@ -23,7 +23,7 @@ use crate::{
 
 pub struct AcsTask<VerificationReporter: VerificationReportingProvider> {
     timestamp: [u8; 7],
-    time_provider: TimeProvider<DaysLen16Bits>,
+    time_provider: CdsTime<DaysLen16Bits>,
     verif_reporter: VerificationReporter,
     tm_sender: Box<dyn EcssTmSender>,
     request_rx: mpsc::Receiver<RequestWithToken>,
@@ -37,7 +37,7 @@ impl<VerificationReporter: VerificationReportingProvider> AcsTask<VerificationRe
     ) -> Self {
         Self {
             timestamp: [0; 7],
-            time_provider: TimeProvider::new_with_u16_days(0, 0),
+            time_provider: CdsTime::new_with_u16_days(0, 0),
             verif_reporter,
             tm_sender: Box::new(tm_sender),
             request_rx,
