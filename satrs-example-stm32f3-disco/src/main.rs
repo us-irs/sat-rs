@@ -1,12 +1,12 @@
 #![no_std]
 #![no_main]
-extern crate panic_itm;
+// global logger + panicking-behavior + memory layout
+use satrs_example_stm32f3_disco as _;
 
 use rtic::app;
 
 use heapless::{mpmc::Q8, Vec};
 #[allow(unused_imports)]
-use itm_logger::{debug, info, logger_init, warn};
 use rtic_monotonics::systick::fugit::TimerInstantU32;
 use rtic_monotonics::systick::ExtU32;
 use satrs::seq_count::SequenceCountProviderCore;
@@ -95,14 +95,12 @@ pub struct TxIdle {
 
 pub struct TmSender {
     vec: Option<RefCell<Vec<u8, MAX_TM_LEN>>>,
-    ctx: &'static str,
 }
 
 impl TmSender {
-    pub fn new(tm_packet: TmPacket, ctx: &'static str) -> Self {
+    pub fn new(tm_packet: TmPacket) -> Self {
         Self {
             vec: Some(RefCell::new(tm_packet)),
-            ctx,
         }
     }
 }
@@ -131,7 +129,12 @@ impl EcssTmSenderCore for TmSender {
                 }
                 vec.resize(tm.len_written(), 0).expect("vec resize failed");
                 tm.write_to_bytes(vec.as_mut_slice())?;
-                info!(target: self.ctx, "Sending TM[{},{}] with size {}", tm.service(), tm.subservice(), tm.len_written());
+                defmt::info!(
+                    "Sending TM[{},{}] with size {}",
+                    tm.service(),
+                    tm.subservice(),
+                    tm.len_written()
+                );
                 drop(vec);
                 TM_REQUESTS
                     .enqueue(vec_ref.take())
@@ -158,7 +161,6 @@ pub struct UartTxShared {
 mod app {
     use super::*;
     use core::slice::Iter;
-    use cortex_m::iprintln;
     use rtic_monotonics::systick::Systick;
     use rtic_monotonics::Monotonic;
     use satrs::pus::verification::FailParams;
@@ -192,14 +194,13 @@ mod app {
     }
 
     #[init]
-    fn init(mut cx: init::Context) -> (Shared, Local) {
+    fn init(cx: init::Context) -> (Shared, Local) {
         let mut rcc = cx.device.RCC.constrain();
 
         // Initialize the systick interrupt & obtain the token to prove that we did
         let systick_mono_token = rtic_monotonics::create_systick_token!();
         Systick::start(cx.core.SYST, 8_000_000, systick_mono_token);
 
-        logger_init();
         let mut flash = cx.device.FLASH.constrain();
         let clocks = rcc
             .cfgr
@@ -211,11 +212,7 @@ mod app {
         // Set up monotonic timer.
         //let mono_timer = MonoTimer::new(cx.core.DWT, clocks, &mut cx.core.DCB);
 
-        // setup ITM output
-        iprintln!(
-            &mut cx.core.ITM.stim[0],
-            "Starting sat-rs demo application for the STM32F3-Discovery"
-        );
+        defmt::info!("Starting sat-rs demo application for the STM32F3-Discovery");
         let mut gpioe = cx.device.GPIOE.split(&mut rcc.ahb);
 
         let verif_reporter = VerificationReporterCore::new(PUS_APID).unwrap();
@@ -265,7 +262,7 @@ mod app {
         // For some reason, this is also immediately triggered..
         tx_serial.clear_event(TxEvent::TransmissionComplete);
         let rx_transfer = rx_serial.read_exact(unsafe { DMA_RX_BUF.as_mut_slice() }, dma1.ch6);
-        info!(target: "init", "Spawning tasks");
+        defmt::info!("Spawning tasks");
         blink::spawn().unwrap();
         serial_tx_handler::spawn().unwrap();
         (
@@ -399,10 +396,9 @@ mod app {
         cx: serial_rx_handler::Context,
         received_packet: Vec<u8, MAX_TC_LEN>,
     ) {
-        info!("running rx handler");
-        let tgt: &'static str = "serial_rx_handler";
+        defmt::info!("running rx handler");
         cx.local.stamp_buf[0] = P_FIELD_BASE;
-        info!(target: tgt, "Received packet with {} bytes", received_packet.len());
+        defmt::info!("Received packet with {} bytes", received_packet.len());
         let decode_buf = cx.local.decode_buf;
         let packet = received_packet.as_slice();
         let mut start_idx = None;
@@ -413,16 +409,13 @@ mod app {
             }
         }
         if start_idx.is_none() {
-            warn!(
-                target: tgt,
-                "decoding error, can only process cobs encoded frames, data is all 0"
-            );
+            defmt::warn!("decoding error, can only process cobs encoded frames, data is all 0");
             return;
         }
         let start_idx = start_idx.unwrap();
         match cobs::decode(&received_packet.as_slice()[start_idx..], decode_buf) {
             Ok(len) => {
-                info!(target: tgt, "Decoded packet length: {}", len);
+                defmt::info!("Decoded packet length: {}", len);
                 let pus_tc = PusTcReader::new(decode_buf);
                 let verif_reporter = cx.local.verif_reporter;
                 match pus_tc {
@@ -432,18 +425,15 @@ mod app {
                         verif_reporter,
                         cx.local.src_data_buf,
                         cx.local.stamp_buf,
-                        tgt,
                     ),
-                    Err(e) => {
-                        warn!(target: tgt, "Error unpacking PUS TC: {}", e);
+                    Err(_e) => {
+                        // TODO: Print error after API rework.
+                        defmt::warn!("Error unpacking PUS TC");
                     }
                 }
             }
             Err(_) => {
-                warn!(
-                    target: tgt,
-                    "decoding error, can only process cobs encoded frames"
-                )
+                defmt::warn!("decoding error, can only process cobs encoded frames")
             }
         }
     }
@@ -454,10 +444,8 @@ mod app {
         verif_reporter: &mut VerificationReporterCore,
         src_data_buf: &mut [u8; MAX_TM_LEN],
         stamp_buf: &[u8; 7],
-        tgt: &'static str,
     ) {
-        info!(
-            target: tgt,
+        defmt::info!(
             "Found PUS TC [{},{}] with length {}",
             tc.service(),
             tc.subservice(),
@@ -466,7 +454,7 @@ mod app {
 
         let token = verif_reporter.add_tc(&tc);
         if tc.apid() != PUS_APID {
-            warn!(target: tgt, "Received tc with unknown APID {}", tc.apid());
+            defmt::warn!("Received tc with unknown APID {}", tc.apid());
             let sendable = verif_reporter
                 .acceptance_failure(
                     src_data_buf,
@@ -476,9 +464,9 @@ mod app {
                     FailParams::new(stamp_buf, &EcssEnumU16::new(0), &[]),
                 )
                 .unwrap();
-            let sender = TmSender::new(TmPacket::new(), tgt);
-            if let Err(e) = verif_reporter.send_acceptance_failure(sendable, &sender) {
-                warn!(target: tgt, "Sending acceptance failure failed: {:?}", e.0);
+            let sender = TmSender::new(TmPacket::new());
+            if let Err(_e) = verif_reporter.send_acceptance_failure(sendable, &sender) {
+                defmt::warn!("Sending acceptance failure failed");
             };
             return;
         }
@@ -486,11 +474,12 @@ mod app {
             .acceptance_success(src_data_buf, token, SEQ_COUNT_PROVIDER.get(), 0, stamp_buf)
             .unwrap();
 
-        let sender = TmSender::new(TmPacket::new(), tgt);
+        let sender = TmSender::new(TmPacket::new());
         let accepted_token = match verif_reporter.send_acceptance_success(sendable, &sender) {
             Ok(token) => token,
-            Err(e) => {
-                warn!(target: "serial_rx_handler", "Sending acceptance success failed: {:?}", e.0);
+            Err(_e) => {
+                // TODO: Print error as soon as EcssTmtcError has Format attr.. or rework API.
+                defmt::warn!("Sending acceptance success failed");
                 return;
             }
         };
@@ -507,18 +496,16 @@ mod app {
                     )
                     .unwrap();
                 // let mem_block = poolmod::TM::alloc().unwrap().init([0u8; MAX_TM_LEN]);
-                let sender = TmSender::new(TmPacket::new(), tgt);
+                let sender = TmSender::new(TmPacket::new());
                 let started_token = match verif_reporter.send_start_success(sendable, &sender) {
                     Ok(token) => token,
-                    Err(e) => {
-                        warn!(target: tgt, "Sending acceptance success failed: {:?}", e.0);
+                    Err(_e) => {
+                        // TODO: Print error as soon as EcssTmtcError has Format attr.. or rework API.
+                        defmt::warn!("Sending acceptance success failed");
                         return;
                     }
                 };
-                info!(
-                    target: tgt,
-                    "Received PUS ping telecommand, sending ping reply TM[17,2]"
-                );
+                defmt::info!("Received PUS ping telecommand, sending ping reply TM[17,2]");
                 let mut sp_header =
                     SpHeader::tc_unseg(PUS_APID, SEQ_COUNT_PROVIDER.get(), 0).unwrap();
                 let sec_header = PusTmSecondaryHeader::new_simple(17, 2, stamp_buf);
@@ -529,7 +516,7 @@ mod app {
                     .expect("vec resize failed");
                 ping_reply.write_to_bytes(&mut tm_packet).unwrap();
                 if TM_REQUESTS.enqueue(tm_packet).is_err() {
-                    warn!(target: tgt, "TC queue full");
+                    defmt::warn!("TC queue full");
                     return;
                 }
                 SEQ_COUNT_PROVIDER.increment();
@@ -542,9 +529,9 @@ mod app {
                         stamp_buf,
                     )
                     .unwrap();
-                let sender = TmSender::new(TmPacket::new(), tgt);
-                if let Err(e) = verif_reporter.send_step_or_completion_success(sendable, &sender) {
-                    warn!(target: tgt, "Sending completion success failed: {:?}", e.0);
+                let sender = TmSender::new(TmPacket::new());
+                if let Err(_e) = verif_reporter.send_step_or_completion_success(sendable, &sender) {
+                    defmt::warn!("Sending completion success failed");
                 }
             } else {
                 // TODO: Invalid subservice
@@ -573,7 +560,7 @@ mod app {
                 serial_rx_handler::spawn(tc_packet).expect("spawning rx handler task failed");
                 // If this happens, there is a high chance that the maximum packet length was
                 // exceeded. Circular mode is not used here, so data might be missed.
-                warn!(
+                defmt::warn!(
                     "rx transfer with maximum length {}, might miss data",
                     TC_BUF_LEN
                 );
@@ -615,7 +602,6 @@ mod app {
                     .expect("vec resize failed");
                 tc_packet[0..rx_len as usize].copy_from_slice(&buf[0..rx_len as usize]);
                 rx.clear_event(RxEvent::Idle);
-                info!("spawning rx task");
                 serial_rx_handler::spawn(tc_packet).expect("spawning rx handler failed");
                 *rx_transfer = Some(rx.read_exact(buf, ch));
             }
