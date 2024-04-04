@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+- `spacepackets` v0.11.0
+
 ## Added
 
 - Added `params::WritableToBeBytes::to_vec`.
