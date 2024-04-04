@@ -46,8 +46,9 @@ branch = "complete-dma-update-hal"
 # path = "../stm32f3-discovery"
 
 [dependencies.satrs]
-version = "0.2.0-rc.0"
+path = "../satrs"
 default-features = false
+features = ["defmt"]
 
 [dev-dependencies]
 defmt-test = "0.3"

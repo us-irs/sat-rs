@@ -103,3 +103,12 @@ After that, you can for example send a ping to the MCU using the following comma
 ```sh
 ./main.py -p /ping
 ```
+
+You can configure the blinky frequency using
+
+```sh
+./main.py -p /change_blink_freq
+```
+
+All these commands will package a PUS telecommand which will be sent to the MCU using the COBS
+format as the packet framing format.
