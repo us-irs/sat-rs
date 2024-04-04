@@ -3,10 +3,11 @@
 import logging
 import sys
 import time
-from typing import Optional
+from typing import Any, Optional
 from prompt_toolkit.history import History
 from prompt_toolkit.history import FileHistory
 
+from spacepackets.ccsds import PacketId, PacketType
 import tmtccmd
 from spacepackets.ecss import PusTelemetry, PusVerificator
 from spacepackets.ecss.pus_17_test import Service17Tm
@@ -16,7 +17,7 @@ from spacepackets.ccsds.time import CdsShortTimestamp
 from tmtccmd import TcHandlerBase, ProcedureParamsWrapper
 from tmtccmd.core.base import BackendRequest
 from tmtccmd.pus import VerificationWrapper
-from tmtccmd.tmtc import CcsdsTmHandler, SpecificApidHandlerBase
+from tmtccmd.tmtc import CcsdsTmHandler, GenericApidHandlerBase
 from tmtccmd.com import ComInterface
 from tmtccmd.config import (
     CmdTreeNode,
@@ -46,7 +47,7 @@ from tmtccmd.util.obj_id import ObjectIdDictT
 
 
 import pus_tc
-from common import EXAMPLE_PUS_APID, TM_PACKET_IDS, EventU32
+from common import Apid, EventU32
 
 _LOGGER = logging.getLogger()
 
@@ -62,10 +63,13 @@ class SatRsConfigHook(HookBase):
         )
 
         assert self.cfg_path is not None
+        packet_id_list = []
+        for apid in Apid:
+            packet_id_list.append(PacketId(PacketType.TM, True, apid))
         cfg = create_com_interface_cfg_default(
             com_if_key=com_if_key,
             json_cfg_path=self.cfg_path,
-            space_packet_ids=TM_PACKET_IDS,
+            space_packet_ids=packet_id_list,
         )
         assert cfg is not None
         return create_com_interface_default(cfg)
@@ -85,19 +89,19 @@ class SatRsConfigHook(HookBase):
         return get_core_object_ids()
 
 
-class PusHandler(SpecificApidHandlerBase):
+class PusHandler(GenericApidHandlerBase):
     def __init__(
         self,
         file_logger: logging.Logger,
         verif_wrapper: VerificationWrapper,
         raw_logger: RawTmtcTimedLogWrapper,
     ):
-        super().__init__(EXAMPLE_PUS_APID, None)
+        super().__init__(None)
         self.file_logger = file_logger
         self.raw_logger = raw_logger
         self.verif_wrapper = verif_wrapper
 
-    def handle_tm(self, packet: bytes, _user_args: any):
+    def handle_tm(self, apid: int, packet: bytes, _user_args: Any):
         try:
             pus_tm = PusTelemetry.unpack(packet, time_reader=CdsShortTimestamp.empty())
         except ValueError as e:
@@ -177,7 +181,7 @@ class TcHandler(TcHandlerBase):
             tc_sched_timestamp_len=CdsShortTimestamp.TIMESTAMP_SIZE,
             seq_cnt_provider=seq_count_provider,
             pus_verificator=self.verif_wrapper.pus_verificator,
-            default_pus_apid=EXAMPLE_PUS_APID,
+            default_pus_apid=None,
         )
 
     def send_cb(self, send_params: SendCbParams):
@@ -221,7 +225,6 @@ def main():
         post_args_wrapper.set_params_without_prompts(proc_wrapper)
     else:
         post_args_wrapper.set_params_with_prompts(proc_wrapper)
-    params.apid = EXAMPLE_PUS_APID
     setup_args = SetupWrapper(
         hook_obj=hook_obj, setup_params=params, proc_param_wrapper=proc_wrapper
     )
@@ -233,8 +236,9 @@ def main():
     verification_wrapper = VerificationWrapper(verificator, _LOGGER, file_logger)
     # Create primary TM handler and add it to the CCSDS Packet Handler
     tm_handler = PusHandler(file_logger, verification_wrapper, raw_logger)
-    ccsds_handler = CcsdsTmHandler(generic_handler=None)
-    ccsds_handler.add_apid_handler(tm_handler)
+    ccsds_handler = CcsdsTmHandler(generic_handler=tm_handler)
+    # TODO: We could add the CFDP handler for the CFDP APID at a later stage.
+    # ccsds_handler.add_apid_handler(tm_handler)
 
     # Create TC handler
     seq_count_provider = PusFileSeqCountProvider()

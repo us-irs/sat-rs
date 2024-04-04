@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use super::{
     filestore::{FilestoreError, VirtualFilestore},
     user::{CfdpUser, FileSegmentRecvdParams, MetadataReceivedParams},
-    CheckTimer, CheckTimerCreator, EntityType, LocalEntityConfig, PacketInfo, PacketTarget,
+    CheckTimerCreator, CountdownProvider, EntityType, LocalEntityConfig, PacketInfo, PacketTarget,
     RemoteEntityConfig, RemoteEntityConfigProvider, State, TimerContext, TransactionId,
     TransactionStep,
 };
@@ -54,7 +54,7 @@ struct TransferState {
     completion_disposition: CompletionDisposition,
     checksum: u32,
     current_check_count: u32,
-    current_check_timer: Option<Box<dyn CheckTimer>>,
+    current_check_timer: Option<Box<dyn CountdownProvider>>,
 }
 
 impl Default for TransferState {
@@ -799,9 +799,9 @@ mod tests {
     };
 
     use crate::cfdp::{
-        filestore::NativeFilestore, user::OwnedMetadataRecvdParams, CheckTimer, CheckTimerCreator,
-        DefaultFaultHandler, IndicationConfig, RemoteEntityConfig, StdRemoteEntityConfigProvider,
-        UserFaultHandler, CRC_32,
+        filestore::NativeFilestore, user::OwnedMetadataRecvdParams, CheckTimerCreator,
+        CountdownProvider, DefaultFaultHandler, IndicationConfig, RemoteEntityConfig,
+        StdRemoteEntityConfigProvider, UserFaultHandler, CRC_32,
     };
 
     use super::*;
@@ -1057,7 +1057,7 @@ mod tests {
         expired: Arc<AtomicBool>,
     }
 
-    impl CheckTimer for TestCheckTimer {
+    impl CountdownProvider for TestCheckTimer {
         fn has_expired(&self) -> bool {
             self.expired.load(core::sync::atomic::Ordering::Relaxed)
         }
@@ -1088,7 +1088,10 @@ mod tests {
     }
 
     impl CheckTimerCreator for TestCheckTimerCreator {
-        fn get_check_timer_provider(&self, timer_context: TimerContext) -> Box<dyn CheckTimer> {
+        fn get_check_timer_provider(
+            &self,
+            timer_context: TimerContext,
+        ) -> Box<dyn CountdownProvider> {
             match timer_context {
                 TimerContext::CheckLimit { .. } => {
                     Box::new(TestCheckTimer::new(self.check_limit_expired_flag.clone()))

@@ -4,11 +4,10 @@ use std::{
     net::{SocketAddr, TcpListener, TcpStream},
 };
 
-use alloc::boxed::Box;
-
 use crate::{
-    encoding::{ccsds::PacketIdLookup, parse_buffer_for_ccsds_space_packets},
+    encoding::parse_buffer_for_ccsds_space_packets,
     tmtc::{ReceivesTc, TmPacketSource},
+    ValidatorU16Id,
 };
 
 use super::tcp_server::{
@@ -16,17 +15,19 @@ use super::tcp_server::{
 };
 
 /// Concrete [TcpTcParser] implementation for the [TcpSpacepacketsServer].
-pub struct SpacepacketsTcParser {
-    packet_id_lookup: Box<dyn PacketIdLookup + Send>,
+pub struct SpacepacketsTcParser<PacketIdChecker: ValidatorU16Id> {
+    packet_id_lookup: PacketIdChecker,
 }
 
-impl SpacepacketsTcParser {
-    pub fn new(packet_id_lookup: Box<dyn PacketIdLookup + Send>) -> Self {
+impl<PacketIdChecker: ValidatorU16Id> SpacepacketsTcParser<PacketIdChecker> {
+    pub fn new(packet_id_lookup: PacketIdChecker) -> Self {
         Self { packet_id_lookup }
     }
 }
 
-impl<TmError, TcError: 'static> TcpTcParser<TmError, TcError> for SpacepacketsTcParser {
+impl<TmError, TcError: 'static, PacketIdChecker: ValidatorU16Id> TcpTcParser<TmError, TcError>
+    for SpacepacketsTcParser<PacketIdChecker>
+{
     fn handle_tc_parsing(
         &mut self,
         tc_buffer: &mut [u8],
@@ -38,7 +39,7 @@ impl<TmError, TcError: 'static> TcpTcParser<TmError, TcError> for SpacepacketsTc
         // Reader vec full, need to parse for packets.
         conn_result.num_received_tcs += parse_buffer_for_ccsds_space_packets(
             &mut tc_buffer[..current_write_idx],
-            self.packet_id_lookup.as_ref(),
+            &self.packet_id_lookup,
             tc_receiver.upcast_mut(),
             next_write_idx,
         )
@@ -95,6 +96,7 @@ pub struct TcpSpacepacketsServer<
     TcError: 'static,
     TmSource: TmPacketSource<Error = TmError>,
     TcReceiver: ReceivesTc<Error = TcError>,
+    PacketIdChecker: ValidatorU16Id,
 > {
     generic_server: TcpTmtcGenericServer<
         TmError,
@@ -102,7 +104,7 @@ pub struct TcpSpacepacketsServer<
         TmSource,
         TcReceiver,
         SpacepacketsTmSender,
-        SpacepacketsTcParser,
+        SpacepacketsTcParser<PacketIdChecker>,
     >,
 }
 
@@ -111,7 +113,8 @@ impl<
         TcError: 'static,
         TmSource: TmPacketSource<Error = TmError>,
         TcReceiver: ReceivesTc<Error = TcError>,
-    > TcpSpacepacketsServer<TmError, TcError, TmSource, TcReceiver>
+        PacketIdChecker: ValidatorU16Id,
+    > TcpSpacepacketsServer<TmError, TcError, TmSource, TcReceiver, PacketIdChecker>
 {
     ///
     /// ## Parameter
@@ -127,12 +130,12 @@ impl<
         cfg: ServerConfig,
         tm_source: TmSource,
         tc_receiver: TcReceiver,
-        packet_id_lookup: Box<dyn PacketIdLookup + Send>,
+        packet_id_checker: PacketIdChecker,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
             generic_server: TcpTmtcGenericServer::new(
                 cfg,
-                SpacepacketsTcParser::new(packet_id_lookup),
+                SpacepacketsTcParser::new(packet_id_checker),
                 SpacepacketsTmSender::default(),
                 tm_source,
                 tc_receiver,
@@ -170,7 +173,7 @@ mod tests {
         thread,
     };
 
-    use alloc::{boxed::Box, sync::Arc};
+    use alloc::sync::Arc;
     use hashbrown::HashSet;
     use spacepackets::{
         ecss::{tc::PusTcCreator, WritablePusPacket},
@@ -185,21 +188,21 @@ mod tests {
     use super::TcpSpacepacketsServer;
 
     const TEST_APID_0: u16 = 0x02;
-    const TEST_PACKET_ID_0: PacketId = PacketId::const_tc(true, TEST_APID_0);
+    const TEST_PACKET_ID_0: PacketId = PacketId::new_for_tc(true, TEST_APID_0);
     const TEST_APID_1: u16 = 0x10;
-    const TEST_PACKET_ID_1: PacketId = PacketId::const_tc(true, TEST_APID_1);
+    const TEST_PACKET_ID_1: PacketId = PacketId::new_for_tc(true, TEST_APID_1);
 
     fn generic_tmtc_server(
         addr: &SocketAddr,
         tc_receiver: SyncTcCacher,
         tm_source: SyncTmSource,
         packet_id_lookup: HashSet<PacketId>,
-    ) -> TcpSpacepacketsServer<(), (), SyncTmSource, SyncTcCacher> {
+    ) -> TcpSpacepacketsServer<(), (), SyncTmSource, SyncTcCacher, HashSet<PacketId>> {
         TcpSpacepacketsServer::new(
             ServerConfig::new(*addr, Duration::from_millis(2), 1024, 1024),
             tm_source,
             tc_receiver,
-            Box::new(packet_id_lookup),
+            packet_id_lookup,
         )
         .expect("TCP server generation failed")
     }
@@ -233,8 +236,8 @@ mod tests {
             assert_eq!(conn_result.num_sent_tms, 0);
             set_if_done.store(true, Ordering::Relaxed);
         });
-        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
-        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        let ping_tc =
+            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_0), 17, 1, &[], true);
         let tc_0 = ping_tc.to_vec().expect("packet generation failed");
         let mut stream = TcpStream::connect(dest_addr).expect("connecting to TCP server failed");
         stream
@@ -265,13 +268,13 @@ mod tests {
 
         // Add telemetry
         let mut total_tm_len = 0;
-        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
-        let verif_tm = PusTcCreator::new_simple(&mut sph, 1, 1, None, true);
+        let verif_tm =
+            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_0), 1, 1, &[], true);
         let tm_0 = verif_tm.to_vec().expect("writing packet failed");
         total_tm_len += tm_0.len();
         tm_source.add_tm(&tm_0);
-        let mut sph = SpHeader::tc_unseg(TEST_APID_1, 0, 0).unwrap();
-        let verif_tm = PusTcCreator::new_simple(&mut sph, 1, 3, None, true);
+        let verif_tm =
+            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_1), 1, 3, &[], true);
         let tm_1 = verif_tm.to_vec().expect("writing packet failed");
         total_tm_len += tm_1.len();
         tm_source.add_tm(&tm_1);
@@ -312,14 +315,14 @@ mod tests {
             .expect("setting reas timeout failed");
 
         // Send telecommands
-        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
-        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        let ping_tc =
+            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_0), 17, 1, &[], true);
         let tc_0 = ping_tc.to_vec().expect("ping tc creation failed");
         stream
             .write_all(&tc_0)
             .expect("writing to TCP server failed");
-        let mut sph = SpHeader::tc_unseg(TEST_APID_1, 0, 0).unwrap();
-        let action_tc = PusTcCreator::new_simple(&mut sph, 8, 0, None, true);
+        let action_tc =
+            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_1), 8, 0, &[], true);
         let tc_1 = action_tc.to_vec().expect("action tc creation failed");
         stream
             .write_all(&tc_1)

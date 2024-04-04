@@ -60,21 +60,28 @@ use alloc::vec::Vec;
 /// Generic trait which is used for objects which can be converted into a raw network (big) endian
 /// byte format.
 pub trait WritableToBeBytes {
-    fn raw_len(&self) -> usize;
+    fn written_len(&self) -> usize;
     /// Writes the object to a raw buffer in network endianness (big)
     fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError>;
+
+    #[cfg(feature = "alloc")]
+    fn to_vec(&self) -> Result<Vec<u8>, ByteConversionError> {
+        let mut vec = alloc::vec![0; self.written_len()];
+        self.write_to_be_bytes(&mut vec)?;
+        Ok(vec)
+    }
 }
 
 macro_rules! param_to_be_bytes_impl {
     ($Newtype: ident) => {
         impl WritableToBeBytes for $Newtype {
             #[inline]
-            fn raw_len(&self) -> usize {
+            fn written_len(&self) -> usize {
                 size_of::<<Self as ToBeBytes>::ByteArray>()
             }
 
             fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
-                let raw_len = self.raw_len();
+                let raw_len = WritableToBeBytes::written_len(self);
                 if buf.len() < raw_len {
                     return Err(ByteConversionError::ToSliceTooSmall {
                         found: buf.len(),
@@ -382,32 +389,32 @@ pub enum ParamsRaw {
 }
 
 impl WritableToBeBytes for ParamsRaw {
-    fn raw_len(&self) -> usize {
+    fn written_len(&self) -> usize {
         match self {
-            ParamsRaw::U8(v) => v.raw_len(),
-            ParamsRaw::U8Pair(v) => v.raw_len(),
-            ParamsRaw::U8Triplet(v) => v.raw_len(),
-            ParamsRaw::I8(v) => v.raw_len(),
-            ParamsRaw::I8Pair(v) => v.raw_len(),
-            ParamsRaw::I8Triplet(v) => v.raw_len(),
-            ParamsRaw::U16(v) => v.raw_len(),
-            ParamsRaw::U16Pair(v) => v.raw_len(),
-            ParamsRaw::U16Triplet(v) => v.raw_len(),
-            ParamsRaw::I16(v) => v.raw_len(),
-            ParamsRaw::I16Pair(v) => v.raw_len(),
-            ParamsRaw::I16Triplet(v) => v.raw_len(),
-            ParamsRaw::U32(v) => v.raw_len(),
-            ParamsRaw::U32Pair(v) => v.raw_len(),
-            ParamsRaw::U32Triplet(v) => v.raw_len(),
-            ParamsRaw::I32(v) => v.raw_len(),
-            ParamsRaw::I32Pair(v) => v.raw_len(),
-            ParamsRaw::I32Triplet(v) => v.raw_len(),
-            ParamsRaw::F32(v) => v.raw_len(),
-            ParamsRaw::F32Pair(v) => v.raw_len(),
-            ParamsRaw::F32Triplet(v) => v.raw_len(),
-            ParamsRaw::U64(v) => v.raw_len(),
-            ParamsRaw::I64(v) => v.raw_len(),
-            ParamsRaw::F64(v) => v.raw_len(),
+            ParamsRaw::U8(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U8Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U8Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I8(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I8Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I8Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U16(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U16Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U16Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I16(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I16Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I16Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U32(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U32Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U32Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I32(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I32Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I32Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::F32(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::F32Pair(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::F32Triplet(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::U64(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::I64(v) => WritableToBeBytes::written_len(v),
+            ParamsRaw::F64(v) => WritableToBeBytes::written_len(v),
         }
     }
 
@@ -460,7 +467,7 @@ params_raw_from_newtype!(
 );
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum EcssEnumParams {
+pub enum ParamsEcssEnum {
     U8(EcssEnumU8),
     U16(EcssEnumU16),
     U32(EcssEnumU32),
@@ -468,40 +475,46 @@ pub enum EcssEnumParams {
 }
 
 macro_rules! writable_as_be_bytes_ecss_enum_impl {
-    ($EnumIdent: ident) => {
+    ($EnumIdent: ident, $Ty: ident) => {
+        impl From<$EnumIdent> for ParamsEcssEnum {
+            fn from(e: $EnumIdent) -> Self {
+                Self::$Ty(e)
+            }
+        }
+
         impl WritableToBeBytes for $EnumIdent {
-            fn raw_len(&self) -> usize {
+            fn written_len(&self) -> usize {
                 self.size()
             }
 
             fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
-                <Self as UnsignedEnum>::write_to_be_bytes(self, buf).map(|_| self.raw_len())
+                <Self as UnsignedEnum>::write_to_be_bytes(self, buf).map(|_| self.written_len())
             }
         }
     };
 }
 
-writable_as_be_bytes_ecss_enum_impl!(EcssEnumU8);
-writable_as_be_bytes_ecss_enum_impl!(EcssEnumU16);
-writable_as_be_bytes_ecss_enum_impl!(EcssEnumU32);
-writable_as_be_bytes_ecss_enum_impl!(EcssEnumU64);
+writable_as_be_bytes_ecss_enum_impl!(EcssEnumU8, U8);
+writable_as_be_bytes_ecss_enum_impl!(EcssEnumU16, U16);
+writable_as_be_bytes_ecss_enum_impl!(EcssEnumU32, U32);
+writable_as_be_bytes_ecss_enum_impl!(EcssEnumU64, U64);
 
-impl WritableToBeBytes for EcssEnumParams {
-    fn raw_len(&self) -> usize {
+impl WritableToBeBytes for ParamsEcssEnum {
+    fn written_len(&self) -> usize {
         match self {
-            EcssEnumParams::U8(e) => e.raw_len(),
-            EcssEnumParams::U16(e) => e.raw_len(),
-            EcssEnumParams::U32(e) => e.raw_len(),
-            EcssEnumParams::U64(e) => e.raw_len(),
+            ParamsEcssEnum::U8(e) => e.written_len(),
+            ParamsEcssEnum::U16(e) => e.written_len(),
+            ParamsEcssEnum::U32(e) => e.written_len(),
+            ParamsEcssEnum::U64(e) => e.written_len(),
         }
     }
 
     fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
         match self {
-            EcssEnumParams::U8(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
-            EcssEnumParams::U16(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
-            EcssEnumParams::U32(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
-            EcssEnumParams::U64(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
+            ParamsEcssEnum::U8(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
+            ParamsEcssEnum::U16(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
+            ParamsEcssEnum::U32(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
+            ParamsEcssEnum::U64(e) => WritableToBeBytes::write_to_be_bytes(e, buf),
         }
     }
 }
@@ -510,7 +523,19 @@ impl WritableToBeBytes for EcssEnumParams {
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ParamsHeapless {
     Raw(ParamsRaw),
-    EcssEnum(EcssEnumParams),
+    EcssEnum(ParamsEcssEnum),
+}
+
+impl From<ParamsRaw> for ParamsHeapless {
+    fn from(v: ParamsRaw) -> Self {
+        Self::Raw(v)
+    }
+}
+
+impl From<ParamsEcssEnum> for ParamsHeapless {
+    fn from(v: ParamsEcssEnum) -> Self {
+        Self::EcssEnum(v)
+    }
 }
 
 macro_rules! from_conversions_for_raw {
@@ -559,16 +584,14 @@ from_conversions_for_raw!(
 
 /// Generic enumeration for additional parameters, including parameters which rely on heap
 /// allocations.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Params {
     Heapless(ParamsHeapless),
     Store(StoreAddr),
     #[cfg(feature = "alloc")]
-    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
     Vec(Vec<u8>),
     #[cfg(feature = "alloc")]
-    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
     String(String),
 }
 
@@ -584,8 +607,13 @@ impl From<ParamsHeapless> for Params {
     }
 }
 
+impl From<ParamsRaw> for Params {
+    fn from(x: ParamsRaw) -> Self {
+        Self::Heapless(ParamsHeapless::Raw(x))
+    }
+}
+
 #[cfg(feature = "alloc")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 impl From<Vec<u8>> for Params {
     fn from(val: Vec<u8>) -> Self {
         Self::Vec(val)
@@ -594,7 +622,6 @@ impl From<Vec<u8>> for Params {
 
 /// Converts a byte slice into the [Params::Vec] variant
 #[cfg(feature = "alloc")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 impl From<&[u8]> for Params {
     fn from(val: &[u8]) -> Self {
         Self::Vec(val.to_vec())
@@ -602,7 +629,6 @@ impl From<&[u8]> for Params {
 }
 
 #[cfg(feature = "alloc")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 impl From<String> for Params {
     fn from(val: String) -> Self {
         Self::String(val)
@@ -610,7 +636,6 @@ impl From<String> for Params {
 }
 
 #[cfg(feature = "alloc")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 /// Converts a string slice into the [Params::String] variant
 impl From<&str> for Params {
     fn from(val: &str) -> Self {
@@ -618,9 +643,89 @@ impl From<&str> for Params {
     }
 }
 
+/// Please note while [WritableToBeBytes] is implemented for [Params], the default implementation
+/// will not be able to process the [Params::Store] parameter variant.
+impl WritableToBeBytes for Params {
+    fn written_len(&self) -> usize {
+        match self {
+            Params::Heapless(p) => match p {
+                ParamsHeapless::Raw(raw) => raw.written_len(),
+                ParamsHeapless::EcssEnum(enumeration) => enumeration.written_len(),
+            },
+            Params::Store(_) => 0,
+            #[cfg(feature = "alloc")]
+            Params::Vec(vec) => vec.len(),
+            #[cfg(feature = "alloc")]
+            Params::String(string) => string.len(),
+        }
+    }
+
+    fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
+        match self {
+            Params::Heapless(p) => match p {
+                ParamsHeapless::Raw(raw) => raw.write_to_be_bytes(buf),
+                ParamsHeapless::EcssEnum(enumeration) => enumeration.write_to_be_bytes(buf),
+            },
+            Params::Store(_) => Ok(0),
+            #[cfg(feature = "alloc")]
+            Params::Vec(vec) => {
+                if buf.len() < vec.len() {
+                    return Err(ByteConversionError::ToSliceTooSmall {
+                        found: buf.len(),
+                        expected: vec.len(),
+                    });
+                }
+                buf[0..vec.len()].copy_from_slice(vec);
+                Ok(vec.len())
+            }
+            #[cfg(feature = "alloc")]
+            Params::String(string) => {
+                if buf.len() < string.len() {
+                    return Err(ByteConversionError::ToSliceTooSmall {
+                        found: buf.len(),
+                        expected: string.len(),
+                    });
+                }
+                buf[0..string.len()].copy_from_slice(string.as_bytes());
+                Ok(string.len())
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_cloning_works(param_raw: &impl WritableToBeBytes) {
+        let _new_param = param_raw;
+    }
+
+    fn test_writing_fails(param_raw: &(impl WritableToBeBytes + ToBeBytes)) {
+        let pair_size = WritableToBeBytes::written_len(param_raw);
+        assert_eq!(pair_size, ToBeBytes::written_len(param_raw));
+        let mut vec = alloc::vec![0; pair_size - 1];
+        let result = param_raw.write_to_be_bytes(&mut vec);
+        if let Err(ByteConversionError::ToSliceTooSmall { found, expected }) = result {
+            assert_eq!(found, pair_size - 1);
+            assert_eq!(expected, pair_size);
+        } else {
+            panic!("Expected ByteConversionError::ToSliceTooSmall");
+        }
+    }
+
+    fn test_writing(params_raw: &ParamsRaw, writeable: &impl WritableToBeBytes) {
+        assert_eq!(params_raw.written_len(), writeable.written_len());
+        let mut vec = alloc::vec![0; writeable.written_len()];
+        writeable
+            .write_to_be_bytes(&mut vec)
+            .expect("writing parameter to buffer failed");
+        let mut other_vec = alloc::vec![0; writeable.written_len()];
+        params_raw
+            .write_to_be_bytes(&mut other_vec)
+            .expect("writing parameter to buffer failed");
+        assert_eq!(vec, other_vec);
+    }
 
     #[test]
     fn test_basic_u32_pair() {
@@ -632,10 +737,32 @@ mod tests {
         assert_eq!(u32_conv_back, 4);
         u32_conv_back = u32::from_be_bytes(raw[4..8].try_into().unwrap());
         assert_eq!(u32_conv_back, 8);
+        test_writing_fails(&u32_pair);
+        test_cloning_works(&u32_pair);
+        let u32_praw = ParamsRaw::from(u32_pair);
+        test_writing(&u32_praw, &u32_pair);
     }
 
     #[test]
-    fn basic_signed_test_pair() {
+    fn test_u16_pair_writing_fails() {
+        let u16_pair = U16Pair(4, 8);
+        test_writing_fails(&u16_pair);
+        test_cloning_works(&u16_pair);
+        let u16_praw = ParamsRaw::from(u16_pair);
+        test_writing(&u16_praw, &u16_pair);
+    }
+
+    #[test]
+    fn test_u8_pair_writing_fails() {
+        let u8_pair = U8Pair(4, 8);
+        test_writing_fails(&u8_pair);
+        test_cloning_works(&u8_pair);
+        let u8_praw = ParamsRaw::from(u8_pair);
+        test_writing(&u8_praw, &u8_pair);
+    }
+
+    #[test]
+    fn basic_i8_test() {
         let i8_pair = I8Pair(-3, -16);
         assert_eq!(i8_pair.0, -3);
         assert_eq!(i8_pair.1, -16);
@@ -644,10 +771,31 @@ mod tests {
         assert_eq!(i8_conv_back, -3);
         i8_conv_back = i8::from_be_bytes(raw[1..2].try_into().unwrap());
         assert_eq!(i8_conv_back, -16);
+        test_writing_fails(&i8_pair);
+        test_cloning_works(&i8_pair);
+        let i8_praw = ParamsRaw::from(i8_pair);
+        test_writing(&i8_praw, &i8_pair);
     }
 
     #[test]
-    fn basic_signed_test_triplet() {
+    fn test_from_u32_triplet() {
+        let raw_params = U32Triplet::from((1, 2, 3));
+        assert_eq!(raw_params.0, 1);
+        assert_eq!(raw_params.1, 2);
+        assert_eq!(raw_params.2, 3);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 12);
+        assert_eq!(
+            raw_params.to_be_bytes(),
+            [0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3]
+        );
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let u32_triplet = ParamsRaw::from(raw_params);
+        test_writing(&u32_triplet, &raw_params);
+    }
+
+    #[test]
+    fn test_i8_triplet() {
         let i8_triplet = I8Triplet(-3, -16, -126);
         assert_eq!(i8_triplet.0, -3);
         assert_eq!(i8_triplet.1, -16);
@@ -659,6 +807,10 @@ mod tests {
         assert_eq!(i8_conv_back, -16);
         i8_conv_back = i8::from_be_bytes(raw[2..3].try_into().unwrap());
         assert_eq!(i8_conv_back, -126);
+        test_writing_fails(&i8_triplet);
+        test_cloning_works(&i8_triplet);
+        let i8_praw = ParamsRaw::from(i8_triplet);
+        test_writing(&i8_praw, &i8_triplet);
     }
 
     #[test]
@@ -680,5 +832,353 @@ mod tests {
         } else {
             panic!("Params type is not a vector")
         }
+    }
+
+    #[test]
+    fn test_params_written_len_raw() {
+        let param_raw = ParamsRaw::from((500_u32, 1000_u32));
+        let param: Params = Params::Heapless(param_raw.into());
+        assert_eq!(param.written_len(), 8);
+        let mut buf: [u8; 8] = [0; 8];
+        param
+            .write_to_be_bytes(&mut buf)
+            .expect("writing to buffer failed");
+        assert_eq!(u32::from_be_bytes(buf[0..4].try_into().unwrap()), 500);
+        assert_eq!(u32::from_be_bytes(buf[4..8].try_into().unwrap()), 1000);
+    }
+
+    #[test]
+    fn test_params_written_string() {
+        let string = "Test String".to_string();
+        let param = Params::String(string.clone());
+        assert_eq!(param.written_len(), string.len());
+        let vec = param.to_vec().unwrap();
+        let string_conv_back = String::from_utf8(vec).expect("conversion to string failed");
+        assert_eq!(string_conv_back, string);
+    }
+
+    #[test]
+    fn test_params_written_vec() {
+        let vec: Vec<u8> = alloc::vec![1, 2, 3, 4, 5];
+        let param = Params::Vec(vec.clone());
+        assert_eq!(param.written_len(), vec.len());
+        assert_eq!(param.to_vec().expect("writing vec params failed"), vec);
+    }
+
+    #[test]
+    fn test_u32_single() {
+        let raw_params = U32::from(20);
+        assert_eq!(raw_params.0, 20);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 4);
+        assert_eq!(raw_params.to_be_bytes(), [0, 0, 0, 20]);
+        let other = U32::from(20);
+        assert_eq!(raw_params, other);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let u32_praw = ParamsRaw::from(raw_params);
+        test_writing(&u32_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_i8_single() {
+        let neg_number: i8 = -5_i8;
+        let raw_params = I8::from(neg_number);
+        assert_eq!(raw_params.0, neg_number);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 1);
+        assert_eq!(raw_params.to_be_bytes(), neg_number.to_be_bytes());
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let u8_praw = ParamsRaw::from(raw_params);
+        test_writing(&u8_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_u8_single() {
+        let raw_params = U8::from(20);
+        assert_eq!(raw_params.0, 20);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 1);
+        assert_eq!(raw_params.to_be_bytes(), [20]);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let u32_praw = ParamsRaw::from(raw_params);
+        test_writing(&u32_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_u16_single() {
+        let raw_params = U16::from(0x123);
+        assert_eq!(raw_params.0, 0x123);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 2);
+        assert_eq!(raw_params.to_be_bytes(), [0x01, 0x23]);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let u16_praw = ParamsRaw::from(raw_params);
+        test_writing(&u16_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_u16_triplet() {
+        let raw_params = U16Triplet::from((1, 2, 3));
+        assert_eq!(raw_params.0, 1);
+        assert_eq!(raw_params.1, 2);
+        assert_eq!(raw_params.2, 3);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 6);
+        assert_eq!(raw_params.to_be_bytes(), [0, 1, 0, 2, 0, 3]);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let u16_praw = ParamsRaw::from(raw_params);
+        test_writing(&u16_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_u8_triplet() {
+        let raw_params = U8Triplet::from((1, 2, 3));
+        assert_eq!(raw_params.0, 1);
+        assert_eq!(raw_params.1, 2);
+        assert_eq!(raw_params.2, 3);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 3);
+        assert_eq!(raw_params.to_be_bytes(), [1, 2, 3]);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let u8_praw = ParamsRaw::from(raw_params);
+        test_writing(&u8_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_i16_single() {
+        let value = -300_i16;
+        let raw_params = I16::from(value);
+        assert_eq!(raw_params.0, value);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 2);
+        assert_eq!(raw_params.to_be_bytes(), value.to_be_bytes());
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let i16_praw = ParamsRaw::from(raw_params);
+        test_writing(&i16_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_i16_pair() {
+        let raw_params = I16Pair::from((-300, -400));
+        assert_eq!(raw_params.0, -300);
+        assert_eq!(raw_params.1, -400);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 4);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let i16_praw = ParamsRaw::from(raw_params);
+        test_writing(&i16_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_i16_triplet() {
+        let raw_params = I16Triplet::from((-300, -400, -350));
+        assert_eq!(raw_params.0, -300);
+        assert_eq!(raw_params.1, -400);
+        assert_eq!(raw_params.2, -350);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 6);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let i16_praw = ParamsRaw::from(raw_params);
+        test_writing(&i16_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_i32_single() {
+        let raw_params = I32::from(-80000);
+        assert_eq!(raw_params.0, -80000);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 4);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let i32_praw = ParamsRaw::from(raw_params);
+        test_writing(&i32_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_i32_pair() {
+        let raw_params = I32Pair::from((-80000, -200));
+        assert_eq!(raw_params.0, -80000);
+        assert_eq!(raw_params.1, -200);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 8);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let i32_praw = ParamsRaw::from(raw_params);
+        test_writing(&i32_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_i32_triplet() {
+        let raw_params = I32Triplet::from((-80000, -5, -200));
+        assert_eq!(raw_params.0, -80000);
+        assert_eq!(raw_params.1, -5);
+        assert_eq!(raw_params.2, -200);
+        assert_eq!(WritableToBeBytes::written_len(&raw_params), 12);
+        test_writing_fails(&raw_params);
+        test_cloning_works(&raw_params);
+        let i32_praw = ParamsRaw::from(raw_params);
+        test_writing(&i32_praw, &raw_params);
+    }
+
+    #[test]
+    fn test_f32_single() {
+        let param = F32::from(0.1);
+        assert_eq!(param.0, 0.1);
+        assert_eq!(WritableToBeBytes::written_len(&param), 4);
+        let f32_pair_raw = param.to_be_bytes();
+        let f32_0 = f32::from_be_bytes(f32_pair_raw[0..4].try_into().unwrap());
+        assert_eq!(f32_0, 0.1);
+        test_writing_fails(&param);
+        test_cloning_works(&param);
+        let praw = ParamsRaw::from(param);
+        test_writing(&praw, &param);
+        let p_try_from = F32::try_from(param.to_be_bytes().as_ref()).expect("try_from failed");
+        assert_eq!(p_try_from, param);
+    }
+
+    #[test]
+    fn test_f32_pair() {
+        let param = F32Pair::from((0.1, 0.2));
+        assert_eq!(param.0, 0.1);
+        assert_eq!(param.1, 0.2);
+        assert_eq!(WritableToBeBytes::written_len(&param), 8);
+        let f32_pair_raw = param.to_be_bytes();
+        let f32_0 = f32::from_be_bytes(f32_pair_raw[0..4].try_into().unwrap());
+        assert_eq!(f32_0, 0.1);
+        let f32_1 = f32::from_be_bytes(f32_pair_raw[4..8].try_into().unwrap());
+        assert_eq!(f32_1, 0.2);
+        let other_pair = F32Pair::from((0.1, 0.2));
+        assert_eq!(param, other_pair);
+        test_writing_fails(&param);
+        test_cloning_works(&param);
+        let praw = ParamsRaw::from(param);
+        test_writing(&praw, &param);
+        let p_try_from = F32Pair::try_from(param.to_be_bytes().as_ref()).expect("try_from failed");
+        assert_eq!(p_try_from, param);
+    }
+
+    #[test]
+    fn test_f32_triplet() {
+        let f32 = F32Triplet::from((0.1, -0.1, -5.2));
+        assert_eq!(f32.0, 0.1);
+        assert_eq!(f32.1, -0.1);
+        assert_eq!(f32.2, -5.2);
+        assert_eq!(WritableToBeBytes::written_len(&f32), 12);
+        let f32_pair_raw = f32.to_be_bytes();
+        let f32_0 = f32::from_be_bytes(f32_pair_raw[0..4].try_into().unwrap());
+        assert_eq!(f32_0, 0.1);
+        let f32_1 = f32::from_be_bytes(f32_pair_raw[4..8].try_into().unwrap());
+        assert_eq!(f32_1, -0.1);
+        let f32_2 = f32::from_be_bytes(f32_pair_raw[8..12].try_into().unwrap());
+        assert_eq!(f32_2, -5.2);
+        test_writing_fails(&f32);
+        test_cloning_works(&f32);
+        let f32_praw = ParamsRaw::from(f32);
+        test_writing(&f32_praw, &f32);
+        let f32_try_from =
+            F32Triplet::try_from(f32.to_be_bytes().as_ref()).expect("try_from failed");
+        assert_eq!(f32_try_from, f32);
+    }
+
+    #[test]
+    fn test_u64_single() {
+        let u64 = U64::from(0x1010101010);
+        assert_eq!(u64.0, 0x1010101010);
+        assert_eq!(WritableToBeBytes::written_len(&u64), 8);
+        test_writing_fails(&u64);
+        test_cloning_works(&u64);
+        let praw = ParamsRaw::from(u64);
+        test_writing(&praw, &u64);
+    }
+
+    #[test]
+    fn test_i64_single() {
+        let i64 = I64::from(-0xfffffffff);
+        assert_eq!(i64.0, -0xfffffffff);
+        assert_eq!(WritableToBeBytes::written_len(&i64), 8);
+        test_writing_fails(&i64);
+        test_cloning_works(&i64);
+        let praw = ParamsRaw::from(i64);
+        test_writing(&praw, &i64);
+    }
+
+    #[test]
+    fn test_f64_single() {
+        let value = 823_823_812_832.232_3;
+        let f64 = F64::from(value);
+        assert_eq!(f64.0, value);
+        assert_eq!(WritableToBeBytes::written_len(&f64), 8);
+        test_writing_fails(&f64);
+        test_cloning_works(&f64);
+        let praw = ParamsRaw::from(f64);
+        test_writing(&praw, &f64);
+    }
+
+    #[test]
+    fn test_f64_triplet() {
+        let f64_triplet = F64Triplet::from((0.1, 0.2, 0.3));
+        assert_eq!(f64_triplet.0, 0.1);
+        assert_eq!(f64_triplet.1, 0.2);
+        assert_eq!(f64_triplet.2, 0.3);
+        assert_eq!(WritableToBeBytes::written_len(&f64_triplet), 24);
+        let f64_triplet_raw = f64_triplet.to_be_bytes();
+        let f64_0 = f64::from_be_bytes(f64_triplet_raw[0..8].try_into().unwrap());
+        assert_eq!(f64_0, 0.1);
+        let f64_1 = f64::from_be_bytes(f64_triplet_raw[8..16].try_into().unwrap());
+        assert_eq!(f64_1, 0.2);
+        let f64_2 = f64::from_be_bytes(f64_triplet_raw[16..24].try_into().unwrap());
+        assert_eq!(f64_2, 0.3);
+        test_writing_fails(&f64_triplet);
+        test_cloning_works(&f64_triplet);
+    }
+
+    #[test]
+    fn test_u8_ecss_enum() {
+        let value = 200;
+        let u8p = EcssEnumU8::new(value);
+        test_cloning_works(&u8p);
+        let praw = ParamsEcssEnum::from(u8p);
+        assert_eq!(praw.written_len(), 1);
+        let mut buf = [0; 1];
+        praw.write_to_be_bytes(&mut buf)
+            .expect("writing to buffer failed");
+        buf[0] = 200;
+    }
+
+    #[test]
+    fn test_u16_ecss_enum() {
+        let value = 60000;
+        let u16p = EcssEnumU16::new(value);
+        test_cloning_works(&u16p);
+        let praw = ParamsEcssEnum::from(u16p);
+        assert_eq!(praw.written_len(), 2);
+        let mut buf = [0; 2];
+        praw.write_to_be_bytes(&mut buf)
+            .expect("writing to buffer failed");
+        assert_eq!(u16::from_be_bytes(buf), value);
+    }
+
+    #[test]
+    fn test_u32_ecss_enum() {
+        let value = 70000;
+        let u32p = EcssEnumU32::new(value);
+        test_cloning_works(&u32p);
+        let praw = ParamsEcssEnum::from(u32p);
+        assert_eq!(praw.written_len(), 4);
+        let mut buf = [0; 4];
+        praw.write_to_be_bytes(&mut buf)
+            .expect("writing to buffer failed");
+        assert_eq!(u32::from_be_bytes(buf), value);
+    }
+
+    #[test]
+    fn test_u64_ecss_enum() {
+        let value = 0xffffffffff;
+        let u64p = EcssEnumU64::new(value);
+        test_cloning_works(&u64p);
+        let praw = ParamsEcssEnum::from(u64p);
+        assert_eq!(praw.written_len(), 8);
+        let mut buf = [0; 8];
+        praw.write_to_be_bytes(&mut buf)
+            .expect("writing to buffer failed");
+        assert_eq!(u64::from_be_bytes(buf), value);
     }
 }

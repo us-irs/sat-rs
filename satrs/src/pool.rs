@@ -72,7 +72,6 @@
 //! }
 //! ```
 #[cfg(feature = "alloc")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub use alloc_mod::*;
 use core::fmt::{Display, Formatter};
 use delegate::delegate;

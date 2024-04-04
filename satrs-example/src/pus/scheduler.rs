@@ -1,23 +1,18 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
+use crate::pus::create_verification_reporter;
 use log::{error, info, warn};
-use satrs::pool::{PoolProvider, StaticMemoryPool, StoreAddr};
+use satrs::pool::{PoolProvider, StaticMemoryPool};
 use satrs::pus::scheduler::{PusScheduler, TcInfo};
-use satrs::pus::scheduler_srv::PusService11SchedHandler;
-use satrs::pus::verification::std_mod::{
-    VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
-};
-use satrs::pus::verification::VerificationReportingProvider;
+use satrs::pus::scheduler_srv::PusSchedServiceHandler;
+use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    EcssTcReceiverCore, EcssTmSenderCore, MpscTcReceiver, PusPacketHandlerResult, PusServiceHelper,
-    TmAsVecSenderWithId, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
-    TmInSharedPoolSenderWithId,
+    EcssTmSenderCore, MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSenderBounded,
+    PusPacketHandlerResult, PusServiceHelper, PusTmAsVec, PusTmInPool, TmInSharedPoolSender,
 };
-use satrs::tmtc::tm_helper::SharedTmPool;
-use satrs::ChannelId;
-use satrs_example::config::{TcReceiverId, TmSenderId, PUS_APID};
+use satrs_example::config::components::PUS_SCHED_SERVICE;
 
 use crate::tmtc::PusTcSourceProviderSharedPool;
 
@@ -55,14 +50,12 @@ impl TcReleaser for mpsc::Sender<Vec<u8>> {
     }
 }
 
-pub struct Pus11Wrapper<
-    TcReceiver: EcssTcReceiverCore,
+pub struct SchedulingServiceWrapper<
     TmSender: EcssTmSenderCore,
     TcInMemConverter: EcssTcInMemConverter,
-    VerificationReporter: VerificationReportingProvider,
 > {
-    pub pus_11_handler: PusService11SchedHandler<
-        TcReceiver,
+    pub pus_11_handler: PusSchedServiceHandler<
+        MpscTcReceiver,
         TmSender,
         TcInMemConverter,
         VerificationReporter,
@@ -73,12 +66,8 @@ pub struct Pus11Wrapper<
     pub tc_releaser: Box<dyn TcReleaser + Send>,
 }
 
-impl<
-        TcReceiver: EcssTcReceiverCore,
-        TmSender: EcssTmSenderCore,
-        TcInMemConverter: EcssTcInMemConverter,
-        VerificationReporter: VerificationReportingProvider,
-    > Pus11Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
+impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
+    SchedulingServiceWrapper<TmSender, TcInMemConverter>
 {
     pub fn release_tcs(&mut self) {
         let releaser = |enabled: bool, info: &TcInfo, tc: &[u8]| -> bool {
@@ -103,8 +92,11 @@ impl<
         }
     }
 
-    pub fn handle_next_packet(&mut self) -> bool {
-        match self.pus_11_handler.handle_one_tc(&mut self.sched_tc_pool) {
+    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+        match self
+            .pus_11_handler
+            .poll_and_handle_next_tc(time_stamp, &mut self.sched_tc_pool)
+        {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {
@@ -129,42 +121,24 @@ impl<
 }
 
 pub fn create_scheduler_service_static(
-    shared_tm_store: SharedTmPool,
-    tm_funnel_tx: mpsc::SyncSender<StoreAddr>,
-    verif_reporter: VerificationReporterWithSharedPoolMpscBoundedSender,
+    tm_sender: TmInSharedPoolSender<mpsc::SyncSender<PusTmInPool>>,
     tc_releaser: PusTcSourceProviderSharedPool,
     pus_sched_rx: mpsc::Receiver<EcssTcAndToken>,
     sched_tc_pool: StaticMemoryPool,
-) -> Pus11Wrapper<
-    MpscTcReceiver,
-    TmInSharedPoolSenderWithBoundedMpsc,
-    EcssTcInSharedStoreConverter,
-    VerificationReporterWithSharedPoolMpscBoundedSender,
-> {
-    let sched_srv_tm_sender = TmInSharedPoolSenderWithId::new(
-        TmSenderId::PusSched as ChannelId,
-        "PUS_11_TM_SENDER",
-        shared_tm_store.clone(),
-        tm_funnel_tx.clone(),
-    );
-    let sched_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusSched as ChannelId,
-        "PUS_11_TC_RECV",
-        pus_sched_rx,
-    );
+) -> SchedulingServiceWrapper<MpscTmInSharedPoolSenderBounded, EcssTcInSharedStoreConverter> {
     let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
         .expect("Creating PUS Scheduler failed");
-    let pus_11_handler = PusService11SchedHandler::new(
+    let pus_11_handler = PusSchedServiceHandler::new(
         PusServiceHelper::new(
-            sched_srv_receiver,
-            sched_srv_tm_sender,
-            PUS_APID,
-            verif_reporter.clone(),
+            PUS_SCHED_SERVICE.id(),
+            pus_sched_rx,
+            tm_sender,
+            create_verification_reporter(PUS_SCHED_SERVICE.id(), PUS_SCHED_SERVICE.apid),
             EcssTcInSharedStoreConverter::new(tc_releaser.clone_backing_pool(), 2048),
         ),
         scheduler,
     );
-    Pus11Wrapper {
+    SchedulingServiceWrapper {
         pus_11_handler,
         sched_tc_pool,
         releaser_buf: [0; 4096],
@@ -173,40 +147,26 @@ pub fn create_scheduler_service_static(
 }
 
 pub fn create_scheduler_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<Vec<u8>>,
-    verif_reporter: VerificationReporterWithVecMpscSender,
+    tm_funnel_tx: mpsc::Sender<PusTmAsVec>,
     tc_source_sender: mpsc::Sender<Vec<u8>>,
     pus_sched_rx: mpsc::Receiver<EcssTcAndToken>,
     sched_tc_pool: StaticMemoryPool,
-) -> Pus11Wrapper<
-    MpscTcReceiver,
-    TmAsVecSenderWithMpsc,
-    EcssTcInVecConverter,
-    VerificationReporterWithVecMpscSender,
-> {
-    let sched_srv_tm_sender = TmAsVecSenderWithId::new(
-        TmSenderId::PusSched as ChannelId,
-        "PUS_11_TM_SENDER",
-        tm_funnel_tx,
-    );
-    let sched_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusSched as ChannelId,
-        "PUS_11_TC_RECV",
-        pus_sched_rx,
-    );
+) -> SchedulingServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {
+    //let sched_srv_receiver =
+    //MpscTcReceiver::new(PUS_SCHED_SERVICE.raw(), "PUS_11_TC_RECV", pus_sched_rx);
     let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
         .expect("Creating PUS Scheduler failed");
-    let pus_11_handler = PusService11SchedHandler::new(
+    let pus_11_handler = PusSchedServiceHandler::new(
         PusServiceHelper::new(
-            sched_srv_receiver,
-            sched_srv_tm_sender,
-            PUS_APID,
-            verif_reporter.clone(),
+            PUS_SCHED_SERVICE.id(),
+            pus_sched_rx,
+            tm_funnel_tx,
+            create_verification_reporter(PUS_SCHED_SERVICE.id(), PUS_SCHED_SERVICE.apid),
             EcssTcInVecConverter::default(),
         ),
         scheduler,
     );
-    Pus11Wrapper {
+    SchedulingServiceWrapper {
         pus_11_handler,
         sched_tc_pool,
         releaser_buf: [0; 4096],

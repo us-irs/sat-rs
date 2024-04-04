@@ -4,11 +4,12 @@ import dataclasses
 import enum
 import struct
 
-from spacepackets.ecss.tc import PacketId, PacketType
 
-EXAMPLE_PUS_APID = 0x02
-EXAMPLE_PUS_PACKET_ID_TM = PacketId(PacketType.TM, True, EXAMPLE_PUS_APID)
-TM_PACKET_IDS = [EXAMPLE_PUS_PACKET_ID_TM]
+class Apid(enum.IntEnum):
+    SCHED = 1
+    GENERIC_PUS = 2
+    ACS = 3
+    CFDP = 4
 
 
 class EventSeverity(enum.IntEnum):
@@ -36,8 +37,8 @@ class EventU32:
         )
 
 
-class RequestTargetId(enum.IntEnum):
-    ACS = 1
+class AcsId(enum.IntEnum):
+    MGM_0 = 0
 
 
 class AcsHkIds(enum.IntEnum):
