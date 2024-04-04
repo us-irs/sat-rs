@@ -8,7 +8,9 @@ pub use std_mod::*;
 
 #[cfg(feature = "std")]
 pub mod std_mod {
-    use crate::pool::{PoolProvider, SharedStaticMemoryPool, StaticMemoryPool, StoreAddr};
+    use crate::pool::{
+        PoolProvider, SharedStaticMemoryPool, StaticMemoryPool, StoreAddr, StoreError,
+    };
     use crate::pus::EcssTmtcError;
     use spacepackets::ecss::tm::PusTmCreator;
     use spacepackets::ecss::WritablePusPacket;
@@ -34,7 +36,7 @@ pub mod std_mod {
         }
 
         pub fn add_pus_tm(&self, pus_tm: &PusTmCreator) -> Result<StoreAddr, EcssTmtcError> {
-            let mut pg = self.0.write().map_err(|_| EcssTmtcError::StoreLock)?;
+            let mut pg = self.0.write().map_err(|_| StoreError::LockError)?;
             let addr = pg.free_element(pus_tm.len_written(), |buf| {
                 pus_tm
                     .write_to_bytes(buf)
@@ -90,9 +92,9 @@ impl PusTmWithCdsShortHelper {
         source_data: &'a [u8],
         seq_count: u16,
     ) -> PusTmCreator {
-        let mut reply_header = SpHeader::tm_unseg(self.apid, seq_count, 0).unwrap();
+        let reply_header = SpHeader::new_for_unseg_tm(self.apid, seq_count, 0);
         let tc_header = PusTmSecondaryHeader::new_simple(service, subservice, &self.cds_short_buf);
-        PusTmCreator::new(&mut reply_header, tc_header, source_data, true)
+        PusTmCreator::new(reply_header, tc_header, source_data, true)
     }
 }
 

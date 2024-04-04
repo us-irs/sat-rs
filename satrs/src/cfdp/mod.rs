@@ -17,6 +17,8 @@ use alloc::boxed::Box;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::time::CountdownProvider;
+
 #[cfg(feature = "std")]
 pub mod dest;
 #[cfg(feature = "alloc")]
@@ -45,7 +47,15 @@ pub enum TimerContext {
     },
 }
 
-/// Generic abstraction for a check timer which is used by 3 mechanisms of the CFDP protocol.
+/// A generic trait which allows CFDP entities to create check timers which are required to
+/// implement special procedures in unacknowledged transmission mode, as specified in 4.6.3.2
+/// and 4.6.3.3.
+///
+/// This trait also allows the creation of different check timers depending on context and purpose
+/// of the timer, the runtime environment (e.g. standard clock timer vs. timer using a RTC) or
+/// other factors.
+///
+/// The countdown timer is used by 3 mechanisms of the CFDP protocol.
 ///
 /// ## 1. Check limit handling
 ///
@@ -74,22 +84,9 @@ pub enum TimerContext {
 /// The timer will be used to perform the Positive Acknowledgement Procedures as  specified in
 /// 4.7. 1of the CFDP standard. The expiration period will be provided by the Positive ACK timer
 /// interval of the remote entity configuration.
-pub trait CheckTimer: Debug {
-    fn has_expired(&self) -> bool;
-    fn reset(&mut self);
-}
-
-/// A generic trait which allows CFDP entities to create check timers which are required to
-/// implement special procedures in unacknowledged transmission mode, as specified in 4.6.3.2
-/// and 4.6.3.3. The [CheckTimer] documentation provides more information about the purpose of the
-/// check timer in the context of CFDP.
-///
-/// This trait also allows the creation of different check timers depending on context and purpose
-/// of the timer, the runtime environment (e.g. standard clock timer vs. timer using a RTC) or
-/// other factors.
 #[cfg(feature = "alloc")]
 pub trait CheckTimerCreator {
-    fn get_check_timer_provider(&self, timer_context: TimerContext) -> Box<dyn CheckTimer>;
+    fn get_check_timer_provider(&self, timer_context: TimerContext) -> Box<dyn CountdownProvider>;
 }
 
 /// Simple implementation of the [CheckTimerCreator] trait assuming a standard runtime.
@@ -112,7 +109,7 @@ impl StdCheckTimer {
 }
 
 #[cfg(feature = "std")]
-impl CheckTimer for StdCheckTimer {
+impl CountdownProvider for StdCheckTimer {
     fn has_expired(&self) -> bool {
         let elapsed_time = self.start_time.elapsed();
         if elapsed_time.as_secs() > self.expiry_time_seconds {

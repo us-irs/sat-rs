@@ -1,12 +1,11 @@
-use std::{
-    net::{SocketAddr, UdpSocket},
-    sync::mpsc::Receiver,
-};
+use std::net::{SocketAddr, UdpSocket};
+use std::sync::mpsc;
 
 use log::{info, warn};
+use satrs::pus::{PusTmAsVec, PusTmInPool};
 use satrs::{
     hal::std::udp_server::{ReceiveResult, UdpTcServer},
-    pool::{PoolProviderWithGuards, SharedStaticMemoryPool, StoreAddr},
+    pool::{PoolProviderWithGuards, SharedStaticMemoryPool},
     tmtc::CcsdsError,
 };
 
@@ -15,20 +14,20 @@ pub trait UdpTmHandler {
 }
 
 pub struct StaticUdpTmHandler {
-    pub tm_rx: Receiver<StoreAddr>,
+    pub tm_rx: mpsc::Receiver<PusTmInPool>,
     pub tm_store: SharedStaticMemoryPool,
 }
 
 impl UdpTmHandler for StaticUdpTmHandler {
     fn send_tm_to_udp_client(&mut self, socket: &UdpSocket, &recv_addr: &SocketAddr) {
-        while let Ok(addr) = self.tm_rx.try_recv() {
+        while let Ok(pus_tm_in_pool) = self.tm_rx.try_recv() {
             let store_lock = self.tm_store.write();
             if store_lock.is_err() {
                 warn!("Locking TM store failed");
                 continue;
             }
             let mut store_lock = store_lock.unwrap();
-            let pg = store_lock.read_with_guard(addr);
+            let pg = store_lock.read_with_guard(pus_tm_in_pool.store_addr);
             let read_res = pg.read_as_vec();
             if read_res.is_err() {
                 warn!("Error reading TM pool data");
@@ -44,20 +43,20 @@ impl UdpTmHandler for StaticUdpTmHandler {
 }
 
 pub struct DynamicUdpTmHandler {
-    pub tm_rx: Receiver<Vec<u8>>,
+    pub tm_rx: mpsc::Receiver<PusTmAsVec>,
 }
 
 impl UdpTmHandler for DynamicUdpTmHandler {
     fn send_tm_to_udp_client(&mut self, socket: &UdpSocket, recv_addr: &SocketAddr) {
         while let Ok(tm) = self.tm_rx.try_recv() {
-            if tm.len() > 9 {
-                let service = tm[7];
-                let subservice = tm[8];
+            if tm.packet.len() > 9 {
+                let service = tm.packet[7];
+                let subservice = tm.packet[8];
                 info!("Sending PUS TM[{service},{subservice}]")
             } else {
                 info!("Sending PUS TM");
             }
-            let result = socket.send_to(&tm, recv_addr);
+            let result = socket.send_to(&tm.packet, recv_addr);
             if let Err(e) = result {
                 warn!("Sending TM with UDP socket failed: {e}")
             }
@@ -120,7 +119,7 @@ mod tests {
         },
         tmtc::ReceivesTcCore,
     };
-    use satrs_example::config::{OBSW_SERVER_ADDR, PUS_APID};
+    use satrs_example::config::{components, OBSW_SERVER_ADDR};
 
     use super::*;
 
@@ -178,8 +177,8 @@ mod tests {
             udp_tc_server,
             tm_handler,
         };
-        let mut sph = SpHeader::tc_unseg(PUS_APID, 0, 0).unwrap();
-        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true)
+        let sph = SpHeader::new_for_unseg_tc(components::Apid::GenericPus as u16, 0, 0);
+        let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true)
             .to_vec()
             .unwrap();
         let client = UdpSocket::bind("127.0.0.1:0").expect("Connecting to UDP server failed");

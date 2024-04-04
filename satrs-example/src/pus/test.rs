@@ -1,118 +1,74 @@
+use crate::pus::create_verification_reporter;
 use log::{info, warn};
-use satrs::params::Params;
-use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
+use satrs::event_man::{EventMessage, EventMessageU32};
+use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::test::PusService17TestHandler;
-use satrs::pus::verification::{FailParams, VerificationReportingProvider};
-use satrs::pus::verification::{
-    VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
-};
+use satrs::pus::verification::{FailParams, VerificationReporter, VerificationReportingProvider};
+use satrs::pus::EcssTcInSharedStoreConverter;
 use satrs::pus::{
-    EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter, EcssTcReceiverCore,
-    EcssTmSenderCore, MpscTcReceiver, PusPacketHandlerResult, PusServiceHelper,
-    TmAsVecSenderWithId, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
-    TmInSharedPoolSenderWithId,
+    EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter, EcssTmSenderCore, MpscTcReceiver,
+    MpscTmAsVecSender, MpscTmInSharedPoolSenderBounded, PusPacketHandlerResult, PusServiceHelper,
+    PusTmAsVec, PusTmInPool, TmInSharedPoolSender,
 };
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusPacket;
 use satrs::spacepackets::time::cds::CdsTime;
 use satrs::spacepackets::time::TimeWriter;
-use satrs::tmtc::tm_helper::SharedTmPool;
-use satrs::ChannelId;
-use satrs::{events::EventU32, pus::EcssTcInSharedStoreConverter};
-use satrs_example::config::{tmtc_err, TcReceiverId, TmSenderId, PUS_APID, TEST_EVENT};
-use std::sync::mpsc::{self, Sender};
+use satrs_example::config::components::PUS_TEST_SERVICE;
+use satrs_example::config::{tmtc_err, TEST_EVENT};
+use std::sync::mpsc;
 
 pub fn create_test_service_static(
-    shared_tm_store: SharedTmPool,
-    tm_funnel_tx: mpsc::SyncSender<StoreAddr>,
-    verif_reporter: VerificationReporterWithSharedPoolMpscBoundedSender,
+    tm_sender: TmInSharedPoolSender<mpsc::SyncSender<PusTmInPool>>,
     tc_pool: SharedStaticMemoryPool,
-    event_sender: mpsc::Sender<(EventU32, Option<Params>)>,
+    event_sender: mpsc::Sender<EventMessageU32>,
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
-) -> Service17CustomWrapper<
-    MpscTcReceiver,
-    TmInSharedPoolSenderWithBoundedMpsc,
-    EcssTcInSharedStoreConverter,
-    VerificationReporterWithSharedPoolMpscBoundedSender,
-> {
-    let test_srv_tm_sender = TmInSharedPoolSenderWithId::new(
-        TmSenderId::PusTest as ChannelId,
-        "PUS_17_TM_SENDER",
-        shared_tm_store.clone(),
-        tm_funnel_tx.clone(),
-    );
-    let test_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusTest as ChannelId,
-        "PUS_17_TC_RECV",
-        pus_test_rx,
-    );
+) -> TestCustomServiceWrapper<MpscTmInSharedPoolSenderBounded, EcssTcInSharedStoreConverter> {
     let pus17_handler = PusService17TestHandler::new(PusServiceHelper::new(
-        test_srv_receiver,
-        test_srv_tm_sender,
-        PUS_APID,
-        verif_reporter.clone(),
+        PUS_TEST_SERVICE.id(),
+        pus_test_rx,
+        tm_sender,
+        create_verification_reporter(PUS_TEST_SERVICE.id(), PUS_TEST_SERVICE.apid),
         EcssTcInSharedStoreConverter::new(tc_pool, 2048),
     ));
-    Service17CustomWrapper {
-        pus17_handler,
+    TestCustomServiceWrapper {
+        handler: pus17_handler,
         test_srv_event_sender: event_sender,
     }
 }
 
 pub fn create_test_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<Vec<u8>>,
-    verif_reporter: VerificationReporterWithVecMpscSender,
-    event_sender: mpsc::Sender<(EventU32, Option<Params>)>,
+    tm_funnel_tx: mpsc::Sender<PusTmAsVec>,
+    event_sender: mpsc::Sender<EventMessageU32>,
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
-) -> Service17CustomWrapper<
-    MpscTcReceiver,
-    TmAsVecSenderWithMpsc,
-    EcssTcInVecConverter,
-    VerificationReporterWithVecMpscSender,
-> {
-    let test_srv_tm_sender = TmAsVecSenderWithId::new(
-        TmSenderId::PusTest as ChannelId,
-        "PUS_17_TM_SENDER",
-        tm_funnel_tx.clone(),
-    );
-    let test_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusTest as ChannelId,
-        "PUS_17_TC_RECV",
-        pus_test_rx,
-    );
+) -> TestCustomServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {
     let pus17_handler = PusService17TestHandler::new(PusServiceHelper::new(
-        test_srv_receiver,
-        test_srv_tm_sender,
-        PUS_APID,
-        verif_reporter.clone(),
+        PUS_TEST_SERVICE.id(),
+        pus_test_rx,
+        tm_funnel_tx,
+        create_verification_reporter(PUS_TEST_SERVICE.id(), PUS_TEST_SERVICE.apid),
         EcssTcInVecConverter::default(),
     ));
-    Service17CustomWrapper {
-        pus17_handler,
+    TestCustomServiceWrapper {
+        handler: pus17_handler,
         test_srv_event_sender: event_sender,
     }
 }
 
-pub struct Service17CustomWrapper<
-    TcReceiver: EcssTcReceiverCore,
+pub struct TestCustomServiceWrapper<
     TmSender: EcssTmSenderCore,
     TcInMemConverter: EcssTcInMemConverter,
-    VerificationReporter: VerificationReportingProvider,
 > {
-    pub pus17_handler:
-        PusService17TestHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
-    pub test_srv_event_sender: Sender<(EventU32, Option<Params>)>,
+    pub handler:
+        PusService17TestHandler<MpscTcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+    pub test_srv_event_sender: mpsc::Sender<EventMessageU32>,
 }
 
-impl<
-        TcReceiver: EcssTcReceiverCore,
-        TmSender: EcssTmSenderCore,
-        TcInMemConverter: EcssTcInMemConverter,
-        VerificationReporter: VerificationReportingProvider,
-    > Service17CustomWrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
+impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
+    TestCustomServiceWrapper<TmSender, TcInMemConverter>
 {
-    pub fn handle_next_packet(&mut self) -> bool {
-        let res = self.pus17_handler.handle_one_tc();
+    pub fn poll_and_handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
+        let res = self.handler.poll_and_handle_next_tc(time_stamp);
         if res.is_err() {
             warn!("PUS17 handler failed with error {:?}", res.unwrap_err());
             return true;
@@ -133,7 +89,7 @@ impl<
             }
             PusPacketHandlerResult::CustomSubservice(subservice, token) => {
                 let (tc, _) = PusTcReader::new(
-                    self.pus17_handler
+                    self.handler
                         .service_helper
                         .tc_in_mem_converter
                         .tc_slice_raw(),
@@ -145,28 +101,30 @@ impl<
                 if subservice == 128 {
                     info!("Generating test event");
                     self.test_srv_event_sender
-                        .send((TEST_EVENT.into(), None))
+                        .send(EventMessage::new(PUS_TEST_SERVICE.id(), TEST_EVENT.into()))
                         .expect("Sending test event failed");
                     let start_token = self
-                        .pus17_handler
+                        .handler
                         .service_helper
-                        .common
-                        .verification_handler
-                        .start_success(token, &stamp_buf)
+                        .verif_reporter()
+                        .start_success(self.handler.service_helper.tm_sender(), token, &stamp_buf)
                         .expect("Error sending start success");
-                    self.pus17_handler
+                    self.handler
                         .service_helper
-                        .common
-                        .verification_handler
-                        .completion_success(start_token, &stamp_buf)
+                        .verif_reporter()
+                        .completion_success(
+                            self.handler.service_helper.tm_sender(),
+                            start_token,
+                            &stamp_buf,
+                        )
                         .expect("Error sending completion success");
                 } else {
                     let fail_data = [tc.subservice()];
-                    self.pus17_handler
+                    self.handler
                         .service_helper
-                        .common
-                        .verification_handler
+                        .verif_reporter()
                         .start_failure(
+                            self.handler.service_helper.tm_sender(),
                             token,
                             FailParams::new(
                                 &stamp_buf,

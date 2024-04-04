@@ -1,113 +1,69 @@
 use std::sync::mpsc;
 
+use crate::pus::create_verification_reporter;
 use log::{error, warn};
-use satrs::pool::{SharedStaticMemoryPool, StoreAddr};
+use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::event_man::EventRequestWithToken;
-use satrs::pus::event_srv::PusService5EventHandler;
-use satrs::pus::verification::std_mod::{
-    VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
-};
-use satrs::pus::verification::VerificationReportingProvider;
+use satrs::pus::event_srv::PusEventServiceHandler;
+use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    EcssTcReceiverCore, EcssTmSenderCore, MpscTcReceiver, PusPacketHandlerResult, PusServiceHelper,
-    TmAsVecSenderWithId, TmAsVecSenderWithMpsc, TmInSharedPoolSenderWithBoundedMpsc,
-    TmInSharedPoolSenderWithId,
+    EcssTmSenderCore, MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSenderBounded,
+    PusPacketHandlerResult, PusServiceHelper, PusTmAsVec, PusTmInPool, TmInSharedPoolSender,
 };
-use satrs::tmtc::tm_helper::SharedTmPool;
-use satrs::ChannelId;
-use satrs_example::config::{TcReceiverId, TmSenderId, PUS_APID};
+use satrs_example::config::components::PUS_EVENT_MANAGEMENT;
 
 pub fn create_event_service_static(
-    shared_tm_store: SharedTmPool,
-    tm_funnel_tx: mpsc::SyncSender<StoreAddr>,
-    verif_reporter: VerificationReporterWithSharedPoolMpscBoundedSender,
+    tm_sender: TmInSharedPoolSender<mpsc::SyncSender<PusTmInPool>>,
     tc_pool: SharedStaticMemoryPool,
     pus_event_rx: mpsc::Receiver<EcssTcAndToken>,
     event_request_tx: mpsc::Sender<EventRequestWithToken>,
-) -> Pus5Wrapper<
-    MpscTcReceiver,
-    TmInSharedPoolSenderWithBoundedMpsc,
-    EcssTcInSharedStoreConverter,
-    VerificationReporterWithSharedPoolMpscBoundedSender,
-> {
-    let event_srv_tm_sender = TmInSharedPoolSenderWithId::new(
-        TmSenderId::PusEvent as ChannelId,
-        "PUS_5_TM_SENDER",
-        shared_tm_store.clone(),
-        tm_funnel_tx.clone(),
-    );
-    let event_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusEvent as ChannelId,
-        "PUS_5_TC_RECV",
-        pus_event_rx,
-    );
-    let pus_5_handler = PusService5EventHandler::new(
+) -> EventServiceWrapper<MpscTmInSharedPoolSenderBounded, EcssTcInSharedStoreConverter> {
+    let pus_5_handler = PusEventServiceHandler::new(
         PusServiceHelper::new(
-            event_srv_receiver,
-            event_srv_tm_sender,
-            PUS_APID,
-            verif_reporter.clone(),
+            PUS_EVENT_MANAGEMENT.id(),
+            pus_event_rx,
+            tm_sender,
+            create_verification_reporter(PUS_EVENT_MANAGEMENT.id(), PUS_EVENT_MANAGEMENT.apid),
             EcssTcInSharedStoreConverter::new(tc_pool.clone(), 2048),
         ),
         event_request_tx,
     );
-    Pus5Wrapper { pus_5_handler }
+    EventServiceWrapper {
+        handler: pus_5_handler,
+    }
 }
 
 pub fn create_event_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<Vec<u8>>,
-    verif_reporter: VerificationReporterWithVecMpscSender,
+    tm_funnel_tx: mpsc::Sender<PusTmAsVec>,
     pus_event_rx: mpsc::Receiver<EcssTcAndToken>,
     event_request_tx: mpsc::Sender<EventRequestWithToken>,
-) -> Pus5Wrapper<
-    MpscTcReceiver,
-    TmAsVecSenderWithMpsc,
-    EcssTcInVecConverter,
-    VerificationReporterWithVecMpscSender,
-> {
-    let event_srv_tm_sender = TmAsVecSenderWithId::new(
-        TmSenderId::PusEvent as ChannelId,
-        "PUS_5_TM_SENDER",
-        tm_funnel_tx,
-    );
-    let event_srv_receiver = MpscTcReceiver::new(
-        TcReceiverId::PusEvent as ChannelId,
-        "PUS_5_TC_RECV",
-        pus_event_rx,
-    );
-    let pus_5_handler = PusService5EventHandler::new(
+) -> EventServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {
+    let pus_5_handler = PusEventServiceHandler::new(
         PusServiceHelper::new(
-            event_srv_receiver,
-            event_srv_tm_sender,
-            PUS_APID,
-            verif_reporter.clone(),
+            PUS_EVENT_MANAGEMENT.id(),
+            pus_event_rx,
+            tm_funnel_tx,
+            create_verification_reporter(PUS_EVENT_MANAGEMENT.id(), PUS_EVENT_MANAGEMENT.apid),
             EcssTcInVecConverter::default(),
         ),
         event_request_tx,
     );
-    Pus5Wrapper { pus_5_handler }
+    EventServiceWrapper {
+        handler: pus_5_handler,
+    }
 }
 
-pub struct Pus5Wrapper<
-    TcReceiver: EcssTcReceiverCore,
-    TmSender: EcssTmSenderCore,
-    TcInMemConverter: EcssTcInMemConverter,
-    VerificationReporter: VerificationReportingProvider,
-> {
-    pub pus_5_handler:
-        PusService5EventHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+pub struct EventServiceWrapper<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter> {
+    pub handler:
+        PusEventServiceHandler<MpscTcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
 }
 
-impl<
-        TcReceiver: EcssTcReceiverCore,
-        TmSender: EcssTmSenderCore,
-        TcInMemConverter: EcssTcInMemConverter,
-        VerificationReporter: VerificationReportingProvider,
-    > Pus5Wrapper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
+impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
+    EventServiceWrapper<TmSender, TcInMemConverter>
 {
-    pub fn handle_next_packet(&mut self) -> bool {
-        match self.pus_5_handler.handle_one_tc() {
+    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+        match self.handler.poll_and_handle_next_tc(time_stamp) {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
                 PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {

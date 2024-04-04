@@ -157,8 +157,8 @@ pub mod alloc_mod {
         phantom: PhantomData<(E, EV)>,
     }
 
-    impl<B: PusEventMgmtBackendProvider<EV, Error = E>, EV: GenericEvent, E>
-        PusEventDispatcher<B, EV, E>
+    impl<B: PusEventMgmtBackendProvider<Event, Error = E>, Event: GenericEvent, E>
+        PusEventDispatcher<B, Event, E>
     {
         pub fn new(reporter: EventReporter, backend: B) -> Self {
             Self {
@@ -168,20 +168,20 @@ pub mod alloc_mod {
             }
         }
 
-        pub fn enable_tm_for_event(&mut self, event: &EV) -> Result<bool, E> {
+        pub fn enable_tm_for_event(&mut self, event: &Event) -> Result<bool, E> {
             self.backend.enable_event_reporting(event)
         }
 
-        pub fn disable_tm_for_event(&mut self, event: &EV) -> Result<bool, E> {
+        pub fn disable_tm_for_event(&mut self, event: &Event) -> Result<bool, E> {
             self.backend.disable_event_reporting(event)
         }
 
         pub fn generate_pus_event_tm_generic(
-            &mut self,
-            sender: &mut (impl EcssTmSenderCore + ?Sized),
+            &self,
+            sender: &(impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
-            event: EV,
-            aux_data: Option<&[u8]>,
+            event: Event,
+            params: Option<&[u8]>,
         ) -> Result<bool, EventManError> {
             if !self.backend.event_enabled(&event) {
                 return Ok(false);
@@ -189,22 +189,22 @@ pub mod alloc_mod {
             match event.severity() {
                 Severity::INFO => self
                     .reporter
-                    .event_info(sender, time_stamp, event, aux_data)
+                    .event_info(sender, time_stamp, event, params)
                     .map(|_| true)
                     .map_err(|e| e.into()),
                 Severity::LOW => self
                     .reporter
-                    .event_low_severity(sender, time_stamp, event, aux_data)
+                    .event_low_severity(sender, time_stamp, event, params)
                     .map(|_| true)
                     .map_err(|e| e.into()),
                 Severity::MEDIUM => self
                     .reporter
-                    .event_medium_severity(sender, time_stamp, event, aux_data)
+                    .event_medium_severity(sender, time_stamp, event, params)
                     .map(|_| true)
                     .map_err(|e| e.into()),
                 Severity::HIGH => self
                     .reporter
-                    .event_high_severity(sender, time_stamp, event, aux_data)
+                    .event_high_severity(sender, time_stamp, event, params)
                     .map(|_| true)
                     .map_err(|e| e.into()),
             }
@@ -239,8 +239,8 @@ pub mod alloc_mod {
         }
 
         pub fn generate_pus_event_tm<Severity: HasSeverity>(
-            &mut self,
-            sender: &mut (impl EcssTmSenderCore + ?Sized),
+            &self,
+            sender: &(impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
             event: EventU32TypedSev<Severity>,
             aux_data: Option<&[u8]>,
@@ -257,31 +257,36 @@ pub mod alloc_mod {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{events::SeverityInfo, pus::TmAsVecSenderWithMpsc};
+    use crate::events::SeverityInfo;
+    use crate::pus::PusTmAsVec;
+    use crate::request::UniqueApidTargetId;
     use std::sync::mpsc::{self, TryRecvError};
 
     const INFO_EVENT: EventU32TypedSev<SeverityInfo> =
         EventU32TypedSev::<SeverityInfo>::const_new(1, 0);
     const LOW_SEV_EVENT: EventU32 = EventU32::const_new(Severity::LOW, 1, 5);
     const EMPTY_STAMP: [u8; 7] = [0; 7];
+    const TEST_APID: u16 = 0x02;
+    const TEST_ID: UniqueApidTargetId = UniqueApidTargetId::new(TEST_APID, 0x05);
 
     fn create_basic_man_1() -> DefaultPusEventU32Dispatcher<()> {
-        let reporter = EventReporter::new(0x02, 128).expect("Creating event repoter failed");
+        let reporter = EventReporter::new(TEST_ID.raw(), TEST_APID, 0, 128)
+            .expect("Creating event repoter failed");
         PusEventDispatcher::new_with_default_backend(reporter)
     }
     fn create_basic_man_2() -> DefaultPusEventU32Dispatcher<()> {
-        let reporter = EventReporter::new(0x02, 128).expect("Creating event repoter failed");
+        let reporter = EventReporter::new(TEST_ID.raw(), TEST_APID, 0, 128)
+            .expect("Creating event repoter failed");
         let backend = DefaultPusEventMgmtBackend::default();
         PusEventDispatcher::new(reporter, backend)
     }
 
     #[test]
     fn test_basic() {
-        let mut event_man = create_basic_man_1();
-        let (event_tx, event_rx) = mpsc::channel();
-        let mut sender = TmAsVecSenderWithMpsc::new(0, "test_sender", event_tx);
+        let event_man = create_basic_man_1();
+        let (event_tx, event_rx) = mpsc::channel::<PusTmAsVec>();
         let event_sent = event_man
-            .generate_pus_event_tm(&mut sender, &EMPTY_STAMP, INFO_EVENT, None)
+            .generate_pus_event_tm(&event_tx, &EMPTY_STAMP, INFO_EVENT, None)
             .expect("Sending info event failed");
 
         assert!(event_sent);
@@ -292,13 +297,13 @@ mod tests {
     #[test]
     fn test_disable_event() {
         let mut event_man = create_basic_man_2();
-        let (event_tx, event_rx) = mpsc::channel();
-        let mut sender = TmAsVecSenderWithMpsc::new(0, "test", event_tx);
+        let (event_tx, event_rx) = mpsc::channel::<PusTmAsVec>();
+        // let mut sender = TmAsVecSenderWithMpsc::new(0, "test", event_tx);
         let res = event_man.disable_tm_for_event(&LOW_SEV_EVENT);
         assert!(res.is_ok());
         assert!(res.unwrap());
         let mut event_sent = event_man
-            .generate_pus_event_tm_generic(&mut sender, &EMPTY_STAMP, LOW_SEV_EVENT, None)
+            .generate_pus_event_tm_generic(&event_tx, &EMPTY_STAMP, LOW_SEV_EVENT, None)
             .expect("Sending low severity event failed");
         assert!(!event_sent);
         let res = event_rx.try_recv();
@@ -306,7 +311,7 @@ mod tests {
         assert!(matches!(res.unwrap_err(), TryRecvError::Empty));
         // Check that only the low severity event was disabled
         event_sent = event_man
-            .generate_pus_event_tm(&mut sender, &EMPTY_STAMP, INFO_EVENT, None)
+            .generate_pus_event_tm(&event_tx, &EMPTY_STAMP, INFO_EVENT, None)
             .expect("Sending info event failed");
         assert!(event_sent);
         event_rx.try_recv().expect("No info event received");
@@ -315,8 +320,7 @@ mod tests {
     #[test]
     fn test_reenable_event() {
         let mut event_man = create_basic_man_1();
-        let (event_tx, event_rx) = mpsc::channel();
-        let mut sender = TmAsVecSenderWithMpsc::new(0, "test", event_tx);
+        let (event_tx, event_rx) = mpsc::channel::<PusTmAsVec>();
         let mut res = event_man.disable_tm_for_event_with_sev(&INFO_EVENT);
         assert!(res.is_ok());
         assert!(res.unwrap());
@@ -324,7 +328,7 @@ mod tests {
         assert!(res.is_ok());
         assert!(res.unwrap());
         let event_sent = event_man
-            .generate_pus_event_tm(&mut sender, &EMPTY_STAMP, INFO_EVENT, None)
+            .generate_pus_event_tm(&event_tx, &EMPTY_STAMP, INFO_EVENT, None)
             .expect("Sending info event failed");
         assert!(event_sent);
         event_rx.try_recv().expect("No info event received");

@@ -6,8 +6,10 @@ use spacepackets::ByteConversionError;
 use spacepackets::{SpHeader, MAX_APID};
 
 use crate::pus::EcssTmSenderCore;
+
 #[cfg(feature = "alloc")]
-pub use alloc_mod::EventReporter;
+pub use alloc_mod::*;
+
 pub use spacepackets::ecss::event::*;
 
 pub struct EventReportCreator {
@@ -16,117 +18,112 @@ pub struct EventReportCreator {
 }
 
 impl EventReportCreator {
-    pub fn new(apid: u16) -> Option<Self> {
+    pub fn new(apid: u16, dest_id: u16) -> Option<Self> {
         if apid > MAX_APID {
             return None;
         }
-        Some(Self {
-            // msg_count: 0,
-            dest_id: 0,
-            apid,
-        })
+        Some(Self { dest_id, apid })
     }
 
     pub fn event_info<'time, 'src_data>(
-        &mut self,
-        src_data_buf: &'src_data mut [u8],
+        &self,
         time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
-        aux_data: Option<&'src_data [u8]>,
+        params: Option<&'src_data [u8]>,
+        src_data_buf: &'src_data mut [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.generate_and_send_generic_tm(
-            src_data_buf,
             Subservice::TmInfoReport,
             time_stamp,
             event_id,
-            aux_data,
+            params,
+            src_data_buf,
         )
     }
 
     pub fn event_low_severity<'time, 'src_data>(
-        &mut self,
-        src_data_buf: &'src_data mut [u8],
+        &self,
         time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
-        aux_data: Option<&'src_data [u8]>,
+        params: Option<&'src_data [u8]>,
+        src_data_buf: &'src_data mut [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.generate_and_send_generic_tm(
-            src_data_buf,
             Subservice::TmLowSeverityReport,
             time_stamp,
             event_id,
-            aux_data,
+            params,
+            src_data_buf,
         )
     }
 
     pub fn event_medium_severity<'time, 'src_data>(
-        &mut self,
-        buf: &'src_data mut [u8],
+        &self,
         time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
-        aux_data: Option<&'src_data [u8]>,
+        params: Option<&'src_data [u8]>,
+        buf: &'src_data mut [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.generate_and_send_generic_tm(
-            buf,
             Subservice::TmMediumSeverityReport,
             time_stamp,
             event_id,
-            aux_data,
+            params,
+            buf,
         )
     }
 
     pub fn event_high_severity<'time, 'src_data>(
-        &mut self,
-        src_data_buf: &'src_data mut [u8],
+        &self,
         time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
-        aux_data: Option<&'src_data [u8]>,
+        params: Option<&'src_data [u8]>,
+        src_data_buf: &'src_data mut [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.generate_and_send_generic_tm(
-            src_data_buf,
             Subservice::TmHighSeverityReport,
             time_stamp,
             event_id,
-            aux_data,
+            params,
+            src_data_buf,
         )
     }
 
     fn generate_and_send_generic_tm<'time, 'src_data>(
-        &mut self,
-        src_data_buf: &'src_data mut [u8],
+        &self,
         subservice: Subservice,
         time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
-        aux_data: Option<&'src_data [u8]>,
+        params: Option<&'src_data [u8]>,
+        src_data_buf: &'src_data mut [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
-        self.generate_generic_event_tm(src_data_buf, subservice, time_stamp, event_id, aux_data)
+        self.generate_generic_event_tm(subservice, time_stamp, event_id, params, src_data_buf)
     }
 
     fn generate_generic_event_tm<'time, 'src_data>(
         &self,
-        src_data_buf: &'src_data mut [u8],
         subservice: Subservice,
         time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
-        aux_data: Option<&'src_data [u8]>,
+        params: Option<&'src_data [u8]>,
+        src_data_buf: &'src_data mut [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         let mut src_data_len = event_id.size();
-        if let Some(aux_data) = aux_data {
+        if let Some(aux_data) = params {
             src_data_len += aux_data.len();
         }
         source_buffer_large_enough(src_data_buf.len(), src_data_len)?;
-        let mut sp_header = SpHeader::tm_unseg(self.apid, 0, 0).unwrap();
         let sec_header =
-            PusTmSecondaryHeader::new(5, subservice.into(), 0, self.dest_id, Some(time_stamp));
+            PusTmSecondaryHeader::new(5, subservice.into(), 0, self.dest_id, time_stamp);
         let mut current_idx = 0;
         event_id.write_to_be_bytes(&mut src_data_buf[0..event_id.size()])?;
         current_idx += event_id.size();
-        if let Some(aux_data) = aux_data {
+        if let Some(aux_data) = params {
             src_data_buf[current_idx..current_idx + aux_data.len()].copy_from_slice(aux_data);
             current_idx += aux_data.len();
         }
         Ok(PusTmCreator::new(
-            &mut sp_header,
+            SpHeader::new_from_apid(self.apid),
             sec_header,
             &src_data_buf[0..current_idx],
             true,
@@ -137,99 +134,129 @@ impl EventReportCreator {
 #[cfg(feature = "alloc")]
 mod alloc_mod {
     use super::*;
+    use crate::ComponentId;
     use alloc::vec;
     use alloc::vec::Vec;
+    use core::cell::RefCell;
 
-    pub struct EventReporter {
-        source_data_buf: Vec<u8>,
-        pub reporter: EventReportCreator,
+    pub trait EventTmHookProvider {
+        fn modify_tm(&self, tm: &mut PusTmCreator);
     }
 
-    impl EventReporter {
-        pub fn new(apid: u16, max_event_id_and_aux_data_size: usize) -> Option<Self> {
-            let reporter = EventReportCreator::new(apid)?;
+    #[derive(Default)]
+    pub struct DummyEventHook {}
+
+    impl EventTmHookProvider for DummyEventHook {
+        fn modify_tm(&self, _tm: &mut PusTmCreator) {}
+    }
+
+    pub struct EventReporter<EventTmHook: EventTmHookProvider = DummyEventHook> {
+        id: ComponentId,
+        // Use interior mutability pattern here. This is just an intermediate buffer to the PUS event packet
+        // generation.
+        source_data_buf: RefCell<Vec<u8>>,
+        pub report_creator: EventReportCreator,
+        pub tm_hook: EventTmHook,
+    }
+
+    impl EventReporter<DummyEventHook> {
+        pub fn new(
+            id: ComponentId,
+            default_apid: u16,
+            default_dest_id: u16,
+            max_event_id_and_aux_data_size: usize,
+        ) -> Option<Self> {
+            let reporter = EventReportCreator::new(default_apid, default_dest_id)?;
             Some(Self {
-                source_data_buf: vec![0; max_event_id_and_aux_data_size],
-                reporter,
+                id,
+                source_data_buf: RefCell::new(vec![0; max_event_id_and_aux_data_size]),
+                report_creator: reporter,
+                tm_hook: DummyEventHook::default(),
             })
         }
+    }
+    impl<EventTmHook: EventTmHookProvider> EventReporter<EventTmHook> {
+        pub fn new_with_hook(
+            id: ComponentId,
+            default_apid: u16,
+            default_dest_id: u16,
+            max_event_id_and_aux_data_size: usize,
+            tm_hook: EventTmHook,
+        ) -> Option<Self> {
+            let reporter = EventReportCreator::new(default_apid, default_dest_id)?;
+            Some(Self {
+                id,
+                source_data_buf: RefCell::new(vec![0; max_event_id_and_aux_data_size]),
+                report_creator: reporter,
+                tm_hook,
+            })
+        }
+
         pub fn event_info(
-            &mut self,
-            sender: &mut (impl EcssTmSenderCore + ?Sized),
+            &self,
+            sender: &(impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
-            aux_data: Option<&[u8]>,
+            params: Option<&[u8]>,
         ) -> Result<(), EcssTmtcError> {
-            let tm_creator = self
-                .reporter
-                .event_info(
-                    self.source_data_buf.as_mut_slice(),
-                    time_stamp,
-                    event_id,
-                    aux_data,
-                )
+            let mut mut_buf = self.source_data_buf.borrow_mut();
+            let mut tm_creator = self
+                .report_creator
+                .event_info(time_stamp, event_id, params, mut_buf.as_mut_slice())
                 .map_err(PusError::ByteConversion)?;
-            sender.send_tm(tm_creator.into())?;
+            self.tm_hook.modify_tm(&mut tm_creator);
+            sender.send_tm(self.id, tm_creator.into())?;
             Ok(())
         }
 
         pub fn event_low_severity(
-            &mut self,
-            sender: &mut (impl EcssTmSenderCore + ?Sized),
+            &self,
+            sender: &(impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
-            aux_data: Option<&[u8]>,
+            params: Option<&[u8]>,
         ) -> Result<(), EcssTmtcError> {
-            let tm_creator = self
-                .reporter
-                .event_low_severity(
-                    self.source_data_buf.as_mut_slice(),
-                    time_stamp,
-                    event_id,
-                    aux_data,
-                )
+            let mut mut_buf = self.source_data_buf.borrow_mut();
+            let mut tm_creator = self
+                .report_creator
+                .event_low_severity(time_stamp, event_id, params, mut_buf.as_mut_slice())
                 .map_err(PusError::ByteConversion)?;
-            sender.send_tm(tm_creator.into())?;
+            self.tm_hook.modify_tm(&mut tm_creator);
+            sender.send_tm(self.id, tm_creator.into())?;
             Ok(())
         }
 
         pub fn event_medium_severity(
-            &mut self,
-            sender: &mut (impl EcssTmSenderCore + ?Sized),
+            &self,
+            sender: &(impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
-            aux_data: Option<&[u8]>,
+            params: Option<&[u8]>,
         ) -> Result<(), EcssTmtcError> {
-            let tm_creator = self
-                .reporter
-                .event_medium_severity(
-                    self.source_data_buf.as_mut_slice(),
-                    time_stamp,
-                    event_id,
-                    aux_data,
-                )
+            let mut mut_buf = self.source_data_buf.borrow_mut();
+            let mut tm_creator = self
+                .report_creator
+                .event_medium_severity(time_stamp, event_id, params, mut_buf.as_mut_slice())
                 .map_err(PusError::ByteConversion)?;
-            sender.send_tm(tm_creator.into())?;
+            self.tm_hook.modify_tm(&mut tm_creator);
+            sender.send_tm(self.id, tm_creator.into())?;
             Ok(())
         }
 
         pub fn event_high_severity(
-            &mut self,
-            sender: &mut (impl EcssTmSenderCore + ?Sized),
+            &self,
+            sender: &(impl EcssTmSenderCore + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
-            aux_data: Option<&[u8]>,
+            params: Option<&[u8]>,
         ) -> Result<(), EcssTmtcError> {
-            let tm_creator = self
-                .reporter
-                .event_high_severity(
-                    self.source_data_buf.as_mut_slice(),
-                    time_stamp,
-                    event_id,
-                    aux_data,
-                )
+            let mut mut_buf = self.source_data_buf.borrow_mut();
+            let mut tm_creator = self
+                .report_creator
+                .event_high_severity(time_stamp, event_id, params, mut_buf.as_mut_slice())
                 .map_err(PusError::ByteConversion)?;
-            sender.send_tm(tm_creator.into())?;
+            self.tm_hook.modify_tm(&mut tm_creator);
+            sender.send_tm(self.id, tm_creator.into())?;
             Ok(())
         }
     }
@@ -239,9 +266,10 @@ mod alloc_mod {
 mod tests {
     use super::*;
     use crate::events::{EventU32, Severity};
+    use crate::pus::test_util::TEST_COMPONENT_ID_0;
     use crate::pus::tests::CommonTmInfo;
-    use crate::pus::{EcssChannel, PusTmWrapper};
-    use crate::ChannelId;
+    use crate::pus::{ChannelWithId, PusTmVariant};
+    use crate::ComponentId;
     use spacepackets::ByteConversionError;
     use std::cell::RefCell;
     use std::collections::VecDeque;
@@ -255,6 +283,7 @@ mod tests {
 
     #[derive(Debug, Eq, PartialEq, Clone)]
     struct TmInfo {
+        pub sender_id: ComponentId,
         pub common: CommonTmInfo,
         pub event: EventU32,
         pub aux_data: Vec<u8>,
@@ -265,19 +294,19 @@ mod tests {
         pub service_queue: RefCell<VecDeque<TmInfo>>,
     }
 
-    impl EcssChannel for TestSender {
-        fn channel_id(&self) -> ChannelId {
+    impl ChannelWithId for TestSender {
+        fn id(&self) -> ComponentId {
             0
         }
     }
 
     impl EcssTmSenderCore for TestSender {
-        fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
+        fn send_tm(&self, sender_id: ComponentId, tm: PusTmVariant) -> Result<(), EcssTmtcError> {
             match tm {
-                PusTmWrapper::InStore(_) => {
+                PusTmVariant::InStore(_) => {
                     panic!("TestSender: unexpected call with address");
                 }
-                PusTmWrapper::Direct(tm) => {
+                PusTmVariant::Direct(tm) => {
                     assert!(!tm.source_data().is_empty());
                     let src_data = tm.source_data();
                     assert!(src_data.len() >= 4);
@@ -288,6 +317,7 @@ mod tests {
                         aux_data.extend_from_slice(&src_data[4..]);
                     }
                     self.service_queue.borrow_mut().push_back(TmInfo {
+                        sender_id,
                         common: CommonTmInfo::new_from_tm(&tm),
                         event,
                         aux_data,
@@ -345,7 +375,12 @@ mod tests {
         error_data: Option<&[u8]>,
     ) {
         let mut sender = TestSender::default();
-        let reporter = EventReporter::new(EXAMPLE_APID, max_event_aux_data_buf);
+        let reporter = EventReporter::new(
+            TEST_COMPONENT_ID_0.id(),
+            EXAMPLE_APID,
+            0,
+            max_event_aux_data_buf,
+        );
         assert!(reporter.is_some());
         let mut reporter = reporter.unwrap();
         let time_stamp_empty: [u8; 7] = [0; 7];
@@ -375,6 +410,7 @@ mod tests {
         assert_eq!(tm_info.common.msg_counter, 0);
         assert_eq!(tm_info.common.apid, EXAMPLE_APID);
         assert_eq!(tm_info.event, event);
+        assert_eq!(tm_info.sender_id, TEST_COMPONENT_ID_0.id());
         assert_eq!(tm_info.aux_data, error_copy);
     }
 
@@ -437,7 +473,7 @@ mod tests {
     fn insufficient_buffer() {
         let mut sender = TestSender::default();
         for i in 0..3 {
-            let reporter = EventReporter::new(EXAMPLE_APID, i);
+            let reporter = EventReporter::new(0, EXAMPLE_APID, 0, i);
             assert!(reporter.is_some());
             let mut reporter = reporter.unwrap();
             check_buf_too_small(&mut reporter, &mut sender, i);

@@ -32,7 +32,7 @@ dyn_clone::clone_trait_object!(SequenceCountProvider<u16>);
 #[cfg(feature = "alloc")]
 impl<T, Raw> SequenceCountProvider<Raw> for T where T: SequenceCountProviderCore<Raw> + Clone {}
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct SeqCountProviderSimple<T: Copy> {
     seq_count: Cell<T>,
     max_val: T,
@@ -43,18 +43,23 @@ macro_rules! impl_for_primitives {
         $(
             paste! {
                 impl SeqCountProviderSimple<$ty> {
-                    pub fn [<new_ $ty _max_val>](max_val: $ty) -> Self {
+                    pub fn [<new_custom_max_val_ $ty>](max_val: $ty) -> Self {
                         Self {
                             seq_count: Cell::new(0),
                             max_val,
                         }
                     }
-
                     pub fn [<new_ $ty>]() -> Self {
                         Self {
                             seq_count: Cell::new(0),
                             max_val: $ty::MAX
                         }
+                    }
+                }
+
+                impl Default for SeqCountProviderSimple<$ty> {
+                    fn default() -> Self {
+                        Self::[<new_ $ty>]()
                     }
                 }
 
@@ -86,21 +91,16 @@ macro_rules! impl_for_primitives {
 impl_for_primitives!(u8, u16, u32, u64,);
 
 /// This is a sequence count provider which wraps around at [MAX_SEQ_COUNT].
+#[derive(Clone)]
 pub struct CcsdsSimpleSeqCountProvider {
     provider: SeqCountProviderSimple<u16>,
 }
 
-impl CcsdsSimpleSeqCountProvider {
-    pub fn new() -> Self {
-        Self {
-            provider: SeqCountProviderSimple::new_u16_max_val(MAX_SEQ_COUNT),
-        }
-    }
-}
-
 impl Default for CcsdsSimpleSeqCountProvider {
     fn default() -> Self {
-        Self::new()
+        Self {
+            provider: SeqCountProviderSimple::new_custom_max_val_u16(MAX_SEQ_COUNT),
+        }
     }
 }
 
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_u8_counter() {
-        let u8_counter = SeqCountProviderSimple::new_u8();
+        let u8_counter = SeqCountProviderSimple::<u8>::default();
         assert_eq!(u8_counter.get(), 0);
         assert_eq!(u8_counter.get_and_increment(), 0);
         assert_eq!(u8_counter.get_and_increment(), 1);

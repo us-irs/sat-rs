@@ -1,8 +1,7 @@
 use log::warn;
-use satrs::pus::verification::std_mod::{
-    VerificationReporterWithSharedPoolMpscBoundedSender, VerificationReporterWithVecMpscSender,
+use satrs::pus::{
+    EcssTcAndToken, MpscTmAsVecSender, MpscTmInSharedPoolSenderBounded, ReceivesEcssPusTc,
 };
-use satrs::pus::{EcssTcAndToken, ReceivesEcssPusTc};
 use satrs::spacepackets::SpHeader;
 use std::sync::mpsc::{self, Receiver, SendError, Sender, SyncSender, TryRecvError};
 use thiserror::Error;
@@ -100,14 +99,14 @@ pub struct TcSourceTaskStatic {
     shared_tc_pool: SharedTcPool,
     tc_receiver: Receiver<StoreAddr>,
     tc_buf: [u8; 4096],
-    pus_receiver: PusReceiver<VerificationReporterWithSharedPoolMpscBoundedSender>,
+    pus_receiver: PusReceiver<MpscTmInSharedPoolSenderBounded>,
 }
 
 impl TcSourceTaskStatic {
     pub fn new(
         shared_tc_pool: SharedTcPool,
         tc_receiver: Receiver<StoreAddr>,
-        pus_receiver: PusReceiver<VerificationReporterWithSharedPoolMpscBoundedSender>,
+        pus_receiver: PusReceiver<MpscTmInSharedPoolSenderBounded>,
     ) -> Self {
         Self {
             shared_tc_pool,
@@ -164,13 +163,13 @@ impl TcSourceTaskStatic {
 // TC source components where the heap is the backing memory of the received telecommands.
 pub struct TcSourceTaskDynamic {
     pub tc_receiver: Receiver<Vec<u8>>,
-    pus_receiver: PusReceiver<VerificationReporterWithVecMpscSender>,
+    pus_receiver: PusReceiver<MpscTmAsVecSender>,
 }
 
 impl TcSourceTaskDynamic {
     pub fn new(
         tc_receiver: Receiver<Vec<u8>>,
-        pus_receiver: PusReceiver<VerificationReporterWithVecMpscSender>,
+        pus_receiver: PusReceiver<MpscTmAsVecSender>,
     ) -> Self {
         Self {
             tc_receiver,

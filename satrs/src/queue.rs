@@ -4,11 +4,17 @@ use std::error::Error;
 #[cfg(feature = "std")]
 use std::sync::mpsc;
 
+use crate::ComponentId;
+
+/// Generic channel ID type.
+pub type ChannelId = u32;
+
 /// Generic error type for sending something via a message queue.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum GenericSendError {
     RxDisconnected,
     QueueFull(Option<u32>),
+    TargetDoesNotExist(ComponentId),
 }
 
 impl Display for GenericSendError {
@@ -20,6 +26,9 @@ impl Display for GenericSendError {
             GenericSendError::QueueFull(max_cap) => {
                 write!(f, "queue with max capacity of {max_cap:?} is full")
             }
+            GenericSendError::TargetDoesNotExist(target) => {
+                write!(f, "target queue with ID {target} does not exist")
+            }
         }
     }
 }
@@ -28,17 +37,17 @@ impl Display for GenericSendError {
 impl Error for GenericSendError {}
 
 /// Generic error type for sending something via a message queue.
-#[derive(Debug, Copy, Clone)]
-pub enum GenericRecvError {
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum GenericReceiveError {
     Empty,
-    TxDisconnected,
+    TxDisconnected(Option<ComponentId>),
 }
 
-impl Display for GenericRecvError {
+impl Display for GenericReceiveError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::TxDisconnected => {
-                write!(f, "tx side has disconnected")
+            Self::TxDisconnected(channel_id) => {
+                write!(f, "tx side with id {channel_id:?} has disconnected")
             }
             Self::Empty => {
                 write!(f, "nothing to receive")
@@ -48,7 +57,43 @@ impl Display for GenericRecvError {
 }
 
 #[cfg(feature = "std")]
-impl Error for GenericRecvError {}
+impl Error for GenericReceiveError {}
+
+#[derive(Debug, Clone)]
+pub enum GenericTargetedMessagingError {
+    Send(GenericSendError),
+    Receive(GenericReceiveError),
+}
+impl From<GenericSendError> for GenericTargetedMessagingError {
+    fn from(value: GenericSendError) -> Self {
+        Self::Send(value)
+    }
+}
+
+impl From<GenericReceiveError> for GenericTargetedMessagingError {
+    fn from(value: GenericReceiveError) -> Self {
+        Self::Receive(value)
+    }
+}
+
+impl Display for GenericTargetedMessagingError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Send(err) => write!(f, "generic targeted messaging error: {}", err),
+            Self::Receive(err) => write!(f, "generic targeted messaging error: {}", err),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl Error for GenericTargetedMessagingError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            GenericTargetedMessagingError::Send(send) => Some(send),
+            GenericTargetedMessagingError::Receive(receive) => Some(receive),
+        }
+    }
+}
 
 #[cfg(feature = "std")]
 impl<T> From<mpsc::SendError<T>> for GenericSendError {

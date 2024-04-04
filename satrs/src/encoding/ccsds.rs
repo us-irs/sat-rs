@@ -1,65 +1,4 @@
-#[cfg(feature = "alloc")]
-use alloc::vec::Vec;
-#[cfg(feature = "alloc")]
-use hashbrown::HashSet;
-use spacepackets::PacketId;
-
-use crate::tmtc::ReceivesTcCore;
-
-pub trait PacketIdLookup {
-    fn validate(&self, packet_id: u16) -> bool;
-}
-
-#[cfg(feature = "alloc")]
-impl PacketIdLookup for Vec<u16> {
-    fn validate(&self, packet_id: u16) -> bool {
-        self.contains(&packet_id)
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl PacketIdLookup for HashSet<u16> {
-    fn validate(&self, packet_id: u16) -> bool {
-        self.contains(&packet_id)
-    }
-}
-
-impl PacketIdLookup for [u16] {
-    fn validate(&self, packet_id: u16) -> bool {
-        self.binary_search(&packet_id).is_ok()
-    }
-}
-
-impl PacketIdLookup for &[u16] {
-    fn validate(&self, packet_id: u16) -> bool {
-        self.binary_search(&packet_id).is_ok()
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl PacketIdLookup for Vec<PacketId> {
-    fn validate(&self, packet_id: u16) -> bool {
-        self.contains(&PacketId::from(packet_id))
-    }
-}
-#[cfg(feature = "alloc")]
-impl PacketIdLookup for HashSet<PacketId> {
-    fn validate(&self, packet_id: u16) -> bool {
-        self.contains(&PacketId::from(packet_id))
-    }
-}
-
-impl PacketIdLookup for [PacketId] {
-    fn validate(&self, packet_id: u16) -> bool {
-        self.binary_search(&PacketId::from(packet_id)).is_ok()
-    }
-}
-
-impl PacketIdLookup for &[PacketId] {
-    fn validate(&self, packet_id: u16) -> bool {
-        self.binary_search(&PacketId::from(packet_id)).is_ok()
-    }
-}
+use crate::{tmtc::ReceivesTcCore, ValidatorU16Id};
 
 /// This function parses a given buffer for tightly packed CCSDS space packets. It uses the
 /// [PacketId] field of the CCSDS packets to detect the start of a CCSDS space packet and then
@@ -75,7 +14,7 @@ impl PacketIdLookup for &[PacketId] {
 /// error will be returned.
 pub fn parse_buffer_for_ccsds_space_packets<E>(
     buf: &mut [u8],
-    packet_id_lookup: &(impl PacketIdLookup + ?Sized),
+    packet_id_validator: &(impl ValidatorU16Id + ?Sized),
     tc_receiver: &mut (impl ReceivesTcCore<Error = E> + ?Sized),
     next_write_idx: &mut usize,
 ) -> Result<u32, E> {
@@ -88,7 +27,7 @@ pub fn parse_buffer_for_ccsds_space_packets<E>(
             break;
         }
         let packet_id = u16::from_be_bytes(buf[current_idx..current_idx + 2].try_into().unwrap());
-        if packet_id_lookup.validate(packet_id) {
+        if packet_id_validator.validate(packet_id) {
             let length_field =
                 u16::from_be_bytes(buf[current_idx + 4..current_idx + 6].try_into().unwrap());
             let packet_size = length_field + 7;
@@ -123,13 +62,13 @@ mod tests {
 
     const TEST_APID_0: u16 = 0x02;
     const TEST_APID_1: u16 = 0x10;
-    const TEST_PACKET_ID_0: PacketId = PacketId::const_tc(true, TEST_APID_0);
-    const TEST_PACKET_ID_1: PacketId = PacketId::const_tc(true, TEST_APID_1);
+    const TEST_PACKET_ID_0: PacketId = PacketId::new_for_tc(true, TEST_APID_0);
+    const TEST_PACKET_ID_1: PacketId = PacketId::new_for_tc(true, TEST_APID_1);
 
     #[test]
     fn test_basic() {
-        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
-        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        let sph = SpHeader::new_from_apid(TEST_APID_0);
+        let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len = ping_tc
             .write_to_bytes(&mut buffer)
@@ -155,9 +94,9 @@ mod tests {
 
     #[test]
     fn test_multi_packet() {
-        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
-        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
-        let action_tc = PusTcCreator::new_simple(&mut sph, 8, 0, None, true);
+        let sph = SpHeader::new_from_apid(TEST_APID_0);
+        let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
+        let action_tc = PusTcCreator::new_simple(sph, 8, 0, &[], true);
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len_ping = ping_tc
             .write_to_bytes(&mut buffer)
@@ -190,10 +129,10 @@ mod tests {
 
     #[test]
     fn test_multi_apid() {
-        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
-        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
-        sph = SpHeader::tc_unseg(TEST_APID_1, 0, 0).unwrap();
-        let action_tc = PusTcCreator::new_simple(&mut sph, 8, 0, None, true);
+        let sph = SpHeader::new_from_apid(TEST_APID_0);
+        let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
+        let sph = SpHeader::new_from_apid(TEST_APID_1);
+        let action_tc = PusTcCreator::new_simple(sph, 8, 0, &[], true);
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len_ping = ping_tc
             .write_to_bytes(&mut buffer)
@@ -226,10 +165,10 @@ mod tests {
 
     #[test]
     fn test_split_packet_multi() {
-        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
-        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
-        sph = SpHeader::tc_unseg(TEST_APID_1, 0, 0).unwrap();
-        let action_tc = PusTcCreator::new_simple(&mut sph, 8, 0, None, true);
+        let ping_tc =
+            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_0), 17, 1, &[], true);
+        let action_tc =
+            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_1), 8, 0, &[], true);
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len_ping = ping_tc
             .write_to_bytes(&mut buffer)
@@ -257,8 +196,8 @@ mod tests {
 
     #[test]
     fn test_one_split_packet() {
-        let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
-        let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        let ping_tc =
+            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_0), 17, 1, &[], true);
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len_ping = ping_tc
             .write_to_bytes(&mut buffer)

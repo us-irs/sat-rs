@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     sync::{Arc, Mutex},
 };
 
@@ -10,11 +10,8 @@ use satrs::{
     spacepackets::PacketId,
     tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc, TmPacketSourceCore},
 };
-use satrs_example::config::PUS_APID;
 
 use crate::ccsds::CcsdsReceiver;
-
-pub const PACKET_ID_LOOKUP: &[PacketId] = &[PacketId::const_tc(true, PUS_APID)];
 
 #[derive(Default, Clone)]
 pub struct SyncTcpTmSource {
@@ -77,6 +74,7 @@ pub type TcpServerType<TcSource, MpscErrorType> = TcpSpacepacketsServer<
     CcsdsError<MpscErrorType>,
     SyncTcpTmSource,
     CcsdsDistributor<CcsdsReceiver<TcSource, MpscErrorType>, MpscErrorType>,
+    HashSet<PacketId>,
 >;
 
 pub struct TcpTask<
@@ -103,14 +101,10 @@ impl<
         cfg: ServerConfig,
         tm_source: SyncTcpTmSource,
         tc_receiver: CcsdsDistributor<CcsdsReceiver<TcSource, MpscErrorType>, MpscErrorType>,
+        packet_id_lookup: HashSet<PacketId>,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
-            server: TcpSpacepacketsServer::new(
-                cfg,
-                tm_source,
-                tc_receiver,
-                Box::new(PACKET_ID_LOOKUP),
-            )?,
+            server: TcpSpacepacketsServer::new(cfg, tm_source, tc_receiver, packet_id_lookup)?,
         })
     }
 
