@@ -71,9 +71,8 @@ features = ["all"]
 optional = true
 
 [dependencies.spacepackets]
-git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
+# git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
 version = "0.11.0-rc.2"
-branch = "main"
 default-features = false
 
 [dependencies.cobs]
@@ -117,6 +116,7 @@ alloc = [
 serde = ["dep:serde", "spacepackets/serde", "satrs-shared/serde"]
 crossbeam = ["crossbeam-channel"]
 heapless = ["dep:heapless"]
+defmt = ["spacepackets/defmt"]
 test_util = []
 doc-images = []
 

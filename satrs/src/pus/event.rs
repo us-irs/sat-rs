@@ -1,11 +1,9 @@
-use crate::pus::{source_buffer_large_enough, EcssTmtcError};
+use crate::pus::source_buffer_large_enough;
 use spacepackets::ecss::tm::PusTmCreator;
 use spacepackets::ecss::tm::PusTmSecondaryHeader;
-use spacepackets::ecss::{EcssEnumeration, PusError};
+use spacepackets::ecss::EcssEnumeration;
 use spacepackets::ByteConversionError;
 use spacepackets::{SpHeader, MAX_APID};
-
-use crate::pus::EcssTmSenderCore;
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
@@ -134,10 +132,12 @@ impl EventReportCreator {
 #[cfg(feature = "alloc")]
 mod alloc_mod {
     use super::*;
+    use crate::pus::{EcssTmSenderCore, EcssTmtcError};
     use crate::ComponentId;
     use alloc::vec;
     use alloc::vec::Vec;
     use core::cell::RefCell;
+    use spacepackets::ecss::PusError;
 
     pub trait EventTmHookProvider {
         fn modify_tm(&self, tm: &mut PusTmCreator);
@@ -268,8 +268,9 @@ mod tests {
     use crate::events::{EventU32, Severity};
     use crate::pus::test_util::TEST_COMPONENT_ID_0;
     use crate::pus::tests::CommonTmInfo;
-    use crate::pus::{ChannelWithId, PusTmVariant};
+    use crate::pus::{ChannelWithId, EcssTmSenderCore, EcssTmtcError, PusTmVariant};
     use crate::ComponentId;
+    use spacepackets::ecss::PusError;
     use spacepackets::ByteConversionError;
     use std::cell::RefCell;
     use std::collections::VecDeque;

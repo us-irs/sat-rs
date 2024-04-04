@@ -92,7 +92,7 @@ use delegate::delegate;
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::tc::IsPusTelecommand;
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
-use spacepackets::ecss::{EcssEnumeration, PusError};
+use spacepackets::ecss::EcssEnumeration;
 use spacepackets::{ByteConversionError, CcsdsPacket, PacketId, PacketSequenceCtrl};
 use spacepackets::{SpHeader, MAX_APID};
 
@@ -883,6 +883,8 @@ impl VerificationReportCreator {
 
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
+    use spacepackets::ecss::PusError;
+
     use super::*;
     use crate::{pus::PusTmVariant, ComponentId};
     use core::cell::RefCell;
