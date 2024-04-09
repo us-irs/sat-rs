@@ -1,3 +1,5 @@
+use alloc::sync::Arc;
+use core::sync::atomic::AtomicBool;
 use delegate::delegate;
 use std::{
     io::Write,
@@ -131,6 +133,7 @@ impl<
         tm_source: TmSource,
         tc_receiver: TcReceiver,
         packet_id_checker: PacketIdChecker,
+        stop_signal: Option<Arc<AtomicBool>>,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
             generic_server: TcpTmtcGenericServer::new(
@@ -139,6 +142,7 @@ impl<
                 SpacepacketsTmSender::default(),
                 tm_source,
                 tc_receiver,
+                stop_signal,
             )?,
         })
     }
@@ -197,12 +201,14 @@ mod tests {
         tc_receiver: SyncTcCacher,
         tm_source: SyncTmSource,
         packet_id_lookup: HashSet<PacketId>,
+        stop_signal: Option<Arc<AtomicBool>>,
     ) -> TcpSpacepacketsServer<(), (), SyncTmSource, SyncTcCacher, HashSet<PacketId>> {
         TcpSpacepacketsServer::new(
             ServerConfig::new(*addr, Duration::from_millis(2), 1024, 1024),
             tm_source,
             tc_receiver,
             packet_id_lookup,
+            stop_signal,
         )
         .expect("TCP server generation failed")
     }
@@ -219,6 +225,7 @@ mod tests {
             tc_receiver.clone(),
             tm_source,
             packet_id_lookup,
+            None,
         );
         let dest_addr = tcp_server
             .local_addr()
@@ -288,6 +295,7 @@ mod tests {
             tc_receiver.clone(),
             tm_source,
             packet_id_lookup,
+            None,
         );
         let dest_addr = tcp_server
             .local_addr()

@@ -104,7 +104,13 @@ impl<
         packet_id_lookup: HashSet<PacketId>,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
-            server: TcpSpacepacketsServer::new(cfg, tm_source, tc_receiver, packet_id_lookup)?,
+            server: TcpSpacepacketsServer::new(
+                cfg,
+                tm_source,
+                tc_receiver,
+                packet_id_lookup,
+                None,
+            )?,
         })
     }
 

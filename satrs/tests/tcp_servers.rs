@@ -96,6 +96,7 @@ fn test_cobs_server() {
         ServerConfig::new(AUTO_PORT_ADDR, Duration::from_millis(2), 1024, 1024),
         tm_source,
         tc_receiver.clone(),
+        None,
     )
     .expect("TCP server generation failed");
     let dest_addr = tcp_server
@@ -179,6 +180,7 @@ fn test_ccsds_server() {
         tm_source,
         tc_receiver.clone(),
         packet_id_lookup,
+        None,
     )
     .expect("TCP server generation failed");
     let dest_addr = tcp_server

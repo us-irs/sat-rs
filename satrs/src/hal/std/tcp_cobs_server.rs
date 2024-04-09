@@ -1,5 +1,7 @@
+use alloc::sync::Arc;
 use alloc::vec;
 use cobs::encode;
+use core::sync::atomic::AtomicBool;
 use delegate::delegate;
 use std::io::Write;
 use std::net::SocketAddr;
@@ -140,6 +142,7 @@ impl<
         cfg: ServerConfig,
         tm_source: TmSource,
         tc_receiver: TcReceiver,
+        stop_signal: Option<Arc<AtomicBool>>,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
             generic_server: TcpTmtcGenericServer::new(
@@ -148,6 +151,7 @@ impl<
                 CobsTmSender::new(cfg.tm_buffer_size),
                 tm_source,
                 tc_receiver,
+                stop_signal,
             )?,
         })
     }
@@ -178,6 +182,7 @@ mod tests {
         io::{Read, Write},
         net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
         thread,
+        time::Instant,
     };
 
     use crate::{
@@ -212,11 +217,13 @@ mod tests {
         addr: &SocketAddr,
         tc_receiver: SyncTcCacher,
         tm_source: SyncTmSource,
+        stop_signal: Option<Arc<AtomicBool>>,
     ) -> TcpTmtcInCobsServer<(), (), SyncTmSource, SyncTcCacher> {
         TcpTmtcInCobsServer::new(
             ServerConfig::new(*addr, Duration::from_millis(2), 1024, 1024),
             tm_source,
             tc_receiver,
+            stop_signal,
         )
         .expect("TCP server generation failed")
     }
@@ -226,7 +233,8 @@ mod tests {
         let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
         let tc_receiver = SyncTcCacher::default();
         let tm_source = SyncTmSource::default();
-        let mut tcp_server = generic_tmtc_server(&auto_port_addr, tc_receiver.clone(), tm_source);
+        let mut tcp_server =
+            generic_tmtc_server(&auto_port_addr, tc_receiver.clone(), tm_source, None);
         let dest_addr = tcp_server
             .local_addr()
             .expect("retrieving dest addr failed");
@@ -278,8 +286,12 @@ mod tests {
         let mut tm_source = SyncTmSource::default();
         tm_source.add_tm(&INVERTED_PACKET);
         tm_source.add_tm(&SIMPLE_PACKET);
-        let mut tcp_server =
-            generic_tmtc_server(&auto_port_addr, tc_receiver.clone(), tm_source.clone());
+        let mut tcp_server = generic_tmtc_server(
+            &auto_port_addr,
+            tc_receiver.clone(),
+            tm_source.clone(),
+            None,
+        );
         let dest_addr = tcp_server
             .local_addr()
             .expect("retrieving dest addr failed");
@@ -375,5 +387,31 @@ mod tests {
         assert_eq!(tc_queue.pop_front().unwrap(), &SIMPLE_PACKET);
         assert_eq!(tc_queue.pop_front().unwrap(), &INVERTED_PACKET);
         drop(tc_queue);
+    }
+
+    #[test]
+    fn test_server_stop_signal() {
+        let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
+        let tc_receiver = SyncTcCacher::default();
+        let tm_source = SyncTmSource::default();
+        let stop_signal = Arc::new(AtomicBool::new(false));
+        let mut tcp_server = generic_tmtc_server(
+            &auto_port_addr,
+            tc_receiver.clone(),
+            tm_source,
+            Some(stop_signal.clone()),
+        );
+        let start = Instant::now();
+        // Call the connection handler in separate thread, does block.
+        thread::spawn(move || loop {
+            let result = tcp_server.handle_next_connection();
+            if result.is_err() {
+                panic!("handling connection failed: {:?}", result.unwrap_err());
+            }
+            if Instant::now() - start > Duration::from_millis(50) {
+                panic!("regular stop signal handling failed");
+            }
+        });
+        stop_signal.store(true, Ordering::Relaxed);
     }
 }

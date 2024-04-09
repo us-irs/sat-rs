@@ -1,6 +1,8 @@
 //! Generic TCP TMTC servers with different TMTC format flavours.
+use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::sync::atomic::AtomicBool;
 use core::time::Duration;
 use socket2::{Domain, Socket, Type};
 use std::io::Read;
@@ -145,6 +147,7 @@ pub struct TcpTmtcGenericServer<
     pub(crate) tm_buffer: Vec<u8>,
     pub(crate) tc_receiver: TcReceiver,
     pub(crate) tc_buffer: Vec<u8>,
+    stop_signal: Option<Arc<AtomicBool>>,
     tc_handler: TcParser,
     tm_handler: TmSender,
 }
@@ -176,6 +179,7 @@ impl<
         tm_sender: TmSender,
         tm_source: TmSource,
         tc_receiver: TcReceiver,
+        stop_signal: Option<Arc<AtomicBool>>,
     ) -> Result<Self, std::io::Error> {
         // Create a TCP listener bound to two addresses.
         let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
@@ -194,6 +198,7 @@ impl<
             tm_buffer: vec![0; cfg.tm_buffer_size],
             tc_receiver,
             tc_buffer: vec![0; cfg.tc_buffer_size],
+            stop_signal,
         })
     }
 
@@ -284,6 +289,16 @@ impl<
                             // No TC read, no TM was sent, but the client has not disconnected.
                             // Perform an inner delay to avoid burning CPU time.
                             thread::sleep(self.inner_loop_delay);
+                            // Optional stop signal handling.
+                            if self.stop_signal.is_some()
+                                && self
+                                    .stop_signal
+                                    .as_ref()
+                                    .unwrap()
+                                    .load(std::sync::atomic::Ordering::Relaxed)
+                            {
+                                return Ok(connection_result);
+                            }
                         }
                     }
                     _ => {
