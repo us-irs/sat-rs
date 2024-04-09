@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Introduced generic `EventMessage` which is generic over the event type and the additional
   parameter type. This message also contains the sender ID which can be useful for debugging
   or application layer / FDIR logic.
+- Stop signal handling for the TCP servers.
 
 ## Changed
 
