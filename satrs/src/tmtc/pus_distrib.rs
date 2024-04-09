@@ -46,8 +46,8 @@
 //! let mut pus_distributor = PusDistributor::new(service_handler);
 //!
 //! // Create and pass PUS ping telecommand with a valid APID
-//! let mut space_packet_header = SpHeader::tc_unseg(0x002, 0x34, 0).unwrap();
-//! let mut pus_tc = PusTcCreator::new_simple(&mut space_packet_header, 17, 1, None, true);
+//! let sp_header = SpHeader::new_for_unseg_tc(0x002, 0x34, 0);
+//! let mut pus_tc = PusTcCreator::new_simple(sp_header, 17, 1, &[], true);
 //! let mut test_buf: [u8; 32] = [0; 32];
 //! let mut size = pus_tc
 //!     .write_to_bytes(test_buf.as_mut_slice())
@@ -176,6 +176,7 @@ mod tests {
         BasicApidHandlerSharedQueue,
     };
     use crate::tmtc::ccsds_distrib::{CcsdsDistributor, CcsdsPacketHandler};
+    use crate::ValidatorU16Id;
     use alloc::format;
     use alloc::vec::Vec;
     use spacepackets::ecss::PusError;
@@ -253,17 +254,13 @@ mod tests {
         () => {
             type Error = PusError;
 
-            fn valid_apids(&self) -> &'static [u16] {
-                &[0x000, 0x002]
-            }
-
-            fn handle_known_apid(
+            fn handle_packet_with_valid_apid(
                 &mut self,
                 sp_header: &SpHeader,
                 tc_raw: &[u8],
             ) -> Result<(), Self::Error> {
                 self.handler_base
-                    .handle_known_apid(&sp_header, tc_raw)
+                    .handle_packet_with_valid_apid(&sp_header, tc_raw)
                     .ok()
                     .expect("Unexpected error");
                 match self.pus_distrib.pass_ccsds(&sp_header, tc_raw) {
@@ -275,18 +272,30 @@ mod tests {
                 }
             }
 
-            fn handle_unknown_apid(
+            fn handle_packet_with_unknown_apid(
                 &mut self,
                 sp_header: &SpHeader,
                 tc_raw: &[u8],
             ) -> Result<(), Self::Error> {
                 self.handler_base
-                    .handle_unknown_apid(&sp_header, tc_raw)
+                    .handle_packet_with_unknown_apid(&sp_header, tc_raw)
                     .ok()
                     .expect("Unexpected error");
                 Ok(())
             }
         };
+    }
+
+    impl ValidatorU16Id for ApidHandlerOwned {
+        fn validate(&self, packet_id: u16) -> bool {
+            [0x000, 0x002].contains(&packet_id)
+        }
+    }
+
+    impl ValidatorU16Id for ApidHandlerShared {
+        fn validate(&self, packet_id: u16) -> bool {
+            [0x000, 0x002].contains(&packet_id)
+        }
     }
 
     impl CcsdsPacketHandler for ApidHandlerOwned {

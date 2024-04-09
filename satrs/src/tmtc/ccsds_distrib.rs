@@ -18,11 +18,12 @@
 //! # Example
 //!
 //! ```rust
+//! use satrs::ValidatorU16Id;
 //! use satrs::tmtc::ccsds_distrib::{CcsdsPacketHandler, CcsdsDistributor};
 //! use satrs::tmtc::{ReceivesTc, ReceivesTcCore};
 //! use spacepackets::{CcsdsPacket, SpHeader};
 //! use spacepackets::ecss::WritablePusPacket;
-//! use spacepackets::ecss::tc::{PusTc, PusTcCreator};
+//! use spacepackets::ecss::tc::PusTcCreator;
 //!
 //! #[derive (Default)]
 //! struct ConcreteApidHandler {
@@ -34,16 +35,19 @@
 //!     fn mutable_foo(&mut self) {}
 //! }
 //!
+//! impl ValidatorU16Id for ConcreteApidHandler {
+//!     fn validate(&self, apid: u16) -> bool { apid == 0x0002 }
+//! }
+//!
 //! impl CcsdsPacketHandler for ConcreteApidHandler {
 //!     type Error = ();
-//!     fn valid_apids(&self) -> &'static [u16] { &[0x002] }
-//!     fn handle_known_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) -> Result<(), Self::Error> {
+//!     fn handle_packet_with_valid_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) -> Result<(), Self::Error> {
 //!         assert_eq!(sp_header.apid(), 0x002);
 //!         assert_eq!(tc_raw.len(), 13);
 //!         self.known_call_count += 1;
 //!         Ok(())
 //!     }
-//!     fn handle_unknown_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) -> Result<(), Self::Error> {
+//!     fn handle_packet_with_unknown_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) -> Result<(), Self::Error> {
 //!         assert_eq!(sp_header.apid(), 0x003);
 //!         assert_eq!(tc_raw.len(), 13);
 //!         self.unknown_call_count += 1;
@@ -55,8 +59,8 @@
 //! let mut ccsds_distributor = CcsdsDistributor::new(apid_handler);
 //!
 //! // Create and pass PUS telecommand with a valid APID
-//! let mut space_packet_header = SpHeader::tc_unseg(0x002, 0x34, 0).unwrap();
-//! let mut pus_tc = PusTcCreator::new_simple(&mut space_packet_header, 17, 1, None, true);
+//! let sp_header = SpHeader::new_for_unseg_tc(0x002, 0x34, 0);
+//! let mut pus_tc = PusTcCreator::new_simple(sp_header, 17, 1, &[], true);
 //! let mut test_buf: [u8; 32] = [0; 32];
 //! let mut size = pus_tc
 //!     .write_to_bytes(test_buf.as_mut_slice())
@@ -81,7 +85,10 @@
 //! let mutable_handler_ref = ccsds_distributor.packet_handler_mut();
 //! mutable_handler_ref.mutable_foo();
 //! ```
-use crate::tmtc::{ReceivesCcsdsTc, ReceivesTcCore};
+use crate::{
+    tmtc::{ReceivesCcsdsTc, ReceivesTcCore},
+    ValidatorU16Id,
+};
 use core::fmt::{Display, Formatter};
 use spacepackets::{ByteConversionError, CcsdsPacket, SpHeader};
 #[cfg(feature = "std")]
@@ -92,14 +99,18 @@ use std::error::Error;
 /// Users should implement this trait on their custom CCSDS packet handler and then pass a boxed
 /// instance of this handler to the [CcsdsDistributor]. The distributor will use the trait
 /// interface to dispatch received packets to the user based on the Application Process Identifier
-/// (APID) field of the CCSDS packet.
-pub trait CcsdsPacketHandler {
+/// (APID) field of the CCSDS packet. The APID will be checked using the generic [ValidatorU16Id]
+/// trait.
+pub trait CcsdsPacketHandler: ValidatorU16Id {
     type Error;
 
-    fn valid_apids(&self) -> &'static [u16];
-    fn handle_known_apid(&mut self, sp_header: &SpHeader, tc_raw: &[u8])
-        -> Result<(), Self::Error>;
-    fn handle_unknown_apid(
+    fn handle_packet_with_valid_apid(
+        &mut self,
+        sp_header: &SpHeader,
+        tc_raw: &[u8],
+    ) -> Result<(), Self::Error>;
+
+    fn handle_packet_with_unknown_apid(
         &mut self,
         sp_header: &SpHeader,
         tc_raw: &[u8],
@@ -183,18 +194,15 @@ impl<PacketHandler: CcsdsPacketHandler<Error = E>, E: 'static> CcsdsDistributor<
     }
 
     fn dispatch_ccsds(&mut self, sp_header: &SpHeader, tc_raw: &[u8]) -> Result<(), CcsdsError<E>> {
-        let apid = sp_header.apid();
-        let valid_apids = self.packet_handler.valid_apids();
-        for &valid_apid in valid_apids {
-            if valid_apid == apid {
-                return self
-                    .packet_handler
-                    .handle_known_apid(sp_header, tc_raw)
-                    .map_err(|e| CcsdsError::CustomError(e));
-            }
+        let valid_apid = self.packet_handler().validate(sp_header.apid());
+        if valid_apid {
+            self.packet_handler
+                .handle_packet_with_valid_apid(sp_header, tc_raw)
+                .map_err(|e| CcsdsError::CustomError(e))?;
+            return Ok(());
         }
         self.packet_handler
-            .handle_unknown_apid(sp_header, tc_raw)
+            .handle_packet_with_unknown_apid(sp_header, tc_raw)
             .map_err(|e| CcsdsError::CustomError(e))
     }
 }
@@ -213,8 +221,8 @@ pub(crate) mod tests {
     fn is_send<T: Send>(_: &T) {}
 
     pub fn generate_ping_tc(buf: &mut [u8]) -> &[u8] {
-        let mut sph = SpHeader::tc_unseg(0x002, 0x34, 0).unwrap();
-        let pus_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        let sph = SpHeader::new_for_unseg_tc(0x002, 0x34, 0);
+        let pus_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
         let size = pus_tc
             .write_to_bytes(buf)
             .expect("Error writing TC to buffer");
@@ -223,8 +231,8 @@ pub(crate) mod tests {
     }
 
     pub fn generate_ping_tc_as_vec() -> Vec<u8> {
-        let mut sph = SpHeader::tc_unseg(0x002, 0x34, 0).unwrap();
-        PusTcCreator::new_simple(&mut sph, 17, 1, None, true)
+        let sph = SpHeader::new_for_unseg_tc(0x002, 0x34, 0);
+        PusTcCreator::new_simple(sph, 17, 1, &[], true)
             .to_vec()
             .unwrap()
     }
@@ -241,13 +249,16 @@ pub(crate) mod tests {
         pub unknown_packet_queue: VecDeque<(u16, Vec<u8>)>,
     }
 
+    impl ValidatorU16Id for BasicApidHandlerSharedQueue {
+        fn validate(&self, packet_id: u16) -> bool {
+            [0x000, 0x002].contains(&packet_id)
+        }
+    }
+
     impl CcsdsPacketHandler for BasicApidHandlerSharedQueue {
         type Error = ();
-        fn valid_apids(&self) -> &'static [u16] {
-            &[0x000, 0x002]
-        }
 
-        fn handle_known_apid(
+        fn handle_packet_with_valid_apid(
             &mut self,
             sp_header: &SpHeader,
             tc_raw: &[u8],
@@ -261,7 +272,7 @@ pub(crate) mod tests {
             Ok(())
         }
 
-        fn handle_unknown_apid(
+        fn handle_packet_with_unknown_apid(
             &mut self,
             sp_header: &SpHeader,
             tc_raw: &[u8],
@@ -276,14 +287,16 @@ pub(crate) mod tests {
         }
     }
 
+    impl ValidatorU16Id for BasicApidHandlerOwnedQueue {
+        fn validate(&self, packet_id: u16) -> bool {
+            [0x000, 0x002].contains(&packet_id)
+        }
+    }
+
     impl CcsdsPacketHandler for BasicApidHandlerOwnedQueue {
         type Error = ();
 
-        fn valid_apids(&self) -> &'static [u16] {
-            &[0x000, 0x002]
-        }
-
-        fn handle_known_apid(
+        fn handle_packet_with_valid_apid(
             &mut self,
             sp_header: &SpHeader,
             tc_raw: &[u8],
@@ -294,7 +307,7 @@ pub(crate) mod tests {
             Ok(())
         }
 
-        fn handle_unknown_apid(
+        fn handle_packet_with_unknown_apid(
             &mut self,
             sp_header: &SpHeader,
             tc_raw: &[u8],
@@ -332,8 +345,8 @@ pub(crate) mod tests {
     fn test_unknown_apid_handling() {
         let apid_handler = BasicApidHandlerOwnedQueue::default();
         let mut ccsds_distrib = CcsdsDistributor::new(apid_handler);
-        let mut sph = SpHeader::tc_unseg(0x004, 0x34, 0).unwrap();
-        let pus_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        let sph = SpHeader::new_for_unseg_tc(0x004, 0x34, 0);
+        let pus_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
         let mut test_buf: [u8; 32] = [0; 32];
         pus_tc
             .write_to_bytes(test_buf.as_mut_slice())
@@ -351,8 +364,8 @@ pub(crate) mod tests {
     #[test]
     fn test_ccsds_distribution() {
         let mut ccsds_distrib = CcsdsDistributor::new(BasicApidHandlerOwnedQueue::default());
-        let mut sph = SpHeader::tc_unseg(0x002, 0x34, 0).unwrap();
-        let pus_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        let sph = SpHeader::new_for_unseg_tc(0x002, 0x34, 0);
+        let pus_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
         let tc_vec = pus_tc.to_vec().unwrap();
         ccsds_distrib
             .pass_ccsds(&sph, &tc_vec)
@@ -370,8 +383,8 @@ pub(crate) mod tests {
     #[test]
     fn test_distribution_short_packet_fails() {
         let mut ccsds_distrib = CcsdsDistributor::new(BasicApidHandlerOwnedQueue::default());
-        let mut sph = SpHeader::tc_unseg(0x002, 0x34, 0).unwrap();
-        let pus_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+        let sph = SpHeader::new_for_unseg_tc(0x002, 0x34, 0);
+        let pus_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
         let tc_vec = pus_tc.to_vec().unwrap();
         let result = ccsds_distrib.pass_tc(&tc_vec[0..6]);
         assert!(result.is_err());

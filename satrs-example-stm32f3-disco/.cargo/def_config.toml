@@ -5,11 +5,17 @@
 # runner = "arm-none-eabi-gdb -q -x openocd.gdb"
 # runner = "gdb-multiarch -q -x openocd.gdb"
 # runner = "gdb -q -x openocd.gdb"
-# runner = "probe-run --chip STM32F303VCTx --connect-under-reset"
+runner = "probe-rs run --chip STM32F303VCTx"
 
 rustflags = [
+  "-C", "linker=flip-link",
   # LLD (shipped with the Rust toolchain) is used as the default linker
   "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tdefmt.x",
+
+  # This is needed if your flash or ram addresses are not aligned to 0x10000 in memory.x
+  # See https://github.com/rust-embedded/cortex-m-quickstart/pull/95
+  "-C", "link-arg=--nmagic",
 
   # if you run into problems with LLD switch to the GNU linker by commenting out
   # this line
@@ -26,3 +32,6 @@ rustflags = [
 [build]
 # comment out the following line if you intend to run unit tests on host machine
 target = "thumbv7em-none-eabihf" # Cortex-M4F and Cortex-M7F (with FPU)
+
+[env]
+DEFMT_LOG = "info"

@@ -1,9 +1,10 @@
-#[cfg(feature = "crossbeam")]
+// #[cfg(feature = "crossbeam")]
 pub mod crossbeam_test {
     use hashbrown::HashMap;
     use satrs::pool::{PoolProvider, PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
+    use satrs::pus::test_util::{TEST_APID, TEST_COMPONENT_ID_0};
     use satrs::pus::verification::{
-        FailParams, RequestId, VerificationReporterCfg, VerificationReporterWithSender,
+        FailParams, RequestId, VerificationReporter, VerificationReporterCfg,
         VerificationReportingProvider,
     };
     use satrs::pus::TmInSharedPoolSenderWithCrossbeam;
@@ -16,7 +17,6 @@ pub mod crossbeam_test {
     use std::thread;
     use std::time::Duration;
 
-    const TEST_APID: u16 = 0x03;
     const FIXED_STAMP: [u8; 7] = [0; 7];
     const PACKETS_SENT: u8 = 8;
 
@@ -40,13 +40,9 @@ pub mod crossbeam_test {
         let shared_tc_pool_0 = Arc::new(RwLock::new(StaticMemoryPool::new(pool_cfg)));
         let shared_tc_pool_1 = shared_tc_pool_0.clone();
         let (tx, rx) = crossbeam_channel::bounded(10);
-        let sender = TmInSharedPoolSenderWithCrossbeam::new(
-            0,
-            "verif_sender",
-            shared_tm_pool.clone(),
-            tx.clone(),
-        );
-        let mut reporter_with_sender_0 = VerificationReporterWithSender::new(&cfg, sender);
+        let sender_0 = TmInSharedPoolSenderWithCrossbeam::new(shared_tm_pool.clone(), tx.clone());
+        let sender_1 = sender_0.clone();
+        let mut reporter_with_sender_0 = VerificationReporter::new(TEST_COMPONENT_ID_0.id(), &cfg);
         let mut reporter_with_sender_1 = reporter_with_sender_0.clone();
         // For test purposes, we retrieve the request ID from the TCs and pass them to the receiver
         // tread.
@@ -57,9 +53,9 @@ pub mod crossbeam_test {
         let (tx_tc_1, rx_tc_1) = crossbeam_channel::bounded(3);
         {
             let mut tc_guard = shared_tc_pool_0.write().unwrap();
-            let mut sph = SpHeader::tc_unseg(TEST_APID, 0, 0).unwrap();
+            let sph = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
             let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-            let pus_tc_0 = PusTcCreator::new_no_app_data(&mut sph, tc_header, true);
+            let pus_tc_0 = PusTcCreator::new_no_app_data(sph, tc_header, true);
             req_id_0 = RequestId::new(&pus_tc_0);
             let addr = tc_guard
                 .free_element(pus_tc_0.len_written(), |buf| {
@@ -67,9 +63,9 @@ pub mod crossbeam_test {
                 })
                 .unwrap();
             tx_tc_0.send(addr).unwrap();
-            let mut sph = SpHeader::tc_unseg(TEST_APID, 1, 0).unwrap();
+            let sph = SpHeader::new_for_unseg_tc(TEST_APID, 1, 0);
             let tc_header = PusTcSecondaryHeader::new_simple(5, 1);
-            let pus_tc_1 = PusTcCreator::new_no_app_data(&mut sph, tc_header, true);
+            let pus_tc_1 = PusTcCreator::new_no_app_data(sph, tc_header, true);
             req_id_1 = RequestId::new(&pus_tc_1);
             let addr = tc_guard
                 .free_element(pus_tc_0.len_written(), |buf| {
@@ -93,24 +89,24 @@ pub mod crossbeam_test {
 
             let token = reporter_with_sender_0.add_tc_with_req_id(req_id_0);
             let accepted_token = reporter_with_sender_0
-                .acceptance_success(token, &FIXED_STAMP)
+                .acceptance_success(&sender_0, token, &FIXED_STAMP)
                 .expect("Acceptance success failed");
 
             // Do some start handling here
             let started_token = reporter_with_sender_0
-                .start_success(accepted_token, &FIXED_STAMP)
+                .start_success(&sender_0, accepted_token, &FIXED_STAMP)
                 .expect("Start success failed");
             // Do some step handling here
             reporter_with_sender_0
-                .step_success(&started_token, &FIXED_STAMP, EcssEnumU8::new(0))
+                .step_success(&sender_0, &started_token, &FIXED_STAMP, EcssEnumU8::new(0))
                 .expect("Start success failed");
 
             // Finish up
             reporter_with_sender_0
-                .step_success(&started_token, &FIXED_STAMP, EcssEnumU8::new(1))
+                .step_success(&sender_0, &started_token, &FIXED_STAMP, EcssEnumU8::new(1))
                 .expect("Start success failed");
             reporter_with_sender_0
-                .completion_success(started_token, &FIXED_STAMP)
+                .completion_success(&sender_0, started_token, &FIXED_STAMP)
                 .expect("Completion success failed");
         });
 
@@ -128,15 +124,15 @@ pub mod crossbeam_test {
             let (tc, _) = PusTcReader::new(&tc_buf[0..tc_len]).unwrap();
             let token = reporter_with_sender_1.add_tc(&tc);
             let accepted_token = reporter_with_sender_1
-                .acceptance_success(token, &FIXED_STAMP)
+                .acceptance_success(&sender_1, token, &FIXED_STAMP)
                 .expect("Acceptance success failed");
             let started_token = reporter_with_sender_1
-                .start_success(accepted_token, &FIXED_STAMP)
+                .start_success(&sender_1, accepted_token, &FIXED_STAMP)
                 .expect("Start success failed");
             let fail_code = EcssEnumU16::new(2);
             let params = FailParams::new_no_fail_data(&FIXED_STAMP, &fail_code);
             reporter_with_sender_1
-                .completion_failure(started_token, params)
+                .completion_failure(&sender_1, started_token, params)
                 .expect("Completion success failed");
         });
 
@@ -145,14 +141,14 @@ pub mod crossbeam_test {
             let mut tm_buf: [u8; 1024] = [0; 1024];
             let mut verif_map = HashMap::new();
             while packet_counter < PACKETS_SENT {
-                let verif_addr = rx
+                let tm_in_pool = rx
                     .recv_timeout(Duration::from_millis(50))
                     .expect("Packet reception timeout");
                 let tm_len;
                 let shared_tm_store = shared_tm_pool.clone_backing_pool();
                 {
                     let mut rg = shared_tm_store.write().expect("Error locking shared pool");
-                    let store_guard = rg.read_with_guard(verif_addr);
+                    let store_guard = rg.read_with_guard(tm_in_pool.store_addr);
                     tm_len = store_guard
                         .read(&mut tm_buf)
                         .expect("Error reading TM slice");

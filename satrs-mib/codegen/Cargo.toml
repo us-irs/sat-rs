@@ -26,7 +26,10 @@ features = ["full"]
 
 [dev-dependencies]
 trybuild = { version = "1", features = ["diff"] }
-satrs-shared = "0.1.2"
+
+[dev-dependencies.satrs-shared]
+version = "0.1.3"
+path = "../../satrs-shared"
 
 [dev-dependencies.satrs-mib]
 path = ".."

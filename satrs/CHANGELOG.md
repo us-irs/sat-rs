@@ -8,8 +8,30 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+- `spacepackets` v0.11.0
+
+## Added
+
+- Added `params::WritableToBeBytes::to_vec`.
+- New `ComponentId` (`u64` typedef for now) which replaces former `TargetId` as a generic
+  way to identify components.
+- Various abstraction and objects for targeted requests. This includes mode request/reply
+  types for actions, HK and modes.
+- `VerificationReportingProvider::owner_id` method.
+- Introduced generic `EventMessage` which is generic over the event type and the additional
+  parameter type. This message also contains the sender ID which can be useful for debugging
+  or application layer / FDIR logic.
+
 ## Changed
 
+- `encoding::ccsds::PacketIdValidator` renamed to `ValidatorU16Id`, which lives in the crate root.
+  It can be used for both CCSDS packet ID and CCSDS APID validation.
+- `EventManager::try_event_handling` not expects a mutable error handling closure instead of
+  returning the occured errors.
+- Renamed `EventManagerBase` to `EventReportCreator`
+- Renamed `VerificationReporterCore` to `VerificationReportCreator`.
+- Removed `VerificationReporterCore`. The high-level API exposed by `VerificationReporter` and
+  the low level API exposed by `VerificationReportCreator` should be sufficient for all use-cases.
 - Refactored `EventManager` to heavily use generics instead of trait objects.
   - `SendEventProvider` -> `EventSendProvider`. `id` trait method renamed to `channel_id`.
   - `ListenerTable` -> `ListenerMapProvider`
@@ -18,16 +40,37 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Refactored ECSS TM sender abstractions to be generic over different message queue backends.
 - Refactored Verification Reporter abstractions and implementation to be generic over the sender
   instead of using trait objects.
+- Renamed `WritableToBeBytes::raw_len` to `WritableToBeBytes::written_len` for consistency.
 - `PusServiceProvider` renamed to `PusServiceDistributor` to make the purpose of the object
   more clear
 - `PusServiceProvider::handle_pus_tc_packet` renamed to `PusServiceDistributor::distribute_packet`.
 - `PusServiceDistibutor` and `CcsdsDistributor` now use generics instead of trait objects.
   This makes accessing the concrete trait implementations more easy as well.
+- Major overhaul of the PUS handling module.
+- Replace `TargetId` by `ComponentId`.
+- Replace most usages of `ChannelId` by `ComponentId`. A dedicated channel ID has limited usage
+  due to the nature of typed channels in Rust.
+- `CheckTimer` renamed to `CountdownProvider`.
+- Renamed `TargetId` to `ComponentId`.
+- Replaced most `ChannelId` occurences with `ComponentId`. For typed channels, there is generally
+  no need for dedicated channel IDs.
+- Changed `params::WritableToBeBytes::raw_len` to `written_len` for consistency.
+- `EventReporter` caches component ID.
+- Renamed `PusService11SchedHandler` to `PusSchedServiceHandler`.
+- Fixed general naming of PUS handlers from `handle_one_tc` to `poll_and_handle_next_tc`.
+- Reworked verification module: The sender (`impl EcssTmSenderCore`)
+  now needs to be passed explicitely to the `VerificationReportingProvider` abstraction. This
+  allows easier sharing of the TM sender component.
 
 ## Fixed
 
 - Update deprecated API for `PusScheduler::insert_wrapped_tc_cds_short`
   and `PusScheduler::insert_wrapped_tc_cds_long`.
+- `EventReporter` uses interior mutability pattern to allow non-mutable API.
+
+## Removed
+
+- Remove `objects` module.
 
 # [v0.2.0-rc.0] 2024-02-21
 

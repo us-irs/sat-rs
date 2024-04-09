@@ -1,4 +1,4 @@
-<p align="center"> <img src="misc/satrs-logo.png" width="40%"> </p>
+<p align="center"> <img src="misc/satrs-logo-v2.png" width="40%"> </p>
 
 [![sat-rs website](https://img.shields.io/badge/sat--rs-website-darkgreen?style=flat)](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/)
 [![sat-rs book](https://img.shields.io/badge/sat--rs-book-darkgreen?style=flat)](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/book/)
@@ -8,16 +8,26 @@
 sat-rs
 =========
 
-This is the repository of the sat-rs framework. Its primary goal is to provide re-usable components
+This is the repository of the sat-rs library. Its primary goal is to provide re-usable components
 to write on-board software for remote systems like rovers or satellites. It is specifically written
 for the special requirements for these systems. You can find an overview of the project and the
 link to the [more high-level sat-rs book](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/)
 at the [IRS software projects website](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/).
 
+This is early-stage software. Important features are missing. New releases
+with breaking changes are released regularly, with all changes documented inside respective
+changelog files. You should only use this library if your are willing to work in this
+environment.
+
 A lot of the architecture and general design considerations are based on the
 [FSFW](https://egit.irs.uni-stuttgart.de/fsfw/fsfw) C++ framework which has flight heritage
 through the 2 missions [FLP](https://www.irs.uni-stuttgart.de/en/research/satellitetechnology-and-instruments/smallsatelliteprogram/flying-laptop/)
 and [EIVE](https://www.irs.uni-stuttgart.de/en/research/satellitetechnology-and-instruments/smallsatelliteprogram/EIVE/).
+
+This framework is in the early stages of development. Important features are missing. New releases
+with breaking changes are released regularly, with all changes documented inside respective
+changelog files. You should only use this framework if your are willing to work in this
+environment.
 
 # Overview
 
@@ -35,7 +45,7 @@ This project currently contains following crates:
 * [`satrs-mib`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-mib):
    Components to build a mission information base from the on-board software directly.
 * [`satrs-example-stm32f3-disco`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example-stm32f3-disco):
-   Example of a simple example on-board software using sat-rs components on a bare-metal system
+   Example of a simple example using low-level sat-rs components on a bare-metal system
    with constrained resources.
 
 Each project has its own `CHANGELOG.md`.

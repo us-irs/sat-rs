@@ -4,8 +4,9 @@ use std::{
 };
 
 use log::info;
+use satrs::pus::{PusTmAsVec, PusTmInPool};
 use satrs::{
-    pool::{PoolProvider, StoreAddr},
+    pool::PoolProvider,
     seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore},
     spacepackets::{
         ecss::{tm::PusTmZeroCopyWriter, PusPacket},
@@ -77,16 +78,16 @@ impl TmFunnelCommon {
 pub struct TmFunnelStatic {
     common: TmFunnelCommon,
     shared_tm_store: SharedTmPool,
-    tm_funnel_rx: mpsc::Receiver<StoreAddr>,
-    tm_server_tx: mpsc::SyncSender<StoreAddr>,
+    tm_funnel_rx: mpsc::Receiver<PusTmInPool>,
+    tm_server_tx: mpsc::SyncSender<PusTmInPool>,
 }
 
 impl TmFunnelStatic {
     pub fn new(
         shared_tm_store: SharedTmPool,
         sync_tm_tcp_source: SyncTcpTmSource,
-        tm_funnel_rx: mpsc::Receiver<StoreAddr>,
-        tm_server_tx: mpsc::SyncSender<StoreAddr>,
+        tm_funnel_rx: mpsc::Receiver<PusTmInPool>,
+        tm_server_tx: mpsc::SyncSender<PusTmInPool>,
     ) -> Self {
         Self {
             common: TmFunnelCommon::new(sync_tm_tcp_source),
@@ -97,14 +98,14 @@ impl TmFunnelStatic {
     }
 
     pub fn operation(&mut self) {
-        if let Ok(addr) = self.tm_funnel_rx.recv() {
+        if let Ok(pus_tm_in_pool) = self.tm_funnel_rx.recv() {
             // Read the TM, set sequence counter and message counter, and finally update
             // the CRC.
             let shared_pool = self.shared_tm_store.clone_backing_pool();
             let mut pool_guard = shared_pool.write().expect("Locking TM pool failed");
             let mut tm_copy = Vec::new();
             pool_guard
-                .modify(&addr, |buf| {
+                .modify(&pus_tm_in_pool.store_addr, |buf| {
                     let zero_copy_writer = PusTmZeroCopyWriter::new(buf, MIN_CDS_FIELD_LEN)
                         .expect("Creating TM zero copy writer failed");
                     self.common.apply_packet_processing(zero_copy_writer);
@@ -112,7 +113,7 @@ impl TmFunnelStatic {
                 })
                 .expect("Reading TM from pool failed");
             self.tm_server_tx
-                .send(addr)
+                .send(pus_tm_in_pool)
                 .expect("Sending TM to server failed");
             // We could also do this step in the update closure, but I'd rather avoid this, could
             // lead to nested locking.
@@ -123,15 +124,15 @@ impl TmFunnelStatic {
 
 pub struct TmFunnelDynamic {
     common: TmFunnelCommon,
-    tm_funnel_rx: mpsc::Receiver<Vec<u8>>,
-    tm_server_tx: mpsc::Sender<Vec<u8>>,
+    tm_funnel_rx: mpsc::Receiver<PusTmAsVec>,
+    tm_server_tx: mpsc::Sender<PusTmAsVec>,
 }
 
 impl TmFunnelDynamic {
     pub fn new(
         sync_tm_tcp_source: SyncTcpTmSource,
-        tm_funnel_rx: mpsc::Receiver<Vec<u8>>,
-        tm_server_tx: mpsc::Sender<Vec<u8>>,
+        tm_funnel_rx: mpsc::Receiver<PusTmAsVec>,
+        tm_server_tx: mpsc::Sender<PusTmAsVec>,
     ) -> Self {
         Self {
             common: TmFunnelCommon::new(sync_tm_tcp_source),
@@ -144,13 +145,13 @@ impl TmFunnelDynamic {
         if let Ok(mut tm) = self.tm_funnel_rx.recv() {
             // Read the TM, set sequence counter and message counter, and finally update
             // the CRC.
-            let zero_copy_writer = PusTmZeroCopyWriter::new(&mut tm, MIN_CDS_FIELD_LEN)
+            let zero_copy_writer = PusTmZeroCopyWriter::new(&mut tm.packet, MIN_CDS_FIELD_LEN)
                 .expect("Creating TM zero copy writer failed");
             self.common.apply_packet_processing(zero_copy_writer);
+            self.common.sync_tm_tcp_source.add_tm(&tm.packet);
             self.tm_server_tx
-                .send(tm.clone())
+                .send(tm)
                 .expect("Sending TM to server failed");
-            self.common.sync_tm_tcp_source.add_tm(&tm);
         }
     }
 }

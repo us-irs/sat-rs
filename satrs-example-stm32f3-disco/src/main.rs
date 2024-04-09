@@ -1,27 +1,31 @@
 #![no_std]
 #![no_main]
-extern crate panic_itm;
+use satrs::pus::verification::{
+    FailParams, TcStateAccepted, VerificationReportCreator, VerificationToken,
+};
+use satrs::spacepackets::ecss::tc::PusTcReader;
+use satrs::spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
+use satrs::spacepackets::ecss::EcssEnumU16;
+use satrs::spacepackets::CcsdsPacket;
+use satrs::spacepackets::{ByteConversionError, SpHeader};
+// global logger + panicking-behavior + memory layout
+use satrs_example_stm32f3_disco as _;
 
 use rtic::app;
 
 use heapless::{mpmc::Q8, Vec};
 #[allow(unused_imports)]
-use itm_logger::{debug, info, logger_init, warn};
-use rtic_monotonics::systick::fugit::TimerInstantU32;
+use rtic_monotonics::systick::fugit::{MillisDurationU32, TimerInstantU32};
 use rtic_monotonics::systick::ExtU32;
 use satrs::seq_count::SequenceCountProviderCore;
-use satrs::{
-    pool::StoreError,
-    pus::{EcssChannel, EcssTmSenderCore, EcssTmtcError, PusTmWrapper},
-    spacepackets::{ecss::PusPacket, ecss::WritablePusPacket},
-};
+use satrs::spacepackets::{ecss::PusPacket, ecss::WritablePusPacket};
 use stm32f3xx_hal::dma::dma1;
 use stm32f3xx_hal::gpio::{PushPull, AF7, PA2, PA3};
 use stm32f3xx_hal::pac::USART2;
 use stm32f3xx_hal::serial::{Rx, RxEvent, Serial, SerialDmaRx, SerialDmaTx, Tx, TxEvent};
 
 const UART_BAUD: u32 = 115200;
-const BLINK_FREQ_MS: u32 = 1000;
+const DEFAULT_BLINK_FREQ_MS: u32 = 1000;
 const TX_HANDLER_FREQ_MS: u32 = 20;
 const MIN_DELAY_BETWEEN_TX_PACKETS_MS: u32 = 5;
 const MAX_TC_LEN: usize = 128;
@@ -54,7 +58,6 @@ type TcPacket = Vec<u8, MAX_TC_LEN>;
 
 static TM_REQUESTS: Q8<TmPacket> = Q8::new();
 
-use core::cell::RefCell;
 use core::sync::atomic::{AtomicU16, Ordering};
 
 pub struct SeqCountProviderAtomicRef {
@@ -93,53 +96,45 @@ pub struct TxIdle {
     dma_channel: dma1::C7,
 }
 
-pub struct TmSender {
-    vec: Option<RefCell<Vec<u8, MAX_TM_LEN>>>,
-    ctx: &'static str,
+#[derive(Debug, defmt::Format)]
+pub enum TmSendError {
+    ByteConversion(ByteConversionError),
+    Queue,
 }
 
-impl TmSender {
-    pub fn new(tm_packet: TmPacket, ctx: &'static str) -> Self {
-        Self {
-            vec: Some(RefCell::new(tm_packet)),
-            ctx,
-        }
+impl From<ByteConversionError> for TmSendError {
+    fn from(value: ByteConversionError) -> Self {
+        Self::ByteConversion(value)
     }
 }
 
-impl EcssChannel for TmSender {
-    fn id(&self) -> satrs::ChannelId {
-        0
+fn send_tm(tm_creator: PusTmCreator) -> Result<(), TmSendError> {
+    if tm_creator.len_written() > MAX_TM_LEN {
+        return Err(ByteConversionError::ToSliceTooSmall {
+            expected: tm_creator.len_written(),
+            found: MAX_TM_LEN,
+        }
+        .into());
     }
+    let mut tm_vec = TmPacket::new();
+    tm_vec
+        .resize(tm_creator.len_written(), 0)
+        .expect("vec resize failed");
+    tm_creator.write_to_bytes(tm_vec.as_mut_slice())?;
+    defmt::info!(
+        "Sending TM[{},{}] with size {}",
+        tm_creator.service(),
+        tm_creator.subservice(),
+        tm_creator.len_written()
+    );
+    TM_REQUESTS
+        .enqueue(tm_vec)
+        .map_err(|_| TmSendError::Queue)?;
+    Ok(())
 }
 
-impl EcssTmSenderCore for TmSender {
-    fn send_tm(&self, tm: PusTmWrapper) -> Result<(), EcssTmtcError> {
-        let vec = self.vec.as_ref();
-        if vec.is_none() {
-            panic!("send_tm should only be called once");
-        }
-        let vec_ref = vec.unwrap();
-        let mut vec = vec_ref.borrow_mut();
-        match tm {
-            PusTmWrapper::InStore(addr) => return Err(EcssTmtcError::CantSendAddr(addr)),
-            PusTmWrapper::Direct(tm) => {
-                if tm.len_written() > MAX_TM_LEN {
-                    return Err(EcssTmtcError::Store(StoreError::DataTooLarge(
-                        tm.len_written(),
-                    )));
-                }
-                vec.resize(tm.len_written(), 0).expect("vec resize failed");
-                tm.write_to_bytes(vec.as_mut_slice())?;
-                info!(target: self.ctx, "Sending TM[{},{}] with size {}", tm.service(), tm.subservice(), tm.len_written());
-                drop(vec);
-                TM_REQUESTS
-                    .enqueue(vec_ref.take())
-                    .map_err(|_| EcssTmtcError::Store(StoreError::StoreFull(0)))?;
-            }
-        }
-        Ok(())
-    }
+fn handle_tm_send_error(error: TmSendError) {
+    defmt::warn!("sending tm failed with error {}", error);
 }
 
 pub enum UartTxState {
@@ -154,19 +149,106 @@ pub struct UartTxShared {
     state: UartTxState,
 }
 
+pub struct RequestWithToken {
+    token: VerificationToken<TcStateAccepted>,
+    request: Request,
+}
+
+#[derive(Debug, defmt::Format)]
+pub enum Request {
+    Ping,
+    ChangeBlinkFrequency(u32),
+}
+
+#[derive(Debug, defmt::Format)]
+pub enum RequestError {
+    InvalidApid = 1,
+    InvalidService = 2,
+    InvalidSubservice = 3,
+    NotEnoughAppData = 4,
+}
+
+pub fn convert_pus_tc_to_request(
+    tc: &PusTcReader,
+    verif_reporter: &mut VerificationReportCreator,
+    src_data_buf: &mut [u8],
+    timestamp: &[u8],
+) -> Result<RequestWithToken, RequestError> {
+    defmt::info!(
+        "Found PUS TC [{},{}] with length {}",
+        tc.service(),
+        tc.subservice(),
+        tc.len_packed()
+    );
+
+    let token = verif_reporter.add_tc(tc);
+    if tc.apid() != PUS_APID {
+        defmt::warn!("Received tc with unknown APID {}", tc.apid());
+        let result = send_tm(
+            verif_reporter
+                .acceptance_failure(
+                    src_data_buf,
+                    token,
+                    SEQ_COUNT_PROVIDER.get_and_increment(),
+                    0,
+                    FailParams::new(timestamp, &EcssEnumU16::new(0), &[]),
+                )
+                .unwrap(),
+        );
+        if let Err(e) = result {
+            handle_tm_send_error(e);
+        }
+        return Err(RequestError::InvalidApid);
+    }
+    let (tm_creator, accepted_token) = verif_reporter
+        .acceptance_success(
+            src_data_buf,
+            token,
+            SEQ_COUNT_PROVIDER.get_and_increment(),
+            0,
+            timestamp,
+        )
+        .unwrap();
+
+    if let Err(e) = send_tm(tm_creator) {
+        handle_tm_send_error(e);
+    }
+
+    if tc.service() == 17 && tc.subservice() == 1 {
+        if tc.subservice() == 1 {
+            return Ok(RequestWithToken {
+                request: Request::Ping,
+                token: accepted_token,
+            });
+        } else {
+            return Err(RequestError::InvalidSubservice);
+        }
+    } else if tc.service() == 8 {
+        if tc.subservice() == 1 {
+            if tc.user_data().len() < 4 {
+                return Err(RequestError::NotEnoughAppData);
+            }
+            let new_freq_ms = u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap());
+            return Ok(RequestWithToken {
+                request: Request::ChangeBlinkFrequency(new_freq_ms),
+                token: accepted_token,
+            });
+        } else {
+            return Err(RequestError::InvalidSubservice);
+        }
+    } else {
+        return Err(RequestError::InvalidService);
+    }
+}
+
 #[app(device = stm32f3xx_hal::pac, peripherals = true)]
 mod app {
     use super::*;
     use core::slice::Iter;
-    use cortex_m::iprintln;
     use rtic_monotonics::systick::Systick;
     use rtic_monotonics::Monotonic;
-    use satrs::pus::verification::FailParams;
-    use satrs::pus::verification::VerificationReporterCore;
-    use satrs::spacepackets::{
-        ecss::tc::PusTcReader, ecss::tm::PusTmCreator, ecss::tm::PusTmSecondaryHeader,
-        ecss::EcssEnumU16, time::cds::P_FIELD_BASE, CcsdsPacket, SpHeader,
-    };
+    use satrs::pus::verification::{TcStateStarted, VerificationReportCreator};
+    use satrs::spacepackets::{ecss::tc::PusTcReader, time::cds::P_FIELD_BASE};
     #[allow(unused_imports)]
     use stm32f3_discovery::leds::Direction;
     use stm32f3_discovery::leds::Leds;
@@ -179,27 +261,27 @@ mod app {
 
     #[shared]
     struct Shared {
+        blink_freq: MillisDurationU32,
         tx_shared: UartTxShared,
         rx_transfer: Option<RxDmaTransferType>,
     }
 
     #[local]
     struct Local {
+        verif_reporter: VerificationReportCreator,
         leds: Leds,
         last_dir: Direction,
-        verif_reporter: VerificationReporterCore,
         curr_dir: Iter<'static, Direction>,
     }
 
     #[init]
-    fn init(mut cx: init::Context) -> (Shared, Local) {
+    fn init(cx: init::Context) -> (Shared, Local) {
         let mut rcc = cx.device.RCC.constrain();
 
         // Initialize the systick interrupt & obtain the token to prove that we did
         let systick_mono_token = rtic_monotonics::create_systick_token!();
         Systick::start(cx.core.SYST, 8_000_000, systick_mono_token);
 
-        logger_init();
         let mut flash = cx.device.FLASH.constrain();
         let clocks = rcc
             .cfgr
@@ -211,14 +293,8 @@ mod app {
         // Set up monotonic timer.
         //let mono_timer = MonoTimer::new(cx.core.DWT, clocks, &mut cx.core.DCB);
 
-        // setup ITM output
-        iprintln!(
-            &mut cx.core.ITM.stim[0],
-            "Starting sat-rs demo application for the STM32F3-Discovery"
-        );
+        defmt::info!("Starting sat-rs demo application for the STM32F3-Discovery");
         let mut gpioe = cx.device.GPIOE.split(&mut rcc.ahb);
-
-        let verif_reporter = VerificationReporterCore::new(PUS_APID).unwrap();
 
         let leds = Leds::new(
             gpioe.pe8,
@@ -265,11 +341,15 @@ mod app {
         // For some reason, this is also immediately triggered..
         tx_serial.clear_event(TxEvent::TransmissionComplete);
         let rx_transfer = rx_serial.read_exact(unsafe { DMA_RX_BUF.as_mut_slice() }, dma1.ch6);
-        info!(target: "init", "Spawning tasks");
+        defmt::info!("Spawning tasks");
         blink::spawn().unwrap();
         serial_tx_handler::spawn().unwrap();
+
+        let verif_reporter = VerificationReportCreator::new(PUS_APID).unwrap();
+
         (
             Shared {
+                blink_freq: MillisDurationU32::from_ticks(DEFAULT_BLINK_FREQ_MS),
                 tx_shared: UartTxShared {
                     last_completed: None,
                     state: UartTxState::Idle(Some(TxIdle {
@@ -280,17 +360,16 @@ mod app {
                 rx_transfer: Some(rx_transfer),
             },
             Local {
-                //timer: mono_timer,
+                verif_reporter,
                 leds,
                 last_dir: Direction::North,
                 curr_dir: Direction::iter(),
-                verif_reporter,
             },
         )
     }
 
-    #[task(local = [leds, curr_dir, last_dir])]
-    async fn blink(cx: blink::Context) {
+    #[task(local = [leds, curr_dir, last_dir], shared=[blink_freq])]
+    async fn blink(mut cx: blink::Context) {
         let blink::LocalResources {
             leds,
             curr_dir,
@@ -314,7 +393,8 @@ mod app {
                     toggle_leds(curr_dir.next().unwrap());
                 }
             }
-            Systick::delay(BLINK_FREQ_MS.millis()).await;
+            let current_blink_freq = cx.shared.blink_freq.lock(|current| *current);
+            Systick::delay(current_blink_freq).await;
         }
     }
 
@@ -389,20 +469,19 @@ mod app {
 
     #[task(
         local = [
-            stamp_buf: [u8; 7] = [0; 7],
+            verif_reporter,
             decode_buf: [u8; MAX_TC_LEN] = [0; MAX_TC_LEN],
             src_data_buf: [u8; MAX_TM_LEN] = [0; MAX_TM_LEN],
-            verif_reporter
+            timestamp: [u8; 7] = [0; 7],
         ],
+        shared = [blink_freq]
     )]
     async fn serial_rx_handler(
-        cx: serial_rx_handler::Context,
+        mut cx: serial_rx_handler::Context,
         received_packet: Vec<u8, MAX_TC_LEN>,
     ) {
-        info!("running rx handler");
-        let tgt: &'static str = "serial_rx_handler";
-        cx.local.stamp_buf[0] = P_FIELD_BASE;
-        info!(target: tgt, "Received packet with {} bytes", received_packet.len());
+        cx.local.timestamp[0] = P_FIELD_BASE;
+        defmt::info!("Received packet with {} bytes", received_packet.len());
         let decode_buf = cx.local.decode_buf;
         let packet = received_packet.as_slice();
         let mut start_idx = None;
@@ -413,142 +492,124 @@ mod app {
             }
         }
         if start_idx.is_none() {
-            warn!(
-                target: tgt,
-                "decoding error, can only process cobs encoded frames, data is all 0"
-            );
+            defmt::warn!("decoding error, can only process cobs encoded frames, data is all 0");
             return;
         }
         let start_idx = start_idx.unwrap();
         match cobs::decode(&received_packet.as_slice()[start_idx..], decode_buf) {
             Ok(len) => {
-                info!(target: tgt, "Decoded packet length: {}", len);
+                defmt::info!("Decoded packet length: {}", len);
                 let pus_tc = PusTcReader::new(decode_buf);
-                let verif_reporter = cx.local.verif_reporter;
                 match pus_tc {
-                    Ok((tc, tc_len)) => handle_tc(
-                        tc,
-                        tc_len,
-                        verif_reporter,
-                        cx.local.src_data_buf,
-                        cx.local.stamp_buf,
-                        tgt,
-                    ),
+                    Ok((tc, _tc_len)) => {
+                        match convert_pus_tc_to_request(
+                            &tc,
+                            cx.local.verif_reporter,
+                            cx.local.src_data_buf,
+                            cx.local.timestamp,
+                        ) {
+                            Ok(request_with_token) => {
+                                let started_token = handle_start_verification(
+                                    request_with_token.token,
+                                    cx.local.verif_reporter,
+                                    cx.local.src_data_buf,
+                                    cx.local.timestamp,
+                                );
+
+                                match request_with_token.request {
+                                    Request::Ping => {
+                                        handle_ping_request(cx.local.timestamp);
+                                    }
+                                    Request::ChangeBlinkFrequency(new_freq_ms) => {
+                                        defmt::info!("Received blink frequency change request with new frequncy {}", new_freq_ms);
+                                        cx.shared.blink_freq.lock(|blink_freq| {
+                                            *blink_freq =
+                                                MillisDurationU32::from_ticks(new_freq_ms);
+                                        });
+                                    }
+                                }
+                                handle_completion_verification(
+                                    started_token,
+                                    cx.local.verif_reporter,
+                                    cx.local.src_data_buf,
+                                    cx.local.timestamp,
+                                );
+                            }
+                            Err(e) => {
+                                // TODO: Error handling: Send verification failure based on request error.
+                                defmt::warn!("request error {}", e);
+                            }
+                        }
+                    }
                     Err(e) => {
-                        warn!(target: tgt, "Error unpacking PUS TC: {}", e);
+                        defmt::warn!("Error unpacking PUS TC: {}", e);
                     }
                 }
             }
             Err(_) => {
-                warn!(
-                    target: tgt,
-                    "decoding error, can only process cobs encoded frames"
-                )
+                defmt::warn!("decoding error, can only process cobs encoded frames")
             }
         }
     }
 
-    fn handle_tc(
-        tc: PusTcReader,
-        tc_len: usize,
-        verif_reporter: &mut VerificationReporterCore,
-        src_data_buf: &mut [u8; MAX_TM_LEN],
-        stamp_buf: &[u8; 7],
-        tgt: &'static str,
-    ) {
-        info!(
-            target: tgt,
-            "Found PUS TC [{},{}] with length {}",
-            tc.service(),
-            tc.subservice(),
-            tc_len
-        );
-
-        let token = verif_reporter.add_tc(&tc);
-        if tc.apid() != PUS_APID {
-            warn!(target: tgt, "Received tc with unknown APID {}", tc.apid());
-            let sendable = verif_reporter
-                .acceptance_failure(
-                    src_data_buf,
-                    token,
-                    SEQ_COUNT_PROVIDER.get(),
-                    0,
-                    FailParams::new(stamp_buf, &EcssEnumU16::new(0), &[]),
-                )
-                .unwrap();
-            let sender = TmSender::new(TmPacket::new(), tgt);
-            if let Err(e) = verif_reporter.send_acceptance_failure(sendable, &sender) {
-                warn!(target: tgt, "Sending acceptance failure failed: {:?}", e.0);
-            };
+    fn handle_ping_request(timestamp: &[u8]) {
+        defmt::info!("Received PUS ping telecommand, sending ping reply TM[17,2]");
+        let sp_header =
+            SpHeader::new_for_unseg_tc(PUS_APID, SEQ_COUNT_PROVIDER.get_and_increment(), 0);
+        let sec_header = PusTmSecondaryHeader::new_simple(17, 2, timestamp);
+        let ping_reply = PusTmCreator::new(sp_header, sec_header, &[], true);
+        let mut tm_packet = TmPacket::new();
+        tm_packet
+            .resize(ping_reply.len_written(), 0)
+            .expect("vec resize failed");
+        ping_reply.write_to_bytes(&mut tm_packet).unwrap();
+        if TM_REQUESTS.enqueue(tm_packet).is_err() {
+            defmt::warn!("TC queue full");
             return;
         }
-        let sendable = verif_reporter
-            .acceptance_success(src_data_buf, token, SEQ_COUNT_PROVIDER.get(), 0, stamp_buf)
+    }
+
+    fn handle_start_verification(
+        accepted_token: VerificationToken<TcStateAccepted>,
+        verif_reporter: &mut VerificationReportCreator,
+        src_data_buf: &mut [u8],
+        timestamp: &[u8],
+    ) -> VerificationToken<TcStateStarted> {
+        let (tm_creator, started_token) = verif_reporter
+            .start_success(
+                src_data_buf,
+                accepted_token,
+                SEQ_COUNT_PROVIDER.get(),
+                0,
+                &timestamp,
+            )
             .unwrap();
+        let result = send_tm(tm_creator);
+        if let Err(e) = result {
+            handle_tm_send_error(e);
+        }
+        started_token
+    }
 
-        let sender = TmSender::new(TmPacket::new(), tgt);
-        let accepted_token = match verif_reporter.send_acceptance_success(sendable, &sender) {
-            Ok(token) => token,
-            Err(e) => {
-                warn!(target: "serial_rx_handler", "Sending acceptance success failed: {:?}", e.0);
-                return;
-            }
-        };
-
-        if tc.service() == 17 {
-            if tc.subservice() == 1 {
-                let sendable = verif_reporter
-                    .start_success(
-                        src_data_buf,
-                        accepted_token,
-                        SEQ_COUNT_PROVIDER.get(),
-                        0,
-                        stamp_buf,
-                    )
-                    .unwrap();
-                // let mem_block = poolmod::TM::alloc().unwrap().init([0u8; MAX_TM_LEN]);
-                let sender = TmSender::new(TmPacket::new(), tgt);
-                let started_token = match verif_reporter.send_start_success(sendable, &sender) {
-                    Ok(token) => token,
-                    Err(e) => {
-                        warn!(target: tgt, "Sending acceptance success failed: {:?}", e.0);
-                        return;
-                    }
-                };
-                info!(
-                    target: tgt,
-                    "Received PUS ping telecommand, sending ping reply TM[17,2]"
-                );
-                let mut sp_header =
-                    SpHeader::tc_unseg(PUS_APID, SEQ_COUNT_PROVIDER.get(), 0).unwrap();
-                let sec_header = PusTmSecondaryHeader::new_simple(17, 2, stamp_buf);
-                let ping_reply = PusTmCreator::new(&mut sp_header, sec_header, &[], true);
-                let mut tm_packet = TmPacket::new();
-                tm_packet
-                    .resize(ping_reply.len_written(), 0)
-                    .expect("vec resize failed");
-                ping_reply.write_to_bytes(&mut tm_packet).unwrap();
-                if TM_REQUESTS.enqueue(tm_packet).is_err() {
-                    warn!(target: tgt, "TC queue full");
-                    return;
-                }
-                SEQ_COUNT_PROVIDER.increment();
-                let sendable = verif_reporter
-                    .completion_success(
-                        src_data_buf,
-                        started_token,
-                        SEQ_COUNT_PROVIDER.get(),
-                        0,
-                        stamp_buf,
-                    )
-                    .unwrap();
-                let sender = TmSender::new(TmPacket::new(), tgt);
-                if let Err(e) = verif_reporter.send_step_or_completion_success(sendable, &sender) {
-                    warn!(target: tgt, "Sending completion success failed: {:?}", e.0);
-                }
-            } else {
-                // TODO: Invalid subservice
-            }
+    fn handle_completion_verification(
+        started_token: VerificationToken<TcStateStarted>,
+        verif_reporter: &mut VerificationReportCreator,
+        src_data_buf: &mut [u8],
+        timestamp: &[u8],
+    ) {
+        let result = send_tm(
+            verif_reporter
+                .completion_success(
+                    src_data_buf,
+                    started_token,
+                    SEQ_COUNT_PROVIDER.get(),
+                    0,
+                    timestamp,
+                )
+                .unwrap(),
+        );
+        if let Err(e) = result {
+            handle_tm_send_error(e);
         }
     }
 
@@ -573,7 +634,7 @@ mod app {
                 serial_rx_handler::spawn(tc_packet).expect("spawning rx handler task failed");
                 // If this happens, there is a high chance that the maximum packet length was
                 // exceeded. Circular mode is not used here, so data might be missed.
-                warn!(
+                defmt::warn!(
                     "rx transfer with maximum length {}, might miss data",
                     TC_BUF_LEN
                 );
@@ -615,7 +676,6 @@ mod app {
                     .expect("vec resize failed");
                 tc_packet[0..rx_len as usize].copy_from_slice(&buf[0..rx_len as usize]);
                 rx.clear_event(RxEvent::Idle);
-                info!("spawning rx task");
                 serial_rx_handler::spawn(tc_packet).expect("spawning rx handler failed");
                 *rx_transfer = Some(rx.read_exact(buf, ch));
             }

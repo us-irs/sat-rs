@@ -1,7 +1,7 @@
 [package]
 name = "satrs-shared"
 description = "Components shared by multiple sat-rs crates"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
 homepage = "https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/"
@@ -18,7 +18,7 @@ default-features = false
 optional = true
 
 [dependencies.spacepackets]
-version = "0.10"
+version = "0.11.0-rc.2"
 default-features = false
 
 [features]

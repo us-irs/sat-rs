@@ -1,15 +1,18 @@
-use satrs::res_code::ResultU16;
+use lazy_static::lazy_static;
+use satrs::{
+    res_code::ResultU16,
+    spacepackets::{PacketId, PacketType},
+};
 use satrs_mib::res_code::ResultU16Info;
 use satrs_mib::resultcode;
-use std::net::Ipv4Addr;
+use std::{collections::HashSet, net::Ipv4Addr};
+use strum::IntoEnumIterator;
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use satrs::{
     events::{EventU32TypedSev, SeverityInfo},
     pool::{StaticMemoryPool, StaticPoolConfig},
 };
-
-pub const PUS_APID: u16 = 0x02;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
@@ -29,6 +32,7 @@ pub const AOCS_APID: u16 = 1;
 pub enum GroupId {
     Tmtc = 0,
     Hk = 1,
+    Mode = 2,
 }
 
 pub const OBSW_SERVER_ADDR: Ipv4Addr = Ipv4Addr::UNSPECIFIED;
@@ -36,6 +40,23 @@ pub const SERVER_PORT: u16 = 7301;
 
 pub const TEST_EVENT: EventU32TypedSev<SeverityInfo> =
     EventU32TypedSev::<SeverityInfo>::const_new(0, 0);
+
+lazy_static! {
+    pub static ref PACKET_ID_VALIDATOR: HashSet<PacketId> = {
+        let mut set = HashSet::new();
+        for id in components::Apid::iter() {
+            set.insert(PacketId::new(PacketType::Tc, true, id as u16));
+        }
+        set
+    };
+    pub static ref APID_VALIDATOR: HashSet<u16> = {
+        let mut set = HashSet::new();
+        for id in components::Apid::iter() {
+            set.insert(id as u16);
+        }
+        set
+    };
+}
 
 pub mod tmtc_err {
 
@@ -53,6 +74,8 @@ pub mod tmtc_err {
     pub const UNKNOWN_TARGET_ID: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 4);
     #[resultcode]
     pub const ROUTING_ERROR: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 5);
+    #[resultcode(info = "Request timeout for targeted PUS request. P1: Request ID. P2: Target ID")]
+    pub const REQUEST_TIMEOUT: ResultU16 = ResultU16::new(GroupId::Tmtc as u8, 6);
 
     #[resultcode(
         info = "Not enough data inside the TC application data field. Optionally includes: \
@@ -92,27 +115,59 @@ pub mod hk_err {
     ];
 }
 
-#[allow(clippy::enum_variant_names)]
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum TmSenderId {
-    PusVerification = 0,
-    PusTest = 1,
-    PusEvent = 2,
-    PusHk = 3,
-    PusAction = 4,
-    PusSched = 5,
-    AllEvents = 6,
-    AcsSubsystem = 7,
+pub mod mode_err {
+    use super::*;
+
+    #[resultcode]
+    pub const WRONG_MODE: ResultU16 = ResultU16::new(GroupId::Mode as u8, 0);
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum TcReceiverId {
-    PusTest = 1,
-    PusEvent = 2,
-    PusHk = 3,
-    PusAction = 4,
-    PusSched = 5,
+pub mod components {
+    use satrs::request::UniqueApidTargetId;
+    use strum::EnumIter;
+
+    #[derive(Copy, Clone, PartialEq, Eq, EnumIter)]
+    pub enum Apid {
+        Sched = 1,
+        GenericPus = 2,
+        Acs = 3,
+        Cfdp = 4,
+    }
+
+    // Component IDs for components with the PUS APID.
+    #[derive(Copy, Clone, PartialEq, Eq)]
+    pub enum PusId {
+        PusEventManagement = 0,
+        PusRouting = 1,
+        PusTest = 2,
+        PusAction = 3,
+        PusMode = 4,
+        PusHk = 5,
+    }
+
+    #[derive(Copy, Clone, PartialEq, Eq)]
+    pub enum AcsId {
+        Mgm0 = 0,
+    }
+
+    pub const PUS_ACTION_SERVICE: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::GenericPus as u16, PusId::PusAction as u32);
+    pub const PUS_EVENT_MANAGEMENT: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::GenericPus as u16, 0);
+    pub const PUS_ROUTING_SERVICE: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::GenericPus as u16, PusId::PusRouting as u32);
+    pub const PUS_TEST_SERVICE: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::GenericPus as u16, PusId::PusTest as u32);
+    pub const PUS_MODE_SERVICE: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::GenericPus as u16, PusId::PusMode as u32);
+    pub const PUS_HK_SERVICE: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::GenericPus as u16, PusId::PusHk as u32);
+    pub const PUS_SCHED_SERVICE: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::Sched as u16, 0);
+    pub const MGM_HANDLER_0: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::Acs as u16, AcsId::Mgm0 as u32);
 }
+
 pub mod pool {
     use super::*;
     pub fn create_static_pools() -> (StaticMemoryPool, StaticMemoryPool) {

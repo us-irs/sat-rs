@@ -31,7 +31,7 @@ use spacepackets::{
     ecss::{tc::PusTcCreator, WritablePusPacket},
     PacketId, SpHeader,
 };
-use std::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
+use std::{collections::VecDeque, sync::Arc, vec::Vec};
 
 #[derive(Default, Clone)]
 struct SyncTcCacher {
@@ -162,14 +162,14 @@ fn test_cobs_server() {
 }
 
 const TEST_APID_0: u16 = 0x02;
-const TEST_PACKET_ID_0: PacketId = PacketId::const_tc(true, TEST_APID_0);
+const TEST_PACKET_ID_0: PacketId = PacketId::new_for_tc(true, TEST_APID_0);
 
 #[test]
 fn test_ccsds_server() {
     let tc_receiver = SyncTcCacher::default();
     let mut tm_source = SyncTmSource::default();
-    let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
-    let verif_tm = PusTcCreator::new_simple(&mut sph, 1, 1, None, true);
+    let sph = SpHeader::new_for_unseg_tc(TEST_APID_0, 0, 0);
+    let verif_tm = PusTcCreator::new_simple(sph, 1, 1, &[], true);
     let tm_0 = verif_tm.to_vec().expect("tm generation failed");
     tm_source.add_tm(&tm_0);
     let mut packet_id_lookup = HashSet::new();
@@ -178,7 +178,7 @@ fn test_ccsds_server() {
         ServerConfig::new(AUTO_PORT_ADDR, Duration::from_millis(2), 1024, 1024),
         tm_source,
         tc_receiver.clone(),
-        Box::new(packet_id_lookup),
+        packet_id_lookup,
     )
     .expect("TCP server generation failed");
     let dest_addr = tcp_server
@@ -203,8 +203,8 @@ fn test_ccsds_server() {
         .expect("setting reas timeout failed");
 
     // Send ping telecommand.
-    let mut sph = SpHeader::tc_unseg(TEST_APID_0, 0, 0).unwrap();
-    let ping_tc = PusTcCreator::new_simple(&mut sph, 17, 1, None, true);
+    let sph = SpHeader::new_for_unseg_tc(TEST_APID_0, 0, 0);
+    let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
     let tc_0 = ping_tc.to_vec().expect("packet creation failed");
     stream
         .write_all(&tc_0)

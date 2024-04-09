@@ -80,7 +80,7 @@ impl HasSeverity for SeverityHigh {
     const SEVERITY: Severity = Severity::HIGH;
 }
 
-pub trait GenericEvent: EcssEnumeration {
+pub trait GenericEvent: EcssEnumeration + Copy + Clone {
     type Raw;
     type GroupId;
     type UniqueId;

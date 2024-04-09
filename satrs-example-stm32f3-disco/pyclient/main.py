@@ -94,6 +94,7 @@ class SatRsConfigHook(HookBase):
 def create_cmd_definition_tree() -> CmdTreeNode:
     root_node = CmdTreeNode.root_node()
     root_node.add_child(CmdTreeNode("ping", "Send PUS ping TC"))
+    root_node.add_child(CmdTreeNode("change_blink_freq", "Change blink frequency"))
     return root_node
 
 
@@ -215,6 +216,25 @@ class TcHandler(TcHandlerBase):
             if cmd_path == "/ping":
                 q.add_log_cmd("Sending PUS ping telecommand")
                 q.add_pus_tc(PusTelecommand(service=17, subservice=1))
+            if cmd_path == "/change_blink_freq":
+                self.create_change_blink_freq_command(q)
+
+    def create_change_blink_freq_command(self, q: DefaultPusQueueHelper):
+        q.add_log_cmd("Changing blink frequency")
+        while True:
+            blink_freq = int(
+                input(
+                    "Please specify new blink frequency in ms. Valid Range [2..10000]: "
+                )
+            )
+            if blink_freq < 2 or blink_freq > 10000:
+                print(
+                    "Invalid blink frequency. Please specify a value between 2 and 10000."
+                )
+                continue
+            break
+        app_data = struct.pack("!I", blink_freq)
+        q.add_pus_tc(PusTelecommand(service=8, subservice=1, app_data=app_data))
 
 
 def main():

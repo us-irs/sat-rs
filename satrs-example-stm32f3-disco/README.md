@@ -2,26 +2,24 @@ sat-rs example for the STM32F3-Discovery board
 =======
 
 This example application shows how the [sat-rs framework](https://egit.irs.uni-stuttgart.de/rust/satrs-launchpad)
-can be used on an embedded target. It also shows how a relatively simple OBSW could be built when no
-standard runtime is available. It uses [RTIC](https://rtic.rs/1/book/en/) as the concurrency
-framework.
+can be used on an embedded target.
+It also shows how a relatively simple OBSW could be built when no standard runtime is available.
+It uses [RTIC](https://rtic.rs/1/book/en/) as the concurrency framework and the
+[defmt](https://defmt.ferrous-systems.com/) framework for logging.
 
 The STM32F3-Discovery device was picked because it is a cheap Cortex-M4 based device which is also
 used by the [Rust Embedded Book](https://docs.rust-embedded.org/book/intro/hardware.html) and the
 [Rust Discovery](https://docs.rust-embedded.org/discovery/f3discovery/) book as an introduction
 to embedded Rust.
 
-If you would like to access the ITM log output, you need to connect the PB3 pin to the CN3 pin
-of the SWD header like [shown here](https://docs.rust-embedded.org/discovery/f3discovery/06-hello-world/index.html).
-
 ## Pre-Requisites
 
 Make sure the following tools are installed:
 
-1. `openocd`: This is the debug server used to debug the STM32F3. You can install this from
-   [`xPacks`](https://xpack.github.io/dev-tools/openocd/install/). You can also use the one provided
-   by a STM32Cube installation.
-2. A debugger like `arm-none-eabi-gdb` or `gdb-multiarch`.
+1. [`probe-rs`](https://probe.rs/): Application used to flash and debug the MCU.
+2. Optional and recommended: [VS Code](https://code.visualstudio.com/) with
+   [probe-rs plugin](https://marketplace.visualstudio.com/items?itemName=probe-rs.probe-rs-debugger)
+   for debugging.
 
 ## Preparing Rust and the repository
 
@@ -52,23 +50,19 @@ you can simply build the application with
 cargo build
 ```
 
-## Flashing and Debugging from the command line
+## Flashing from the command line
 
-Make sure you have `openocd` and `itmdump` installed first.
+You can flash the application from the command line using `probe-rs`:
 
-1. Configure a runner inside your `.cargo/config.toml` file by uncommenting an appropriate line
-   depending on the application you want to use for debugging
-2. Start `openocd` inside the project folder. This will start `openocd` with the provided
-   `openocd.cfg` configuration file.
-3. Use `cargo run` to flash and debug the application in your terminal
-4. Use  `itmdump -F -f itm.txt` to print the logs received from the STM32F3 device. Please note
-   that the PB3 and CN3 pin of the SWD header need to be connected for this to work.
+```sh
+probe-rs run --chip STM32F303VCTx
+```
 
 ## Debugging with VS Code
 
 The STM32F3-Discovery comes with an on-board ST-Link so all that is required to flash and debug
-the board is a Mini-USB cable. The code in this repository was debugged using `openocd`
-and the VS Code [`Cortex-Debug` plugin](https://marketplace.visualstudio.com/items?itemName=marus25.cortex-debug).
+the board is a Mini-USB cable. The code in this repository was debugged using [`probe-rs`](https://probe.rs/docs/tools/debuggerA)
+and the VS Code [`probe-rs` plugin](https://marketplace.visualstudio.com/items?itemName=probe-rs.probe-rs-debugger).
 Make sure to install this plugin first.
 
 Sample configuration files are provided inside the `vscode` folder.
@@ -80,19 +74,11 @@ to automatically rebuild and flash your application.
 The `tasks.json` and `launch.json` files are generic and you can use them immediately by opening
 the folder in VS code or adding it to a workspace.
 
-If you would like to use a custom GDB application, you can specify the gdb binary in the following
-configuration variables in your `settings.json`:
-
-- `"cortex-debug.gdbPath"`
-- `"cortex-debug.gdbPath.linux"`
-- `"cortex-debug.gdbPath.windows"`
-- `"cortex-debug.gdbPath.osx"`
-
 ## Commanding with Python
 
 When the SW is running on the Discovery board, you can command the MCU via a serial interface,
 using COBS encoded PUS packets.
- 
+
 It is recommended to use a virtual environment to do this. To set up one in the command line,
 you can use `python3 -m venv venv` on Unix systems or `py -m venv venv` on Windows systems.
 After doing this, you can check the [venv tutorial](https://docs.python.org/3/tutorial/venv.html)
@@ -111,3 +97,18 @@ A default configuration file for the python application is provided and can be u
 ```sh
 cp def_tmtc_conf.json tmtc_conf.json
 ```
+
+After that, you can for example send a ping to the MCU using the following command
+
+```sh
+./main.py -p /ping
+```
+
+You can configure the blinky frequency using
+
+```sh
+./main.py -p /change_blink_freq
+```
+
+All these commands will package a PUS telecommand which will be sent to the MCU using the COBS
+format as the packet framing format.
