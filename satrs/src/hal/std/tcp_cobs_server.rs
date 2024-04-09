@@ -181,7 +181,7 @@ mod tests {
     use std::{
         io::{Read, Write},
         net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
-        thread,
+        panic, println, thread,
         time::Instant,
     };
 
@@ -403,15 +403,24 @@ mod tests {
         );
         let start = Instant::now();
         // Call the connection handler in separate thread, does block.
-        thread::spawn(move || loop {
+        let thread_jh = thread::spawn(move || loop {
+            println!("hello wtf!!!!");
             let result = tcp_server.handle_next_connection();
             if result.is_err() {
                 panic!("handling connection failed: {:?}", result.unwrap_err());
+            }
+            println!("helluuuu");
+            let result = result.unwrap();
+            if result.stopped_by_signal {
+                break;
             }
             if Instant::now() - start > Duration::from_millis(50) {
                 panic!("regular stop signal handling failed");
             }
         });
         stop_signal.store(true, Ordering::Relaxed);
+        thread::sleep(Duration::from_millis(100));
+        panic!("shit")
+        //thread_jh.join().expect("thread join failed");
     }
 }
