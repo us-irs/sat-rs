@@ -288,7 +288,9 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter> Targete
                 PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
             },
             Err(error) => {
-                error!("PUS mode service: packet handling error: {error:?}")
+                error!("PUS mode service: packet handling error: {error:?}");
+                // To avoid permanent loops on error cases.
+                return HandlingStatus::Empty;
             }
         }
         HandlingStatus::HandledOne
