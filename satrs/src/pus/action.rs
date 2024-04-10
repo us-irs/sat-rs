@@ -41,18 +41,18 @@ pub enum ActionReplyVariant {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct PusActionReply {
+pub struct ActionReplyPus {
     pub action_id: ActionId,
     pub variant: ActionReplyVariant,
 }
 
-impl PusActionReply {
+impl ActionReplyPus {
     pub fn new(action_id: ActionId, variant: ActionReplyVariant) -> Self {
         Self { action_id, variant }
     }
 }
 
-pub type GenericActionReplyPus = GenericMessage<PusActionReply>;
+pub type GenericActionReplyPus = GenericMessage<ActionReplyPus>;
 
 impl GenericActionReplyPus {
     pub fn new_action_reply(
@@ -60,7 +60,7 @@ impl GenericActionReplyPus {
         action_id: ActionId,
         reply: ActionReplyVariant,
     ) -> Self {
-        Self::new(requestor_info, PusActionReply::new(action_id, reply))
+        Self::new(requestor_info, ActionReplyPus::new(action_id, reply))
     }
 }
 
@@ -76,13 +76,13 @@ pub mod alloc_mod {
         ComponentId,
     };
 
-    use super::PusActionReply;
+    use super::ActionReplyPus;
 
     /// Helper type definition for a mode handler which can handle mode requests.
     pub type ActionRequestHandlerInterface<S, R> =
-        MessageSenderAndReceiver<PusActionReply, ActionRequest, S, R>;
+        MessageSenderAndReceiver<ActionReplyPus, ActionRequest, S, R>;
 
-    impl<S: MessageSender<PusActionReply>, R: MessageReceiver<ActionRequest>>
+    impl<S: MessageSender<ActionReplyPus>, R: MessageReceiver<ActionRequest>>
         ActionRequestHandlerInterface<S, R>
     {
         pub fn try_recv_action_request(
@@ -95,7 +95,7 @@ pub mod alloc_mod {
             &self,
             request_id: RequestId,
             target_id: ComponentId,
-            reply: PusActionReply,
+            reply: ActionReplyPus,
         ) -> Result<(), GenericTargetedMessagingError> {
             self.send_message(request_id, target_id, reply)
         }
@@ -104,14 +104,14 @@ pub mod alloc_mod {
     /// Helper type defintion for a mode handler object which can send mode requests and receive
     /// mode replies.
     pub type ActionRequestorInterface<S, R> =
-        MessageSenderAndReceiver<ActionRequest, PusActionReply, S, R>;
+        MessageSenderAndReceiver<ActionRequest, ActionReplyPus, S, R>;
 
-    impl<S: MessageSender<ActionRequest>, R: MessageReceiver<PusActionReply>>
+    impl<S: MessageSender<ActionRequest>, R: MessageReceiver<ActionReplyPus>>
         ActionRequestorInterface<S, R>
     {
         pub fn try_recv_action_reply(
             &self,
-        ) -> Result<Option<GenericMessage<PusActionReply>>, GenericTargetedMessagingError> {
+        ) -> Result<Option<GenericMessage<ActionReplyPus>>, GenericTargetedMessagingError> {
             self.try_recv_message()
         }
 
@@ -179,21 +179,21 @@ pub mod std_mod {
     pub type DefaultActiveActionRequestMap = DefaultActiveRequestMap<ActivePusActionRequestStd>;
 
     pub type ActionRequestHandlerMpsc = ActionRequestHandlerInterface<
-        mpsc::Sender<GenericMessage<PusActionReply>>,
+        mpsc::Sender<GenericMessage<ActionReplyPus>>,
         mpsc::Receiver<GenericMessage<ActionRequest>>,
     >;
     pub type ActionRequestHandlerMpscBounded = ActionRequestHandlerInterface<
-        mpsc::SyncSender<GenericMessage<PusActionReply>>,
+        mpsc::SyncSender<GenericMessage<ActionReplyPus>>,
         mpsc::Receiver<GenericMessage<ActionRequest>>,
     >;
 
     pub type ActionRequestorMpsc = ActionRequestorInterface<
         mpsc::Sender<GenericMessage<ActionRequest>>,
-        mpsc::Receiver<GenericMessage<PusActionReply>>,
+        mpsc::Receiver<GenericMessage<ActionReplyPus>>,
     >;
     pub type ActionRequestorBoundedMpsc = ActionRequestorInterface<
         mpsc::SyncSender<GenericMessage<ActionRequest>>,
-        mpsc::Receiver<GenericMessage<PusActionReply>>,
+        mpsc::Receiver<GenericMessage<ActionReplyPus>>,
     >;
 
     /*
