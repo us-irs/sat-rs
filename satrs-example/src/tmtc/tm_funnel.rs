@@ -16,7 +16,7 @@ use satrs::{
     tmtc::tm_helper::SharedTmPool,
 };
 
-use crate::tcp::SyncTcpTmSource;
+use crate::interface::tcp::SyncTcpTmSource;
 
 #[derive(Default)]
 pub struct CcsdsSeqCounterMap {

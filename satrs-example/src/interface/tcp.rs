@@ -11,7 +11,7 @@ use satrs::{
     tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc, TmPacketSourceCore},
 };
 
-use crate::ccsds::CcsdsReceiver;
+use crate::tmtc::ccsds::CcsdsReceiver;
 
 #[derive(Default)]
 pub struct ConnectionFinishedHandler {}
