@@ -1,18 +1,16 @@
 mod acs;
-mod ccsds;
 mod events;
 mod hk;
+mod interface;
 mod logger;
 mod pus;
 mod requests;
-mod tcp;
-mod tm_funnel;
 mod tmtc;
-mod udp;
 
 use crate::events::EventHandler;
+use crate::interface::udp::DynamicUdpTmHandler;
 use crate::pus::stack::PusStack;
-use crate::tm_funnel::{TmFunnelDynamic, TmFunnelStatic};
+use crate::tmtc::tm_funnel::{TmFunnelDynamic, TmFunnelStatic};
 use log::info;
 use pus::test::create_test_service_dynamic;
 use satrs::hal::std::tcp_server::ServerConfig;
@@ -25,10 +23,10 @@ use satrs_example::config::tasks::{
 };
 use satrs_example::config::{OBSW_SERVER_ADDR, PACKET_ID_VALIDATOR, SERVER_PORT};
 use tmtc::PusTcSourceProviderDynamic;
-use udp::DynamicUdpTmHandler;
 
 use crate::acs::mgm::{MgmHandlerLis3Mdl, MpscModeLeafInterface, SpiDummyInterface};
-use crate::ccsds::CcsdsReceiver;
+use crate::interface::tcp::{SyncTcpTmSource, TcpTask};
+use crate::interface::udp::{StaticUdpTmHandler, UdpTmtcServer};
 use crate::logger::setup_logger;
 use crate::pus::action::{create_action_service_dynamic, create_action_service_static};
 use crate::pus::event::{create_event_service_dynamic, create_event_service_static};
@@ -38,11 +36,10 @@ use crate::pus::scheduler::{create_scheduler_service_dynamic, create_scheduler_s
 use crate::pus::test::create_test_service_static;
 use crate::pus::{PusReceiver, PusTcMpscRouter};
 use crate::requests::{CompositeRequest, GenericRequestRouter};
-use crate::tcp::{SyncTcpTmSource, TcpTask};
+use crate::tmtc::ccsds::CcsdsReceiver;
 use crate::tmtc::{
     PusTcSourceProviderSharedPool, SharedTcPool, TcSourceTaskDynamic, TcSourceTaskStatic,
 };
-use crate::udp::{StaticUdpTmHandler, UdpTmtcServer};
 use satrs::mode::ModeRequest;
 use satrs::pus::event_man::EventRequestWithToken;
 use satrs::pus::TmInSharedPoolSender;

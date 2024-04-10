@@ -12,6 +12,9 @@ use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusPacket;
 use satrs::tmtc::ReceivesCcsdsTc;
 
+pub mod ccsds;
+pub mod tm_funnel;
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum MpscStoreAndSendError {
     #[error("Store error: {0}")]
