@@ -36,11 +36,11 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
             let mut nothing_to_do = true;
             let mut is_srv_finished =
                 |_srv_id: u8,
-                 tc_handling_done: HandlingStatus,
-                 reply_handling_done: Option<HandlingStatus>| {
-                    if tc_handling_done == HandlingStatus::HandledOne
-                        || (reply_handling_done.is_some()
-                            && reply_handling_done.unwrap() == HandlingStatus::HandledOne)
+                 tc_handling_status: HandlingStatus,
+                 reply_handling_status: Option<HandlingStatus>| {
+                    if tc_handling_status == HandlingStatus::HandledOne
+                        || (reply_handling_status.is_some()
+                            && reply_handling_status.unwrap() == HandlingStatus::HandledOne)
                     {
                         nothing_to_do = false;
                     }
