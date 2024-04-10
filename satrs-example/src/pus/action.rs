@@ -3,7 +3,7 @@ use satrs::action::{ActionRequest, ActionRequestVariant};
 use satrs::params::WritableToBeBytes;
 use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::action::{
-    ActionReplyVariant, ActivePusActionRequestStd, DefaultActiveActionRequestMap, PusActionReply,
+    ActionReplyPus, ActionReplyVariant, ActivePusActionRequestStd, DefaultActiveActionRequestMap,
 };
 use satrs::pus::verification::{
     FailParams, FailParamsWithStep, TcStateAccepted, TcStateStarted, VerificationReporter,
@@ -42,12 +42,12 @@ impl Default for ActionReplyHandler {
     }
 }
 
-impl PusReplyHandler<ActivePusActionRequestStd, PusActionReply> for ActionReplyHandler {
+impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPus> for ActionReplyHandler {
     type Error = EcssTmtcError;
 
     fn handle_unrequested_reply(
         &mut self,
-        reply: &GenericMessage<PusActionReply>,
+        reply: &GenericMessage<ActionReplyPus>,
         _tm_sender: &impl EcssTmSenderCore,
     ) -> Result<(), Self::Error> {
         warn!("received unexpected reply for service 8: {reply:?}");
@@ -56,7 +56,7 @@ impl PusReplyHandler<ActivePusActionRequestStd, PusActionReply> for ActionReplyH
 
     fn handle_reply(
         &mut self,
-        reply: &GenericMessage<PusActionReply>,
+        reply: &GenericMessage<ActionReplyPus>,
         active_request: &ActivePusActionRequestStd,
         tm_sender: &(impl EcssTmSenderCore + ?Sized),
         verification_handler: &impl VerificationReportingProvider,
@@ -199,7 +199,7 @@ pub fn create_action_service_static(
     tc_pool: SharedStaticMemoryPool,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     action_router: GenericRequestRouter,
-    reply_receiver: mpsc::Receiver<GenericMessage<PusActionReply>>,
+    reply_receiver: mpsc::Receiver<GenericMessage<ActionReplyPus>>,
 ) -> ActionServiceWrapper<MpscTmInSharedPoolSenderBounded, EcssTcInSharedStoreConverter> {
     let action_request_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
@@ -226,7 +226,7 @@ pub fn create_action_service_dynamic(
     tm_funnel_tx: mpsc::Sender<PusTmAsVec>,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     action_router: GenericRequestRouter,
-    reply_receiver: mpsc::Receiver<GenericMessage<PusActionReply>>,
+    reply_receiver: mpsc::Receiver<GenericMessage<ActionReplyPus>>,
 ) -> ActionServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {
     let action_request_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
@@ -259,7 +259,7 @@ pub struct ActionServiceWrapper<TmSender: EcssTmSenderCore, TcInMemConverter: Ec
         DefaultActiveActionRequestMap,
         ActivePusActionRequestStd,
         ActionRequest,
-        PusActionReply,
+        ActionReplyPus,
     >,
 }
 
@@ -339,7 +339,7 @@ mod tests {
             DefaultActiveActionRequestMap,
             ActivePusActionRequestStd,
             ActionRequest,
-            PusActionReply,
+            ActionReplyPus,
         >
     {
         pub fn new_for_action(owner_id: ComponentId, target_id: ComponentId) -> Self {
@@ -495,7 +495,7 @@ mod tests {
         if let CompositeRequest::Action(action_req) = req.message {
             assert_eq!(action_req.action_id, action_id);
             assert_eq!(action_req.variant, ActionRequestVariant::NoData);
-            let action_reply = PusActionReply::new(action_id, ActionReplyVariant::Completed);
+            let action_reply = ActionReplyPus::new(action_id, ActionReplyVariant::Completed);
             testbench
                 .reply_tx
                 .send(GenericMessage::new(req.requestor_info, action_reply))
@@ -615,7 +615,7 @@ mod tests {
         let (req_id, active_req) = testbench.add_tc(TEST_APID, TEST_UNIQUE_ID_0, &[]);
         let active_action_req =
             ActivePusActionRequestStd::new_from_common_req(action_id, active_req);
-        let reply = PusActionReply::new(action_id, ActionReplyVariant::Completed);
+        let reply = ActionReplyPus::new(action_id, ActionReplyVariant::Completed);
         let generic_reply = GenericMessage::new(MessageMetadata::new(req_id.into(), 0), reply);
         let result = testbench.handle_reply(&generic_reply, &active_action_req, &[]);
         assert!(result.is_ok());
@@ -636,7 +636,7 @@ mod tests {
         let active_action_req =
             ActivePusActionRequestStd::new_from_common_req(action_id, active_req);
         let error_code = ResultU16::new(2, 3);
-        let reply = PusActionReply::new(
+        let reply = ActionReplyPus::new(
             action_id,
             ActionReplyVariant::CompletionFailed {
                 error_code,
@@ -663,7 +663,7 @@ mod tests {
         let (req_id, active_req) = testbench.add_tc(TEST_APID, TEST_UNIQUE_ID_0, &[]);
         let active_action_req =
             ActivePusActionRequestStd::new_from_common_req(action_id, active_req);
-        let reply = PusActionReply::new(action_id, ActionReplyVariant::StepSuccess { step: 1 });
+        let reply = ActionReplyPus::new(action_id, ActionReplyVariant::StepSuccess { step: 1 });
         let generic_reply = GenericMessage::new(MessageMetadata::new(req_id.into(), 0), reply);
         let result = testbench.handle_reply(&generic_reply, &active_action_req, &[]);
         assert!(result.is_ok());
@@ -690,7 +690,7 @@ mod tests {
         let active_action_req =
             ActivePusActionRequestStd::new_from_common_req(action_id, active_req);
         let error_code = ResultU16::new(2, 3);
-        let reply = PusActionReply::new(
+        let reply = ActionReplyPus::new(
             action_id,
             ActionReplyVariant::StepFailed {
                 error_code,
@@ -720,7 +720,7 @@ mod tests {
     fn reply_handling_unrequested_reply() {
         let mut testbench =
             ReplyHandlerTestbench::new(TEST_COMPONENT_ID_0.id(), ActionReplyHandler::default());
-        let action_reply = PusActionReply::new(5_u32, ActionReplyVariant::Completed);
+        let action_reply = ActionReplyPus::new(5_u32, ActionReplyVariant::Completed);
         let unrequested_reply =
             GenericMessage::new(MessageMetadata::new(10_u32, 15_u64), action_reply);
         // Right now this function does not do a lot. We simply check that it does not panic or do
