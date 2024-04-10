@@ -13,6 +13,8 @@ use satrs::pus::{
 };
 use satrs_example::config::components::PUS_EVENT_MANAGEMENT;
 
+use super::HandlingStatus;
+
 pub fn create_event_service_static(
     tm_sender: TmInSharedPoolSender<mpsc::SyncSender<PusTmInPool>>,
     tc_pool: SharedStaticMemoryPool,
@@ -62,7 +64,7 @@ pub struct EventServiceWrapper<TmSender: EcssTmSenderCore, TcInMemConverter: Ecs
 impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
     EventServiceWrapper<TmSender, TcInMemConverter>
 {
-    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
         match self.handler.poll_and_handle_next_tc(time_stamp) {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
@@ -75,14 +77,12 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
                 PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
                     warn!("PUS 5 subservice {subservice} not implemented");
                 }
-                PusPacketHandlerResult::Empty => {
-                    return true;
-                }
+                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
             },
             Err(error) => {
                 error!("PUS packet handling error: {error:?}")
             }
         }
-        false
+        HandlingStatus::HandledOne
     }
 }

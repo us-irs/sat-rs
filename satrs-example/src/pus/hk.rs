@@ -300,7 +300,7 @@ pub struct HkServiceWrapper<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTc
 impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
     HkServiceWrapper<TmSender, TcInMemConverter>
 {
-    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
         match self.service.poll_and_handle_next_tc(time_stamp) {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
@@ -313,15 +313,13 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
                 PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
                     warn!("PUS 3 subservice {subservice} not implemented");
                 }
-                PusPacketHandlerResult::Empty => {
-                    return true;
-                }
+                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
             },
             Err(error) => {
                 error!("PUS packet handling error: {error:?}")
             }
         }
-        false
+        HandlingStatus::HandledOne
     }
 
     pub fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> HandlingStatus {

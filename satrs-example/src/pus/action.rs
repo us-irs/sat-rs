@@ -267,7 +267,7 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter> Targete
     for ActionServiceWrapper<TmSender, TcInMemConverter>
 {
     /// Returns [true] if the packet handling is finished.
-    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
         match self.service.poll_and_handle_next_tc(time_stamp) {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
@@ -280,15 +280,13 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter> Targete
                 PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
                     warn!("PUS 8 subservice {subservice} not implemented");
                 }
-                PusPacketHandlerResult::Empty => {
-                    return true;
-                }
+                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
             },
             Err(error) => {
                 error!("PUS packet handling error: {error:?}")
             }
         }
-        false
+        HandlingStatus::HandledOne
     }
 
     fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> HandlingStatus {

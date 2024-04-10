@@ -16,6 +16,8 @@ use satrs_example::config::components::PUS_SCHED_SERVICE;
 
 use crate::tmtc::PusTcSourceProviderSharedPool;
 
+use super::HandlingStatus;
+
 pub trait TcReleaser {
     fn release(&mut self, enabled: bool, info: &TcInfo, tc: &[u8]) -> bool;
 }
@@ -92,7 +94,7 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
         }
     }
 
-    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
         match self
             .pus_11_handler
             .poll_and_handle_next_tc(time_stamp, &mut self.sched_tc_pool)
@@ -108,15 +110,13 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
                 PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
                     warn!("PUS11: Subservice {subservice} not implemented");
                 }
-                PusPacketHandlerResult::Empty => {
-                    return true;
-                }
+                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
             },
             Err(error) => {
                 error!("PUS packet handling error: {error:?}")
             }
         }
-        false
+        HandlingStatus::HandledOne
     }
 }
 
