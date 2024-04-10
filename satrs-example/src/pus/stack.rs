@@ -35,18 +35,29 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
         loop {
             let mut nothing_to_do = true;
             let mut is_srv_finished =
-                |tc_handling_done: bool, reply_handling_done: Option<HandlingStatus>| {
-                    if !tc_handling_done
+                |_srv_id: u8,
+                 tc_handling_done: HandlingStatus,
+                 reply_handling_done: Option<HandlingStatus>| {
+                    if tc_handling_done == HandlingStatus::HandledOne
                         || (reply_handling_done.is_some()
-                            && reply_handling_done.unwrap() == HandlingStatus::Empty)
+                            && reply_handling_done.unwrap() == HandlingStatus::HandledOne)
                     {
                         nothing_to_do = false;
                     }
                 };
-            is_srv_finished(self.test_srv.poll_and_handle_next_packet(&time_stamp), None);
-            is_srv_finished(self.schedule_srv.poll_and_handle_next_tc(&time_stamp), None);
-            is_srv_finished(self.event_srv.poll_and_handle_next_tc(&time_stamp), None);
             is_srv_finished(
+                17,
+                self.test_srv.poll_and_handle_next_packet(&time_stamp),
+                None,
+            );
+            is_srv_finished(
+                11,
+                self.schedule_srv.poll_and_handle_next_tc(&time_stamp),
+                None,
+            );
+            is_srv_finished(5, self.event_srv.poll_and_handle_next_tc(&time_stamp), None);
+            is_srv_finished(
+                8,
                 self.action_srv_wrapper.poll_and_handle_next_tc(&time_stamp),
                 Some(
                     self.action_srv_wrapper
@@ -54,10 +65,12 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
                 ),
             );
             is_srv_finished(
+                3,
                 self.hk_srv_wrapper.poll_and_handle_next_tc(&time_stamp),
                 Some(self.hk_srv_wrapper.poll_and_handle_next_reply(&time_stamp)),
             );
             is_srv_finished(
+                200,
                 self.mode_srv.poll_and_handle_next_tc(&time_stamp),
                 Some(self.mode_srv.poll_and_handle_next_reply(&time_stamp)),
             );

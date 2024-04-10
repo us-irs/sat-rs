@@ -225,7 +225,7 @@ fn static_tmtc_pool_main() {
 
     info!("Starting TMTC and UDP task");
     let jh_udp_tmtc = thread::Builder::new()
-        .name("TMTC and UDP".to_string())
+        .name("SATRS tmtc-udp".to_string())
         .spawn(move || {
             info!("Running UDP server on port {SERVER_PORT}");
             loop {
@@ -238,7 +238,7 @@ fn static_tmtc_pool_main() {
 
     info!("Starting TCP task");
     let jh_tcp = thread::Builder::new()
-        .name("TCP".to_string())
+        .name("sat-rs tcp".to_string())
         .spawn(move || {
             info!("Running TCP server on port {SERVER_PORT}");
             loop {
@@ -257,7 +257,7 @@ fn static_tmtc_pool_main() {
 
     info!("Starting event handling task");
     let jh_event_handling = thread::Builder::new()
-        .name("Event".to_string())
+        .name("sat-rs events".to_string())
         .spawn(move || loop {
             event_handler.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_EVENT_HANDLING));
@@ -266,7 +266,7 @@ fn static_tmtc_pool_main() {
 
     info!("Starting AOCS thread");
     let jh_aocs = thread::Builder::new()
-        .name("AOCS".to_string())
+        .name("sat-rs aocs".to_string())
         .spawn(move || loop {
             mgm_handler.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_AOCS));
@@ -275,7 +275,7 @@ fn static_tmtc_pool_main() {
 
     info!("Starting PUS handler thread");
     let jh_pus_handler = thread::Builder::new()
-        .name("PUS".to_string())
+        .name("sat-rs pus".to_string())
         .spawn(move || loop {
             pus_stack.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_PUS_STACK));
@@ -444,7 +444,7 @@ fn dyn_tmtc_pool_main() {
 
     info!("Starting TMTC and UDP task");
     let jh_udp_tmtc = thread::Builder::new()
-        .name("TMTC and UDP".to_string())
+        .name("sat-rs tmtc-udp".to_string())
         .spawn(move || {
             info!("Running UDP server on port {SERVER_PORT}");
             loop {
@@ -457,7 +457,7 @@ fn dyn_tmtc_pool_main() {
 
     info!("Starting TCP task");
     let jh_tcp = thread::Builder::new()
-        .name("TCP".to_string())
+        .name("sat-rs tcp".to_string())
         .spawn(move || {
             info!("Running TCP server on port {SERVER_PORT}");
             loop {
@@ -468,7 +468,7 @@ fn dyn_tmtc_pool_main() {
 
     info!("Starting TM funnel task");
     let jh_tm_funnel = thread::Builder::new()
-        .name("TM Funnel".to_string())
+        .name("sat-rs tm-funnel".to_string())
         .spawn(move || loop {
             tm_funnel.operation();
         })
@@ -476,7 +476,7 @@ fn dyn_tmtc_pool_main() {
 
     info!("Starting event handling task");
     let jh_event_handling = thread::Builder::new()
-        .name("Event".to_string())
+        .name("sat-rs events".to_string())
         .spawn(move || loop {
             event_handler.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_EVENT_HANDLING));
@@ -485,7 +485,7 @@ fn dyn_tmtc_pool_main() {
 
     info!("Starting AOCS thread");
     let jh_aocs = thread::Builder::new()
-        .name("AOCS".to_string())
+        .name("sat-rs aocs".to_string())
         .spawn(move || loop {
             mgm_handler.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_AOCS));
@@ -494,7 +494,7 @@ fn dyn_tmtc_pool_main() {
 
     info!("Starting PUS handler thread");
     let jh_pus_handler = thread::Builder::new()
-        .name("PUS".to_string())
+        .name("sat-rs pus".to_string())
         .spawn(move || loop {
             pus_stack.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_PUS_STACK));

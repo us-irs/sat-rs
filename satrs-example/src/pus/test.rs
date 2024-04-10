@@ -18,6 +18,8 @@ use satrs_example::config::components::PUS_TEST_SERVICE;
 use satrs_example::config::{tmtc_err, TEST_EVENT};
 use std::sync::mpsc;
 
+use super::HandlingStatus;
+
 pub fn create_test_service_static(
     tm_sender: TmInSharedPoolSender<mpsc::SyncSender<PusTmInPool>>,
     tc_pool: SharedStaticMemoryPool,
@@ -67,11 +69,11 @@ pub struct TestCustomServiceWrapper<
 impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
     TestCustomServiceWrapper<TmSender, TcInMemConverter>
 {
-    pub fn poll_and_handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
+    pub fn poll_and_handle_next_packet(&mut self, time_stamp: &[u8]) -> HandlingStatus {
         let res = self.handler.poll_and_handle_next_tc(time_stamp);
         if res.is_err() {
             warn!("PUS17 handler failed with error {:?}", res.unwrap_err());
-            return true;
+            return HandlingStatus::HandledOne;
         }
         match res.unwrap() {
             PusPacketHandlerResult::RequestHandled => {
@@ -135,10 +137,8 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
                         .expect("Sending start failure verification failed");
                 }
             }
-            PusPacketHandlerResult::Empty => {
-                return true;
-            }
+            PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
         }
-        false
+        HandlingStatus::HandledOne
     }
 }

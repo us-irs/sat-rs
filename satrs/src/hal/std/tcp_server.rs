@@ -4,10 +4,13 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
 use core::time::Duration;
+use mio::net::{TcpListener, TcpStream};
+use mio::{Events, Interest, Poll, Token};
 use socket2::{Domain, Socket, Type};
-use std::io::Read;
-use std::net::TcpListener;
-use std::net::{SocketAddr, TcpStream};
+use std::io::{self, Read};
+use std::net::SocketAddr;
+// use std::net::TcpListener;
+// use std::net::{SocketAddr, TcpStream};
 use std::thread;
 
 use crate::tmtc::{ReceivesTc, TmPacketSource};
@@ -81,11 +84,35 @@ pub enum TcpTmtcError<TmError, TcError> {
 
 /// Result of one connection attempt. Contains the client address if a connection was established,
 /// in addition to the number of telecommands and telemetry packets exchanged.
-#[derive(Debug, Default)]
-pub struct ConnectionResult {
-    pub addr: Option<SocketAddr>,
+#[derive(Debug, PartialEq, Eq)]
+pub enum ConnectionResult {
+    AcceptTimeout,
+    HandledConnections(u32),
+}
+
+#[derive(Debug)]
+pub struct HandledConnectionInfo {
+    pub addr: SocketAddr,
     pub num_received_tcs: u32,
     pub num_sent_tms: u32,
+    /// The generic TCP server can be stopped using an external signal. If this happened, this
+    /// boolean will be set to true.
+    pub stopped_by_signal: bool,
+}
+
+impl HandledConnectionInfo {
+    pub fn new(addr: SocketAddr) -> Self {
+        Self {
+            addr,
+            num_received_tcs: 0,
+            num_sent_tms: 0,
+            stopped_by_signal: false,
+        }
+    }
+}
+
+pub trait HandledConnectionHandler {
+    fn handled_connection(&mut self, info: HandledConnectionInfo);
 }
 
 /// Generic parser abstraction for an object which can parse for telecommands given a raw
@@ -96,7 +123,7 @@ pub trait TcpTcParser<TmError, TcError> {
         &mut self,
         tc_buffer: &mut [u8],
         tc_receiver: &mut (impl ReceivesTc<Error = TcError> + ?Sized),
-        conn_result: &mut ConnectionResult,
+        conn_result: &mut HandledConnectionInfo,
         current_write_idx: usize,
         next_write_idx: &mut usize,
     ) -> Result<(), TcpTmtcError<TmError, TcError>>;
@@ -111,7 +138,7 @@ pub trait TcpTmSender<TmError, TcError> {
         &mut self,
         tm_buffer: &mut [u8],
         tm_source: &mut (impl TmPacketSource<Error = TmError> + ?Sized),
-        conn_result: &mut ConnectionResult,
+        conn_result: &mut HandledConnectionInfo,
         stream: &mut TcpStream,
     ) -> Result<bool, TcpTmtcError<TmError, TcError>>;
 }
@@ -134,32 +161,46 @@ pub trait TcpTmSender<TmError, TcError> {
 ///
 /// 1. [TcpTmtcInCobsServer] to exchange TMTC wrapped inside the COBS framing protocol.
 pub struct TcpTmtcGenericServer<
-    TmError,
-    TcError,
     TmSource: TmPacketSource<Error = TmError>,
     TcReceiver: ReceivesTc<Error = TcError>,
     TmSender: TcpTmSender<TmError, TcError>,
     TcParser: TcpTcParser<TmError, TcError>,
+    HandledConnection: HandledConnectionHandler,
+    TmError,
+    TcError,
 > {
+    pub finished_handler: HandledConnection,
     pub(crate) listener: TcpListener,
     pub(crate) inner_loop_delay: Duration,
     pub(crate) tm_source: TmSource,
     pub(crate) tm_buffer: Vec<u8>,
     pub(crate) tc_receiver: TcReceiver,
     pub(crate) tc_buffer: Vec<u8>,
-    stop_signal: Option<Arc<AtomicBool>>,
+    poll: Poll,
+    events: Events,
     tc_handler: TcParser,
     tm_handler: TmSender,
+    stop_signal: Option<Arc<AtomicBool>>,
 }
 
 impl<
-        TmError: 'static,
-        TcError: 'static,
         TmSource: TmPacketSource<Error = TmError>,
         TcReceiver: ReceivesTc<Error = TcError>,
         TmSender: TcpTmSender<TmError, TcError>,
         TcParser: TcpTcParser<TmError, TcError>,
-    > TcpTmtcGenericServer<TmError, TcError, TmSource, TcReceiver, TmSender, TcParser>
+        HandledConnection: HandledConnectionHandler,
+        TmError: 'static,
+        TcError: 'static,
+    >
+    TcpTmtcGenericServer<
+        TmSource,
+        TcReceiver,
+        TmSender,
+        TcParser,
+        HandledConnection,
+        TmError,
+        TcError,
+    >
 {
     /// Create a new generic TMTC server instance.
     ///
@@ -173,32 +214,52 @@ impl<
     ///     then sent back to the client.
     /// * `tc_receiver` - Any received telecommand which was decoded successfully will be forwarded
     ///     to this TC receiver.
+    /// * `stop_signal` - Can be used to stop the server even if a connection is ongoing.
     pub fn new(
         cfg: ServerConfig,
         tc_parser: TcParser,
         tm_sender: TmSender,
         tm_source: TmSource,
         tc_receiver: TcReceiver,
+        finished_handler: HandledConnection,
         stop_signal: Option<Arc<AtomicBool>>,
     ) -> Result<Self, std::io::Error> {
         // Create a TCP listener bound to two addresses.
         let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
+
         socket.set_reuse_address(cfg.reuse_addr)?;
         #[cfg(unix)]
         socket.set_reuse_port(cfg.reuse_port)?;
+        // MIO does not do this for us. We want the accept calls to be non-blocking.
+        socket.set_nonblocking(true)?;
         let addr = (cfg.addr).into();
         socket.bind(&addr)?;
         socket.listen(128)?;
+
+        // Create a poll instance.
+        let poll = Poll::new()?;
+        // Create storage for events.
+        let events = Events::with_capacity(10);
+        let listener: std::net::TcpListener = socket.into();
+        let mut mio_listener = TcpListener::from_std(listener);
+
+        // Start listening for incoming connections.
+        poll.registry()
+            .register(&mut mio_listener, Token(0), Interest::READABLE)?;
+
         Ok(Self {
             tc_handler: tc_parser,
             tm_handler: tm_sender,
-            listener: socket.into(),
+            poll,
+            events,
+            listener: mio_listener,
             inner_loop_delay: cfg.inner_loop_delay,
             tm_source,
             tm_buffer: vec![0; cfg.tm_buffer_size],
             tc_receiver,
             tc_buffer: vec![0; cfg.tc_buffer_size],
             stop_signal,
+            finished_handler,
         })
     }
 
@@ -228,13 +289,50 @@ impl<
     /// client does not send any telecommands and no telemetry needs to be sent back to the client.
     pub fn handle_next_connection(
         &mut self,
+        poll_timeout: Option<Duration>,
     ) -> Result<ConnectionResult, TcpTmtcError<TmError, TcError>> {
-        let mut connection_result = ConnectionResult::default();
+        let mut handled_connections = 0;
+        // Poll Mio for events.
+        self.poll.poll(&mut self.events, poll_timeout)?;
+        let mut acceptable_connection = false;
+        // Process each event.
+        for event in self.events.iter() {
+            if event.token() == Token(0) {
+                acceptable_connection = true;
+            } else {
+                // Should never happen..
+                panic!("unexpected TCP event token");
+            }
+        }
+        // I'd love to do this in the loop above, but there are issues with multiple borrows.
+        if acceptable_connection {
+            // There might be mutliple connections available. Accept until all of them have
+            // been handled.
+            loop {
+                match self.listener.accept() {
+                    Ok((stream, addr)) => {
+                        self.handle_accepted_connection(stream, addr)?;
+                        handled_connections += 1;
+                    }
+                    Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => break,
+                    Err(err) => return Err(TcpTmtcError::Io(err)),
+                }
+            }
+        }
+        if handled_connections > 0 {
+            return Ok(ConnectionResult::HandledConnections(handled_connections));
+        }
+        Ok(ConnectionResult::AcceptTimeout)
+    }
+
+    fn handle_accepted_connection(
+        &mut self,
+        mut stream: TcpStream,
+        addr: SocketAddr,
+    ) -> Result<(), TcpTmtcError<TmError, TcError>> {
         let mut current_write_idx;
         let mut next_write_idx = 0;
-        let (mut stream, addr) = self.listener.accept()?;
-        stream.set_nonblocking(true)?;
-        connection_result.addr = Some(addr);
+        let mut connection_result = HandledConnectionInfo::new(addr);
         current_write_idx = next_write_idx;
         loop {
             let read_result = stream.read(&mut self.tc_buffer[current_write_idx..]);
@@ -297,7 +395,9 @@ impl<
                                     .unwrap()
                                     .load(std::sync::atomic::Ordering::Relaxed)
                             {
-                                return Ok(connection_result);
+                                connection_result.stopped_by_signal = true;
+                                self.finished_handler.handled_connection(connection_result);
+                                return Ok(());
                             }
                         }
                     }
@@ -313,7 +413,8 @@ impl<
             &mut connection_result,
             &mut stream,
         )?;
-        Ok(connection_result)
+        self.finished_handler.handled_connection(connection_result);
+        Ok(())
     }
 }
 
@@ -324,6 +425,8 @@ pub(crate) mod tests {
     use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
 
     use crate::tmtc::{ReceivesTcCore, TmPacketSourceCore};
+
+    use super::*;
 
     #[derive(Default, Clone)]
     pub(crate) struct SyncTcCacher {
@@ -369,6 +472,32 @@ pub(crate) mod tests {
                 return Ok(next_vec.len());
             }
             Ok(0)
+        }
+    }
+
+    #[derive(Default)]
+    pub struct ConnectionFinishedHandler {
+        connection_info: VecDeque<HandledConnectionInfo>,
+    }
+
+    impl HandledConnectionHandler for ConnectionFinishedHandler {
+        fn handled_connection(&mut self, info: HandledConnectionInfo) {
+            self.connection_info.push_back(info);
+        }
+    }
+
+    impl ConnectionFinishedHandler {
+        pub fn check_last_connection(&mut self, num_tms: u32, num_tcs: u32) {
+            let last_conn_result = self
+                .connection_info
+                .pop_back()
+                .expect("no connection info available");
+            assert_eq!(last_conn_result.num_received_tcs, num_tcs);
+            assert_eq!(last_conn_result.num_sent_tms, num_tms);
+        }
+
+        pub fn check_no_connections_left(&self) {
+            assert!(self.connection_info.is_empty());
         }
     }
 }

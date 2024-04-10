@@ -157,7 +157,7 @@ impl<TmSender: EcssTmSenderCore> PusReceiver<TmSender> {
 
 pub trait TargetedPusService {
     /// Returns [true] if the packet handling is finished.
-    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool;
+    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus;
     fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> HandlingStatus;
     fn check_for_request_timeouts(&mut self);
 }
