@@ -5,13 +5,25 @@ use std::{
 
 use log::{info, warn};
 use satrs::{
-    hal::std::tcp_server::{ServerConfig, TcpSpacepacketsServer},
+    hal::std::tcp_server::{HandledConnectionHandler, ServerConfig, TcpSpacepacketsServer},
     pus::ReceivesEcssPusTc,
     spacepackets::PacketId,
     tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc, TmPacketSourceCore},
 };
 
 use crate::ccsds::CcsdsReceiver;
+
+#[derive(Default)]
+pub struct ConnectionFinishedHandler {}
+
+impl HandledConnectionHandler for ConnectionFinishedHandler {
+    fn handled_connection(&mut self, info: satrs::hal::std::tcp_server::HandledConnectionInfo) {
+        info!(
+            "Served {} TMs and {} TCs for client {:?}",
+            info.num_sent_tms, info.num_received_tcs, info.addr
+        );
+    }
+}
 
 #[derive(Default, Clone)]
 pub struct SyncTcpTmSource {
@@ -70,11 +82,12 @@ impl TmPacketSourceCore for SyncTcpTmSource {
 }
 
 pub type TcpServerType<TcSource, MpscErrorType> = TcpSpacepacketsServer<
-    (),
-    CcsdsError<MpscErrorType>,
     SyncTcpTmSource,
     CcsdsDistributor<CcsdsReceiver<TcSource, MpscErrorType>, MpscErrorType>,
     HashSet<PacketId>,
+    ConnectionFinishedHandler,
+    (),
+    CcsdsError<MpscErrorType>,
 >;
 
 pub struct TcpTask<
@@ -109,6 +122,7 @@ impl<
                 tm_source,
                 tc_receiver,
                 packet_id_lookup,
+                ConnectionFinishedHandler::default(),
                 None,
             )?,
         })
@@ -116,14 +130,9 @@ impl<
 
     pub fn periodic_operation(&mut self) {
         loop {
-            let result = self.server.handle_next_connection();
+            let result = self.server.handle_next_connection(None);
             match result {
-                Ok(conn_result) => {
-                    info!(
-                        "Served {} TMs and {} TCs for client {:?}",
-                        conn_result.num_sent_tms, conn_result.num_received_tcs, conn_result.addr
-                    );
-                }
+                Ok(_conn_result) => (),
                 Err(e) => {
                     warn!("TCP server error: {e:?}");
                 }

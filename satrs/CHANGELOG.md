@@ -22,9 +22,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   parameter type. This message also contains the sender ID which can be useful for debugging
   or application layer / FDIR logic.
 - Stop signal handling for the TCP servers.
+- TCP server now uses `mio` crate to allow non-blocking operation. The server can now handle
+  multiple connections at once, and the context information about handled transfers is
+  passed via a callback which is inserted as a generic as well.
 
 ## Changed
 
+- TCP server generics order. The error generics come last now.
 - `encoding::ccsds::PacketIdValidator` renamed to `ValidatorU16Id`, which lives in the crate root.
   It can be used for both CCSDS packet ID and CCSDS APID validation.
 - `EventManager::try_event_handling` not expects a mutable error handling closure instead of

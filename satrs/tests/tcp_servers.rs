@@ -24,7 +24,10 @@ use std::{
 use hashbrown::HashSet;
 use satrs::{
     encoding::cobs::encode_packet_with_cobs,
-    hal::std::tcp_server::{ServerConfig, TcpSpacepacketsServer, TcpTmtcInCobsServer},
+    hal::std::tcp_server::{
+        ConnectionResult, HandledConnectionHandler, HandledConnectionInfo, ServerConfig,
+        TcpSpacepacketsServer, TcpTmtcInCobsServer,
+    },
     tmtc::{ReceivesTcCore, TmPacketSourceCore},
 };
 use spacepackets::{
@@ -33,10 +36,36 @@ use spacepackets::{
 };
 use std::{collections::VecDeque, sync::Arc, vec::Vec};
 
+#[derive(Default)]
+pub struct ConnectionFinishedHandler {
+    connection_info: VecDeque<HandledConnectionInfo>,
+}
+
+impl HandledConnectionHandler for ConnectionFinishedHandler {
+    fn handled_connection(&mut self, info: HandledConnectionInfo) {
+        self.connection_info.push_back(info);
+    }
+}
+
+impl ConnectionFinishedHandler {
+    pub fn check_last_connection(&mut self, num_tms: u32, num_tcs: u32) {
+        let last_conn_result = self
+            .connection_info
+            .pop_back()
+            .expect("no connection info available");
+        assert_eq!(last_conn_result.num_received_tcs, num_tcs);
+        assert_eq!(last_conn_result.num_sent_tms, num_tms);
+    }
+
+    pub fn check_no_connections_left(&self) {
+        assert!(self.connection_info.is_empty());
+    }
+}
 #[derive(Default, Clone)]
 struct SyncTcCacher {
     tc_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
 }
+
 impl ReceivesTcCore for SyncTcCacher {
     type Error = ();
 
@@ -96,6 +125,7 @@ fn test_cobs_server() {
         ServerConfig::new(AUTO_PORT_ADDR, Duration::from_millis(2), 1024, 1024),
         tm_source,
         tc_receiver.clone(),
+        ConnectionFinishedHandler::default(),
         None,
     )
     .expect("TCP server generation failed");
@@ -107,13 +137,20 @@ fn test_cobs_server() {
 
     // Call the connection handler in separate thread, does block.
     thread::spawn(move || {
-        let result = tcp_server.handle_next_connection();
+        let result = tcp_server.handle_next_connection(Some(Duration::from_millis(400)));
         if result.is_err() {
             panic!("handling connection failed: {:?}", result.unwrap_err());
         }
         let conn_result = result.unwrap();
-        assert_eq!(conn_result.num_received_tcs, 1, "No TC received");
-        assert_eq!(conn_result.num_sent_tms, 1, "No TM received");
+        assert_eq!(conn_result, ConnectionResult::HandledConnections(1));
+        tcp_server
+            .generic_server
+            .finished_handler
+            .check_last_connection(1, 1);
+        tcp_server
+            .generic_server
+            .finished_handler
+            .check_no_connections_left();
         // Signal the main thread we are done.
         set_if_done.store(true, Ordering::Relaxed);
     });
@@ -180,6 +217,7 @@ fn test_ccsds_server() {
         tm_source,
         tc_receiver.clone(),
         packet_id_lookup,
+        ConnectionFinishedHandler::default(),
         None,
     )
     .expect("TCP server generation failed");
@@ -190,13 +228,20 @@ fn test_ccsds_server() {
     let set_if_done = conn_handled.clone();
     // Call the connection handler in separate thread, does block.
     thread::spawn(move || {
-        let result = tcp_server.handle_next_connection();
+        let result = tcp_server.handle_next_connection(Some(Duration::from_millis(500)));
         if result.is_err() {
             panic!("handling connection failed: {:?}", result.unwrap_err());
         }
         let conn_result = result.unwrap();
-        assert_eq!(conn_result.num_received_tcs, 1);
-        assert_eq!(conn_result.num_sent_tms, 1);
+        assert_eq!(conn_result, ConnectionResult::HandledConnections(1));
+        tcp_server
+            .generic_server
+            .finished_handler
+            .check_last_connection(1, 1);
+        tcp_server
+            .generic_server
+            .finished_handler
+            .check_no_connections_left();
         set_if_done.store(true, Ordering::Relaxed);
     });
     let mut stream = TcpStream::connect(dest_addr).expect("connecting to TCP server failed");

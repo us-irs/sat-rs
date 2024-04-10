@@ -1,10 +1,8 @@
 use alloc::sync::Arc;
-use core::sync::atomic::AtomicBool;
+use core::{sync::atomic::AtomicBool, time::Duration};
 use delegate::delegate;
-use std::{
-    io::Write,
-    net::{SocketAddr, TcpListener, TcpStream},
-};
+use mio::net::{TcpListener, TcpStream};
+use std::{io::Write, net::SocketAddr};
 
 use crate::{
     encoding::parse_buffer_for_ccsds_space_packets,
@@ -13,7 +11,8 @@ use crate::{
 };
 
 use super::tcp_server::{
-    ConnectionResult, ServerConfig, TcpTcParser, TcpTmSender, TcpTmtcError, TcpTmtcGenericServer,
+    ConnectionResult, HandledConnectionHandler, HandledConnectionInfo, ServerConfig, TcpTcParser,
+    TcpTmSender, TcpTmtcError, TcpTmtcGenericServer,
 };
 
 /// Concrete [TcpTcParser] implementation for the [TcpSpacepacketsServer].
@@ -27,14 +26,14 @@ impl<PacketIdChecker: ValidatorU16Id> SpacepacketsTcParser<PacketIdChecker> {
     }
 }
 
-impl<TmError, TcError: 'static, PacketIdChecker: ValidatorU16Id> TcpTcParser<TmError, TcError>
+impl<PacketIdChecker: ValidatorU16Id, TmError, TcError: 'static> TcpTcParser<TmError, TcError>
     for SpacepacketsTcParser<PacketIdChecker>
 {
     fn handle_tc_parsing(
         &mut self,
         tc_buffer: &mut [u8],
         tc_receiver: &mut (impl ReceivesTc<Error = TcError> + ?Sized),
-        conn_result: &mut ConnectionResult,
+        conn_result: &mut HandledConnectionInfo,
         current_write_idx: usize,
         next_write_idx: &mut usize,
     ) -> Result<(), TcpTmtcError<TmError, TcError>> {
@@ -59,7 +58,7 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for SpacepacketsTmSender {
         &mut self,
         tm_buffer: &mut [u8],
         tm_source: &mut (impl TmPacketSource<Error = TmError> + ?Sized),
-        conn_result: &mut ConnectionResult,
+        conn_result: &mut HandledConnectionInfo,
         stream: &mut TcpStream,
     ) -> Result<bool, TcpTmtcError<TmError, TcError>> {
         let mut tm_was_sent = false;
@@ -94,29 +93,40 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for SpacepacketsTmSender {
 /// The [TCP server integration tests](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs/tests/tcp_servers.rs)
 /// also serves as the example application for this module.
 pub struct TcpSpacepacketsServer<
-    TmError,
-    TcError: 'static,
     TmSource: TmPacketSource<Error = TmError>,
     TcReceiver: ReceivesTc<Error = TcError>,
     PacketIdChecker: ValidatorU16Id,
+    HandledConnection: HandledConnectionHandler,
+    TmError,
+    TcError: 'static,
 > {
-    generic_server: TcpTmtcGenericServer<
-        TmError,
-        TcError,
+    pub generic_server: TcpTmtcGenericServer<
         TmSource,
         TcReceiver,
         SpacepacketsTmSender,
         SpacepacketsTcParser<PacketIdChecker>,
+        HandledConnection,
+        TmError,
+        TcError,
     >,
 }
 
 impl<
-        TmError: 'static,
-        TcError: 'static,
         TmSource: TmPacketSource<Error = TmError>,
         TcReceiver: ReceivesTc<Error = TcError>,
         PacketIdChecker: ValidatorU16Id,
-    > TcpSpacepacketsServer<TmError, TcError, TmSource, TcReceiver, PacketIdChecker>
+        HandledConnection: HandledConnectionHandler,
+        TmError: 'static,
+        TcError: 'static,
+    >
+    TcpSpacepacketsServer<
+        TmSource,
+        TcReceiver,
+        PacketIdChecker,
+        HandledConnection,
+        TmError,
+        TcError,
+    >
 {
     ///
     /// ## Parameter
@@ -133,6 +143,7 @@ impl<
         tm_source: TmSource,
         tc_receiver: TcReceiver,
         packet_id_checker: PacketIdChecker,
+        handled_connection: HandledConnection,
         stop_signal: Option<Arc<AtomicBool>>,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
@@ -142,6 +153,7 @@ impl<
                 SpacepacketsTmSender::default(),
                 tm_source,
                 tc_receiver,
+                handled_connection,
                 stop_signal,
             )?,
         })
@@ -158,6 +170,7 @@ impl<
             /// Delegation to the [TcpTmtcGenericServer::handle_next_connection] call.
             pub fn handle_next_connection(
                 &mut self,
+                poll_timeout: Option<Duration>
             ) -> Result<ConnectionResult, TcpTmtcError<TmError, TcError>>;
         }
     }
@@ -185,8 +198,8 @@ mod tests {
     };
 
     use crate::hal::std::tcp_server::{
-        tests::{SyncTcCacher, SyncTmSource},
-        ServerConfig,
+        tests::{ConnectionFinishedHandler, SyncTcCacher, SyncTmSource},
+        ConnectionResult, ServerConfig,
     };
 
     use super::TcpSpacepacketsServer;
@@ -202,12 +215,20 @@ mod tests {
         tm_source: SyncTmSource,
         packet_id_lookup: HashSet<PacketId>,
         stop_signal: Option<Arc<AtomicBool>>,
-    ) -> TcpSpacepacketsServer<(), (), SyncTmSource, SyncTcCacher, HashSet<PacketId>> {
+    ) -> TcpSpacepacketsServer<
+        SyncTmSource,
+        SyncTcCacher,
+        HashSet<PacketId>,
+        ConnectionFinishedHandler,
+        (),
+        (),
+    > {
         TcpSpacepacketsServer::new(
             ServerConfig::new(*addr, Duration::from_millis(2), 1024, 1024),
             tm_source,
             tc_receiver,
             packet_id_lookup,
+            ConnectionFinishedHandler::default(),
             stop_signal,
         )
         .expect("TCP server generation failed")
@@ -234,13 +255,20 @@ mod tests {
         let set_if_done = conn_handled.clone();
         // Call the connection handler in separate thread, does block.
         thread::spawn(move || {
-            let result = tcp_server.handle_next_connection();
+            let result = tcp_server.handle_next_connection(Some(Duration::from_millis(100)));
             if result.is_err() {
                 panic!("handling connection failed: {:?}", result.unwrap_err());
             }
             let conn_result = result.unwrap();
-            assert_eq!(conn_result.num_received_tcs, 1);
-            assert_eq!(conn_result.num_sent_tms, 0);
+            matches!(conn_result, ConnectionResult::HandledConnections(1));
+            tcp_server
+                .generic_server
+                .finished_handler
+                .check_last_connection(0, 1);
+            tcp_server
+                .generic_server
+                .finished_handler
+                .check_no_connections_left();
             set_if_done.store(true, Ordering::Relaxed);
         });
         let ping_tc =
@@ -305,16 +333,20 @@ mod tests {
 
         // Call the connection handler in separate thread, does block.
         thread::spawn(move || {
-            let result = tcp_server.handle_next_connection();
+            let result = tcp_server.handle_next_connection(Some(Duration::from_millis(100)));
             if result.is_err() {
                 panic!("handling connection failed: {:?}", result.unwrap_err());
             }
             let conn_result = result.unwrap();
-            assert_eq!(
-                conn_result.num_received_tcs, 2,
-                "wrong number of received TCs"
-            );
-            assert_eq!(conn_result.num_sent_tms, 2, "wrong number of sent TMs");
+            matches!(conn_result, ConnectionResult::HandledConnections(1));
+            tcp_server
+                .generic_server
+                .finished_handler
+                .check_last_connection(2, 2);
+            tcp_server
+                .generic_server
+                .finished_handler
+                .check_no_connections_left();
             set_if_done.store(true, Ordering::Relaxed);
         });
         let mut stream = TcpStream::connect(dest_addr).expect("connecting to TCP server failed");
