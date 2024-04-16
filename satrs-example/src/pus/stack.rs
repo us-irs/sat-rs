@@ -1,7 +1,7 @@
 use crate::pus::mode::ModeServiceWrapper;
 use derive_new::new;
 use satrs::{
-    pus::{EcssTcInMemConverter, EcssTmSenderCore},
+    pus::{EcssTcInMemConverter, EcssTmSender},
     spacepackets::time::{cds, TimeWriter},
 };
 
@@ -12,7 +12,7 @@ use super::{
 };
 
 #[derive(new)]
-pub struct PusStack<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter> {
+pub struct PusStack<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> {
     test_srv: TestCustomServiceWrapper<TmSender, TcInMemConverter>,
     hk_srv_wrapper: HkServiceWrapper<TmSender, TcInMemConverter>,
     event_srv: EventServiceWrapper<TmSender, TcInMemConverter>,
@@ -21,7 +21,7 @@ pub struct PusStack<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemCon
     mode_srv: ModeServiceWrapper<TmSender, TcInMemConverter>,
 }
 
-impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
+impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
     PusStack<TmSender, TcInMemConverter>
 {
     pub fn periodic_operation(&mut self) {

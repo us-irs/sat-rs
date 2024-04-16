@@ -1,20 +1,40 @@
 use std::{
     collections::{HashSet, VecDeque},
+    fmt::Debug,
+    marker::PhantomData,
     sync::{Arc, Mutex},
 };
 
 use log::{info, warn};
 use satrs::{
+    encoding::ccsds::{SpValidity, SpacePacketValidator},
     hal::std::tcp_server::{HandledConnectionHandler, ServerConfig, TcpSpacepacketsServer},
-    pus::ReceivesEcssPusTc,
-    spacepackets::PacketId,
-    tmtc::{CcsdsDistributor, CcsdsError, ReceivesCcsdsTc, TmPacketSourceCore},
+    spacepackets::{CcsdsPacket, PacketId},
+    tmtc::{PacketSenderRaw, PacketSource},
 };
-
-use crate::tmtc::ccsds::CcsdsReceiver;
 
 #[derive(Default)]
 pub struct ConnectionFinishedHandler {}
+
+pub struct SimplePacketValidator {
+    pub valid_ids: HashSet<PacketId>,
+}
+
+impl SpacePacketValidator for SimplePacketValidator {
+    fn validate(
+        &self,
+        sp_header: &satrs::spacepackets::SpHeader,
+        _raw_buf: &[u8],
+    ) -> satrs::encoding::ccsds::SpValidity {
+        if self.valid_ids.contains(&sp_header.packet_id()) {
+            return SpValidity::Valid;
+        }
+        log::warn!("ignoring space packet with header {:?}", sp_header);
+        // We could perform a CRC check.. but lets keep this simple and assume that TCP ensures
+        // data integrity.
+        SpValidity::Skip
+    }
+}
 
 impl HandledConnectionHandler for ConnectionFinishedHandler {
     fn handled_connection(&mut self, info: satrs::hal::std::tcp_server::HandledConnectionInfo) {
@@ -53,7 +73,7 @@ impl SyncTcpTmSource {
     }
 }
 
-impl TmPacketSourceCore for SyncTcpTmSource {
+impl PacketSource for SyncTcpTmSource {
     type Error = ();
 
     fn retrieve_packet(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
@@ -81,56 +101,45 @@ impl TmPacketSourceCore for SyncTcpTmSource {
     }
 }
 
-pub type TcpServerType<TcSource, MpscErrorType> = TcpSpacepacketsServer<
+pub type TcpServer<ReceivesTc, SendError> = TcpSpacepacketsServer<
     SyncTcpTmSource,
-    CcsdsDistributor<CcsdsReceiver<TcSource, MpscErrorType>, MpscErrorType>,
-    HashSet<PacketId>,
+    ReceivesTc,
+    SimplePacketValidator,
     ConnectionFinishedHandler,
     (),
-    CcsdsError<MpscErrorType>,
+    SendError,
 >;
 
-pub struct TcpTask<
-    TcSource: ReceivesCcsdsTc<Error = MpscErrorType>
-        + ReceivesEcssPusTc<Error = MpscErrorType>
-        + Clone
-        + Send
-        + 'static,
-    MpscErrorType: 'static,
-> {
-    server: TcpServerType<TcSource, MpscErrorType>,
-}
+pub struct TcpTask<TcSender: PacketSenderRaw<Error = SendError>, SendError: Debug + 'static>(
+    pub TcpServer<TcSender, SendError>,
+    PhantomData<SendError>,
+);
 
-impl<
-        TcSource: ReceivesCcsdsTc<Error = MpscErrorType>
-            + ReceivesEcssPusTc<Error = MpscErrorType>
-            + Clone
-            + Send
-            + 'static,
-        MpscErrorType: 'static + core::fmt::Debug,
-    > TcpTask<TcSource, MpscErrorType>
+impl<TcSender: PacketSenderRaw<Error = SendError>, SendError: Debug + 'static>
+    TcpTask<TcSender, SendError>
 {
     pub fn new(
         cfg: ServerConfig,
         tm_source: SyncTcpTmSource,
-        tc_receiver: CcsdsDistributor<CcsdsReceiver<TcSource, MpscErrorType>, MpscErrorType>,
-        packet_id_lookup: HashSet<PacketId>,
+        tc_sender: TcSender,
+        valid_ids: HashSet<PacketId>,
     ) -> Result<Self, std::io::Error> {
-        Ok(Self {
-            server: TcpSpacepacketsServer::new(
+        Ok(Self(
+            TcpSpacepacketsServer::new(
                 cfg,
                 tm_source,
-                tc_receiver,
-                packet_id_lookup,
+                tc_sender,
+                SimplePacketValidator { valid_ids },
                 ConnectionFinishedHandler::default(),
                 None,
             )?,
-        })
+            PhantomData,
+        ))
     }
 
     pub fn periodic_operation(&mut self) {
         loop {
-            let result = self.server.handle_next_connection(None);
+            let result = self.0.handle_all_connections(None);
             match result {
                 Ok(_conn_result) => (),
                 Err(e) => {

@@ -13,14 +13,13 @@ use std::net::SocketAddr;
 // use std::net::{SocketAddr, TcpStream};
 use std::thread;
 
-use crate::tmtc::{ReceivesTc, TmPacketSource};
+use crate::tmtc::{PacketSenderRaw, PacketSource};
+use crate::ComponentId;
 use thiserror::Error;
 
 // Re-export the TMTC in COBS server.
 pub use crate::hal::std::tcp_cobs_server::{CobsTcParser, CobsTmSender, TcpTmtcInCobsServer};
-pub use crate::hal::std::tcp_spacepackets_server::{
-    SpacepacketsTcParser, SpacepacketsTmSender, TcpSpacepacketsServer,
-};
+pub use crate::hal::std::tcp_spacepackets_server::{SpacepacketsTmSender, TcpSpacepacketsServer};
 
 /// Configuration struct for the generic TCP TMTC server
 ///
@@ -30,7 +29,7 @@ pub use crate::hal::std::tcp_spacepackets_server::{
 /// * `inner_loop_delay` - If a client connects for a longer period, but no TC is received or
 ///     no TM needs to be sent, the TCP server will delay for the specified amount of time
 ///     to reduce CPU load.
-/// * `tm_buffer_size` - Size of the TM buffer used to read TM from the [TmPacketSource] and
+/// * `tm_buffer_size` - Size of the TM buffer used to read TM from the [PacketSource] and
 ///     encoding of that data. This buffer should at large enough to hold the maximum expected
 ///     TM size read from the packet source.
 /// * `tc_buffer_size` - Size of the TC buffer used to read encoded telecommands sent from
@@ -46,6 +45,7 @@ pub use crate::hal::std::tcp_spacepackets_server::{
 ///     default.
 #[derive(Debug, Copy, Clone)]
 pub struct ServerConfig {
+    pub id: ComponentId,
     pub addr: SocketAddr,
     pub inner_loop_delay: Duration,
     pub tm_buffer_size: usize,
@@ -56,12 +56,14 @@ pub struct ServerConfig {
 
 impl ServerConfig {
     pub fn new(
+        id: ComponentId,
         addr: SocketAddr,
         inner_loop_delay: Duration,
         tm_buffer_size: usize,
         tc_buffer_size: usize,
     ) -> Self {
         Self {
+            id,
             addr,
             inner_loop_delay,
             tm_buffer_size,
@@ -116,28 +118,29 @@ pub trait HandledConnectionHandler {
 }
 
 /// Generic parser abstraction for an object which can parse for telecommands given a raw
-/// bytestream received from a TCP socket and send them to a generic [ReceivesTc] telecommand
-/// receiver. This allows different encoding schemes for telecommands.
-pub trait TcpTcParser<TmError, TcError> {
+/// bytestream received from a TCP socket and send them using a generic [PacketSenderRaw]
+/// implementation. This allows different encoding schemes for telecommands.
+pub trait TcpTcParser<TmError, SendError> {
     fn handle_tc_parsing(
         &mut self,
         tc_buffer: &mut [u8],
-        tc_receiver: &mut (impl ReceivesTc<Error = TcError> + ?Sized),
+        sender_id: ComponentId,
+        tc_sender: &(impl PacketSenderRaw<Error = SendError> + ?Sized),
         conn_result: &mut HandledConnectionInfo,
         current_write_idx: usize,
         next_write_idx: &mut usize,
-    ) -> Result<(), TcpTmtcError<TmError, TcError>>;
+    ) -> Result<(), TcpTmtcError<TmError, SendError>>;
 }
 
 /// Generic sender abstraction for an object which can pull telemetry from a given TM source
-/// using a [TmPacketSource] and then send them back to a client using a given [TcpStream].
+/// using a [PacketSource] and then send them back to a client using a given [TcpStream].
 /// The concrete implementation can also perform any encoding steps which are necessary before
 /// sending back the data to a client.
 pub trait TcpTmSender<TmError, TcError> {
     fn handle_tm_sending(
         &mut self,
         tm_buffer: &mut [u8],
-        tm_source: &mut (impl TmPacketSource<Error = TmError> + ?Sized),
+        tm_source: &mut (impl PacketSource<Error = TmError> + ?Sized),
         conn_result: &mut HandledConnectionInfo,
         stream: &mut TcpStream,
     ) -> Result<bool, TcpTmtcError<TmError, TcError>>;
@@ -150,9 +153,9 @@ pub trait TcpTmSender<TmError, TcError> {
 /// through the following 4 core abstractions:
 ///
 /// 1. [TcpTcParser] to parse for telecommands from the raw bytestream received from a client.
-/// 2. Parsed telecommands will be sent to the [ReceivesTc] telecommand receiver.
+/// 2. Parsed telecommands will be sent using the [PacketSenderRaw] object.
 /// 3. [TcpTmSender] to send telemetry pulled from a TM source back to the client.
-/// 4. [TmPacketSource] as a generic TM source used by the [TcpTmSender].
+/// 4. [PacketSource] as a generic TM source used by the [TcpTmSender].
 ///
 /// It is possible to specify custom abstractions to build a dedicated TCP TMTC server without
 /// having to re-implement common logic.
@@ -160,46 +163,48 @@ pub trait TcpTmSender<TmError, TcError> {
 /// Currently, this framework offers the following concrete implementations:
 ///
 /// 1. [TcpTmtcInCobsServer] to exchange TMTC wrapped inside the COBS framing protocol.
+/// 2. [TcpSpacepacketsServer] to exchange space packets via TCP.
 pub struct TcpTmtcGenericServer<
-    TmSource: TmPacketSource<Error = TmError>,
-    TcReceiver: ReceivesTc<Error = TcError>,
-    TmSender: TcpTmSender<TmError, TcError>,
-    TcParser: TcpTcParser<TmError, TcError>,
+    TmSource: PacketSource<Error = TmError>,
+    TcSender: PacketSenderRaw<Error = TcSendError>,
+    TmSender: TcpTmSender<TmError, TcSendError>,
+    TcParser: TcpTcParser<TmError, TcSendError>,
     HandledConnection: HandledConnectionHandler,
     TmError,
-    TcError,
+    TcSendError,
 > {
+    pub id: ComponentId,
     pub finished_handler: HandledConnection,
     pub(crate) listener: TcpListener,
     pub(crate) inner_loop_delay: Duration,
     pub(crate) tm_source: TmSource,
     pub(crate) tm_buffer: Vec<u8>,
-    pub(crate) tc_receiver: TcReceiver,
+    pub(crate) tc_sender: TcSender,
     pub(crate) tc_buffer: Vec<u8>,
     poll: Poll,
     events: Events,
-    tc_handler: TcParser,
-    tm_handler: TmSender,
+    pub tc_handler: TcParser,
+    pub tm_handler: TmSender,
     stop_signal: Option<Arc<AtomicBool>>,
 }
 
 impl<
-        TmSource: TmPacketSource<Error = TmError>,
-        TcReceiver: ReceivesTc<Error = TcError>,
-        TmSender: TcpTmSender<TmError, TcError>,
-        TcParser: TcpTcParser<TmError, TcError>,
+        TmSource: PacketSource<Error = TmError>,
+        TcSender: PacketSenderRaw<Error = TcSendError>,
+        TmSender: TcpTmSender<TmError, TcSendError>,
+        TcParser: TcpTcParser<TmError, TcSendError>,
         HandledConnection: HandledConnectionHandler,
         TmError: 'static,
-        TcError: 'static,
+        TcSendError: 'static,
     >
     TcpTmtcGenericServer<
         TmSource,
-        TcReceiver,
+        TcSender,
         TmSender,
         TcParser,
         HandledConnection,
         TmError,
-        TcError,
+        TcSendError,
     >
 {
     /// Create a new generic TMTC server instance.
@@ -212,15 +217,15 @@ impl<
     /// * `tm_sender` - Sends back telemetry to the client using the specified TM source.
     /// * `tm_source` - Generic TM source used by the server to pull telemetry packets which are
     ///     then sent back to the client.
-    /// * `tc_receiver` - Any received telecommand which was decoded successfully will be forwarded
-    ///     to this TC receiver.
+    /// * `tc_sender` - Any received telecommand which was decoded successfully will be forwarded
+    ///     using this TC sender.
     /// * `stop_signal` - Can be used to stop the server even if a connection is ongoing.
     pub fn new(
         cfg: ServerConfig,
         tc_parser: TcParser,
         tm_sender: TmSender,
         tm_source: TmSource,
-        tc_receiver: TcReceiver,
+        tc_receiver: TcSender,
         finished_handler: HandledConnection,
         stop_signal: Option<Arc<AtomicBool>>,
     ) -> Result<Self, std::io::Error> {
@@ -248,6 +253,7 @@ impl<
             .register(&mut mio_listener, Token(0), Interest::READABLE)?;
 
         Ok(Self {
+            id: cfg.id,
             tc_handler: tc_parser,
             tm_handler: tm_sender,
             poll,
@@ -256,7 +262,7 @@ impl<
             inner_loop_delay: cfg.inner_loop_delay,
             tm_source,
             tm_buffer: vec![0; cfg.tm_buffer_size],
-            tc_receiver,
+            tc_sender: tc_receiver,
             tc_buffer: vec![0; cfg.tc_buffer_size],
             stop_signal,
             finished_handler,
@@ -287,10 +293,10 @@ impl<
     /// The server will delay for a user-specified period if the client connects to the server
     /// for prolonged periods and there is no traffic for the server. This is the case if the
     /// client does not send any telecommands and no telemetry needs to be sent back to the client.
-    pub fn handle_next_connection(
+    pub fn handle_all_connections(
         &mut self,
         poll_timeout: Option<Duration>,
-    ) -> Result<ConnectionResult, TcpTmtcError<TmError, TcError>> {
+    ) -> Result<ConnectionResult, TcpTmtcError<TmError, TcSendError>> {
         let mut handled_connections = 0;
         // Poll Mio for events.
         self.poll.poll(&mut self.events, poll_timeout)?;
@@ -329,7 +335,7 @@ impl<
         &mut self,
         mut stream: TcpStream,
         addr: SocketAddr,
-    ) -> Result<(), TcpTmtcError<TmError, TcError>> {
+    ) -> Result<(), TcpTmtcError<TmError, TcSendError>> {
         let mut current_write_idx;
         let mut next_write_idx = 0;
         let mut connection_result = HandledConnectionInfo::new(addr);
@@ -343,7 +349,8 @@ impl<
                     if current_write_idx > 0 {
                         self.tc_handler.handle_tc_parsing(
                             &mut self.tc_buffer,
-                            &mut self.tc_receiver,
+                            self.id,
+                            &self.tc_sender,
                             &mut connection_result,
                             current_write_idx,
                             &mut next_write_idx,
@@ -357,7 +364,8 @@ impl<
                     if current_write_idx == self.tc_buffer.capacity() {
                         self.tc_handler.handle_tc_parsing(
                             &mut self.tc_buffer,
-                            &mut self.tc_receiver,
+                            self.id,
+                            &self.tc_sender,
                             &mut connection_result,
                             current_write_idx,
                             &mut next_write_idx,
@@ -371,7 +379,8 @@ impl<
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
                         self.tc_handler.handle_tc_parsing(
                             &mut self.tc_buffer,
-                            &mut self.tc_receiver,
+                            self.id,
+                            &self.tc_sender,
                             &mut connection_result,
                             current_write_idx,
                             &mut next_write_idx,
@@ -424,23 +433,9 @@ pub(crate) mod tests {
 
     use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
 
-    use crate::tmtc::{ReceivesTcCore, TmPacketSourceCore};
+    use crate::tmtc::PacketSource;
 
     use super::*;
-
-    #[derive(Default, Clone)]
-    pub(crate) struct SyncTcCacher {
-        pub(crate) tc_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
-    }
-    impl ReceivesTcCore for SyncTcCacher {
-        type Error = ();
-
-        fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
-            let mut tc_queue = self.tc_queue.lock().expect("tc forwarder failed");
-            tc_queue.push_back(tc_raw.to_vec());
-            Ok(())
-        }
-    }
 
     #[derive(Default, Clone)]
     pub(crate) struct SyncTmSource {
@@ -454,7 +449,7 @@ pub(crate) mod tests {
         }
     }
 
-    impl TmPacketSourceCore for SyncTmSource {
+    impl PacketSource for SyncTmSource {
         type Error = ();
 
         fn retrieve_packet(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {

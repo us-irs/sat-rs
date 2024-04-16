@@ -10,12 +10,13 @@ use std::net::SocketAddr;
 use std::vec::Vec;
 
 use crate::encoding::parse_buffer_for_cobs_encoded_packets;
-use crate::tmtc::ReceivesTc;
-use crate::tmtc::TmPacketSource;
+use crate::tmtc::PacketSenderRaw;
+use crate::tmtc::PacketSource;
 
 use crate::hal::std::tcp_server::{
     ConnectionResult, ServerConfig, TcpTcParser, TcpTmSender, TcpTmtcError, TcpTmtcGenericServer,
 };
+use crate::ComponentId;
 
 use super::tcp_server::HandledConnectionHandler;
 use super::tcp_server::HandledConnectionInfo;
@@ -28,14 +29,16 @@ impl<TmError, TcError: 'static> TcpTcParser<TmError, TcError> for CobsTcParser {
     fn handle_tc_parsing(
         &mut self,
         tc_buffer: &mut [u8],
-        tc_receiver: &mut (impl ReceivesTc<Error = TcError> + ?Sized),
+        sender_id: ComponentId,
+        tc_sender: &(impl PacketSenderRaw<Error = TcError> + ?Sized),
         conn_result: &mut HandledConnectionInfo,
         current_write_idx: usize,
         next_write_idx: &mut usize,
     ) -> Result<(), TcpTmtcError<TmError, TcError>> {
         conn_result.num_received_tcs += parse_buffer_for_cobs_encoded_packets(
             &mut tc_buffer[..current_write_idx],
-            tc_receiver.upcast_mut(),
+            sender_id,
+            tc_sender,
             next_write_idx,
         )
         .map_err(|e| TcpTmtcError::TcError(e))?;
@@ -62,7 +65,7 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
     fn handle_tm_sending(
         &mut self,
         tm_buffer: &mut [u8],
-        tm_source: &mut (impl TmPacketSource<Error = TmError> + ?Sized),
+        tm_source: &mut (impl PacketSource<Error = TmError> + ?Sized),
         conn_result: &mut HandledConnectionInfo,
         stream: &mut TcpStream,
     ) -> Result<bool, TcpTmtcError<TmError, TcError>> {
@@ -101,7 +104,7 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
 /// Telemetry will be encoded with the COBS  protocol using [cobs::encode] in addition to being
 /// wrapped with the sentinel value 0 as the packet delimiter as well before being sent back to
 /// the client. Please note that the server will send as much data as it can retrieve from the
-/// [TmPacketSource] in its current implementation.
+/// [PacketSource] in its current implementation.
 ///
 /// Using a framing protocol like COBS imposes minimal restrictions on the type of TMTC data
 /// exchanged while also allowing packets with flexible size and a reliable way to reconstruct full
@@ -115,26 +118,26 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
 /// The [TCP integration tests](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs/tests/tcp_servers.rs)
 /// test also serves as the example application for this module.
 pub struct TcpTmtcInCobsServer<
-    TmSource: TmPacketSource<Error = TmError>,
-    TcReceiver: ReceivesTc<Error = TcError>,
+    TmSource: PacketSource<Error = TmError>,
+    TcSender: PacketSenderRaw<Error = SendError>,
     HandledConnection: HandledConnectionHandler,
     TmError,
-    TcError: 'static,
+    SendError: 'static,
 > {
     pub generic_server: TcpTmtcGenericServer<
         TmSource,
-        TcReceiver,
+        TcSender,
         CobsTmSender,
         CobsTcParser,
         HandledConnection,
         TmError,
-        TcError,
+        SendError,
     >,
 }
 
 impl<
-        TmSource: TmPacketSource<Error = TmError>,
-        TcReceiver: ReceivesTc<Error = TcError>,
+        TmSource: PacketSource<Error = TmError>,
+        TcReceiver: PacketSenderRaw<Error = TcError>,
         HandledConnection: HandledConnectionHandler,
         TmError: 'static,
         TcError: 'static,
@@ -178,8 +181,8 @@ impl<
             /// useful if using the port number 0 for OS auto-assignment.
             pub fn local_addr(&self) -> std::io::Result<SocketAddr>;
 
-            /// Delegation to the [TcpTmtcGenericServer::handle_next_connection] call.
-            pub fn handle_next_connection(
+            /// Delegation to the [TcpTmtcGenericServer::handle_all_connections] call.
+            pub fn handle_all_connections(
                 &mut self,
                 poll_duration: Option<Duration>,
             ) -> Result<ConnectionResult, TcpTmtcError<TmError, TcError>>;
@@ -196,21 +199,28 @@ mod tests {
     use std::{
         io::{Read, Write},
         net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
-        panic, thread,
+        panic,
+        sync::mpsc,
+        thread,
         time::Instant,
     };
 
     use crate::{
         encoding::tests::{INVERTED_PACKET, SIMPLE_PACKET},
         hal::std::tcp_server::{
-            tests::{ConnectionFinishedHandler, SyncTcCacher, SyncTmSource},
+            tests::{ConnectionFinishedHandler, SyncTmSource},
             ConnectionResult, ServerConfig,
         },
+        queue::GenericSendError,
+        tmtc::PacketAsVec,
+        ComponentId,
     };
     use alloc::sync::Arc;
     use cobs::encode;
 
     use super::TcpTmtcInCobsServer;
+
+    const TCP_SERVER_ID: ComponentId = 0x05;
 
     fn encode_simple_packet(encoded_buf: &mut [u8], current_idx: &mut usize) {
         encode_packet(&SIMPLE_PACKET, encoded_buf, current_idx)
@@ -230,14 +240,20 @@ mod tests {
 
     fn generic_tmtc_server(
         addr: &SocketAddr,
-        tc_receiver: SyncTcCacher,
+        tc_sender: mpsc::Sender<PacketAsVec>,
         tm_source: SyncTmSource,
         stop_signal: Option<Arc<AtomicBool>>,
-    ) -> TcpTmtcInCobsServer<SyncTmSource, SyncTcCacher, ConnectionFinishedHandler, (), ()> {
+    ) -> TcpTmtcInCobsServer<
+        SyncTmSource,
+        mpsc::Sender<PacketAsVec>,
+        ConnectionFinishedHandler,
+        (),
+        GenericSendError,
+    > {
         TcpTmtcInCobsServer::new(
-            ServerConfig::new(*addr, Duration::from_millis(2), 1024, 1024),
+            ServerConfig::new(TCP_SERVER_ID, *addr, Duration::from_millis(2), 1024, 1024),
             tm_source,
-            tc_receiver,
+            tc_sender,
             ConnectionFinishedHandler::default(),
             stop_signal,
         )
@@ -247,10 +263,10 @@ mod tests {
     #[test]
     fn test_server_basic_no_tm() {
         let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
-        let tc_receiver = SyncTcCacher::default();
+        let (tc_sender, tc_receiver) = mpsc::channel();
         let tm_source = SyncTmSource::default();
         let mut tcp_server =
-            generic_tmtc_server(&auto_port_addr, tc_receiver.clone(), tm_source, None);
+            generic_tmtc_server(&auto_port_addr, tc_sender.clone(), tm_source, None);
         let dest_addr = tcp_server
             .local_addr()
             .expect("retrieving dest addr failed");
@@ -258,7 +274,7 @@ mod tests {
         let set_if_done = conn_handled.clone();
         // Call the connection handler in separate thread, does block.
         thread::spawn(move || {
-            let result = tcp_server.handle_next_connection(Some(Duration::from_millis(100)));
+            let result = tcp_server.handle_all_connections(Some(Duration::from_millis(100)));
             if result.is_err() {
                 panic!("handling connection failed: {:?}", result.unwrap_err());
             }
@@ -293,28 +309,20 @@ mod tests {
             panic!("connection was not handled properly");
         }
         // Check that the packet was received and decoded successfully.
-        let mut tc_queue = tc_receiver
-            .tc_queue
-            .lock()
-            .expect("locking tc queue failed");
-        assert_eq!(tc_queue.len(), 1);
-        assert_eq!(tc_queue.pop_front().unwrap(), &SIMPLE_PACKET);
-        drop(tc_queue);
+        let packet_with_sender = tc_receiver.recv().expect("receiving TC failed");
+        assert_eq!(packet_with_sender.packet, &SIMPLE_PACKET);
+        matches!(tc_receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
     }
 
     #[test]
     fn test_server_basic_multi_tm_multi_tc() {
         let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
-        let tc_receiver = SyncTcCacher::default();
+        let (tc_sender, tc_receiver) = mpsc::channel();
         let mut tm_source = SyncTmSource::default();
         tm_source.add_tm(&INVERTED_PACKET);
         tm_source.add_tm(&SIMPLE_PACKET);
-        let mut tcp_server = generic_tmtc_server(
-            &auto_port_addr,
-            tc_receiver.clone(),
-            tm_source.clone(),
-            None,
-        );
+        let mut tcp_server =
+            generic_tmtc_server(&auto_port_addr, tc_sender.clone(), tm_source.clone(), None);
         let dest_addr = tcp_server
             .local_addr()
             .expect("retrieving dest addr failed");
@@ -322,7 +330,7 @@ mod tests {
         let set_if_done = conn_handled.clone();
         // Call the connection handler in separate thread, does block.
         thread::spawn(move || {
-            let result = tcp_server.handle_next_connection(Some(Duration::from_millis(100)));
+            let result = tcp_server.handle_all_connections(Some(Duration::from_millis(100)));
             if result.is_err() {
                 panic!("handling connection failed: {:?}", result.unwrap_err());
             }
@@ -409,27 +417,26 @@ mod tests {
             panic!("connection was not handled properly");
         }
         // Check that the packet was received and decoded successfully.
-        let mut tc_queue = tc_receiver
-            .tc_queue
-            .lock()
-            .expect("locking tc queue failed");
-        assert_eq!(tc_queue.len(), 2);
-        assert_eq!(tc_queue.pop_front().unwrap(), &SIMPLE_PACKET);
-        assert_eq!(tc_queue.pop_front().unwrap(), &INVERTED_PACKET);
-        drop(tc_queue);
+        let packet_with_sender = tc_receiver.recv().expect("receiving TC failed");
+        let packet = &packet_with_sender.packet;
+        assert_eq!(packet, &SIMPLE_PACKET);
+        let packet_with_sender = tc_receiver.recv().expect("receiving TC failed");
+        let packet = &packet_with_sender.packet;
+        assert_eq!(packet, &INVERTED_PACKET);
+        matches!(tc_receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
     }
 
     #[test]
     fn test_server_accept_timeout() {
         let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
-        let tc_receiver = SyncTcCacher::default();
+        let (tc_sender, _tc_receiver) = mpsc::channel();
         let tm_source = SyncTmSource::default();
         let mut tcp_server =
-            generic_tmtc_server(&auto_port_addr, tc_receiver.clone(), tm_source, None);
+            generic_tmtc_server(&auto_port_addr, tc_sender.clone(), tm_source, None);
         let start = Instant::now();
         // Call the connection handler in separate thread, does block.
         let thread_jh = thread::spawn(move || loop {
-            let result = tcp_server.handle_next_connection(Some(Duration::from_millis(20)));
+            let result = tcp_server.handle_all_connections(Some(Duration::from_millis(20)));
             if result.is_err() {
                 panic!("handling connection failed: {:?}", result.unwrap_err());
             }
@@ -447,12 +454,12 @@ mod tests {
     #[test]
     fn test_server_stop_signal() {
         let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
-        let tc_receiver = SyncTcCacher::default();
+        let (tc_sender, _tc_receiver) = mpsc::channel();
         let tm_source = SyncTmSource::default();
         let stop_signal = Arc::new(AtomicBool::new(false));
         let mut tcp_server = generic_tmtc_server(
             &auto_port_addr,
-            tc_receiver.clone(),
+            tc_sender.clone(),
             tm_source,
             Some(stop_signal.clone()),
         );
@@ -463,7 +470,7 @@ mod tests {
         let start = Instant::now();
         // Call the connection handler in separate thread, does block.
         let thread_jh = thread::spawn(move || loop {
-            let result = tcp_server.handle_next_connection(Some(Duration::from_millis(20)));
+            let result = tcp_server.handle_all_connections(Some(Duration::from_millis(20)));
             if result.is_err() {
                 panic!("handling connection failed: {:?}", result.unwrap_err());
             }

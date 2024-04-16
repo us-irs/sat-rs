@@ -72,6 +72,18 @@ impl ValidatorU16Id for hashbrown::HashSet<u16> {
     }
 }
 
+impl ValidatorU16Id for u16 {
+    fn validate(&self, id: u16) -> bool {
+        id == *self
+    }
+}
+
+impl ValidatorU16Id for &u16 {
+    fn validate(&self, id: u16) -> bool {
+        id == **self
+    }
+}
+
 impl ValidatorU16Id for [u16] {
     fn validate(&self, id: u16) -> bool {
         self.binary_search(&id).is_ok()

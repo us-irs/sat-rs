@@ -11,13 +11,14 @@ use satrs::pus::verification::{
 };
 use satrs::pus::{
     ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
-    EcssTcInVecConverter, EcssTmSenderCore, EcssTmtcError, GenericConversionError, MpscTcReceiver,
-    MpscTmAsVecSender, MpscTmInSharedPoolSenderBounded, PusPacketHandlerResult, PusReplyHandler,
-    PusServiceHelper, PusTcToRequestConverter, PusTmAsVec, PusTmInPool, TmInSharedPoolSender,
+    EcssTcInVecConverter, EcssTmSender, EcssTmtcError, GenericConversionError, MpscTcReceiver,
+    MpscTmAsVecSender, PusPacketHandlerResult, PusReplyHandler, PusServiceHelper,
+    PusTcToRequestConverter,
 };
 use satrs::request::{GenericMessage, UniqueApidTargetId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{EcssEnumU16, PusPacket};
+use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use satrs_example::config::components::PUS_ACTION_SERVICE;
 use satrs_example::config::tmtc_err;
 use std::sync::mpsc;
@@ -48,7 +49,7 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPus> for ActionReplyH
     fn handle_unrequested_reply(
         &mut self,
         reply: &GenericMessage<ActionReplyPus>,
-        _tm_sender: &impl EcssTmSenderCore,
+        _tm_sender: &impl EcssTmSender,
     ) -> Result<(), Self::Error> {
         warn!("received unexpected reply for service 8: {reply:?}");
         Ok(())
@@ -58,7 +59,7 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPus> for ActionReplyH
         &mut self,
         reply: &GenericMessage<ActionReplyPus>,
         active_request: &ActivePusActionRequestStd,
-        tm_sender: &(impl EcssTmSenderCore + ?Sized),
+        tm_sender: &(impl EcssTmSender + ?Sized),
         verification_handler: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<bool, Self::Error> {
@@ -121,7 +122,7 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPus> for ActionReplyH
     fn handle_request_timeout(
         &mut self,
         active_request: &ActivePusActionRequestStd,
-        tm_sender: &impl EcssTmSenderCore,
+        tm_sender: &impl EcssTmSender,
         verification_handler: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<(), Self::Error> {
@@ -145,7 +146,7 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest> for Actio
         &mut self,
         token: VerificationToken<TcStateAccepted>,
         tc: &PusTcReader,
-        tm_sender: &(impl EcssTmSenderCore + ?Sized),
+        tm_sender: &(impl EcssTmSender + ?Sized),
         verif_reporter: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<(ActivePusActionRequestStd, ActionRequest), Self::Error> {
@@ -195,12 +196,12 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest> for Actio
 }
 
 pub fn create_action_service_static(
-    tm_sender: TmInSharedPoolSender<mpsc::SyncSender<PusTmInPool>>,
+    tm_sender: PacketSenderWithSharedPool,
     tc_pool: SharedStaticMemoryPool,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     action_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<ActionReplyPus>>,
-) -> ActionServiceWrapper<MpscTmInSharedPoolSenderBounded, EcssTcInSharedStoreConverter> {
+) -> ActionServiceWrapper<PacketSenderWithSharedPool, EcssTcInSharedStoreConverter> {
     let action_request_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
             PUS_ACTION_SERVICE.id(),
@@ -223,7 +224,7 @@ pub fn create_action_service_static(
 }
 
 pub fn create_action_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<PusTmAsVec>,
+    tm_funnel_tx: mpsc::Sender<PacketAsVec>,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     action_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<ActionReplyPus>>,
@@ -247,8 +248,7 @@ pub fn create_action_service_dynamic(
     }
 }
 
-pub struct ActionServiceWrapper<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
-{
+pub struct ActionServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> {
     pub(crate) service: PusTargetedRequestService<
         MpscTcReceiver,
         TmSender,
@@ -263,7 +263,7 @@ pub struct ActionServiceWrapper<TmSender: EcssTmSenderCore, TcInMemConverter: Ec
     >,
 }
 
-impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
+impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
     for ActionServiceWrapper<TmSender, TcInMemConverter>
 {
     /// Returns [true] if the packet handling is finished.
@@ -465,7 +465,10 @@ mod tests {
                 .verif_reporter()
                 .check_next_is_acceptance_success(id, accepted_token.request_id());
             self.pus_packet_tx
-                .send(EcssTcAndToken::new(tc.to_vec().unwrap(), accepted_token))
+                .send(EcssTcAndToken::new(
+                    PacketAsVec::new(self.service.service_helper.id(), tc.to_vec().unwrap()),
+                    accepted_token,
+                ))
                 .unwrap();
         }
     }

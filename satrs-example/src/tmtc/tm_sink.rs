@@ -4,7 +4,7 @@ use std::{
 };
 
 use log::info;
-use satrs::pus::{PusTmAsVec, PusTmInPool};
+use satrs::tmtc::{PacketAsVec, PacketInPool, SharedPacketPool};
 use satrs::{
     pool::PoolProvider,
     seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore},
@@ -13,7 +13,6 @@ use satrs::{
         time::cds::MIN_CDS_FIELD_LEN,
         CcsdsPacket,
     },
-    tmtc::tm_helper::SharedTmPool,
 };
 
 use crate::interface::tcp::SyncTcpTmSource;
@@ -77,17 +76,17 @@ impl TmFunnelCommon {
 
 pub struct TmFunnelStatic {
     common: TmFunnelCommon,
-    shared_tm_store: SharedTmPool,
-    tm_funnel_rx: mpsc::Receiver<PusTmInPool>,
-    tm_server_tx: mpsc::SyncSender<PusTmInPool>,
+    shared_tm_store: SharedPacketPool,
+    tm_funnel_rx: mpsc::Receiver<PacketInPool>,
+    tm_server_tx: mpsc::SyncSender<PacketInPool>,
 }
 
 impl TmFunnelStatic {
     pub fn new(
-        shared_tm_store: SharedTmPool,
+        shared_tm_store: SharedPacketPool,
         sync_tm_tcp_source: SyncTcpTmSource,
-        tm_funnel_rx: mpsc::Receiver<PusTmInPool>,
-        tm_server_tx: mpsc::SyncSender<PusTmInPool>,
+        tm_funnel_rx: mpsc::Receiver<PacketInPool>,
+        tm_server_tx: mpsc::SyncSender<PacketInPool>,
     ) -> Self {
         Self {
             common: TmFunnelCommon::new(sync_tm_tcp_source),
@@ -101,7 +100,7 @@ impl TmFunnelStatic {
         if let Ok(pus_tm_in_pool) = self.tm_funnel_rx.recv() {
             // Read the TM, set sequence counter and message counter, and finally update
             // the CRC.
-            let shared_pool = self.shared_tm_store.clone_backing_pool();
+            let shared_pool = self.shared_tm_store.0.clone();
             let mut pool_guard = shared_pool.write().expect("Locking TM pool failed");
             let mut tm_copy = Vec::new();
             pool_guard
@@ -124,15 +123,15 @@ impl TmFunnelStatic {
 
 pub struct TmFunnelDynamic {
     common: TmFunnelCommon,
-    tm_funnel_rx: mpsc::Receiver<PusTmAsVec>,
-    tm_server_tx: mpsc::Sender<PusTmAsVec>,
+    tm_funnel_rx: mpsc::Receiver<PacketAsVec>,
+    tm_server_tx: mpsc::Sender<PacketAsVec>,
 }
 
 impl TmFunnelDynamic {
     pub fn new(
         sync_tm_tcp_source: SyncTcpTmSource,
-        tm_funnel_rx: mpsc::Receiver<PusTmAsVec>,
-        tm_server_tx: mpsc::Sender<PusTmAsVec>,
+        tm_funnel_rx: mpsc::Receiver<PacketAsVec>,
+        tm_server_tx: mpsc::Sender<PacketAsVec>,
     ) -> Self {
         Self {
             common: TmFunnelCommon::new(sync_tm_tcp_source),

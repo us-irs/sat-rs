@@ -7,13 +7,12 @@ pub mod crossbeam_test {
         FailParams, RequestId, VerificationReporter, VerificationReporterCfg,
         VerificationReportingProvider,
     };
-    use satrs::pus::TmInSharedPoolSenderWithCrossbeam;
-    use satrs::tmtc::tm_helper::SharedTmPool;
+    use satrs::tmtc::{PacketSenderWithSharedPool, SharedStaticMemoryPool};
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTmReader;
     use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket, WritablePusPacket};
     use spacepackets::SpHeader;
-    use std::sync::{Arc, RwLock};
+    use std::sync::RwLock;
     use std::thread;
     use std::time::Duration;
 
@@ -36,12 +35,15 @@ pub mod crossbeam_test {
         // Shared pool object to store the verification PUS telemetry
         let pool_cfg =
             StaticPoolConfig::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)], false);
-        let shared_tm_pool = SharedTmPool::new(StaticMemoryPool::new(pool_cfg.clone()));
-        let shared_tc_pool_0 = Arc::new(RwLock::new(StaticMemoryPool::new(pool_cfg)));
-        let shared_tc_pool_1 = shared_tc_pool_0.clone();
+        let shared_tm_pool =
+            SharedStaticMemoryPool::new(RwLock::new(StaticMemoryPool::new(pool_cfg.clone())));
+        let shared_tc_pool =
+            SharedStaticMemoryPool::new(RwLock::new(StaticMemoryPool::new(pool_cfg)));
+        let shared_tc_pool_1 = shared_tc_pool.clone();
         let (tx, rx) = crossbeam_channel::bounded(10);
-        let sender_0 = TmInSharedPoolSenderWithCrossbeam::new(shared_tm_pool.clone(), tx.clone());
-        let sender_1 = sender_0.clone();
+        let sender =
+            PacketSenderWithSharedPool::new_with_shared_packet_pool(tx.clone(), &shared_tm_pool);
+        let sender_1 = sender.clone();
         let mut reporter_with_sender_0 = VerificationReporter::new(TEST_COMPONENT_ID_0.id(), &cfg);
         let mut reporter_with_sender_1 = reporter_with_sender_0.clone();
         // For test purposes, we retrieve the request ID from the TCs and pass them to the receiver
@@ -52,7 +54,7 @@ pub mod crossbeam_test {
         let (tx_tc_0, rx_tc_0) = crossbeam_channel::bounded(3);
         let (tx_tc_1, rx_tc_1) = crossbeam_channel::bounded(3);
         {
-            let mut tc_guard = shared_tc_pool_0.write().unwrap();
+            let mut tc_guard = shared_tc_pool.write().unwrap();
             let sph = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
             let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
             let pus_tc_0 = PusTcCreator::new_no_app_data(sph, tc_header, true);
@@ -81,7 +83,7 @@ pub mod crossbeam_test {
                 .expect("Receive timeout");
             let tc_len;
             {
-                let mut tc_guard = shared_tc_pool_0.write().unwrap();
+                let mut tc_guard = shared_tc_pool.write().unwrap();
                 let pg = tc_guard.read_with_guard(tc_addr);
                 tc_len = pg.read(&mut tc_buf).unwrap();
             }
@@ -89,24 +91,24 @@ pub mod crossbeam_test {
 
             let token = reporter_with_sender_0.add_tc_with_req_id(req_id_0);
             let accepted_token = reporter_with_sender_0
-                .acceptance_success(&sender_0, token, &FIXED_STAMP)
+                .acceptance_success(&sender, token, &FIXED_STAMP)
                 .expect("Acceptance success failed");
 
             // Do some start handling here
             let started_token = reporter_with_sender_0
-                .start_success(&sender_0, accepted_token, &FIXED_STAMP)
+                .start_success(&sender, accepted_token, &FIXED_STAMP)
                 .expect("Start success failed");
             // Do some step handling here
             reporter_with_sender_0
-                .step_success(&sender_0, &started_token, &FIXED_STAMP, EcssEnumU8::new(0))
+                .step_success(&sender, &started_token, &FIXED_STAMP, EcssEnumU8::new(0))
                 .expect("Start success failed");
 
             // Finish up
             reporter_with_sender_0
-                .step_success(&sender_0, &started_token, &FIXED_STAMP, EcssEnumU8::new(1))
+                .step_success(&sender, &started_token, &FIXED_STAMP, EcssEnumU8::new(1))
                 .expect("Start success failed");
             reporter_with_sender_0
-                .completion_success(&sender_0, started_token, &FIXED_STAMP)
+                .completion_success(&sender, started_token, &FIXED_STAMP)
                 .expect("Completion success failed");
         });
 
@@ -145,9 +147,8 @@ pub mod crossbeam_test {
                     .recv_timeout(Duration::from_millis(50))
                     .expect("Packet reception timeout");
                 let tm_len;
-                let shared_tm_store = shared_tm_pool.clone_backing_pool();
                 {
-                    let mut rg = shared_tm_store.write().expect("Error locking shared pool");
+                    let mut rg = shared_tm_pool.write().expect("Error locking shared pool");
                     let store_guard = rg.read_with_guard(tm_in_pool.store_addr);
                     tm_len = store_guard
                         .read(&mut tm_buf)

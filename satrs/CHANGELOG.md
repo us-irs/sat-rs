@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## Changed
 
+- Renamed `ReceivesTcCore` to `PacketSenderRaw` to better show its primary purpose. It now contains
+  a `send_raw_tc` method which is not mutable anymore.
+- Renamed `TmPacketSourceCore` to `TmPacketSource`.
+- Renamed `EcssTmSenderCore` to `EcssTmSender`.
+- Renamed `StoreAddr` to `PoolAddr`.
+- Reanmed `StoreError` to `PoolError`.
 - TCP server generics order. The error generics come last now.
 - `encoding::ccsds::PacketIdValidator` renamed to `ValidatorU16Id`, which lives in the crate root.
   It can be used for both CCSDS packet ID and CCSDS APID validation.
@@ -76,6 +82,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ## Removed
 
 - Remove `objects` module.
+- Removed CCSDS and PUS distributor modules. Their worth is questionable in an architecture
+  where routing traits are sufficient and the core logic to demultiplex and distribute packets
+  is simple enough to be application code.
 
 # [v0.2.0-rc.0] 2024-02-21
 

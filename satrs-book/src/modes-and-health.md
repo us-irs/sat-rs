@@ -1,11 +1,11 @@
 # Modes
 
-Modes are an extremely useful concept for complex system in general. They also allow simplified
-system reasoning for both system operators and OBSW developers. They model the behaviour of a
-component and also provide observability of a system. A few examples of how to model
-different components of a space system with modes will be given.
+Modes are an extremely useful concept to model complex systems. They allow simplified
+system reasoning for both system operators and OBSW developers. They also provide a way to alter
+the behaviour of a component and also provide observability of a system. A few examples of how to
+model the mode of different components within a space system with modes will be given.
 
-## Modelling a pyhsical devices with modes
+## Pyhsical device component with modes
 
 The following simple mode scheme with the following three mode
 
@@ -13,7 +13,8 @@ The following simple mode scheme with the following three mode
 - `ON`
 - `NORMAL`
 
-can be applied to a large number of simpler devices of a remote system, for example sensors.
+can be applied to a large number of simpler device controllers of a remote system, for example
+sensors.
 
 1. `OFF` means that a device is physically switched off, and the corresponding software component
 does not poll the device regularly.
@@ -31,7 +32,7 @@ for the majority of devices:
 2. `NORMAL` or `ON` to `OFF`: Any important shutdown configuration or handling must be performed
    before powering off the device.
 
-## Modelling a controller with modes
+## Controller components with modes
 
 Controller components are not modelling physical devices, but a mode scheme is still the best
 way to model most of these components.
