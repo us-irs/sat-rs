@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [v0.1.3] 2024-04-16
 
-Bumped `spacepackets` to v0.11.
+Allow `spacepackets` range starting with v0.10 and v0.11.
 
 # [v0.1.2] 2024-02-17
 
