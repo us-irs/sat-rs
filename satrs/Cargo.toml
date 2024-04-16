@@ -76,8 +76,7 @@ features = ["os-poll", "net"]
 optional = true
 
 [dependencies.spacepackets]
-# git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git"
-version = "0.11.0-rc.2"
+version = "0.11.0"
 default-features = false
 
 [dependencies.cobs]
