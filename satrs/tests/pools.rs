@@ -1,4 +1,4 @@
-use satrs::pool::{PoolGuard, PoolProvider, StaticMemoryPool, StaticPoolConfig, StoreAddr};
+use satrs::pool::{PoolAddr, PoolGuard, PoolProvider, StaticMemoryPool, StaticPoolConfig};
 use std::ops::DerefMut;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
@@ -12,7 +12,7 @@ fn threaded_usage() {
     let pool_cfg = StaticPoolConfig::new(vec![(16, 6), (32, 3), (8, 12)], false);
     let shared_pool = Arc::new(RwLock::new(StaticMemoryPool::new(pool_cfg)));
     let shared_clone = shared_pool.clone();
-    let (tx, rx): (Sender<StoreAddr>, Receiver<StoreAddr>) = mpsc::channel();
+    let (tx, rx): (Sender<PoolAddr>, Receiver<PoolAddr>) = mpsc::channel();
     let jh0 = thread::spawn(move || {
         let mut dummy = shared_pool.write().unwrap();
         let addr = dummy.add(&DUMMY_DATA).expect("Writing data failed");

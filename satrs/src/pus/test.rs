@@ -1,7 +1,7 @@
 use crate::pus::{
-    PartialPusHandlingError, PusPacketHandlerResult, PusPacketHandlingError, PusTmAsVec,
-    PusTmInPool, PusTmVariant,
+    PartialPusHandlingError, PusPacketHandlerResult, PusPacketHandlingError, PusTmVariant,
 };
+use crate::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
 use spacepackets::ecss::PusPacket;
 use spacepackets::SpHeader;
@@ -9,16 +9,15 @@ use std::sync::mpsc;
 
 use super::verification::{VerificationReporter, VerificationReportingProvider};
 use super::{
-    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiverCore,
-    EcssTmSenderCore, GenericConversionError, MpscTcReceiver, MpscTmInSharedPoolSender,
-    MpscTmInSharedPoolSenderBounded, PusServiceHelper,
+    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiver,
+    EcssTmSender, GenericConversionError, MpscTcReceiver, PusServiceHelper,
 };
 
 /// This is a helper class for [std] environments to handle generic PUS 17 (test service) packets.
 /// This handler only processes ping requests and generates a ping reply for them accordingly.
 pub struct PusService17TestHandler<
-    TcReceiver: EcssTcReceiverCore,
-    TmSender: EcssTmSenderCore,
+    TcReceiver: EcssTcReceiver,
+    TmSender: EcssTmSender,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
@@ -27,8 +26,8 @@ pub struct PusService17TestHandler<
 }
 
 impl<
-        TcReceiver: EcssTcReceiverCore,
-        TmSender: EcssTmSenderCore,
+        TcReceiver: EcssTcReceiver,
+        TmSender: EcssTmSender,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
     > PusService17TestHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
@@ -127,7 +126,7 @@ impl<
 /// mpsc queues.
 pub type PusService17TestHandlerDynWithMpsc = PusService17TestHandler<
     MpscTcReceiver,
-    mpsc::Sender<PusTmAsVec>,
+    mpsc::Sender<PacketAsVec>,
     EcssTcInVecConverter,
     VerificationReporter,
 >;
@@ -135,23 +134,15 @@ pub type PusService17TestHandlerDynWithMpsc = PusService17TestHandler<
 /// queues.
 pub type PusService17TestHandlerDynWithBoundedMpsc = PusService17TestHandler<
     MpscTcReceiver,
-    mpsc::SyncSender<PusTmInPool>,
+    mpsc::SyncSender<PacketAsVec>,
     EcssTcInVecConverter,
-    VerificationReporter,
->;
-/// Helper type definition for a PUS 17 handler with a shared store TMTC memory backend and regular
-/// mpsc queues.
-pub type PusService17TestHandlerStaticWithMpsc = PusService17TestHandler<
-    MpscTcReceiver,
-    MpscTmInSharedPoolSender,
-    EcssTcInSharedStoreConverter,
     VerificationReporter,
 >;
 /// Helper type definition for a PUS 17 handler with a shared store TMTC memory backend and bounded
 /// mpsc queues.
 pub type PusService17TestHandlerStaticWithBoundedMpsc = PusService17TestHandler<
     MpscTcReceiver,
-    MpscTmInSharedPoolSenderBounded,
+    PacketSenderWithSharedPool,
     EcssTcInSharedStoreConverter,
     VerificationReporter,
 >;
@@ -168,9 +159,9 @@ mod tests {
     use crate::pus::verification::{TcStateAccepted, VerificationToken};
     use crate::pus::{
         EcssTcInSharedStoreConverter, EcssTcInVecConverter, GenericConversionError, MpscTcReceiver,
-        MpscTmAsVecSender, MpscTmInSharedPoolSenderBounded, PusPacketHandlerResult,
-        PusPacketHandlingError,
+        MpscTmAsVecSender, PusPacketHandlerResult, PusPacketHandlingError,
     };
+    use crate::tmtc::PacketSenderWithSharedPool;
     use crate::ComponentId;
     use delegate::delegate;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
@@ -185,7 +176,7 @@ mod tests {
         common: PusServiceHandlerWithSharedStoreCommon,
         handler: PusService17TestHandler<
             MpscTcReceiver,
-            MpscTmInSharedPoolSenderBounded,
+            PacketSenderWithSharedPool,
             EcssTcInSharedStoreConverter,
             VerificationReporter,
         >,
@@ -212,10 +203,14 @@ mod tests {
                 .expect("acceptance success failure")
         }
 
+        fn send_tc(&self, token: &VerificationToken<TcStateAccepted>, tc: &PusTcCreator) {
+            self.common
+                .send_tc(self.handler.service_helper.id(), token, tc);
+        }
+
         delegate! {
             to self.common {
                 fn read_next_tm(&mut self) -> PusTmReader<'_>;
-                fn send_tc(&self, token: &VerificationToken<TcStateAccepted>, tc: &PusTcCreator);
                 fn check_no_tm_available(&self) -> bool;
                 fn check_next_verification_tm(
                     &self,
@@ -263,9 +258,13 @@ mod tests {
                 .expect("acceptance success failure")
         }
 
+        fn send_tc(&self, token: &VerificationToken<TcStateAccepted>, tc: &PusTcCreator) {
+            self.common
+                .send_tc(self.handler.service_helper.id(), token, tc);
+        }
+
         delegate! {
             to self.common {
-                fn send_tc(&self, token: &VerificationToken<TcStateAccepted>, tc: &PusTcCreator);
                 fn read_next_tm(&mut self) -> PusTmReader<'_>;
                 fn check_no_tm_available(&self) -> bool;
                 fn check_next_verification_tm(

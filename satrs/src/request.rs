@@ -193,8 +193,6 @@ impl<MSG, R: MessageReceiver<MSG>> MessageReceiverWithId<MSG, R> {
 
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
-    use core::marker::PhantomData;
-
     use crate::queue::GenericSendError;
 
     use super::*;
@@ -333,7 +331,7 @@ pub mod std_mod {
     use super::*;
     use std::sync::mpsc;
 
-    use crate::queue::{GenericReceiveError, GenericSendError, GenericTargetedMessagingError};
+    use crate::queue::{GenericReceiveError, GenericSendError};
 
     impl<MSG: Send> MessageSender<MSG> for mpsc::Sender<GenericMessage<MSG>> {
         fn send(&self, message: GenericMessage<MSG>) -> Result<(), GenericTargetedMessagingError> {

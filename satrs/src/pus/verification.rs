@@ -19,10 +19,9 @@
 //! use satrs::pus::verification::{
 //!     VerificationReportingProvider, VerificationReporterCfg, VerificationReporter
 //! };
+//! use satrs::tmtc::{SharedStaticMemoryPool, PacketSenderWithSharedPool};
 //! use satrs::seq_count::SeqCountProviderSimple;
 //! use satrs::request::UniqueApidTargetId;
-//! use satrs::pus::MpscTmInSharedPoolSender;
-//! use satrs::tmtc::tm_helper::SharedTmPool;
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
 //! use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
@@ -34,10 +33,9 @@
 //!
 //! let pool_cfg = StaticPoolConfig::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)], false);
 //! let tm_pool = StaticMemoryPool::new(pool_cfg.clone());
-//! let shared_tm_store = SharedTmPool::new(tm_pool);
-//! let tm_store = shared_tm_store.clone_backing_pool();
-//! let (verif_tx, verif_rx) = mpsc::channel();
-//! let sender = MpscTmInSharedPoolSender::new(shared_tm_store, verif_tx);
+//! let shared_tm_pool = SharedStaticMemoryPool::new(RwLock::new(tm_pool));
+//! let (verif_tx, verif_rx) = mpsc::sync_channel(10);
+//! let sender = PacketSenderWithSharedPool::new_with_shared_packet_pool(verif_tx, &shared_tm_pool);
 //! let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
 //! let mut  reporter = VerificationReporter::new(TEST_COMPONENT_ID.id(), &cfg);
 //!
@@ -61,7 +59,7 @@
 //!     let tm_in_store = verif_rx.recv_timeout(Duration::from_millis(10)).unwrap();
 //!     let tm_len;
 //!     {
-//!         let mut rg = tm_store.write().expect("Error locking shared pool");
+//!         let mut rg = shared_tm_pool.write().expect("Error locking shared pool");
 //!         let store_guard = rg.read_with_guard(tm_in_store.store_addr);
 //!         tm_len = store_guard.read(&mut tm_buf).expect("Error reading TM slice");
 //!     }
@@ -81,7 +79,7 @@
 //! The [integration test](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-core/tests/verification_test.rs)
 //! for the verification module contains examples how this module could be used in a more complex
 //! context involving multiple threads
-use crate::pus::{source_buffer_large_enough, EcssTmSenderCore, EcssTmtcError};
+use crate::pus::{source_buffer_large_enough, EcssTmSender, EcssTmtcError};
 use core::fmt::{Debug, Display, Formatter};
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
@@ -425,35 +423,35 @@ pub trait VerificationReportingProvider {
 
     fn acceptance_success(
         &self,
-        sender: &(impl EcssTmSenderCore + ?Sized),
+        sender: &(impl EcssTmSender + ?Sized),
         token: VerificationToken<TcStateNone>,
         time_stamp: &[u8],
     ) -> Result<VerificationToken<TcStateAccepted>, EcssTmtcError>;
 
     fn acceptance_failure(
         &self,
-        sender: &(impl EcssTmSenderCore + ?Sized),
+        sender: &(impl EcssTmSender + ?Sized),
         token: VerificationToken<TcStateNone>,
         params: FailParams,
     ) -> Result<(), EcssTmtcError>;
 
     fn start_success(
         &self,
-        sender: &(impl EcssTmSenderCore + ?Sized),
+        sender: &(impl EcssTmSender + ?Sized),
         token: VerificationToken<TcStateAccepted>,
         time_stamp: &[u8],
     ) -> Result<VerificationToken<TcStateStarted>, EcssTmtcError>;
 
     fn start_failure(
         &self,
-        sender: &(impl EcssTmSenderCore + ?Sized),
+        sender: &(impl EcssTmSender + ?Sized),
         token: VerificationToken<TcStateAccepted>,
         params: FailParams,
     ) -> Result<(), EcssTmtcError>;
 
     fn step_success(
         &self,
-        sender: &(impl EcssTmSenderCore + ?Sized),
+        sender: &(impl EcssTmSender + ?Sized),
         token: &VerificationToken<TcStateStarted>,
         time_stamp: &[u8],
         step: impl EcssEnumeration,
@@ -461,21 +459,21 @@ pub trait VerificationReportingProvider {
 
     fn step_failure(
         &self,
-        sender: &(impl EcssTmSenderCore + ?Sized),
+        sender: &(impl EcssTmSender + ?Sized),
         token: VerificationToken<TcStateStarted>,
         params: FailParamsWithStep,
     ) -> Result<(), EcssTmtcError>;
 
     fn completion_success<TcState: WasAtLeastAccepted + Copy>(
         &self,
-        sender: &(impl EcssTmSenderCore + ?Sized),
+        sender: &(impl EcssTmSender + ?Sized),
         token: VerificationToken<TcState>,
         time_stamp: &[u8],
     ) -> Result<(), EcssTmtcError>;
 
     fn completion_failure<TcState: WasAtLeastAccepted + Copy>(
         &self,
-        sender: &(impl EcssTmSenderCore + ?Sized),
+        sender: &(impl EcssTmSender + ?Sized),
         token: VerificationToken<TcState>,
         params: FailParams,
     ) -> Result<(), EcssTmtcError>;
@@ -886,7 +884,7 @@ pub mod alloc_mod {
     use spacepackets::ecss::PusError;
 
     use super::*;
-    use crate::{pus::PusTmVariant, ComponentId};
+    use crate::pus::PusTmVariant;
     use core::cell::RefCell;
 
     #[derive(Clone)]
@@ -1027,7 +1025,7 @@ pub mod alloc_mod {
         /// Package and send a PUS TM\[1, 1\] packet, see 8.1.2.1 of the PUS standard
         fn acceptance_success(
             &self,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<TcStateNone>,
             time_stamp: &[u8],
         ) -> Result<VerificationToken<TcStateAccepted>, EcssTmtcError> {
@@ -1044,7 +1042,7 @@ pub mod alloc_mod {
         /// Package and send a PUS TM\[1, 2\] packet, see 8.1.2.2 of the PUS standard
         fn acceptance_failure(
             &self,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<TcStateNone>,
             params: FailParams,
         ) -> Result<(), EcssTmtcError> {
@@ -1063,7 +1061,7 @@ pub mod alloc_mod {
         /// Requires a token previously acquired by calling [Self::acceptance_success].
         fn start_success(
             &self,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<TcStateAccepted>,
             time_stamp: &[u8],
         ) -> Result<VerificationToken<TcStateStarted>, EcssTmtcError> {
@@ -1083,7 +1081,7 @@ pub mod alloc_mod {
         /// the token because verification handling is done.
         fn start_failure(
             &self,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<TcStateAccepted>,
             params: FailParams,
         ) -> Result<(), EcssTmtcError> {
@@ -1102,7 +1100,7 @@ pub mod alloc_mod {
         /// Requires a token previously acquired by calling [Self::start_success].
         fn step_success(
             &self,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             token: &VerificationToken<TcStateStarted>,
             time_stamp: &[u8],
             step: impl EcssEnumeration,
@@ -1123,7 +1121,7 @@ pub mod alloc_mod {
         /// token because verification handling is done.
         fn step_failure(
             &self,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<TcStateStarted>,
             params: FailParamsWithStep,
         ) -> Result<(), EcssTmtcError> {
@@ -1144,7 +1142,7 @@ pub mod alloc_mod {
         fn completion_success<TcState: WasAtLeastAccepted + Copy>(
             &self,
             // sender_id: ComponentId,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<TcState>,
             time_stamp: &[u8],
         ) -> Result<(), EcssTmtcError> {
@@ -1164,7 +1162,7 @@ pub mod alloc_mod {
         /// token because verification handling is done.
         fn completion_failure<TcState: WasAtLeastAccepted + Copy>(
             &self,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<TcState>,
             params: FailParams,
         ) -> Result<(), EcssTmtcError> {
@@ -1269,7 +1267,7 @@ pub mod test_util {
 
         fn acceptance_success(
             &self,
-            _sender: &(impl EcssTmSenderCore + ?Sized),
+            _sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<TcStateNone>,
             time_stamp: &[u8],
         ) -> Result<VerificationToken<TcStateAccepted>, EcssTmtcError> {
@@ -1288,7 +1286,7 @@ pub mod test_util {
 
         fn acceptance_failure(
             &self,
-            _sender: &(impl EcssTmSenderCore + ?Sized),
+            _sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<TcStateNone>,
             params: FailParams,
         ) -> Result<(), EcssTmtcError> {
@@ -1306,7 +1304,7 @@ pub mod test_util {
 
         fn start_success(
             &self,
-            _sender: &(impl EcssTmSenderCore + ?Sized),
+            _sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<TcStateAccepted>,
             time_stamp: &[u8],
         ) -> Result<VerificationToken<TcStateStarted>, EcssTmtcError> {
@@ -1325,7 +1323,7 @@ pub mod test_util {
 
         fn start_failure(
             &self,
-            _sender: &(impl EcssTmSenderCore + ?Sized),
+            _sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<super::TcStateAccepted>,
             params: FailParams,
         ) -> Result<(), EcssTmtcError> {
@@ -1343,7 +1341,7 @@ pub mod test_util {
 
         fn step_success(
             &self,
-            _sender: &(impl EcssTmSenderCore + ?Sized),
+            _sender: &(impl EcssTmSender + ?Sized),
             token: &VerificationToken<TcStateStarted>,
             time_stamp: &[u8],
             step: impl EcssEnumeration,
@@ -1363,7 +1361,7 @@ pub mod test_util {
 
         fn step_failure(
             &self,
-            _sender: &(impl EcssTmSenderCore + ?Sized),
+            _sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<TcStateStarted>,
             params: FailParamsWithStep,
         ) -> Result<(), EcssTmtcError> {
@@ -1381,7 +1379,7 @@ pub mod test_util {
 
         fn completion_success<TcState: super::WasAtLeastAccepted + Copy>(
             &self,
-            _sender: &(impl EcssTmSenderCore + ?Sized),
+            _sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<TcState>,
             time_stamp: &[u8],
         ) -> Result<(), EcssTmtcError> {
@@ -1397,7 +1395,7 @@ pub mod test_util {
 
         fn completion_failure<TcState: WasAtLeastAccepted + Copy>(
             &self,
-            _sender: &(impl EcssTmSenderCore + ?Sized),
+            _sender: &(impl EcssTmSender + ?Sized),
             token: VerificationToken<TcState>,
             params: FailParams,
         ) -> Result<(), EcssTmtcError> {
@@ -1636,17 +1634,17 @@ pub mod test_util {
 
 #[cfg(test)]
 pub mod tests {
-    use crate::pool::{StaticMemoryPool, StaticPoolConfig};
+    use crate::pool::{SharedStaticMemoryPool, StaticMemoryPool, StaticPoolConfig};
     use crate::pus::test_util::{TEST_APID, TEST_COMPONENT_ID_0};
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
-        EcssTmSenderCore, EcssTmtcError, FailParams, FailParamsWithStep, RequestId, TcStateNone,
+        EcssTmSender, EcssTmtcError, FailParams, FailParamsWithStep, RequestId, TcStateNone,
         VerificationReporter, VerificationReporterCfg, VerificationToken,
     };
-    use crate::pus::{ChannelWithId, MpscTmInSharedPoolSender, PusTmVariant};
+    use crate::pus::{ChannelWithId, PusTmVariant};
     use crate::request::MessageMetadata;
     use crate::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore};
-    use crate::tmtc::tm_helper::SharedTmPool;
+    use crate::tmtc::{PacketSenderWithSharedPool, SharedPacketPool};
     use crate::ComponentId;
     use alloc::format;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
@@ -1658,7 +1656,7 @@ pub mod tests {
     use spacepackets::{ByteConversionError, SpHeader};
     use std::cell::RefCell;
     use std::collections::VecDeque;
-    use std::sync::mpsc;
+    use std::sync::{mpsc, RwLock};
     use std::vec;
     use std::vec::Vec;
 
@@ -1694,7 +1692,7 @@ pub mod tests {
         }
     }
 
-    impl EcssTmSenderCore for TestSender {
+    impl EcssTmSender for TestSender {
         fn send_tm(&self, sender_id: ComponentId, tm: PusTmVariant) -> Result<(), EcssTmtcError> {
             match tm {
                 PusTmVariant::InStore(_) => {
@@ -2128,9 +2126,10 @@ pub mod tests {
     #[test]
     fn test_mpsc_verif_send() {
         let pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(8, 8)], false));
-        let shared_tm_store = SharedTmPool::new(pool);
-        let (tx, _) = mpsc::channel();
-        let mpsc_verif_sender = MpscTmInSharedPoolSender::new(shared_tm_store, tx);
+        let shared_tm_store =
+            SharedPacketPool::new(&SharedStaticMemoryPool::new(RwLock::new(pool)));
+        let (tx, _) = mpsc::sync_channel(10);
+        let mpsc_verif_sender = PacketSenderWithSharedPool::new(tx, shared_tm_store);
         is_send(&mpsc_verif_sender);
     }
 

@@ -1,4 +1,4 @@
-use crate::tmtc::ReceivesTcCore;
+use crate::{tmtc::PacketSenderRaw, ComponentId};
 use cobs::{decode_in_place, encode, max_encoding_length};
 
 /// This function encodes the given packet with COBS and also wraps the encoded packet with
@@ -55,11 +55,12 @@ pub fn encode_packet_with_cobs(
 /// future write operations will be written to the `next_write_idx` argument.
 ///
 /// The parser will write all packets which were decoded successfully to the given `tc_receiver`.
-pub fn parse_buffer_for_cobs_encoded_packets<E>(
+pub fn parse_buffer_for_cobs_encoded_packets<SendError>(
     buf: &mut [u8],
-    tc_receiver: &mut dyn ReceivesTcCore<Error = E>,
+    sender_id: ComponentId,
+    packet_sender: &(impl PacketSenderRaw<Error = SendError> + ?Sized),
     next_write_idx: &mut usize,
-) -> Result<u32, E> {
+) -> Result<u32, SendError> {
     let mut start_index_packet = 0;
     let mut start_found = false;
     let mut last_byte = false;
@@ -78,8 +79,10 @@ pub fn parse_buffer_for_cobs_encoded_packets<E>(
                 let decode_result = decode_in_place(&mut buf[start_index_packet..i]);
                 if let Ok(packet_len) = decode_result {
                     packets_found += 1;
-                    tc_receiver
-                        .pass_tc(&buf[start_index_packet..start_index_packet + packet_len])?;
+                    packet_sender.send_packet(
+                        sender_id,
+                        &buf[start_index_packet..start_index_packet + packet_len],
+                    )?;
                 }
                 start_found = false;
             } else {
@@ -100,32 +103,39 @@ pub fn parse_buffer_for_cobs_encoded_packets<E>(
 pub(crate) mod tests {
     use cobs::encode;
 
-    use crate::encoding::tests::{encode_simple_packet, TcCacher, INVERTED_PACKET, SIMPLE_PACKET};
+    use crate::{
+        encoding::tests::{encode_simple_packet, TcCacher, INVERTED_PACKET, SIMPLE_PACKET},
+        ComponentId,
+    };
 
     use super::parse_buffer_for_cobs_encoded_packets;
 
+    const PARSER_ID: ComponentId = 0x05;
+
     #[test]
     fn test_parsing_simple_packet() {
-        let mut test_sender = TcCacher::default();
+        let test_sender = TcCacher::default();
         let mut encoded_buf: [u8; 16] = [0; 16];
         let mut current_idx = 0;
         encode_simple_packet(&mut encoded_buf, &mut current_idx);
         let mut next_read_idx = 0;
         let packets = parse_buffer_for_cobs_encoded_packets(
             &mut encoded_buf[0..current_idx],
-            &mut test_sender,
+            PARSER_ID,
+            &test_sender,
             &mut next_read_idx,
         )
         .unwrap();
         assert_eq!(packets, 1);
-        assert_eq!(test_sender.tc_queue.len(), 1);
-        let packet = &test_sender.tc_queue[0];
-        assert_eq!(packet, &SIMPLE_PACKET);
+        let queue = test_sender.tc_queue.borrow();
+        assert_eq!(queue.len(), 1);
+        let packet = &queue[0];
+        assert_eq!(packet.packet, &SIMPLE_PACKET);
     }
 
     #[test]
     fn test_parsing_consecutive_packets() {
-        let mut test_sender = TcCacher::default();
+        let test_sender = TcCacher::default();
         let mut encoded_buf: [u8; 16] = [0; 16];
         let mut current_idx = 0;
         encode_simple_packet(&mut encoded_buf, &mut current_idx);
@@ -139,21 +149,23 @@ pub(crate) mod tests {
         let mut next_read_idx = 0;
         let packets = parse_buffer_for_cobs_encoded_packets(
             &mut encoded_buf[0..current_idx],
-            &mut test_sender,
+            PARSER_ID,
+            &test_sender,
             &mut next_read_idx,
         )
         .unwrap();
         assert_eq!(packets, 2);
-        assert_eq!(test_sender.tc_queue.len(), 2);
-        let packet0 = &test_sender.tc_queue[0];
-        assert_eq!(packet0, &SIMPLE_PACKET);
-        let packet1 = &test_sender.tc_queue[1];
-        assert_eq!(packet1, &INVERTED_PACKET);
+        let queue = test_sender.tc_queue.borrow();
+        assert_eq!(queue.len(), 2);
+        let packet0 = &queue[0];
+        assert_eq!(packet0.packet, &SIMPLE_PACKET);
+        let packet1 = &queue[1];
+        assert_eq!(packet1.packet, &INVERTED_PACKET);
     }
 
     #[test]
     fn test_split_tail_packet_only() {
-        let mut test_sender = TcCacher::default();
+        let test_sender = TcCacher::default();
         let mut encoded_buf: [u8; 16] = [0; 16];
         let mut current_idx = 0;
         encode_simple_packet(&mut encoded_buf, &mut current_idx);
@@ -161,17 +173,19 @@ pub(crate) mod tests {
         let packets = parse_buffer_for_cobs_encoded_packets(
             // Cut off the sentinel byte at the end.
             &mut encoded_buf[0..current_idx - 1],
-            &mut test_sender,
+            PARSER_ID,
+            &test_sender,
             &mut next_read_idx,
         )
         .unwrap();
         assert_eq!(packets, 0);
-        assert_eq!(test_sender.tc_queue.len(), 0);
+        let queue = test_sender.tc_queue.borrow();
+        assert_eq!(queue.len(), 0);
         assert_eq!(next_read_idx, 0);
     }
 
     fn generic_test_split_packet(cut_off: usize) {
-        let mut test_sender = TcCacher::default();
+        let test_sender = TcCacher::default();
         let mut encoded_buf: [u8; 16] = [0; 16];
         assert!(cut_off < INVERTED_PACKET.len() + 1);
         let mut current_idx = 0;
@@ -193,13 +207,15 @@ pub(crate) mod tests {
         let packets = parse_buffer_for_cobs_encoded_packets(
             // Cut off the sentinel byte at the end.
             &mut encoded_buf[0..current_idx - cut_off],
-            &mut test_sender,
+            PARSER_ID,
+            &test_sender,
             &mut next_write_idx,
         )
         .unwrap();
         assert_eq!(packets, 1);
-        assert_eq!(test_sender.tc_queue.len(), 1);
-        assert_eq!(&test_sender.tc_queue[0], &SIMPLE_PACKET);
+        let queue = test_sender.tc_queue.borrow();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(&queue[0].packet, &SIMPLE_PACKET);
         assert_eq!(next_write_idx, next_expected_write_idx);
         assert_eq!(encoded_buf[..next_expected_write_idx], expected_at_start);
     }
@@ -221,7 +237,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_zero_at_end() {
-        let mut test_sender = TcCacher::default();
+        let test_sender = TcCacher::default();
         let mut encoded_buf: [u8; 16] = [0; 16];
         let mut next_write_idx = 0;
         let mut current_idx = 0;
@@ -233,31 +249,35 @@ pub(crate) mod tests {
         let packets = parse_buffer_for_cobs_encoded_packets(
             // Cut off the sentinel byte at the end.
             &mut encoded_buf[0..current_idx],
-            &mut test_sender,
+            PARSER_ID,
+            &test_sender,
             &mut next_write_idx,
         )
         .unwrap();
         assert_eq!(packets, 1);
-        assert_eq!(test_sender.tc_queue.len(), 1);
-        assert_eq!(&test_sender.tc_queue[0], &SIMPLE_PACKET);
+        let queue = test_sender.tc_queue.borrow_mut();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(&queue[0].packet, &SIMPLE_PACKET);
         assert_eq!(next_write_idx, 1);
         assert_eq!(encoded_buf[0], 0);
     }
 
     #[test]
     fn test_all_zeroes() {
-        let mut test_sender = TcCacher::default();
+        let test_sender = TcCacher::default();
         let mut all_zeroes: [u8; 5] = [0; 5];
         let mut next_write_idx = 0;
         let packets = parse_buffer_for_cobs_encoded_packets(
             // Cut off the sentinel byte at the end.
             &mut all_zeroes,
-            &mut test_sender,
+            PARSER_ID,
+            &test_sender,
             &mut next_write_idx,
         )
         .unwrap();
         assert_eq!(packets, 0);
-        assert!(test_sender.tc_queue.is_empty());
+        let queue = test_sender.tc_queue.borrow();
+        assert!(queue.is_empty());
         assert_eq!(next_write_idx, 0);
     }
 }

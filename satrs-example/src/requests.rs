@@ -8,7 +8,7 @@ use satrs::mode::ModeRequest;
 use satrs::pus::verification::{
     FailParams, TcStateAccepted, VerificationReportingProvider, VerificationToken,
 };
-use satrs::pus::{ActiveRequestProvider, EcssTmSenderCore, GenericRoutingError, PusRequestRouter};
+use satrs::pus::{ActiveRequestProvider, EcssTmSender, GenericRoutingError, PusRequestRouter};
 use satrs::queue::GenericSendError;
 use satrs::request::{GenericMessage, MessageMetadata, UniqueApidTargetId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
@@ -47,7 +47,7 @@ impl GenericRequestRouter {
         active_request: &impl ActiveRequestProvider,
         tc: &PusTcReader,
         error: GenericRoutingError,
-        tm_sender: &(impl EcssTmSenderCore + ?Sized),
+        tm_sender: &(impl EcssTmSender + ?Sized),
         verif_reporter: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) {

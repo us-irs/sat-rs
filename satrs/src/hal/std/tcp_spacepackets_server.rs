@@ -5,9 +5,9 @@ use mio::net::{TcpListener, TcpStream};
 use std::{io::Write, net::SocketAddr};
 
 use crate::{
-    encoding::parse_buffer_for_ccsds_space_packets,
-    tmtc::{ReceivesTc, TmPacketSource},
-    ValidatorU16Id,
+    encoding::{ccsds::SpacePacketValidator, parse_buffer_for_ccsds_space_packets},
+    tmtc::{PacketSenderRaw, PacketSource},
+    ComponentId,
 };
 
 use super::tcp_server::{
@@ -15,24 +15,12 @@ use super::tcp_server::{
     TcpTmSender, TcpTmtcError, TcpTmtcGenericServer,
 };
 
-/// Concrete [TcpTcParser] implementation for the [TcpSpacepacketsServer].
-pub struct SpacepacketsTcParser<PacketIdChecker: ValidatorU16Id> {
-    packet_id_lookup: PacketIdChecker,
-}
-
-impl<PacketIdChecker: ValidatorU16Id> SpacepacketsTcParser<PacketIdChecker> {
-    pub fn new(packet_id_lookup: PacketIdChecker) -> Self {
-        Self { packet_id_lookup }
-    }
-}
-
-impl<PacketIdChecker: ValidatorU16Id, TmError, TcError: 'static> TcpTcParser<TmError, TcError>
-    for SpacepacketsTcParser<PacketIdChecker>
-{
+impl<T: SpacePacketValidator, TmError, TcError: 'static> TcpTcParser<TmError, TcError> for T {
     fn handle_tc_parsing(
         &mut self,
         tc_buffer: &mut [u8],
-        tc_receiver: &mut (impl ReceivesTc<Error = TcError> + ?Sized),
+        sender_id: ComponentId,
+        tc_sender: &(impl PacketSenderRaw<Error = TcError> + ?Sized),
         conn_result: &mut HandledConnectionInfo,
         current_write_idx: usize,
         next_write_idx: &mut usize,
@@ -40,8 +28,9 @@ impl<PacketIdChecker: ValidatorU16Id, TmError, TcError: 'static> TcpTcParser<TmE
         // Reader vec full, need to parse for packets.
         conn_result.num_received_tcs += parse_buffer_for_ccsds_space_packets(
             &mut tc_buffer[..current_write_idx],
-            &self.packet_id_lookup,
-            tc_receiver.upcast_mut(),
+            self,
+            sender_id,
+            tc_sender,
             next_write_idx,
         )
         .map_err(|e| TcpTmtcError::TcError(e))?;
@@ -57,7 +46,7 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for SpacepacketsTmSender {
     fn handle_tm_sending(
         &mut self,
         tm_buffer: &mut [u8],
-        tm_source: &mut (impl TmPacketSource<Error = TmError> + ?Sized),
+        tm_source: &mut (impl PacketSource<Error = TmError> + ?Sized),
         conn_result: &mut HandledConnectionInfo,
         stream: &mut TcpStream,
     ) -> Result<bool, TcpTmtcError<TmError, TcError>> {
@@ -85,48 +74,41 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for SpacepacketsTmSender {
 ///
 /// This serves only works if
 /// [CCSDS 133.0-B-2 space packets](https://public.ccsds.org/Pubs/133x0b2e1.pdf) are the only
-/// packet type being exchanged. It uses the CCSDS [spacepackets::PacketId] as the packet delimiter
-/// and start marker when parsing for packets. The user specifies a set of expected
-/// [spacepackets::PacketId]s as part of the server configuration for that purpose.
+/// packet type being exchanged. It uses the CCSDS space packet header [spacepackets::SpHeader] and
+/// a user specified [SpacePacketValidator] to determine the space packets relevant for further
+/// processing.
 ///
 /// ## Example
+///
 /// The [TCP server integration tests](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs/tests/tcp_servers.rs)
 /// also serves as the example application for this module.
 pub struct TcpSpacepacketsServer<
-    TmSource: TmPacketSource<Error = TmError>,
-    TcReceiver: ReceivesTc<Error = TcError>,
-    PacketIdChecker: ValidatorU16Id,
+    TmSource: PacketSource<Error = TmError>,
+    TcSender: PacketSenderRaw<Error = SendError>,
+    Validator: SpacePacketValidator,
     HandledConnection: HandledConnectionHandler,
     TmError,
-    TcError: 'static,
+    SendError: 'static,
 > {
     pub generic_server: TcpTmtcGenericServer<
         TmSource,
-        TcReceiver,
+        TcSender,
         SpacepacketsTmSender,
-        SpacepacketsTcParser<PacketIdChecker>,
+        Validator,
         HandledConnection,
         TmError,
-        TcError,
+        SendError,
     >,
 }
 
 impl<
-        TmSource: TmPacketSource<Error = TmError>,
-        TcReceiver: ReceivesTc<Error = TcError>,
-        PacketIdChecker: ValidatorU16Id,
+        TmSource: PacketSource<Error = TmError>,
+        TcSender: PacketSenderRaw<Error = TcError>,
+        Validator: SpacePacketValidator,
         HandledConnection: HandledConnectionHandler,
         TmError: 'static,
         TcError: 'static,
-    >
-    TcpSpacepacketsServer<
-        TmSource,
-        TcReceiver,
-        PacketIdChecker,
-        HandledConnection,
-        TmError,
-        TcError,
-    >
+    > TcpSpacepacketsServer<TmSource, TcSender, Validator, HandledConnection, TmError, TcError>
 {
     ///
     /// ## Parameter
@@ -134,26 +116,30 @@ impl<
     /// * `cfg` - Configuration of the server.
     /// * `tm_source` - Generic TM source used by the server to pull telemetry packets which are
     ///     then sent back to the client.
-    /// * `tc_receiver` - Any received telecommands which were decoded successfully will be
-    ///     forwarded to this TC receiver.
-    /// * `packet_id_lookup` - This lookup table contains the relevant packets IDs for packet
-    ///     parsing. This mechanism is used to have a start marker for finding CCSDS packets.
+    /// * `tc_sender` - Any received telecommands which were decoded successfully will be
+    ///     forwarded using this [PacketSenderRaw].
+    /// * `validator` - Used to determine the space packets relevant for further processing and
+    ///    to detect broken space packets.
+    /// * `handled_connection_hook` - Called to notify the user about a succesfully handled
+    ///    connection.
+    /// * `stop_signal` - Can be used to shut down the TCP server even for longer running
+    ///    connections.
     pub fn new(
         cfg: ServerConfig,
         tm_source: TmSource,
-        tc_receiver: TcReceiver,
-        packet_id_checker: PacketIdChecker,
-        handled_connection: HandledConnection,
+        tc_sender: TcSender,
+        validator: Validator,
+        handled_connection_hook: HandledConnection,
         stop_signal: Option<Arc<AtomicBool>>,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
             generic_server: TcpTmtcGenericServer::new(
                 cfg,
-                SpacepacketsTcParser::new(packet_id_checker),
+                validator,
                 SpacepacketsTmSender::default(),
                 tm_source,
-                tc_receiver,
-                handled_connection,
+                tc_sender,
+                handled_connection_hook,
                 stop_signal,
             )?,
         })
@@ -167,8 +153,8 @@ impl<
             /// useful if using the port number 0 for OS auto-assignment.
             pub fn local_addr(&self) -> std::io::Result<SocketAddr>;
 
-            /// Delegation to the [TcpTmtcGenericServer::handle_next_connection] call.
-            pub fn handle_next_connection(
+            /// Delegation to the [TcpTmtcGenericServer::handle_all_connections] call.
+            pub fn handle_all_connections(
                 &mut self,
                 poll_timeout: Option<Duration>
             ) -> Result<ConnectionResult, TcpTmtcError<TmError, TcError>>;
@@ -187,6 +173,7 @@ mod tests {
     use std::{
         io::{Read, Write},
         net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
+        sync::mpsc,
         thread,
     };
 
@@ -194,40 +181,60 @@ mod tests {
     use hashbrown::HashSet;
     use spacepackets::{
         ecss::{tc::PusTcCreator, WritablePusPacket},
-        PacketId, SpHeader,
+        CcsdsPacket, PacketId, SpHeader,
     };
 
-    use crate::hal::std::tcp_server::{
-        tests::{ConnectionFinishedHandler, SyncTcCacher, SyncTmSource},
-        ConnectionResult, ServerConfig,
+    use crate::{
+        encoding::ccsds::{SpValidity, SpacePacketValidator},
+        hal::std::tcp_server::{
+            tests::{ConnectionFinishedHandler, SyncTmSource},
+            ConnectionResult, ServerConfig,
+        },
+        queue::GenericSendError,
+        tmtc::PacketAsVec,
+        ComponentId,
     };
 
     use super::TcpSpacepacketsServer;
 
+    const TCP_SERVER_ID: ComponentId = 0x05;
     const TEST_APID_0: u16 = 0x02;
     const TEST_PACKET_ID_0: PacketId = PacketId::new_for_tc(true, TEST_APID_0);
     const TEST_APID_1: u16 = 0x10;
     const TEST_PACKET_ID_1: PacketId = PacketId::new_for_tc(true, TEST_APID_1);
 
+    #[derive(Default)]
+    pub struct SimpleValidator(pub HashSet<PacketId>);
+
+    impl SpacePacketValidator for SimpleValidator {
+        fn validate(&self, sp_header: &SpHeader, _raw_buf: &[u8]) -> SpValidity {
+            if self.0.contains(&sp_header.packet_id()) {
+                return SpValidity::Valid;
+            }
+            // Simple case: Assume that the interface always contains valid space packets.
+            SpValidity::Skip
+        }
+    }
+
     fn generic_tmtc_server(
         addr: &SocketAddr,
-        tc_receiver: SyncTcCacher,
+        tc_sender: mpsc::Sender<PacketAsVec>,
         tm_source: SyncTmSource,
-        packet_id_lookup: HashSet<PacketId>,
+        validator: SimpleValidator,
         stop_signal: Option<Arc<AtomicBool>>,
     ) -> TcpSpacepacketsServer<
         SyncTmSource,
-        SyncTcCacher,
-        HashSet<PacketId>,
+        mpsc::Sender<PacketAsVec>,
+        SimpleValidator,
         ConnectionFinishedHandler,
         (),
-        (),
+        GenericSendError,
     > {
         TcpSpacepacketsServer::new(
-            ServerConfig::new(*addr, Duration::from_millis(2), 1024, 1024),
+            ServerConfig::new(TCP_SERVER_ID, *addr, Duration::from_millis(2), 1024, 1024),
             tm_source,
-            tc_receiver,
-            packet_id_lookup,
+            tc_sender,
+            validator,
             ConnectionFinishedHandler::default(),
             stop_signal,
         )
@@ -237,15 +244,15 @@ mod tests {
     #[test]
     fn test_basic_tc_only() {
         let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
-        let tc_receiver = SyncTcCacher::default();
+        let (tc_sender, tc_receiver) = mpsc::channel();
         let tm_source = SyncTmSource::default();
-        let mut packet_id_lookup = HashSet::new();
-        packet_id_lookup.insert(TEST_PACKET_ID_0);
+        let mut validator = SimpleValidator::default();
+        validator.0.insert(TEST_PACKET_ID_0);
         let mut tcp_server = generic_tmtc_server(
             &auto_port_addr,
-            tc_receiver.clone(),
+            tc_sender.clone(),
             tm_source,
-            packet_id_lookup,
+            validator,
             None,
         );
         let dest_addr = tcp_server
@@ -255,7 +262,7 @@ mod tests {
         let set_if_done = conn_handled.clone();
         // Call the connection handler in separate thread, does block.
         thread::spawn(move || {
-            let result = tcp_server.handle_next_connection(Some(Duration::from_millis(100)));
+            let result = tcp_server.handle_all_connections(Some(Duration::from_millis(100)));
             if result.is_err() {
                 panic!("handling connection failed: {:?}", result.unwrap_err());
             }
@@ -289,16 +296,15 @@ mod tests {
         if !conn_handled.load(Ordering::Relaxed) {
             panic!("connection was not handled properly");
         }
-        // Check that TC has arrived.
-        let mut tc_queue = tc_receiver.tc_queue.lock().unwrap();
-        assert_eq!(tc_queue.len(), 1);
-        assert_eq!(tc_queue.pop_front().unwrap(), tc_0);
+        let packet = tc_receiver.try_recv().expect("receiving TC failed");
+        assert_eq!(packet.packet, tc_0);
+        matches!(tc_receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
     }
 
     #[test]
     fn test_multi_tc_multi_tm() {
         let auto_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
-        let tc_receiver = SyncTcCacher::default();
+        let (tc_sender, tc_receiver) = mpsc::channel();
         let mut tm_source = SyncTmSource::default();
 
         // Add telemetry
@@ -315,14 +321,14 @@ mod tests {
         tm_source.add_tm(&tm_1);
 
         // Set up server
-        let mut packet_id_lookup = HashSet::new();
-        packet_id_lookup.insert(TEST_PACKET_ID_0);
-        packet_id_lookup.insert(TEST_PACKET_ID_1);
+        let mut validator = SimpleValidator::default();
+        validator.0.insert(TEST_PACKET_ID_0);
+        validator.0.insert(TEST_PACKET_ID_1);
         let mut tcp_server = generic_tmtc_server(
             &auto_port_addr,
-            tc_receiver.clone(),
+            tc_sender.clone(),
             tm_source,
-            packet_id_lookup,
+            validator,
             None,
         );
         let dest_addr = tcp_server
@@ -333,7 +339,7 @@ mod tests {
 
         // Call the connection handler in separate thread, does block.
         thread::spawn(move || {
-            let result = tcp_server.handle_next_connection(Some(Duration::from_millis(100)));
+            let result = tcp_server.handle_all_connections(Some(Duration::from_millis(100)));
             if result.is_err() {
                 panic!("handling connection failed: {:?}", result.unwrap_err());
             }
@@ -397,9 +403,10 @@ mod tests {
             panic!("connection was not handled properly");
         }
         // Check that TC has arrived.
-        let mut tc_queue = tc_receiver.tc_queue.lock().unwrap();
-        assert_eq!(tc_queue.len(), 2);
-        assert_eq!(tc_queue.pop_front().unwrap(), tc_0);
-        assert_eq!(tc_queue.pop_front().unwrap(), tc_1);
+        let packet_0 = tc_receiver.try_recv().expect("receiving TC failed");
+        assert_eq!(packet_0.packet, tc_0);
+        let packet_1 = tc_receiver.try_recv().expect("receiving TC failed");
+        assert_eq!(packet_1.packet, tc_1);
+        matches!(tc_receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
     }
 }

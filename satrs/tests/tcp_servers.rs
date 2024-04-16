@@ -17,22 +17,26 @@ use core::{
 use std::{
     io::{Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
-    sync::Mutex,
+    sync::{mpsc, Mutex},
     thread,
 };
 
 use hashbrown::HashSet;
 use satrs::{
-    encoding::cobs::encode_packet_with_cobs,
+    encoding::{
+        ccsds::{SpValidity, SpacePacketValidator},
+        cobs::encode_packet_with_cobs,
+    },
     hal::std::tcp_server::{
         ConnectionResult, HandledConnectionHandler, HandledConnectionInfo, ServerConfig,
         TcpSpacepacketsServer, TcpTmtcInCobsServer,
     },
-    tmtc::{ReceivesTcCore, TmPacketSourceCore},
+    tmtc::PacketSource,
+    ComponentId,
 };
 use spacepackets::{
     ecss::{tc::PusTcCreator, WritablePusPacket},
-    PacketId, SpHeader,
+    CcsdsPacket, PacketId, SpHeader,
 };
 use std::{collections::VecDeque, sync::Arc, vec::Vec};
 
@@ -61,21 +65,6 @@ impl ConnectionFinishedHandler {
         assert!(self.connection_info.is_empty());
     }
 }
-#[derive(Default, Clone)]
-struct SyncTcCacher {
-    tc_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
-}
-
-impl ReceivesTcCore for SyncTcCacher {
-    type Error = ();
-
-    fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
-        let mut tc_queue = self.tc_queue.lock().expect("tc forwarder failed");
-        println!("Received TC: {:x?}", tc_raw);
-        tc_queue.push_back(tc_raw.to_vec());
-        Ok(())
-    }
-}
 
 #[derive(Default, Clone)]
 struct SyncTmSource {
@@ -89,7 +78,7 @@ impl SyncTmSource {
     }
 }
 
-impl TmPacketSourceCore for SyncTmSource {
+impl PacketSource for SyncTmSource {
     type Error = ();
 
     fn retrieve_packet(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
@@ -111,20 +100,27 @@ impl TmPacketSourceCore for SyncTmSource {
     }
 }
 
+const TCP_SERVER_ID: ComponentId = 0x05;
 const SIMPLE_PACKET: [u8; 5] = [1, 2, 3, 4, 5];
 const INVERTED_PACKET: [u8; 5] = [5, 4, 3, 4, 1];
 const AUTO_PORT_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
 
 #[test]
 fn test_cobs_server() {
-    let tc_receiver = SyncTcCacher::default();
+    let (tc_sender, tc_receiver) = mpsc::channel();
     let mut tm_source = SyncTmSource::default();
     // Insert a telemetry packet which will be read back by the client at a later stage.
     tm_source.add_tm(&INVERTED_PACKET);
     let mut tcp_server = TcpTmtcInCobsServer::new(
-        ServerConfig::new(AUTO_PORT_ADDR, Duration::from_millis(2), 1024, 1024),
+        ServerConfig::new(
+            TCP_SERVER_ID,
+            AUTO_PORT_ADDR,
+            Duration::from_millis(2),
+            1024,
+            1024,
+        ),
         tm_source,
-        tc_receiver.clone(),
+        tc_sender.clone(),
         ConnectionFinishedHandler::default(),
         None,
     )
@@ -137,7 +133,7 @@ fn test_cobs_server() {
 
     // Call the connection handler in separate thread, does block.
     thread::spawn(move || {
-        let result = tcp_server.handle_next_connection(Some(Duration::from_millis(400)));
+        let result = tcp_server.handle_all_connections(Some(Duration::from_millis(400)));
         if result.is_err() {
             panic!("handling connection failed: {:?}", result.unwrap_err());
         }
@@ -190,32 +186,53 @@ fn test_cobs_server() {
         panic!("connection was not handled properly");
     }
     // Check that the packet was received and decoded successfully.
-    let mut tc_queue = tc_receiver
-        .tc_queue
-        .lock()
-        .expect("locking tc queue failed");
-    assert_eq!(tc_queue.len(), 1);
-    assert_eq!(tc_queue.pop_front().unwrap(), &SIMPLE_PACKET);
-    drop(tc_queue);
+    let tc_with_sender = tc_receiver.try_recv().expect("no TC received");
+    assert_eq!(tc_with_sender.packet, SIMPLE_PACKET);
+    assert_eq!(tc_with_sender.sender_id, TCP_SERVER_ID);
+    matches!(tc_receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
 }
 
 const TEST_APID_0: u16 = 0x02;
 const TEST_PACKET_ID_0: PacketId = PacketId::new_for_tc(true, TEST_APID_0);
 
+#[derive(Default)]
+pub struct SimpleVerificator {
+    pub valid_ids: HashSet<PacketId>,
+}
+
+impl SpacePacketValidator for SimpleVerificator {
+    fn validate(
+        &self,
+        sp_header: &SpHeader,
+        _raw_buf: &[u8],
+    ) -> satrs::encoding::ccsds::SpValidity {
+        if self.valid_ids.contains(&sp_header.packet_id()) {
+            return SpValidity::Valid;
+        }
+        SpValidity::Skip
+    }
+}
+
 #[test]
 fn test_ccsds_server() {
-    let tc_receiver = SyncTcCacher::default();
+    let (tc_sender, tc_receiver) = mpsc::channel();
     let mut tm_source = SyncTmSource::default();
     let sph = SpHeader::new_for_unseg_tc(TEST_APID_0, 0, 0);
     let verif_tm = PusTcCreator::new_simple(sph, 1, 1, &[], true);
     let tm_0 = verif_tm.to_vec().expect("tm generation failed");
     tm_source.add_tm(&tm_0);
-    let mut packet_id_lookup = HashSet::new();
-    packet_id_lookup.insert(TEST_PACKET_ID_0);
+    let mut packet_id_lookup = SimpleVerificator::default();
+    packet_id_lookup.valid_ids.insert(TEST_PACKET_ID_0);
     let mut tcp_server = TcpSpacepacketsServer::new(
-        ServerConfig::new(AUTO_PORT_ADDR, Duration::from_millis(2), 1024, 1024),
+        ServerConfig::new(
+            TCP_SERVER_ID,
+            AUTO_PORT_ADDR,
+            Duration::from_millis(2),
+            1024,
+            1024,
+        ),
         tm_source,
-        tc_receiver.clone(),
+        tc_sender,
         packet_id_lookup,
         ConnectionFinishedHandler::default(),
         None,
@@ -228,7 +245,7 @@ fn test_ccsds_server() {
     let set_if_done = conn_handled.clone();
     // Call the connection handler in separate thread, does block.
     thread::spawn(move || {
-        let result = tcp_server.handle_next_connection(Some(Duration::from_millis(500)));
+        let result = tcp_server.handle_all_connections(Some(Duration::from_millis(500)));
         if result.is_err() {
             panic!("handling connection failed: {:?}", result.unwrap_err());
         }
@@ -282,7 +299,8 @@ fn test_ccsds_server() {
         panic!("connection was not handled properly");
     }
     // Check that TC has arrived.
-    let mut tc_queue = tc_receiver.tc_queue.lock().unwrap();
-    assert_eq!(tc_queue.len(), 1);
-    assert_eq!(tc_queue.pop_front().unwrap(), tc_0);
+    let tc_with_sender = tc_receiver.try_recv().expect("no TC received");
+    assert_eq!(tc_with_sender.packet, tc_0);
+    assert_eq!(tc_with_sender.sender_id, TCP_SERVER_ID);
+    matches!(tc_receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
 }

@@ -3,50 +3,6 @@ use spacepackets::time::cds::CdsTime;
 use spacepackets::time::TimeWriter;
 use spacepackets::SpHeader;
 
-#[cfg(feature = "std")]
-pub use std_mod::*;
-
-#[cfg(feature = "std")]
-pub mod std_mod {
-    use crate::pool::{
-        PoolProvider, SharedStaticMemoryPool, StaticMemoryPool, StoreAddr, StoreError,
-    };
-    use crate::pus::EcssTmtcError;
-    use spacepackets::ecss::tm::PusTmCreator;
-    use spacepackets::ecss::WritablePusPacket;
-    use std::sync::{Arc, RwLock};
-
-    #[derive(Clone)]
-    pub struct SharedTmPool(pub SharedStaticMemoryPool);
-
-    impl SharedTmPool {
-        pub fn new(shared_pool: StaticMemoryPool) -> Self {
-            Self(Arc::new(RwLock::new(shared_pool)))
-        }
-
-        pub fn clone_backing_pool(&self) -> SharedStaticMemoryPool {
-            self.0.clone()
-        }
-        pub fn shared_pool(&self) -> &SharedStaticMemoryPool {
-            &self.0
-        }
-
-        pub fn shared_pool_mut(&mut self) -> &mut SharedStaticMemoryPool {
-            &mut self.0
-        }
-
-        pub fn add_pus_tm(&self, pus_tm: &PusTmCreator) -> Result<StoreAddr, EcssTmtcError> {
-            let mut pg = self.0.write().map_err(|_| StoreError::LockError)?;
-            let addr = pg.free_element(pus_tm.len_written(), |buf| {
-                pus_tm
-                    .write_to_bytes(buf)
-                    .expect("writing PUS TM to store failed");
-            })?;
-            Ok(addr)
-        }
-    }
-}
-
 pub struct PusTmWithCdsShortHelper {
     apid: u16,
     cds_short_buf: [u8; 7],

@@ -10,7 +10,7 @@ use hashbrown::HashSet;
 pub use crate::pus::event::EventReporter;
 use crate::pus::verification::TcStateToken;
 #[cfg(feature = "alloc")]
-use crate::pus::EcssTmSenderCore;
+use crate::pus::EcssTmSender;
 use crate::pus::EcssTmtcError;
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
@@ -178,7 +178,7 @@ pub mod alloc_mod {
 
         pub fn generate_pus_event_tm_generic(
             &self,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             time_stamp: &[u8],
             event: Event,
             params: Option<&[u8]>,
@@ -240,7 +240,7 @@ pub mod alloc_mod {
 
         pub fn generate_pus_event_tm<Severity: HasSeverity>(
             &self,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             time_stamp: &[u8],
             event: EventU32TypedSev<Severity>,
             aux_data: Option<&[u8]>,
@@ -257,9 +257,8 @@ pub mod alloc_mod {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::SeverityInfo;
-    use crate::pus::PusTmAsVec;
     use crate::request::UniqueApidTargetId;
+    use crate::{events::SeverityInfo, tmtc::PacketAsVec};
     use std::sync::mpsc::{self, TryRecvError};
 
     const INFO_EVENT: EventU32TypedSev<SeverityInfo> =
@@ -284,7 +283,7 @@ mod tests {
     #[test]
     fn test_basic() {
         let event_man = create_basic_man_1();
-        let (event_tx, event_rx) = mpsc::channel::<PusTmAsVec>();
+        let (event_tx, event_rx) = mpsc::channel::<PacketAsVec>();
         let event_sent = event_man
             .generate_pus_event_tm(&event_tx, &EMPTY_STAMP, INFO_EVENT, None)
             .expect("Sending info event failed");
@@ -297,7 +296,7 @@ mod tests {
     #[test]
     fn test_disable_event() {
         let mut event_man = create_basic_man_2();
-        let (event_tx, event_rx) = mpsc::channel::<PusTmAsVec>();
+        let (event_tx, event_rx) = mpsc::channel::<PacketAsVec>();
         // let mut sender = TmAsVecSenderWithMpsc::new(0, "test", event_tx);
         let res = event_man.disable_tm_for_event(&LOW_SEV_EVENT);
         assert!(res.is_ok());
@@ -320,7 +319,7 @@ mod tests {
     #[test]
     fn test_reenable_event() {
         let mut event_man = create_basic_man_1();
-        let (event_tx, event_rx) = mpsc::channel::<PusTmAsVec>();
+        let (event_tx, event_rx) = mpsc::channel::<PacketAsVec>();
         let mut res = event_man.disable_tm_for_event_with_sev(&INFO_EVENT);
         assert!(res.is_ok());
         assert!(res.unwrap());

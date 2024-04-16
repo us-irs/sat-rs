@@ -17,7 +17,7 @@ it is still centered around small packets. `sat-rs` provides support for these E
 standards and also attempts to fill the gap to the internet protocol by providing the following
 components.
 
-1. [UDP TMTC Server](https://docs.rs/satrs/latest/satrs/hal/host/udp_server/index.html).
+1. [UDP TMTC Server](https://docs.rs/satrs/latest/satrs/hal/std/udp_server/index.html).
    UDP is already packet based which makes it an excellent fit for exchanging space packets.
 2. [TCP TMTC Server Components](https://docs.rs/satrs/latest/satrs/hal/std/tcp_server/index.html).
    TCP is a stream based protocol, so the library provides building blocks to parse telemetry
@@ -39,8 +39,12 @@ task might be to store all arriving telemetry persistently. This is especially i
 space systems which do not have permanent contact like low-earth-orbit (LEO) satellites.
 
 The most important task of a TC source is to deliver the telecommands to the correct recipients.
-For modern component oriented software using message passing, this usually includes staged
-demultiplexing components to determine where a command needs to be sent.
+For component oriented software using message passing, this usually includes staged demultiplexing
+components to determine where a command needs to be sent.
+
+Using a generic concept of a TC source and a TM sink as part of the software design simplifies
+the flexibility of the TMTC infrastructure: Newly added TM generators and TC receiver only have to
+forward their generated or received packets to those handler objects.
 
 # Low-level protocols and the bridge to the communcation subsystem
 
