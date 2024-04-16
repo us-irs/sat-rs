@@ -23,7 +23,6 @@ version = "1"
 optional = true
 
 [dependencies.satrs-shared]
-path = "../satrs-shared"
 version = "0.1.3"
 features = ["serde"]
 
