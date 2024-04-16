@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.1.3] 2024-04-16
+
+Bumped `spacepackets` to v0.11.
+
 # [v0.1.2] 2024-02-17
 
 - Bumped `spacepackets` to v0.10.0 for `UnsignedEnum` trait change.
