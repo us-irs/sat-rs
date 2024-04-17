@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.1.2] 2024-04-17
+
+Allow `satrs-shared` from `v0.1.3` to `<v0.2`.
+
 # [v0.1.1] 2024-02-17
 
 - Bumped `spacepackets` to v0.10.0
