@@ -368,7 +368,6 @@ pub mod alloc_mod {
     /// [DynClone] allows cloning the trait object as long as the boxed object implements
     /// [Clone].
     #[cfg(feature = "alloc")]
-    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
     pub trait EcssTmSenderExt: EcssTmSender + Downcast + DynClone {
         // Remove this once trait upcasting coercion has been implemented.
         // Tracking issue: https://github.com/rust-lang/rust/issues/65991
@@ -409,7 +408,6 @@ pub mod alloc_mod {
     /// [DynClone] allows cloning the trait object as long as the boxed object implements
     /// [Clone].
     #[cfg(feature = "alloc")]
-    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
     pub trait EcssTcSenderExt: EcssTcSender + Downcast + DynClone {}
 
     /// Blanket implementation for all types which implement [EcssTcSender] and are clonable.
@@ -429,7 +427,6 @@ pub mod alloc_mod {
     /// [DynClone] allows cloning the trait object as long as the boxed object implements
     /// [Clone].
     #[cfg(feature = "alloc")]
-    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
     pub trait EcssTcReceiverExt: EcssTcReceiver + Downcast {}
 
     /// Blanket implementation for all types which implement [EcssTcReceiver] and are clonable.
@@ -551,7 +548,6 @@ pub mod alloc_mod {
         >
     {
         #[cfg(feature = "std")]
-        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
         pub fn new_from_now(
             active_request_map: ActiveRequestMap,
             fail_data_buf_size: usize,
@@ -638,7 +634,6 @@ pub mod alloc_mod {
 
         /// Update the current time used for timeout checks based on the current OS time.
         #[cfg(feature = "std")]
-        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
         pub fn update_time_from_now(&mut self) -> Result<(), std::time::SystemTimeError> {
             self.current_time = UnixTimestamp::from_now()?;
             Ok(())
@@ -653,7 +648,6 @@ pub mod alloc_mod {
 }
 
 #[cfg(feature = "std")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod std_mod {
     use crate::pool::{
         PoolAddr, PoolError, PoolProvider, PoolProviderWithGuards, SharedStaticMemoryPool,

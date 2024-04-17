@@ -26,11 +26,9 @@ pub enum Subservice {
 }
 
 #[cfg(feature = "alloc")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub mod alloc_mod {}
 
 #[cfg(feature = "alloc")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub mod std_mod {}
 
 #[cfg(test)]
