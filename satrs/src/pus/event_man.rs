@@ -13,10 +13,8 @@ use crate::pus::verification::TcStateToken;
 use crate::pus::EcssTmSender;
 use crate::pus::EcssTmtcError;
 #[cfg(feature = "alloc")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub use alloc_mod::*;
 #[cfg(feature = "heapless")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "heapless")))]
 pub use heapless_mod::*;
 
 /// This trait allows the PUS event manager implementation to stay generic over various types
@@ -44,7 +42,6 @@ pub mod heapless_mod {
     use crate::events::LargestEventRaw;
     use core::marker::PhantomData;
 
-    #[cfg_attr(doc_cfg, doc(cfg(feature = "heapless")))]
     // TODO: After a new version of heapless is released which uses hash32 version 0.3, try using
     //       regular Event type again.
     #[derive(Default)]

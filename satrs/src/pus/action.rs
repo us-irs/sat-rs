@@ -7,11 +7,9 @@ use crate::{
 use satrs_shared::res_code::ResultU16;
 
 #[cfg(feature = "std")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub use std_mod::*;
 
 #[cfg(feature = "alloc")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 #[allow(unused_imports)]
 pub use alloc_mod::*;
 
@@ -65,7 +63,6 @@ impl GenericActionReplyPus {
 }
 
 #[cfg(feature = "alloc")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
 pub mod alloc_mod {
     use crate::{
         action::ActionRequest,
@@ -127,7 +124,6 @@ pub mod alloc_mod {
 }
 
 #[cfg(feature = "std")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod std_mod {
     use std::sync::mpsc;
 

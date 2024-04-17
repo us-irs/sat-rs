@@ -423,7 +423,6 @@ pub mod alloc_mod {
 
         /// Like [Self::new], but sets the `init_current_time` parameter to the current system time.
         #[cfg(feature = "std")]
-        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
         pub fn new_with_current_init_time(time_margin: Duration) -> Result<Self, SystemTimeError> {
             Ok(Self::new(UnixTime::now()?, time_margin))
         }
@@ -667,7 +666,6 @@ pub mod alloc_mod {
         }
 
         #[cfg(feature = "std")]
-        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
         pub fn update_time_from_now(&mut self) -> Result<(), SystemTimeError> {
             self.current_time = UnixTime::now()?;
             Ok(())

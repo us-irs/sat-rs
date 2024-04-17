@@ -98,17 +98,10 @@ pub use crate::seq_count::SeqCountProviderSimple;
 pub use spacepackets::ecss::verification::*;
 
 #[cfg(feature = "alloc")]
-#[cfg_attr(feature = "doc_cfg", doc(cfg(feature = "alloc")))]
 pub use alloc_mod::*;
 
 use crate::request::Apid;
 use crate::ComponentId;
-
-/*
-#[cfg(feature = "std")]
-#[cfg_attr(feature = "doc_cfg", doc(cfg(feature = "std")))]
-pub use std_mod::*;
- */
 
 /// This is a request identifier as specified in 5.4.11.2 c. of the PUS standard.
 ///
