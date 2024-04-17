@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.2.0-rc.3] 2024-04-17
+
+docs-rs hotfix 2
+
 # [v0.2.0-rc.2] 2024-04-17
 
 docs-rs hotfix
