@@ -26,14 +26,19 @@ impl<T: SpacePacketValidator, TmError, TcError: 'static> TcpTcParser<TmError, Tc
         next_write_idx: &mut usize,
     ) -> Result<(), TcpTmtcError<TmError, TcError>> {
         // Reader vec full, need to parse for packets.
-        conn_result.num_received_tcs += parse_buffer_for_ccsds_space_packets(
-            &mut tc_buffer[..current_write_idx],
+        let parse_result = parse_buffer_for_ccsds_space_packets(
+            &tc_buffer[..current_write_idx],
             self,
             sender_id,
             tc_sender,
-            next_write_idx,
         )
         .map_err(|e| TcpTmtcError::TcError(e))?;
+        if let Some(broken_tail_start) = parse_result.incomplete_tail_start {
+            // Copy broken tail to front of buffer.
+            tc_buffer.copy_within(broken_tail_start..current_write_idx, 0);
+            *next_write_idx = current_write_idx - broken_tail_start;
+        }
+        conn_result.num_received_tcs += parse_result.packets_found;
         Ok(())
     }
 }
