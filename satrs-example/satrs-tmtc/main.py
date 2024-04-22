@@ -256,6 +256,7 @@ def main():
         while True:
             state = tmtc_backend.periodic_op(None)
             if state.request == BackendRequest.TERMINATION_NO_ERROR:
+                tmtc_backend.close_com_if()
                 sys.exit(0)
             elif state.request == BackendRequest.DELAY_IDLE:
                 _LOGGER.info("TMTC Client in IDLE mode")
@@ -270,6 +271,7 @@ def main():
             elif state.request == BackendRequest.CALL_NEXT:
                 pass
     except KeyboardInterrupt:
+        tmtc_backend.close_com_if()
         sys.exit(0)
 
 

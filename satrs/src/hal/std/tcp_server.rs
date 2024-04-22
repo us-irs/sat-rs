@@ -9,8 +9,6 @@ use mio::{Events, Interest, Poll, Token};
 use socket2::{Domain, Socket, Type};
 use std::io::{self, Read};
 use std::net::SocketAddr;
-// use std::net::TcpListener;
-// use std::net::{SocketAddr, TcpStream};
 use std::thread;
 
 use crate::tmtc::{PacketSenderRaw, PacketSource};
@@ -244,13 +242,16 @@ impl<
         // Create a poll instance.
         let poll = Poll::new()?;
         // Create storage for events.
-        let events = Events::with_capacity(10);
+        let events = Events::with_capacity(32);
         let listener: std::net::TcpListener = socket.into();
         let mut mio_listener = TcpListener::from_std(listener);
 
         // Start listening for incoming connections.
-        poll.registry()
-            .register(&mut mio_listener, Token(0), Interest::READABLE)?;
+        poll.registry().register(
+            &mut mio_listener,
+            Token(0),
+            Interest::READABLE | Interest::WRITABLE,
+        )?;
 
         Ok(Self {
             id: cfg.id,
@@ -280,11 +281,11 @@ impl<
         self.listener.local_addr()
     }
 
-    /// This call is used to handle the next connection to a client. Right now, it performs
+    /// This call is used to handle all connection from clients. Right now, it performs
     /// the following steps:
     ///
-    /// 1. It calls the [std::net::TcpListener::accept] method internally using the blocking API
-    ///    until a client connects.
+    /// 1. It calls the [std::net::TcpListener::accept] method until a client connects. An optional
+    ///    timeout can be specified for non-blocking acceptance.
     /// 2. It reads all the telecommands from the client and parses all received data using the
     ///    user specified [TcpTcParser].
     /// 3. After reading and parsing all telecommands, it sends back all telemetry using the
@@ -317,11 +318,17 @@ impl<
             loop {
                 match self.listener.accept() {
                     Ok((stream, addr)) => {
-                        self.handle_accepted_connection(stream, addr)?;
+                        if let Err(e) = self.handle_accepted_connection(stream, addr) {
+                            self.reregister_poll_interest()?;
+                            return Err(e);
+                        }
                         handled_connections += 1;
                     }
                     Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => break,
-                    Err(err) => return Err(TcpTmtcError::Io(err)),
+                    Err(err) => {
+                        self.reregister_poll_interest()?;
+                        return Err(TcpTmtcError::Io(err));
+                    }
                 }
             }
         }
@@ -329,6 +336,14 @@ impl<
             return Ok(ConnectionResult::HandledConnections(handled_connections));
         }
         Ok(ConnectionResult::AcceptTimeout)
+    }
+
+    fn reregister_poll_interest(&mut self) -> io::Result<()> {
+        self.poll.registry().reregister(
+            &mut self.listener,
+            Token(0),
+            Interest::READABLE | Interest::WRITABLE,
+        )
     }
 
     fn handle_accepted_connection(
