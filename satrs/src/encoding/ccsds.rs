@@ -203,12 +203,8 @@ mod tests {
             .expect("writing packet failed");
         let tc_cacher = TcCacher::default();
         let verificator = SimpleVerificator::new_with_second_id();
-        let parse_result = parse_buffer_for_ccsds_space_packets(
-            &buffer,
-            &verificator,
-            PARSER_ID,
-            &tc_cacher,
-        );
+        let parse_result =
+            parse_buffer_for_ccsds_space_packets(&buffer, &verificator, PARSER_ID, &tc_cacher);
         assert!(parse_result.is_ok());
         let parse_result = parse_result.unwrap();
         assert_eq!(parse_result.packets_found, 2);
@@ -250,7 +246,6 @@ mod tests {
         assert!(parse_result.incomplete_tail_start.is_some());
         let incomplete_tail_idx = parse_result.incomplete_tail_start.unwrap();
         assert_eq!(incomplete_tail_idx, packet_len_ping);
-
 
         let queue = tc_cacher.tc_queue.borrow();
         assert_eq!(queue.len(), 1);
@@ -295,12 +290,8 @@ mod tests {
             .expect("writing failed");
         let verificator = SimpleVerificator::default();
         let tc_cacher = TcCacher::default();
-        let parse_result = parse_buffer_for_ccsds_space_packets(
-            &buf,
-            &verificator,
-            PARSER_ID,
-            &tc_cacher,
-        );
+        let parse_result =
+            parse_buffer_for_ccsds_space_packets(&buf, &verificator, PARSER_ID, &tc_cacher);
         assert!(parse_result.is_ok());
         let parse_result = parse_result.unwrap();
         assert_eq!(parse_result.packets_found, 1);
