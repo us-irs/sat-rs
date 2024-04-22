@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.2.0-rc.4] 2024-04-20
+
+## Changed
+
+- The `parse_for_ccsds_space_packets` method now expects a non-mutable slice and does not copy
+  broken tail packets anymore. It also does not expect a mutable `next_write_idx` argument anymore.
+  Instead, a `ParseResult` structure is returned which contains the `packets_found` and an
+  optional `incomplete_tail_start` value.
+
+## Fixed
+
+- `parse_for_ccsds_space_packets` did not detect CCSDS space packets at the buffer end with the
+  smallest possible size of 7 bytes.
+
 # [v0.2.0-rc.3] 2024-04-17
 
 docs-rs hotfix 2

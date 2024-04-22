@@ -21,6 +21,13 @@ pub trait SpacePacketValidator {
     fn validate(&self, sp_header: &SpHeader, raw_buf: &[u8]) -> SpValidity;
 }
 
+#[derive(Default, Debug, PartialEq, Eq)]
+pub struct ParseResult {
+    pub packets_found: u32,
+    /// If an incomplete space packet was found, its start index is indicated by this value.
+    pub incomplete_tail_start: Option<usize>,
+}
+
 /// This function parses a given buffer for tightly packed CCSDS space packets. It uses the
 /// [spacepackets::SpHeader] of the CCSDS packets and a user provided [SpacePacketValidator]
 /// to check whether a received space packet is relevant for processing.
@@ -41,35 +48,29 @@ pub trait SpacePacketValidator {
 ///  3. [SpValidity::Skip]: The parser skips the packet using the packet length determined from the
 ///     space packet header.
 pub fn parse_buffer_for_ccsds_space_packets<SendError>(
-    buf: &mut [u8],
+    buf: &[u8],
     packet_validator: &(impl SpacePacketValidator + ?Sized),
     sender_id: ComponentId,
     packet_sender: &(impl PacketSenderRaw<Error = SendError> + ?Sized),
-    next_write_idx: &mut usize,
-) -> Result<u32, SendError> {
-    *next_write_idx = 0;
-    let mut packets_found = 0;
+) -> Result<ParseResult, SendError> {
+    let mut parse_result = ParseResult::default();
     let mut current_idx = 0;
     let buf_len = buf.len();
     loop {
-        if current_idx + 7 >= buf.len() {
+        if current_idx + 7 > buf.len() {
             break;
         }
         let sp_header = SpHeader::from_be_bytes(&buf[current_idx..]).unwrap().0;
-        // let packet_id = u16::from_be_bytes(buf[current_idx..current_idx + 2].try_into().unwrap());
         match packet_validator.validate(&sp_header, &buf[current_idx..]) {
             SpValidity::Valid => {
                 let packet_size = sp_header.total_len();
                 if (current_idx + packet_size) <= buf_len {
                     packet_sender
                         .send_packet(sender_id, &buf[current_idx..current_idx + packet_size])?;
-                    packets_found += 1;
+                    parse_result.packets_found += 1;
                 } else {
                     // Move packet to start of buffer if applicable.
-                    if current_idx > 0 {
-                        buf.copy_within(current_idx.., 0);
-                        *next_write_idx = buf.len() - current_idx;
-                    }
+                    parse_result.incomplete_tail_start = Some(current_idx);
                 }
                 current_idx += packet_size;
                 continue;
@@ -83,14 +84,14 @@ pub fn parse_buffer_for_ccsds_space_packets<SendError>(
             }
         }
     }
-    Ok(packets_found)
+    Ok(parse_result)
 }
 
 #[cfg(test)]
 mod tests {
     use spacepackets::{
         ecss::{tc::PusTcCreator, WritablePusPacket},
-        CcsdsPacket, PacketId, SpHeader,
+        CcsdsPacket, PacketId, PacketSequenceCtrl, PacketType, SequenceFlags, SpHeader,
     };
 
     use crate::{encoding::tests::TcCacher, ComponentId};
@@ -136,17 +137,15 @@ mod tests {
             .write_to_bytes(&mut buffer)
             .expect("writing packet failed");
         let tc_cacher = TcCacher::default();
-        let mut next_write_idx = 0;
         let parse_result = parse_buffer_for_ccsds_space_packets(
-            &mut buffer,
+            &buffer,
             &SimpleVerificator::default(),
             PARSER_ID,
             &tc_cacher,
-            &mut next_write_idx,
         );
         assert!(parse_result.is_ok());
-        let parsed_packets = parse_result.unwrap();
-        assert_eq!(parsed_packets, 1);
+        let parse_result = parse_result.unwrap();
+        assert_eq!(parse_result.packets_found, 1);
         let mut queue = tc_cacher.tc_queue.borrow_mut();
         assert_eq!(queue.len(), 1);
         let packet_with_sender = queue.pop_front().unwrap();
@@ -167,17 +166,15 @@ mod tests {
             .write_to_bytes(&mut buffer[packet_len_ping..])
             .expect("writing packet failed");
         let tc_cacher = TcCacher::default();
-        let mut next_write_idx = 0;
         let parse_result = parse_buffer_for_ccsds_space_packets(
-            &mut buffer,
+            &buffer,
             &SimpleVerificator::default(),
             PARSER_ID,
             &tc_cacher,
-            &mut next_write_idx,
         );
         assert!(parse_result.is_ok());
-        let parsed_packets = parse_result.unwrap();
-        assert_eq!(parsed_packets, 2);
+        let parse_result = parse_result.unwrap();
+        assert_eq!(parse_result.packets_found, 2);
         let mut queue = tc_cacher.tc_queue.borrow_mut();
         assert_eq!(queue.len(), 2);
         let packet_with_addr = queue.pop_front().unwrap();
@@ -205,18 +202,16 @@ mod tests {
             .write_to_bytes(&mut buffer[packet_len_ping..])
             .expect("writing packet failed");
         let tc_cacher = TcCacher::default();
-        let mut next_write_idx = 0;
         let verificator = SimpleVerificator::new_with_second_id();
         let parse_result = parse_buffer_for_ccsds_space_packets(
-            &mut buffer,
+            &buffer,
             &verificator,
             PARSER_ID,
             &tc_cacher,
-            &mut next_write_idx,
         );
         assert!(parse_result.is_ok());
-        let parsed_packets = parse_result.unwrap();
-        assert_eq!(parsed_packets, 2);
+        let parse_result = parse_result.unwrap();
+        assert_eq!(parse_result.packets_found, 2);
         let mut queue = tc_cacher.tc_queue.borrow_mut();
         assert_eq!(queue.len(), 2);
         let packet_with_addr = queue.pop_front().unwrap();
@@ -242,24 +237,25 @@ mod tests {
             .write_to_bytes(&mut buffer[packet_len_ping..])
             .expect("writing packet failed");
         let tc_cacher = TcCacher::default();
-        let mut next_write_idx = 0;
         let verificator = SimpleVerificator::new_with_second_id();
         let parse_result = parse_buffer_for_ccsds_space_packets(
-            &mut buffer[..packet_len_ping + packet_len_action - 4],
+            &buffer[..packet_len_ping + packet_len_action - 4],
             &verificator,
             PARSER_ID,
             &tc_cacher,
-            &mut next_write_idx,
         );
         assert!(parse_result.is_ok());
-        let parsed_packets = parse_result.unwrap();
-        assert_eq!(parsed_packets, 1);
+        let parse_result = parse_result.unwrap();
+        assert_eq!(parse_result.packets_found, 1);
+        assert!(parse_result.incomplete_tail_start.is_some());
+        let incomplete_tail_idx = parse_result.incomplete_tail_start.unwrap();
+        assert_eq!(incomplete_tail_idx, packet_len_ping);
+
 
         let queue = tc_cacher.tc_queue.borrow();
         assert_eq!(queue.len(), 1);
         // The broken packet was moved to the start, so the next write index should be after the
         // last segment missing 4 bytes.
-        assert_eq!(next_write_idx, packet_len_action - 4);
     }
 
     #[test]
@@ -273,19 +269,40 @@ mod tests {
         let tc_cacher = TcCacher::default();
 
         let verificator = SimpleVerificator::new_with_second_id();
-        let mut next_write_idx = 0;
         let parse_result = parse_buffer_for_ccsds_space_packets(
-            &mut buffer[..packet_len_ping - 4],
+            &buffer[..packet_len_ping - 4],
             &verificator,
             PARSER_ID,
             &tc_cacher,
-            &mut next_write_idx,
         );
-        assert_eq!(next_write_idx, 0);
         assert!(parse_result.is_ok());
-        let parsed_packets = parse_result.unwrap();
-        assert_eq!(parsed_packets, 0);
+        let parse_result = parse_result.unwrap();
+        assert_eq!(parse_result.packets_found, 0);
         let queue = tc_cacher.tc_queue.borrow();
         assert_eq!(queue.len(), 0);
+    }
+
+    #[test]
+    fn test_smallest_packet() {
+        let ccsds_header_only = SpHeader::new(
+            PacketId::new(PacketType::Tc, true, TEST_APID_0),
+            PacketSequenceCtrl::new(SequenceFlags::Unsegmented, 0),
+            0,
+        );
+        let mut buf: [u8; 7] = [0; 7];
+        ccsds_header_only
+            .write_to_be_bytes(&mut buf)
+            .expect("writing failed");
+        let verificator = SimpleVerificator::default();
+        let tc_cacher = TcCacher::default();
+        let parse_result = parse_buffer_for_ccsds_space_packets(
+            &buf,
+            &verificator,
+            PARSER_ID,
+            &tc_cacher,
+        );
+        assert!(parse_result.is_ok());
+        let parse_result = parse_result.unwrap();
+        assert_eq!(parse_result.packets_found, 1);
     }
 }
