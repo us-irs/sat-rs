@@ -103,7 +103,9 @@ class PusHandler(GenericApidHandlerBase):
 
     def handle_tm(self, apid: int, packet: bytes, _user_args: Any):
         try:
-            pus_tm = PusTelemetry.unpack(packet, time_reader=CdsShortTimestamp.empty())
+            pus_tm = PusTelemetry.unpack(
+                packet, timestamp_len=CdsShortTimestamp.TIMESTAMP_SIZE
+            )
         except ValueError as e:
             _LOGGER.warning("Could not generate PUS TM object from raw data")
             _LOGGER.warning(f"Raw Packet: [{packet.hex(sep=',')}], REPR: {packet!r}")
@@ -111,7 +113,7 @@ class PusHandler(GenericApidHandlerBase):
         service = pus_tm.service
         if service == 1:
             tm_packet = Service1Tm.unpack(
-                data=packet, params=UnpackParams(CdsShortTimestamp.empty(), 1, 2)
+                data=packet, params=UnpackParams(CdsShortTimestamp.TIMESTAMP_SIZE, 1, 2)
             )
             res = self.verif_wrapper.add_tm(tm_packet)
             if res is None:
@@ -128,7 +130,9 @@ class PusHandler(GenericApidHandlerBase):
         elif service == 3:
             _LOGGER.info("No handling for HK packets implemented")
             _LOGGER.info(f"Raw packet: 0x[{packet.hex(sep=',')}]")
-            pus_tm = PusTelemetry.unpack(packet, time_reader=CdsShortTimestamp.empty())
+            pus_tm = PusTelemetry.unpack(
+                packet, timestamp_len=CdsShortTimestamp.TIMESTAMP_SIZE
+            )
             if pus_tm.subservice == 25:
                 if len(pus_tm.source_data) < 8:
                     raise ValueError("No addressable ID in HK packet")
@@ -136,7 +140,7 @@ class PusHandler(GenericApidHandlerBase):
                 _LOGGER.info(json_str)
         elif service == 5:
             tm_packet = PusTelemetry.unpack(
-                packet, time_reader=CdsShortTimestamp.empty()
+                packet, timestamp_len=CdsShortTimestamp.TIMESTAMP_SIZE
             )
             src_data = tm_packet.source_data
             event_u32 = EventU32.unpack(src_data)
@@ -145,7 +149,7 @@ class PusHandler(GenericApidHandlerBase):
                 _LOGGER.info("Received test event")
         elif service == 17:
             tm_packet = Service17Tm.unpack(
-                packet, time_reader=CdsShortTimestamp.empty()
+                packet, timestamp_len=CdsShortTimestamp.TIMESTAMP_SIZE
             )
             if tm_packet.subservice == 2:
                 self.file_logger.info("Received Ping Reply TM[17,2]")
@@ -162,7 +166,7 @@ class PusHandler(GenericApidHandlerBase):
                 f"The service {service} is not implemented in Telemetry Factory"
             )
             tm_packet = PusTelemetry.unpack(
-                packet, time_reader=CdsShortTimestamp.empty()
+                packet, timestamp_len=CdsShortTimestamp.TIMESTAMP_SIZE
             )
         self.raw_logger.log_tm(pus_tm)
 
@@ -197,15 +201,15 @@ class TcHandler(TcHandlerBase):
             _LOGGER.info(log_entry.log_str)
 
     def queue_finished_cb(self, info: ProcedureWrapper):
-        if info.proc_type == TcProcedureType.DEFAULT:
-            def_proc = info.to_def_procedure()
+        if info.proc_type == TcProcedureType.TREE_COMMANDING:
+            def_proc = info.to_tree_commanding_procedure()
             _LOGGER.info(f"Queue handling finished for command {def_proc.cmd_path}")
 
     def feed_cb(self, info: ProcedureWrapper, wrapper: FeedWrapper):
         q = self.queue_helper
         q.queue_wrapper = wrapper.queue_wrapper
-        if info.proc_type == TcProcedureType.DEFAULT:
-            def_proc = info.to_def_procedure()
+        if info.proc_type == TcProcedureType.TREE_COMMANDING:
+            def_proc = info.to_tree_commanding_procedure()
             assert def_proc.cmd_path is not None
             pus_tc.pack_pus_telecommands(q, def_proc.cmd_path)
 
