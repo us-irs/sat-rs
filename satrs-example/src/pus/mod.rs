@@ -1,20 +1,21 @@
 use crate::requests::GenericRequestRouter;
-use crate::tmtc::MpscStoreAndSendError;
 use log::warn;
+use satrs::pool::PoolAddr;
 use satrs::pus::verification::{
     self, FailParams, TcStateAccepted, TcStateStarted, VerificationReporter,
     VerificationReporterCfg, VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
     ActiveRequestMapProvider, ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter,
-    EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError, GenericConversionError,
-    GenericRoutingError, PusPacketHandlerResult, PusPacketHandlingError, PusReplyHandler,
-    PusRequestRouter, PusServiceHelper, PusTcToRequestConverter, TcInMemory,
+    EcssTcReceiver, EcssTmSender, EcssTmtcError, GenericConversionError, GenericRoutingError,
+    PusPacketHandlerResult, PusPacketHandlingError, PusReplyHandler, PusRequestRouter,
+    PusServiceHelper, PusTcToRequestConverter, TcInMemory,
 };
-use satrs::queue::GenericReceiveError;
+use satrs::queue::{GenericReceiveError, GenericSendError};
 use satrs::request::{Apid, GenericMessage, MessageMetadata};
 use satrs::spacepackets::ecss::tc::PusTcReader;
-use satrs::spacepackets::ecss::PusServiceId;
+use satrs::spacepackets::ecss::{PusPacket, PusServiceId};
+use satrs::tmtc::{PacketAsVec, PacketInPool};
 use satrs::ComponentId;
 use satrs_example::config::components::PUS_ROUTING_SERVICE;
 use satrs_example::config::{tmtc_err, CustomPusServiceId};
@@ -53,7 +54,7 @@ pub struct PusTcMpscRouter {
     pub mode_tc_sender: Sender<EcssTcAndToken>,
 }
 
-pub struct PusReceiver<TmSender: EcssTmSenderCore> {
+pub struct PusTcDistributor<TmSender: EcssTmSender> {
     pub id: ComponentId,
     pub tm_sender: TmSender,
     pub verif_reporter: VerificationReporter,
@@ -61,7 +62,7 @@ pub struct PusReceiver<TmSender: EcssTmSenderCore> {
     stamp_helper: TimeStampHelper,
 }
 
-impl<TmSender: EcssTmSenderCore> PusReceiver<TmSender> {
+impl<TmSender: EcssTmSender> PusTcDistributor<TmSender> {
     pub fn new(tm_sender: TmSender, pus_router: PusTcMpscRouter) -> Self {
         Self {
             id: PUS_ROUTING_SERVICE.raw(),
@@ -75,19 +76,54 @@ impl<TmSender: EcssTmSenderCore> PusReceiver<TmSender> {
         }
     }
 
-    pub fn handle_tc_packet(
+    pub fn handle_tc_packet_vec(
         &mut self,
-        tc_in_memory: TcInMemory,
-        service: u8,
-        pus_tc: &PusTcReader,
-    ) -> Result<PusPacketHandlerResult, MpscStoreAndSendError> {
-        let init_token = self.verif_reporter.add_tc(pus_tc);
+        packet_as_vec: PacketAsVec,
+    ) -> Result<PusPacketHandlerResult, GenericSendError> {
+        self.handle_tc_generic(packet_as_vec.sender_id, None, &packet_as_vec.packet)
+    }
+
+    pub fn handle_tc_packet_in_store(
+        &mut self,
+        packet_in_pool: PacketInPool,
+        pus_tc_copy: &[u8],
+    ) -> Result<PusPacketHandlerResult, GenericSendError> {
+        self.handle_tc_generic(
+            packet_in_pool.sender_id,
+            Some(packet_in_pool.store_addr),
+            pus_tc_copy,
+        )
+    }
+
+    pub fn handle_tc_generic(
+        &mut self,
+        sender_id: ComponentId,
+        addr_opt: Option<PoolAddr>,
+        raw_tc: &[u8],
+    ) -> Result<PusPacketHandlerResult, GenericSendError> {
+        let pus_tc_result = PusTcReader::new(raw_tc);
+        if pus_tc_result.is_err() {
+            log::warn!(
+                "error creating PUS TC from raw data received from {}: {}",
+                sender_id,
+                pus_tc_result.unwrap_err()
+            );
+            log::warn!("raw data: {:x?}", raw_tc);
+            return Ok(PusPacketHandlerResult::RequestHandled);
+        }
+        let pus_tc = pus_tc_result.unwrap().0;
+        let init_token = self.verif_reporter.add_tc(&pus_tc);
         self.stamp_helper.update_from_now();
         let accepted_token = self
             .verif_reporter
             .acceptance_success(&self.tm_sender, init_token, self.stamp_helper.stamp())
             .expect("Acceptance success failure");
-        let service = PusServiceId::try_from(service);
+        let service = PusServiceId::try_from(pus_tc.service());
+        let tc_in_memory: TcInMemory = if let Some(store_addr) = addr_opt {
+            PacketInPool::new(sender_id, store_addr).into()
+        } else {
+            PacketAsVec::new(sender_id, Vec::from(raw_tc)).into()
+        };
         match service {
             Ok(standard_service) => match standard_service {
                 PusServiceId::Test => self.pus_router.test_tc_sender.send(EcssTcAndToken {
@@ -128,12 +164,14 @@ impl<TmSender: EcssTmSenderCore> PusReceiver<TmSender> {
             Err(e) => {
                 if let Ok(custom_service) = CustomPusServiceId::try_from(e.number) {
                     match custom_service {
-                        CustomPusServiceId::Mode => {
-                            self.pus_router.mode_tc_sender.send(EcssTcAndToken {
+                        CustomPusServiceId::Mode => self
+                            .pus_router
+                            .mode_tc_sender
+                            .send(EcssTcAndToken {
                                 tc_in_memory,
                                 token: Some(accepted_token.into()),
-                            })?
-                        }
+                            })
+                            .map_err(|_| GenericSendError::RxDisconnected)?,
                         CustomPusServiceId::Health => {}
                     }
                 } else {
@@ -157,7 +195,7 @@ impl<TmSender: EcssTmSenderCore> PusReceiver<TmSender> {
 
 pub trait TargetedPusService {
     /// Returns [true] if the packet handling is finished.
-    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool;
+    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus;
     fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> HandlingStatus;
     fn check_for_request_timeouts(&mut self);
 }
@@ -179,12 +217,13 @@ pub trait TargetedPusService {
 ///
 /// The handler exposes the following API:
 ///
-///  1. [Self::handle_one_tc] which tries to poll and handle one TC packet, covering steps 1-5.
-///  2. [Self::check_one_reply] which tries to poll and handle one reply, covering step 6.
+///  1. [Self::poll_and_handle_next_tc] which tries to poll and handle one TC packet, covering
+///     steps 1-5.
+///  2. [Self::poll_and_check_next_reply] which tries to poll and handle one reply, covering step 6.
 ///  3. [Self::check_for_request_timeouts] which checks for request timeouts, covering step 7.
 pub struct PusTargetedRequestService<
-    TcReceiver: EcssTcReceiverCore,
-    TmSender: EcssTmSenderCore,
+    TcReceiver: EcssTcReceiver,
+    TmSender: EcssTmSender,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
     RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = GenericConversionError>,
@@ -205,8 +244,8 @@ pub struct PusTargetedRequestService<
 }
 
 impl<
-        TcReceiver: EcssTcReceiverCore,
-        TmSender: EcssTmSenderCore,
+        TcReceiver: EcssTcReceiver,
+        TmSender: EcssTmSender,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
         RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = GenericConversionError>,
@@ -435,7 +474,7 @@ where
 /// Generic timeout handling: Handle the verification failure with a dedicated return code
 /// and also log the error.
 pub fn generic_pus_request_timeout_handler(
-    sender: &(impl EcssTmSenderCore + ?Sized),
+    sender: &(impl EcssTmSender + ?Sized),
     active_request: &(impl ActiveRequestProvider + Debug),
     verification_handler: &impl VerificationReportingProvider,
     time_stamp: &[u8],
@@ -459,7 +498,7 @@ pub(crate) mod tests {
     use std::time::Duration;
 
     use satrs::pus::test_util::TEST_COMPONENT_ID_0;
-    use satrs::pus::{MpscTmAsVecSender, PusTmAsVec, PusTmVariant};
+    use satrs::pus::{MpscTmAsVecSender, PusTmVariant};
     use satrs::request::RequestId;
     use satrs::{
         pus::{
@@ -489,7 +528,7 @@ pub(crate) mod tests {
         pub id: ComponentId,
         pub verif_reporter: TestVerificationReporter,
         pub reply_handler: ReplyHandler,
-        pub tm_receiver: mpsc::Receiver<PusTmAsVec>,
+        pub tm_receiver: mpsc::Receiver<PacketAsVec>,
         pub default_timeout: Duration,
         tm_sender: MpscTmAsVecSender,
         phantom: std::marker::PhantomData<(ActiveRequestInfo, Reply)>,
@@ -589,7 +628,7 @@ pub(crate) mod tests {
     /// Dummy sender component which does nothing on the [Self::send_tm] call.
     ///
     /// Useful for unit tests.
-    impl EcssTmSenderCore for DummySender {
+    impl EcssTmSender for DummySender {
         fn send_tm(&self, _source_id: ComponentId, _tm: PusTmVariant) -> Result<(), EcssTmtcError> {
             Ok(())
         }
@@ -696,7 +735,7 @@ pub(crate) mod tests {
             ReplyType,
         >,
         pub request_id: Option<RequestId>,
-        pub tm_funnel_rx: mpsc::Receiver<PusTmAsVec>,
+        pub tm_funnel_rx: mpsc::Receiver<PacketAsVec>,
         pub pus_packet_tx: mpsc::Sender<EcssTcAndToken>,
         pub reply_tx: mpsc::Sender<GenericMessage<ReplyType>>,
         pub request_rx: mpsc::Receiver<GenericMessage<CompositeRequest>>,

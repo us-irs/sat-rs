@@ -1,5 +1,6 @@
 use derive_new::new;
 use log::{error, warn};
+use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -8,8 +9,8 @@ use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
     DefaultActiveRequestMap, EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
-    EcssTcInVecConverter, MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSenderBounded,
-    PusPacketHandlerResult, PusServiceHelper, PusTmAsVec, PusTmInPool, TmInSharedPoolSender,
+    EcssTcInVecConverter, MpscTcReceiver, MpscTmAsVecSender, PusPacketHandlerResult,
+    PusServiceHelper,
 };
 use satrs::request::GenericMessage;
 use satrs::{
@@ -20,7 +21,7 @@ use satrs::{
             self, FailParams, TcStateAccepted, TcStateStarted, VerificationReportingProvider,
             VerificationToken,
         },
-        ActivePusRequestStd, ActiveRequestProvider, EcssTmSenderCore, EcssTmtcError,
+        ActivePusRequestStd, ActiveRequestProvider, EcssTmSender, EcssTmtcError,
         GenericConversionError, PusReplyHandler, PusTcToRequestConverter, PusTmVariant,
     },
     request::UniqueApidTargetId,
@@ -53,7 +54,7 @@ impl PusReplyHandler<ActivePusRequestStd, ModeReply> for ModeReplyHandler {
     fn handle_unrequested_reply(
         &mut self,
         reply: &GenericMessage<ModeReply>,
-        _tm_sender: &impl EcssTmSenderCore,
+        _tm_sender: &impl EcssTmSender,
     ) -> Result<(), Self::Error> {
         log::warn!("received unexpected reply for mode service 5: {reply:?}");
         Ok(())
@@ -63,7 +64,7 @@ impl PusReplyHandler<ActivePusRequestStd, ModeReply> for ModeReplyHandler {
         &mut self,
         reply: &GenericMessage<ModeReply>,
         active_request: &ActivePusRequestStd,
-        tm_sender: &impl EcssTmSenderCore,
+        tm_sender: &impl EcssTmSender,
         verification_handler: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<bool, Self::Error> {
@@ -117,7 +118,7 @@ impl PusReplyHandler<ActivePusRequestStd, ModeReply> for ModeReplyHandler {
     fn handle_request_timeout(
         &mut self,
         active_request: &ActivePusRequestStd,
-        tm_sender: &impl EcssTmSenderCore,
+        tm_sender: &impl EcssTmSender,
         verification_handler: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<(), Self::Error> {
@@ -142,7 +143,7 @@ impl PusTcToRequestConverter<ActivePusRequestStd, ModeRequest> for ModeRequestCo
         &mut self,
         token: VerificationToken<TcStateAccepted>,
         tc: &PusTcReader,
-        tm_sender: &(impl EcssTmSenderCore + ?Sized),
+        tm_sender: &(impl EcssTmSender + ?Sized),
         verif_reporter: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<(ActivePusRequestStd, ModeRequest), Self::Error> {
@@ -203,12 +204,12 @@ impl PusTcToRequestConverter<ActivePusRequestStd, ModeRequest> for ModeRequestCo
 }
 
 pub fn create_mode_service_static(
-    tm_sender: TmInSharedPoolSender<mpsc::SyncSender<PusTmInPool>>,
+    tm_sender: PacketSenderWithSharedPool,
     tc_pool: SharedStaticMemoryPool,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     mode_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<ModeReply>>,
-) -> ModeServiceWrapper<MpscTmInSharedPoolSenderBounded, EcssTcInSharedStoreConverter> {
+) -> ModeServiceWrapper<PacketSenderWithSharedPool, EcssTcInSharedStoreConverter> {
     let mode_request_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
             PUS_MODE_SERVICE.id(),
@@ -229,7 +230,7 @@ pub fn create_mode_service_static(
 }
 
 pub fn create_mode_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<PusTmAsVec>,
+    tm_funnel_tx: mpsc::Sender<PacketAsVec>,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     mode_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<ModeReply>>,
@@ -253,7 +254,7 @@ pub fn create_mode_service_dynamic(
     }
 }
 
-pub struct ModeServiceWrapper<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter> {
+pub struct ModeServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> {
     pub(crate) service: PusTargetedRequestService<
         MpscTcReceiver,
         TmSender,
@@ -268,11 +269,11 @@ pub struct ModeServiceWrapper<TmSender: EcssTmSenderCore, TcInMemConverter: Ecss
     >,
 }
 
-impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
+impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
     for ModeServiceWrapper<TmSender, TcInMemConverter>
 {
     /// Returns [true] if the packet handling is finished.
-    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
         match self.service.poll_and_handle_next_tc(time_stamp) {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
@@ -285,15 +286,15 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter> Targete
                 PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
                     warn!("PUS mode service: {subservice} not implemented");
                 }
-                PusPacketHandlerResult::Empty => {
-                    return true;
-                }
+                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
             },
             Err(error) => {
-                error!("PUS mode service: packet handling error: {error:?}")
+                error!("PUS mode service: packet handling error: {error:?}");
+                // To avoid permanent loops on error cases.
+                return HandlingStatus::Empty;
             }
         }
-        false
+        HandlingStatus::HandledOne
     }
 
     fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> HandlingStatus {

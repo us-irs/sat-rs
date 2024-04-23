@@ -1,7 +1,7 @@
 use crate::pus::mode::ModeServiceWrapper;
 use derive_new::new;
 use satrs::{
-    pus::{EcssTcInMemConverter, EcssTmSenderCore},
+    pus::{EcssTcInMemConverter, EcssTmSender},
     spacepackets::time::{cds, TimeWriter},
 };
 
@@ -12,7 +12,7 @@ use super::{
 };
 
 #[derive(new)]
-pub struct PusStack<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter> {
+pub struct PusStack<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> {
     test_srv: TestCustomServiceWrapper<TmSender, TcInMemConverter>,
     hk_srv_wrapper: HkServiceWrapper<TmSender, TcInMemConverter>,
     event_srv: EventServiceWrapper<TmSender, TcInMemConverter>,
@@ -21,7 +21,7 @@ pub struct PusStack<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemCon
     mode_srv: ModeServiceWrapper<TmSender, TcInMemConverter>,
 }
 
-impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
+impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
     PusStack<TmSender, TcInMemConverter>
 {
     pub fn periodic_operation(&mut self) {
@@ -35,18 +35,29 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
         loop {
             let mut nothing_to_do = true;
             let mut is_srv_finished =
-                |tc_handling_done: bool, reply_handling_done: Option<HandlingStatus>| {
-                    if !tc_handling_done
-                        || (reply_handling_done.is_some()
-                            && reply_handling_done.unwrap() == HandlingStatus::Empty)
+                |_srv_id: u8,
+                 tc_handling_status: HandlingStatus,
+                 reply_handling_status: Option<HandlingStatus>| {
+                    if tc_handling_status == HandlingStatus::HandledOne
+                        || (reply_handling_status.is_some()
+                            && reply_handling_status.unwrap() == HandlingStatus::HandledOne)
                     {
                         nothing_to_do = false;
                     }
                 };
-            is_srv_finished(self.test_srv.poll_and_handle_next_packet(&time_stamp), None);
-            is_srv_finished(self.schedule_srv.poll_and_handle_next_tc(&time_stamp), None);
-            is_srv_finished(self.event_srv.poll_and_handle_next_tc(&time_stamp), None);
             is_srv_finished(
+                17,
+                self.test_srv.poll_and_handle_next_packet(&time_stamp),
+                None,
+            );
+            is_srv_finished(
+                11,
+                self.schedule_srv.poll_and_handle_next_tc(&time_stamp),
+                None,
+            );
+            is_srv_finished(5, self.event_srv.poll_and_handle_next_tc(&time_stamp), None);
+            is_srv_finished(
+                8,
                 self.action_srv_wrapper.poll_and_handle_next_tc(&time_stamp),
                 Some(
                     self.action_srv_wrapper
@@ -54,10 +65,12 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
                 ),
             );
             is_srv_finished(
+                3,
                 self.hk_srv_wrapper.poll_and_handle_next_tc(&time_stamp),
                 Some(self.hk_srv_wrapper.poll_and_handle_next_reply(&time_stamp)),
             );
             is_srv_finished(
+                200,
                 self.mode_srv.poll_and_handle_next_tc(&time_stamp),
                 Some(self.mode_srv.poll_and_handle_next_reply(&time_stamp)),
             );

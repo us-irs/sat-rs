@@ -1,4 +1,4 @@
-use crate::{params::Params, pool::StoreAddr};
+use crate::{params::Params, pool::PoolAddr};
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
@@ -21,7 +21,7 @@ impl ActionRequest {
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum ActionRequestVariant {
     NoData,
-    StoreData(StoreAddr),
+    StoreData(PoolAddr),
     #[cfg(feature = "alloc")]
     VecData(alloc::vec::Vec<u8>),
 }

@@ -269,14 +269,8 @@ pub trait ModeReplySender {
 
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
-    use crate::{
-        mode::ModeRequest,
-        queue::GenericTargetedMessagingError,
-        request::{
-            MessageMetadata, MessageSender, MessageSenderAndReceiver, MessageSenderMap,
-            RequestAndReplySenderAndReceiver, RequestId,
-        },
-        ComponentId,
+    use crate::request::{
+        MessageSender, MessageSenderAndReceiver, MessageSenderMap, RequestAndReplySenderAndReceiver,
     };
 
     use super::*;
@@ -557,8 +551,6 @@ pub mod alloc_mod {
 #[cfg(feature = "std")]
 pub mod std_mod {
     use std::sync::mpsc;
-
-    use crate::request::GenericMessage;
 
     use super::*;
 

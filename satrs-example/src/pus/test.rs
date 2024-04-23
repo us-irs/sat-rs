@@ -6,24 +6,26 @@ use satrs::pus::test::PusService17TestHandler;
 use satrs::pus::verification::{FailParams, VerificationReporter, VerificationReportingProvider};
 use satrs::pus::EcssTcInSharedStoreConverter;
 use satrs::pus::{
-    EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter, EcssTmSenderCore, MpscTcReceiver,
-    MpscTmAsVecSender, MpscTmInSharedPoolSenderBounded, PusPacketHandlerResult, PusServiceHelper,
-    PusTmAsVec, PusTmInPool, TmInSharedPoolSender,
+    EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter, EcssTmSender, MpscTcReceiver,
+    MpscTmAsVecSender, PusPacketHandlerResult, PusServiceHelper,
 };
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusPacket;
 use satrs::spacepackets::time::cds::CdsTime;
 use satrs::spacepackets::time::TimeWriter;
+use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use satrs_example::config::components::PUS_TEST_SERVICE;
 use satrs_example::config::{tmtc_err, TEST_EVENT};
 use std::sync::mpsc;
 
+use super::HandlingStatus;
+
 pub fn create_test_service_static(
-    tm_sender: TmInSharedPoolSender<mpsc::SyncSender<PusTmInPool>>,
+    tm_sender: PacketSenderWithSharedPool,
     tc_pool: SharedStaticMemoryPool,
     event_sender: mpsc::Sender<EventMessageU32>,
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
-) -> TestCustomServiceWrapper<MpscTmInSharedPoolSenderBounded, EcssTcInSharedStoreConverter> {
+) -> TestCustomServiceWrapper<PacketSenderWithSharedPool, EcssTcInSharedStoreConverter> {
     let pus17_handler = PusService17TestHandler::new(PusServiceHelper::new(
         PUS_TEST_SERVICE.id(),
         pus_test_rx,
@@ -38,7 +40,7 @@ pub fn create_test_service_static(
 }
 
 pub fn create_test_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<PusTmAsVec>,
+    tm_funnel_tx: mpsc::Sender<PacketAsVec>,
     event_sender: mpsc::Sender<EventMessageU32>,
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
 ) -> TestCustomServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {
@@ -55,23 +57,21 @@ pub fn create_test_service_dynamic(
     }
 }
 
-pub struct TestCustomServiceWrapper<
-    TmSender: EcssTmSenderCore,
-    TcInMemConverter: EcssTcInMemConverter,
-> {
+pub struct TestCustomServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
+{
     pub handler:
         PusService17TestHandler<MpscTcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
     pub test_srv_event_sender: mpsc::Sender<EventMessageU32>,
 }
 
-impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
+impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
     TestCustomServiceWrapper<TmSender, TcInMemConverter>
 {
-    pub fn poll_and_handle_next_packet(&mut self, time_stamp: &[u8]) -> bool {
+    pub fn poll_and_handle_next_packet(&mut self, time_stamp: &[u8]) -> HandlingStatus {
         let res = self.handler.poll_and_handle_next_tc(time_stamp);
         if res.is_err() {
             warn!("PUS17 handler failed with error {:?}", res.unwrap_err());
-            return true;
+            return HandlingStatus::HandledOne;
         }
         match res.unwrap() {
             PusPacketHandlerResult::RequestHandled => {
@@ -135,10 +135,8 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
                         .expect("Sending start failure verification failed");
                 }
             }
-            PusPacketHandlerResult::Empty => {
-                return true;
-            }
+            PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
         }
-        false
+        HandlingStatus::HandledOne
     }
 }

@@ -132,6 +132,7 @@ pub mod components {
         GenericPus = 2,
         Acs = 3,
         Cfdp = 4,
+        Tmtc = 5,
     }
 
     // Component IDs for components with the PUS APID.
@@ -150,6 +151,12 @@ pub mod components {
         Mgm0 = 0,
     }
 
+    #[derive(Copy, Clone, PartialEq, Eq)]
+    pub enum TmtcId {
+        UdpServer = 0,
+        TcpServer = 1,
+    }
+
     pub const PUS_ACTION_SERVICE: UniqueApidTargetId =
         UniqueApidTargetId::new(Apid::GenericPus as u16, PusId::PusAction as u32);
     pub const PUS_EVENT_MANAGEMENT: UniqueApidTargetId =
@@ -166,6 +173,10 @@ pub mod components {
         UniqueApidTargetId::new(Apid::Sched as u16, 0);
     pub const MGM_HANDLER_0: UniqueApidTargetId =
         UniqueApidTargetId::new(Apid::Acs as u16, AcsId::Mgm0 as u32);
+    pub const UDP_SERVER: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::Tmtc as u16, TmtcId::UdpServer as u32);
+    pub const TCP_SERVER: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::Tmtc as u16, TmtcId::TcpServer as u32);
 }
 
 pub mod pool {

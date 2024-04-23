@@ -8,14 +8,14 @@ use satrs::pus::verification::{
 };
 use satrs::pus::{
     ActivePusRequestStd, ActiveRequestProvider, DefaultActiveRequestMap, EcssTcAndToken,
-    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTmSenderCore,
+    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTmSender,
     EcssTmtcError, GenericConversionError, MpscTcReceiver, MpscTmAsVecSender,
-    MpscTmInSharedPoolSenderBounded, PusPacketHandlerResult, PusReplyHandler, PusServiceHelper,
-    PusTcToRequestConverter, PusTmAsVec, PusTmInPool, TmInSharedPoolSender,
+    PusPacketHandlerResult, PusReplyHandler, PusServiceHelper, PusTcToRequestConverter,
 };
 use satrs::request::{GenericMessage, UniqueApidTargetId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{hk, PusPacket};
+use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use satrs_example::config::components::PUS_HK_SERVICE;
 use satrs_example::config::{hk_err, tmtc_err};
 use std::sync::mpsc;
@@ -46,7 +46,7 @@ impl PusReplyHandler<ActivePusRequestStd, HkReply> for HkReplyHandler {
     fn handle_unrequested_reply(
         &mut self,
         reply: &GenericMessage<HkReply>,
-        _tm_sender: &impl EcssTmSenderCore,
+        _tm_sender: &impl EcssTmSender,
     ) -> Result<(), Self::Error> {
         log::warn!("received unexpected reply for service 3: {reply:?}");
         Ok(())
@@ -56,7 +56,7 @@ impl PusReplyHandler<ActivePusRequestStd, HkReply> for HkReplyHandler {
         &mut self,
         reply: &GenericMessage<HkReply>,
         active_request: &ActivePusRequestStd,
-        tm_sender: &impl EcssTmSenderCore,
+        tm_sender: &impl EcssTmSender,
         verification_handler: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<bool, Self::Error> {
@@ -77,7 +77,7 @@ impl PusReplyHandler<ActivePusRequestStd, HkReply> for HkReplyHandler {
     fn handle_request_timeout(
         &mut self,
         active_request: &ActivePusRequestStd,
-        tm_sender: &impl EcssTmSenderCore,
+        tm_sender: &impl EcssTmSender,
         verification_handler: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<(), Self::Error> {
@@ -111,7 +111,7 @@ impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for HkRequestConver
         &mut self,
         token: VerificationToken<TcStateAccepted>,
         tc: &PusTcReader,
-        tm_sender: &(impl EcssTmSenderCore + ?Sized),
+        tm_sender: &(impl EcssTmSender + ?Sized),
         verif_reporter: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<(ActivePusRequestStd, HkRequest), Self::Error> {
@@ -232,12 +232,12 @@ impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for HkRequestConver
 }
 
 pub fn create_hk_service_static(
-    tm_sender: TmInSharedPoolSender<mpsc::SyncSender<PusTmInPool>>,
+    tm_sender: PacketSenderWithSharedPool,
     tc_pool: SharedStaticMemoryPool,
     pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
     request_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<HkReply>>,
-) -> HkServiceWrapper<MpscTmInSharedPoolSenderBounded, EcssTcInSharedStoreConverter> {
+) -> HkServiceWrapper<PacketSenderWithSharedPool, EcssTcInSharedStoreConverter> {
     let pus_3_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
             PUS_HK_SERVICE.id(),
@@ -258,7 +258,7 @@ pub fn create_hk_service_static(
 }
 
 pub fn create_hk_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<PusTmAsVec>,
+    tm_funnel_tx: mpsc::Sender<PacketAsVec>,
     pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
     request_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<HkReply>>,
@@ -282,7 +282,7 @@ pub fn create_hk_service_dynamic(
     }
 }
 
-pub struct HkServiceWrapper<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter> {
+pub struct HkServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> {
     pub(crate) service: PusTargetedRequestService<
         MpscTcReceiver,
         TmSender,
@@ -297,10 +297,10 @@ pub struct HkServiceWrapper<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTc
     >,
 }
 
-impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
+impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
     HkServiceWrapper<TmSender, TcInMemConverter>
 {
-    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
         match self.service.poll_and_handle_next_tc(time_stamp) {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
@@ -313,15 +313,15 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
                 PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
                     warn!("PUS 3 subservice {subservice} not implemented");
                 }
-                PusPacketHandlerResult::Empty => {
-                    return true;
-                }
+                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
             },
             Err(error) => {
-                error!("PUS packet handling error: {error:?}")
+                error!("PUS packet handling error: {error:?}");
+                // To avoid permanent loops on error cases.
+                return HandlingStatus::Empty;
             }
         }
-        false
+        HandlingStatus::HandledOne
     }
 
     pub fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> HandlingStatus {

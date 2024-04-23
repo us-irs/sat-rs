@@ -3,7 +3,7 @@ use satrs::action::{ActionRequest, ActionRequestVariant};
 use satrs::params::WritableToBeBytes;
 use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::action::{
-    ActionReplyVariant, ActivePusActionRequestStd, DefaultActiveActionRequestMap, PusActionReply,
+    ActionReplyPus, ActionReplyVariant, ActivePusActionRequestStd, DefaultActiveActionRequestMap,
 };
 use satrs::pus::verification::{
     FailParams, FailParamsWithStep, TcStateAccepted, TcStateStarted, VerificationReporter,
@@ -11,13 +11,14 @@ use satrs::pus::verification::{
 };
 use satrs::pus::{
     ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
-    EcssTcInVecConverter, EcssTmSenderCore, EcssTmtcError, GenericConversionError, MpscTcReceiver,
-    MpscTmAsVecSender, MpscTmInSharedPoolSenderBounded, PusPacketHandlerResult, PusReplyHandler,
-    PusServiceHelper, PusTcToRequestConverter, PusTmAsVec, PusTmInPool, TmInSharedPoolSender,
+    EcssTcInVecConverter, EcssTmSender, EcssTmtcError, GenericConversionError, MpscTcReceiver,
+    MpscTmAsVecSender, PusPacketHandlerResult, PusReplyHandler, PusServiceHelper,
+    PusTcToRequestConverter,
 };
 use satrs::request::{GenericMessage, UniqueApidTargetId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{EcssEnumU16, PusPacket};
+use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use satrs_example::config::components::PUS_ACTION_SERVICE;
 use satrs_example::config::tmtc_err;
 use std::sync::mpsc;
@@ -42,13 +43,13 @@ impl Default for ActionReplyHandler {
     }
 }
 
-impl PusReplyHandler<ActivePusActionRequestStd, PusActionReply> for ActionReplyHandler {
+impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPus> for ActionReplyHandler {
     type Error = EcssTmtcError;
 
     fn handle_unrequested_reply(
         &mut self,
-        reply: &GenericMessage<PusActionReply>,
-        _tm_sender: &impl EcssTmSenderCore,
+        reply: &GenericMessage<ActionReplyPus>,
+        _tm_sender: &impl EcssTmSender,
     ) -> Result<(), Self::Error> {
         warn!("received unexpected reply for service 8: {reply:?}");
         Ok(())
@@ -56,9 +57,9 @@ impl PusReplyHandler<ActivePusActionRequestStd, PusActionReply> for ActionReplyH
 
     fn handle_reply(
         &mut self,
-        reply: &GenericMessage<PusActionReply>,
+        reply: &GenericMessage<ActionReplyPus>,
         active_request: &ActivePusActionRequestStd,
-        tm_sender: &(impl EcssTmSenderCore + ?Sized),
+        tm_sender: &(impl EcssTmSender + ?Sized),
         verification_handler: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<bool, Self::Error> {
@@ -121,7 +122,7 @@ impl PusReplyHandler<ActivePusActionRequestStd, PusActionReply> for ActionReplyH
     fn handle_request_timeout(
         &mut self,
         active_request: &ActivePusActionRequestStd,
-        tm_sender: &impl EcssTmSenderCore,
+        tm_sender: &impl EcssTmSender,
         verification_handler: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<(), Self::Error> {
@@ -145,7 +146,7 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest> for Actio
         &mut self,
         token: VerificationToken<TcStateAccepted>,
         tc: &PusTcReader,
-        tm_sender: &(impl EcssTmSenderCore + ?Sized),
+        tm_sender: &(impl EcssTmSender + ?Sized),
         verif_reporter: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<(ActivePusActionRequestStd, ActionRequest), Self::Error> {
@@ -195,12 +196,12 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest> for Actio
 }
 
 pub fn create_action_service_static(
-    tm_sender: TmInSharedPoolSender<mpsc::SyncSender<PusTmInPool>>,
+    tm_sender: PacketSenderWithSharedPool,
     tc_pool: SharedStaticMemoryPool,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     action_router: GenericRequestRouter,
-    reply_receiver: mpsc::Receiver<GenericMessage<PusActionReply>>,
-) -> ActionServiceWrapper<MpscTmInSharedPoolSenderBounded, EcssTcInSharedStoreConverter> {
+    reply_receiver: mpsc::Receiver<GenericMessage<ActionReplyPus>>,
+) -> ActionServiceWrapper<PacketSenderWithSharedPool, EcssTcInSharedStoreConverter> {
     let action_request_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
             PUS_ACTION_SERVICE.id(),
@@ -223,10 +224,10 @@ pub fn create_action_service_static(
 }
 
 pub fn create_action_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<PusTmAsVec>,
+    tm_funnel_tx: mpsc::Sender<PacketAsVec>,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     action_router: GenericRequestRouter,
-    reply_receiver: mpsc::Receiver<GenericMessage<PusActionReply>>,
+    reply_receiver: mpsc::Receiver<GenericMessage<ActionReplyPus>>,
 ) -> ActionServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {
     let action_request_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
@@ -247,8 +248,7 @@ pub fn create_action_service_dynamic(
     }
 }
 
-pub struct ActionServiceWrapper<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
-{
+pub struct ActionServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> {
     pub(crate) service: PusTargetedRequestService<
         MpscTcReceiver,
         TmSender,
@@ -259,15 +259,15 @@ pub struct ActionServiceWrapper<TmSender: EcssTmSenderCore, TcInMemConverter: Ec
         DefaultActiveActionRequestMap,
         ActivePusActionRequestStd,
         ActionRequest,
-        PusActionReply,
+        ActionReplyPus,
     >,
 }
 
-impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
+impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
     for ActionServiceWrapper<TmSender, TcInMemConverter>
 {
     /// Returns [true] if the packet handling is finished.
-    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
         match self.service.poll_and_handle_next_tc(time_stamp) {
             Ok(result) => match result {
                 PusPacketHandlerResult::RequestHandled => {}
@@ -280,15 +280,15 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter> Targete
                 PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
                     warn!("PUS 8 subservice {subservice} not implemented");
                 }
-                PusPacketHandlerResult::Empty => {
-                    return true;
-                }
+                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
             },
             Err(error) => {
-                error!("PUS packet handling error: {error:?}")
+                error!("PUS packet handling error: {error:?}");
+                // To avoid permanent loops on error cases.
+                return HandlingStatus::Empty;
             }
         }
-        false
+        HandlingStatus::HandledOne
     }
 
     fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> HandlingStatus {
@@ -341,7 +341,7 @@ mod tests {
             DefaultActiveActionRequestMap,
             ActivePusActionRequestStd,
             ActionRequest,
-            PusActionReply,
+            ActionReplyPus,
         >
     {
         pub fn new_for_action(owner_id: ComponentId, target_id: ComponentId) -> Self {
@@ -465,7 +465,10 @@ mod tests {
                 .verif_reporter()
                 .check_next_is_acceptance_success(id, accepted_token.request_id());
             self.pus_packet_tx
-                .send(EcssTcAndToken::new(tc.to_vec().unwrap(), accepted_token))
+                .send(EcssTcAndToken::new(
+                    PacketAsVec::new(self.service.service_helper.id(), tc.to_vec().unwrap()),
+                    accepted_token,
+                ))
                 .unwrap();
         }
     }
@@ -497,7 +500,7 @@ mod tests {
         if let CompositeRequest::Action(action_req) = req.message {
             assert_eq!(action_req.action_id, action_id);
             assert_eq!(action_req.variant, ActionRequestVariant::NoData);
-            let action_reply = PusActionReply::new(action_id, ActionReplyVariant::Completed);
+            let action_reply = ActionReplyPus::new(action_id, ActionReplyVariant::Completed);
             testbench
                 .reply_tx
                 .send(GenericMessage::new(req.requestor_info, action_reply))
@@ -617,7 +620,7 @@ mod tests {
         let (req_id, active_req) = testbench.add_tc(TEST_APID, TEST_UNIQUE_ID_0, &[]);
         let active_action_req =
             ActivePusActionRequestStd::new_from_common_req(action_id, active_req);
-        let reply = PusActionReply::new(action_id, ActionReplyVariant::Completed);
+        let reply = ActionReplyPus::new(action_id, ActionReplyVariant::Completed);
         let generic_reply = GenericMessage::new(MessageMetadata::new(req_id.into(), 0), reply);
         let result = testbench.handle_reply(&generic_reply, &active_action_req, &[]);
         assert!(result.is_ok());
@@ -638,7 +641,7 @@ mod tests {
         let active_action_req =
             ActivePusActionRequestStd::new_from_common_req(action_id, active_req);
         let error_code = ResultU16::new(2, 3);
-        let reply = PusActionReply::new(
+        let reply = ActionReplyPus::new(
             action_id,
             ActionReplyVariant::CompletionFailed {
                 error_code,
@@ -665,7 +668,7 @@ mod tests {
         let (req_id, active_req) = testbench.add_tc(TEST_APID, TEST_UNIQUE_ID_0, &[]);
         let active_action_req =
             ActivePusActionRequestStd::new_from_common_req(action_id, active_req);
-        let reply = PusActionReply::new(action_id, ActionReplyVariant::StepSuccess { step: 1 });
+        let reply = ActionReplyPus::new(action_id, ActionReplyVariant::StepSuccess { step: 1 });
         let generic_reply = GenericMessage::new(MessageMetadata::new(req_id.into(), 0), reply);
         let result = testbench.handle_reply(&generic_reply, &active_action_req, &[]);
         assert!(result.is_ok());
@@ -692,7 +695,7 @@ mod tests {
         let active_action_req =
             ActivePusActionRequestStd::new_from_common_req(action_id, active_req);
         let error_code = ResultU16::new(2, 3);
-        let reply = PusActionReply::new(
+        let reply = ActionReplyPus::new(
             action_id,
             ActionReplyVariant::StepFailed {
                 error_code,
@@ -722,7 +725,7 @@ mod tests {
     fn reply_handling_unrequested_reply() {
         let mut testbench =
             ReplyHandlerTestbench::new(TEST_COMPONENT_ID_0.id(), ActionReplyHandler::default());
-        let action_reply = PusActionReply::new(5_u32, ActionReplyVariant::Completed);
+        let action_reply = ActionReplyPus::new(5_u32, ActionReplyVariant::Completed);
         let unrequested_reply =
             GenericMessage::new(MessageMetadata::new(10_u32, 15_u64), action_reply);
         // Right now this function does not do a lot. We simply check that it does not panic or do

@@ -9,51 +9,62 @@ use satrs::pus::scheduler_srv::PusSchedServiceHandler;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
     EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    EcssTmSenderCore, MpscTcReceiver, MpscTmAsVecSender, MpscTmInSharedPoolSenderBounded,
-    PusPacketHandlerResult, PusServiceHelper, PusTmAsVec, PusTmInPool, TmInSharedPoolSender,
+    EcssTmSender, MpscTcReceiver, MpscTmAsVecSender, PusPacketHandlerResult, PusServiceHelper,
 };
+use satrs::tmtc::{PacketAsVec, PacketInPool, PacketSenderWithSharedPool};
+use satrs::ComponentId;
 use satrs_example::config::components::PUS_SCHED_SERVICE;
 
-use crate::tmtc::PusTcSourceProviderSharedPool;
+use super::HandlingStatus;
 
 pub trait TcReleaser {
-    fn release(&mut self, enabled: bool, info: &TcInfo, tc: &[u8]) -> bool;
+    fn release(&mut self, sender_id: ComponentId, enabled: bool, info: &TcInfo, tc: &[u8]) -> bool;
 }
 
-impl TcReleaser for PusTcSourceProviderSharedPool {
-    fn release(&mut self, enabled: bool, _info: &TcInfo, tc: &[u8]) -> bool {
+impl TcReleaser for PacketSenderWithSharedPool {
+    fn release(
+        &mut self,
+        sender_id: ComponentId,
+        enabled: bool,
+        _info: &TcInfo,
+        tc: &[u8],
+    ) -> bool {
         if enabled {
+            let shared_pool = self.shared_pool.get_mut();
             // Transfer TC from scheduler TC pool to shared TC pool.
-            let released_tc_addr = self
-                .shared_pool
-                .pool
+            let released_tc_addr = shared_pool
+                .0
                 .write()
                 .expect("locking pool failed")
                 .add(tc)
                 .expect("adding TC to shared pool failed");
-            self.tc_source
-                .send(released_tc_addr)
+            self.sender
+                .send(PacketInPool::new(sender_id, released_tc_addr))
                 .expect("sending TC to TC source failed");
         }
         true
     }
 }
 
-impl TcReleaser for mpsc::Sender<Vec<u8>> {
-    fn release(&mut self, enabled: bool, _info: &TcInfo, tc: &[u8]) -> bool {
+impl TcReleaser for mpsc::Sender<PacketAsVec> {
+    fn release(
+        &mut self,
+        sender_id: ComponentId,
+        enabled: bool,
+        _info: &TcInfo,
+        tc: &[u8],
+    ) -> bool {
         if enabled {
             // Send released TC to centralized TC source.
-            self.send(tc.to_vec())
+            self.send(PacketAsVec::new(sender_id, tc.to_vec()))
                 .expect("sending TC to TC source failed");
         }
         true
     }
 }
 
-pub struct SchedulingServiceWrapper<
-    TmSender: EcssTmSenderCore,
-    TcInMemConverter: EcssTcInMemConverter,
-> {
+pub struct SchedulingServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
+{
     pub pus_11_handler: PusSchedServiceHandler<
         MpscTcReceiver,
         TmSender,
@@ -66,12 +77,13 @@ pub struct SchedulingServiceWrapper<
     pub tc_releaser: Box<dyn TcReleaser + Send>,
 }
 
-impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
+impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
     SchedulingServiceWrapper<TmSender, TcInMemConverter>
 {
     pub fn release_tcs(&mut self) {
+        let id = self.pus_11_handler.service_helper.id();
         let releaser = |enabled: bool, info: &TcInfo, tc: &[u8]| -> bool {
-            self.tc_releaser.release(enabled, info, tc)
+            self.tc_releaser.release(id, enabled, info, tc)
         };
 
         self.pus_11_handler
@@ -92,7 +104,7 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
         }
     }
 
-    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> bool {
+    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
         match self
             .pus_11_handler
             .poll_and_handle_next_tc(time_stamp, &mut self.sched_tc_pool)
@@ -108,24 +120,22 @@ impl<TmSender: EcssTmSenderCore, TcInMemConverter: EcssTcInMemConverter>
                 PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
                     warn!("PUS11: Subservice {subservice} not implemented");
                 }
-                PusPacketHandlerResult::Empty => {
-                    return true;
-                }
+                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
             },
             Err(error) => {
                 error!("PUS packet handling error: {error:?}")
             }
         }
-        false
+        HandlingStatus::HandledOne
     }
 }
 
 pub fn create_scheduler_service_static(
-    tm_sender: TmInSharedPoolSender<mpsc::SyncSender<PusTmInPool>>,
-    tc_releaser: PusTcSourceProviderSharedPool,
+    tm_sender: PacketSenderWithSharedPool,
+    tc_releaser: PacketSenderWithSharedPool,
     pus_sched_rx: mpsc::Receiver<EcssTcAndToken>,
     sched_tc_pool: StaticMemoryPool,
-) -> SchedulingServiceWrapper<MpscTmInSharedPoolSenderBounded, EcssTcInSharedStoreConverter> {
+) -> SchedulingServiceWrapper<PacketSenderWithSharedPool, EcssTcInSharedStoreConverter> {
     let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
         .expect("Creating PUS Scheduler failed");
     let pus_11_handler = PusSchedServiceHandler::new(
@@ -134,7 +144,7 @@ pub fn create_scheduler_service_static(
             pus_sched_rx,
             tm_sender,
             create_verification_reporter(PUS_SCHED_SERVICE.id(), PUS_SCHED_SERVICE.apid),
-            EcssTcInSharedStoreConverter::new(tc_releaser.clone_backing_pool(), 2048),
+            EcssTcInSharedStoreConverter::new(tc_releaser.shared_packet_store().0.clone(), 2048),
         ),
         scheduler,
     );
@@ -147,8 +157,8 @@ pub fn create_scheduler_service_static(
 }
 
 pub fn create_scheduler_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<PusTmAsVec>,
-    tc_source_sender: mpsc::Sender<Vec<u8>>,
+    tm_funnel_tx: mpsc::Sender<PacketAsVec>,
+    tc_source_sender: mpsc::Sender<PacketAsVec>,
     pus_sched_rx: mpsc::Receiver<EcssTcAndToken>,
     sched_tc_pool: StaticMemoryPool,
 ) -> SchedulingServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {

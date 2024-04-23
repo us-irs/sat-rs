@@ -1,34 +1,32 @@
 mod acs;
-mod ccsds;
 mod events;
 mod hk;
+mod interface;
 mod logger;
 mod pus;
 mod requests;
-mod tcp;
-mod tm_funnel;
 mod tmtc;
-mod udp;
 
 use crate::events::EventHandler;
+use crate::interface::udp::DynamicUdpTmHandler;
 use crate::pus::stack::PusStack;
-use crate::tm_funnel::{TmFunnelDynamic, TmFunnelStatic};
+use crate::tmtc::tc_source::{TcSourceTaskDynamic, TcSourceTaskStatic};
+use crate::tmtc::tm_sink::{TmFunnelDynamic, TmFunnelStatic};
 use log::info;
 use pus::test::create_test_service_dynamic;
 use satrs::hal::std::tcp_server::ServerConfig;
 use satrs::hal::std::udp_server::UdpTcServer;
 use satrs::request::GenericMessage;
-use satrs::tmtc::tm_helper::SharedTmPool;
+use satrs::tmtc::{PacketSenderWithSharedPool, SharedPacketPool};
 use satrs_example::config::pool::{create_sched_tc_pool, create_static_pools};
 use satrs_example::config::tasks::{
     FREQ_MS_AOCS, FREQ_MS_EVENT_HANDLING, FREQ_MS_PUS_STACK, FREQ_MS_UDP_TMTC,
 };
 use satrs_example::config::{OBSW_SERVER_ADDR, PACKET_ID_VALIDATOR, SERVER_PORT};
-use tmtc::PusTcSourceProviderDynamic;
-use udp::DynamicUdpTmHandler;
 
 use crate::acs::mgm::{MgmHandlerLis3Mdl, MpscModeLeafInterface, SpiDummyInterface};
-use crate::ccsds::CcsdsReceiver;
+use crate::interface::tcp::{SyncTcpTmSource, TcpTask};
+use crate::interface::udp::{StaticUdpTmHandler, UdpTmtcServer};
 use crate::logger::setup_logger;
 use crate::pus::action::{create_action_service_dynamic, create_action_service_static};
 use crate::pus::event::{create_event_service_dynamic, create_event_service_static};
@@ -36,19 +34,12 @@ use crate::pus::hk::{create_hk_service_dynamic, create_hk_service_static};
 use crate::pus::mode::{create_mode_service_dynamic, create_mode_service_static};
 use crate::pus::scheduler::{create_scheduler_service_dynamic, create_scheduler_service_static};
 use crate::pus::test::create_test_service_static;
-use crate::pus::{PusReceiver, PusTcMpscRouter};
+use crate::pus::{PusTcDistributor, PusTcMpscRouter};
 use crate::requests::{CompositeRequest, GenericRequestRouter};
-use crate::tcp::{SyncTcpTmSource, TcpTask};
-use crate::tmtc::{
-    PusTcSourceProviderSharedPool, SharedTcPool, TcSourceTaskDynamic, TcSourceTaskStatic,
-};
-use crate::udp::{StaticUdpTmHandler, UdpTmtcServer};
 use satrs::mode::ModeRequest;
 use satrs::pus::event_man::EventRequestWithToken;
-use satrs::pus::TmInSharedPoolSender;
 use satrs::spacepackets::{time::cds::CdsTime, time::TimeWriter};
-use satrs::tmtc::CcsdsDistributor;
-use satrs_example::config::components::MGM_HANDLER_0;
+use satrs_example::config::components::{MGM_HANDLER_0, TCP_SERVER, UDP_SERVER};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc;
 use std::sync::{Arc, RwLock};
@@ -58,16 +49,16 @@ use std::time::Duration;
 #[allow(dead_code)]
 fn static_tmtc_pool_main() {
     let (tm_pool, tc_pool) = create_static_pools();
-    let shared_tm_pool = SharedTmPool::new(tm_pool);
-    let shared_tc_pool = SharedTcPool {
-        pool: Arc::new(RwLock::new(tc_pool)),
-    };
+    let shared_tm_pool = Arc::new(RwLock::new(tm_pool));
+    let shared_tc_pool = Arc::new(RwLock::new(tc_pool));
+    let shared_tm_pool_wrapper = SharedPacketPool::new(&shared_tm_pool);
+    let shared_tc_pool_wrapper = SharedPacketPool::new(&shared_tc_pool);
     let (tc_source_tx, tc_source_rx) = mpsc::sync_channel(50);
     let (tm_funnel_tx, tm_funnel_rx) = mpsc::sync_channel(50);
     let (tm_server_tx, tm_server_rx) = mpsc::sync_channel(50);
 
     let tm_funnel_tx_sender =
-        TmInSharedPoolSender::new(shared_tm_pool.clone(), tm_funnel_tx.clone());
+        PacketSenderWithSharedPool::new(tm_funnel_tx.clone(), shared_tm_pool_wrapper.clone());
 
     let (mgm_handler_composite_tx, mgm_handler_composite_rx) =
         mpsc::channel::<GenericMessage<CompositeRequest>>();
@@ -84,10 +75,7 @@ fn static_tmtc_pool_main() {
 
     // This helper structure is used by all telecommand providers which need to send telecommands
     // to the TC source.
-    let tc_source = PusTcSourceProviderSharedPool {
-        shared_pool: shared_tc_pool.clone(),
-        tc_source: tc_source_tx,
-    };
+    let tc_source = PacketSenderWithSharedPool::new(tc_source_tx, shared_tc_pool_wrapper.clone());
 
     // Create event handling components
     // These sender handles are used to send event requests, for example to enable or disable
@@ -119,7 +107,7 @@ fn static_tmtc_pool_main() {
     };
     let pus_test_service = create_test_service_static(
         tm_funnel_tx_sender.clone(),
-        shared_tc_pool.pool.clone(),
+        shared_tc_pool.clone(),
         event_handler.clone_event_sender(),
         pus_test_rx,
     );
@@ -131,27 +119,27 @@ fn static_tmtc_pool_main() {
     );
     let pus_event_service = create_event_service_static(
         tm_funnel_tx_sender.clone(),
-        shared_tc_pool.pool.clone(),
+        shared_tc_pool.clone(),
         pus_event_rx,
         event_request_tx,
     );
     let pus_action_service = create_action_service_static(
         tm_funnel_tx_sender.clone(),
-        shared_tc_pool.pool.clone(),
+        shared_tc_pool.clone(),
         pus_action_rx,
         request_map.clone(),
         pus_action_reply_rx,
     );
     let pus_hk_service = create_hk_service_static(
         tm_funnel_tx_sender.clone(),
-        shared_tc_pool.pool.clone(),
+        shared_tc_pool.clone(),
         pus_hk_rx,
         request_map.clone(),
         pus_hk_reply_rx,
     );
     let pus_mode_service = create_mode_service_static(
         tm_funnel_tx_sender.clone(),
-        shared_tc_pool.pool.clone(),
+        shared_tc_pool.clone(),
         pus_mode_rx,
         request_map,
         pus_mode_reply_rx,
@@ -165,38 +153,41 @@ fn static_tmtc_pool_main() {
         pus_mode_service,
     );
 
-    let ccsds_receiver = CcsdsReceiver { tc_source };
     let mut tmtc_task = TcSourceTaskStatic::new(
-        shared_tc_pool.clone(),
+        shared_tc_pool_wrapper.clone(),
         tc_source_rx,
-        PusReceiver::new(tm_funnel_tx_sender, pus_router),
+        PusTcDistributor::new(tm_funnel_tx_sender, pus_router),
     );
 
     let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
-    let udp_ccsds_distributor = CcsdsDistributor::new(ccsds_receiver.clone());
-    let udp_tc_server = UdpTcServer::new(sock_addr, 2048, Box::new(udp_ccsds_distributor))
+    let udp_tc_server = UdpTcServer::new(UDP_SERVER.id(), sock_addr, 2048, tc_source.clone())
         .expect("creating UDP TMTC server failed");
     let mut udp_tmtc_server = UdpTmtcServer {
         udp_tc_server,
         tm_handler: StaticUdpTmHandler {
             tm_rx: tm_server_rx,
-            tm_store: shared_tm_pool.clone_backing_pool(),
+            tm_store: shared_tm_pool.clone(),
         },
     };
 
-    let tcp_ccsds_distributor = CcsdsDistributor::new(ccsds_receiver);
-    let tcp_server_cfg = ServerConfig::new(sock_addr, Duration::from_millis(400), 4096, 8192);
+    let tcp_server_cfg = ServerConfig::new(
+        TCP_SERVER.id(),
+        sock_addr,
+        Duration::from_millis(400),
+        4096,
+        8192,
+    );
     let sync_tm_tcp_source = SyncTcpTmSource::new(200);
     let mut tcp_server = TcpTask::new(
         tcp_server_cfg,
         sync_tm_tcp_source.clone(),
-        tcp_ccsds_distributor,
+        tc_source.clone(),
         PACKET_ID_VALIDATOR.clone(),
     )
     .expect("tcp server creation failed");
 
     let mut tm_funnel = TmFunnelStatic::new(
-        shared_tm_pool,
+        shared_tm_pool_wrapper,
         sync_tm_tcp_source,
         tm_funnel_rx,
         tm_server_tx,
@@ -225,7 +216,7 @@ fn static_tmtc_pool_main() {
 
     info!("Starting TMTC and UDP task");
     let jh_udp_tmtc = thread::Builder::new()
-        .name("TMTC and UDP".to_string())
+        .name("SATRS tmtc-udp".to_string())
         .spawn(move || {
             info!("Running UDP server on port {SERVER_PORT}");
             loop {
@@ -238,7 +229,7 @@ fn static_tmtc_pool_main() {
 
     info!("Starting TCP task");
     let jh_tcp = thread::Builder::new()
-        .name("TCP".to_string())
+        .name("sat-rs tcp".to_string())
         .spawn(move || {
             info!("Running TCP server on port {SERVER_PORT}");
             loop {
@@ -257,7 +248,7 @@ fn static_tmtc_pool_main() {
 
     info!("Starting event handling task");
     let jh_event_handling = thread::Builder::new()
-        .name("Event".to_string())
+        .name("sat-rs events".to_string())
         .spawn(move || loop {
             event_handler.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_EVENT_HANDLING));
@@ -266,7 +257,7 @@ fn static_tmtc_pool_main() {
 
     info!("Starting AOCS thread");
     let jh_aocs = thread::Builder::new()
-        .name("AOCS".to_string())
+        .name("sat-rs aocs".to_string())
         .spawn(move || loop {
             mgm_handler.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_AOCS));
@@ -275,7 +266,7 @@ fn static_tmtc_pool_main() {
 
     info!("Starting PUS handler thread");
     let jh_pus_handler = thread::Builder::new()
-        .name("PUS".to_string())
+        .name("sat-rs pus".to_string())
         .spawn(move || loop {
             pus_stack.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_PUS_STACK));
@@ -320,8 +311,6 @@ fn dyn_tmtc_pool_main() {
         .mode_router_map
         .insert(MGM_HANDLER_0.raw(), mgm_handler_mode_tx);
 
-    let tc_source = PusTcSourceProviderDynamic(tc_source_tx);
-
     // Create event handling components
     // These sender handles are used to send event requests, for example to enable or disable
     // certain events.
@@ -357,7 +346,7 @@ fn dyn_tmtc_pool_main() {
     );
     let pus_scheduler_service = create_scheduler_service_dynamic(
         tm_funnel_tx.clone(),
-        tc_source.0.clone(),
+        tc_source_tx.clone(),
         pus_sched_rx,
         create_sched_tc_pool(),
     );
@@ -391,16 +380,13 @@ fn dyn_tmtc_pool_main() {
         pus_mode_service,
     );
 
-    let ccsds_receiver = CcsdsReceiver { tc_source };
-
     let mut tmtc_task = TcSourceTaskDynamic::new(
         tc_source_rx,
-        PusReceiver::new(tm_funnel_tx.clone(), pus_router),
+        PusTcDistributor::new(tm_funnel_tx.clone(), pus_router),
     );
 
     let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
-    let udp_ccsds_distributor = CcsdsDistributor::new(ccsds_receiver.clone());
-    let udp_tc_server = UdpTcServer::new(sock_addr, 2048, Box::new(udp_ccsds_distributor))
+    let udp_tc_server = UdpTcServer::new(UDP_SERVER.id(), sock_addr, 2048, tc_source_tx.clone())
         .expect("creating UDP TMTC server failed");
     let mut udp_tmtc_server = UdpTmtcServer {
         udp_tc_server,
@@ -409,13 +395,18 @@ fn dyn_tmtc_pool_main() {
         },
     };
 
-    let tcp_ccsds_distributor = CcsdsDistributor::new(ccsds_receiver);
-    let tcp_server_cfg = ServerConfig::new(sock_addr, Duration::from_millis(400), 4096, 8192);
+    let tcp_server_cfg = ServerConfig::new(
+        TCP_SERVER.id(),
+        sock_addr,
+        Duration::from_millis(400),
+        4096,
+        8192,
+    );
     let sync_tm_tcp_source = SyncTcpTmSource::new(200);
     let mut tcp_server = TcpTask::new(
         tcp_server_cfg,
         sync_tm_tcp_source.clone(),
-        tcp_ccsds_distributor,
+        tc_source_tx.clone(),
         PACKET_ID_VALIDATOR.clone(),
     )
     .expect("tcp server creation failed");
@@ -444,7 +435,7 @@ fn dyn_tmtc_pool_main() {
 
     info!("Starting TMTC and UDP task");
     let jh_udp_tmtc = thread::Builder::new()
-        .name("TMTC and UDP".to_string())
+        .name("sat-rs tmtc-udp".to_string())
         .spawn(move || {
             info!("Running UDP server on port {SERVER_PORT}");
             loop {
@@ -457,7 +448,7 @@ fn dyn_tmtc_pool_main() {
 
     info!("Starting TCP task");
     let jh_tcp = thread::Builder::new()
-        .name("TCP".to_string())
+        .name("sat-rs tcp".to_string())
         .spawn(move || {
             info!("Running TCP server on port {SERVER_PORT}");
             loop {
@@ -468,7 +459,7 @@ fn dyn_tmtc_pool_main() {
 
     info!("Starting TM funnel task");
     let jh_tm_funnel = thread::Builder::new()
-        .name("TM Funnel".to_string())
+        .name("sat-rs tm-funnel".to_string())
         .spawn(move || loop {
             tm_funnel.operation();
         })
@@ -476,7 +467,7 @@ fn dyn_tmtc_pool_main() {
 
     info!("Starting event handling task");
     let jh_event_handling = thread::Builder::new()
-        .name("Event".to_string())
+        .name("sat-rs events".to_string())
         .spawn(move || loop {
             event_handler.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_EVENT_HANDLING));
@@ -485,7 +476,7 @@ fn dyn_tmtc_pool_main() {
 
     info!("Starting AOCS thread");
     let jh_aocs = thread::Builder::new()
-        .name("AOCS".to_string())
+        .name("sat-rs aocs".to_string())
         .spawn(move || loop {
             mgm_handler.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_AOCS));
@@ -494,7 +485,7 @@ fn dyn_tmtc_pool_main() {
 
     info!("Starting PUS handler thread");
     let jh_pus_handler = thread::Builder::new()
-        .name("PUS".to_string())
+        .name("sat-rs pus".to_string())
         .spawn(move || loop {
             pus_stack.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_PUS_STACK));

@@ -43,7 +43,7 @@
 //! This includes the [ParamsHeapless] enumeration for contained values which do not require heap
 //! allocation, and the [Params] which enumerates [ParamsHeapless] and some additional types which
 //! require [alloc] support but allow for more flexbility.
-use crate::pool::StoreAddr;
+use crate::pool::PoolAddr;
 use core::fmt::Debug;
 use core::mem::size_of;
 use paste::paste;
@@ -588,15 +588,15 @@ from_conversions_for_raw!(
 #[non_exhaustive]
 pub enum Params {
     Heapless(ParamsHeapless),
-    Store(StoreAddr),
+    Store(PoolAddr),
     #[cfg(feature = "alloc")]
     Vec(Vec<u8>),
     #[cfg(feature = "alloc")]
     String(String),
 }
 
-impl From<StoreAddr> for Params {
-    fn from(x: StoreAddr) -> Self {
+impl From<PoolAddr> for Params {
+    fn from(x: PoolAddr) -> Self {
         Self::Store(x)
     }
 }

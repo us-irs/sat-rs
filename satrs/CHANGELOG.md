@@ -8,7 +8,34 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
-- `spacepackets` v0.11.0
+# [v0.2.0-rc.4] 2024-04-23
+
+## Changed
+
+- The `parse_for_ccsds_space_packets` method now expects a non-mutable slice and does not copy
+  broken tail packets anymore. It also does not expect a mutable `next_write_idx` argument anymore.
+  Instead, a `ParseResult` structure is returned which contains the `packets_found` and an
+  optional `incomplete_tail_start` value.
+
+## Fixed
+
+- `parse_for_ccsds_space_packets` did not detect CCSDS space packets at the buffer end with the
+  smallest possible size of 7 bytes.
+- TCP server component now re-registers the internal `mio::Poll` object if the client reset
+  the connection unexpectedly. Not doing so prevented the server from functioning properly
+  after a re-connect.
+
+# [v0.2.0-rc.3] 2024-04-17
+
+docs-rs hotfix 2
+
+# [v0.2.0-rc.2] 2024-04-17
+
+docs-rs hotfix
+
+# [v0.2.0-rc.1] 2024-04-17
+
+- `spacepackets` v0.11
 
 ## Added
 
@@ -21,9 +48,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Introduced generic `EventMessage` which is generic over the event type and the additional
   parameter type. This message also contains the sender ID which can be useful for debugging
   or application layer / FDIR logic.
+- Stop signal handling for the TCP servers.
+- TCP server now uses `mio` crate to allow non-blocking operation. The server can now handle
+  multiple connections at once, and the context information about handled transfers is
+  passed via a callback which is inserted as a generic as well.
 
 ## Changed
 
+- Renamed `ReceivesTcCore` to `PacketSenderRaw` to better show its primary purpose. It now contains
+  a `send_raw_tc` method which is not mutable anymore.
+- Renamed `TmPacketSourceCore` to `TmPacketSource`.
+- Renamed `EcssTmSenderCore` to `EcssTmSender`.
+- Renamed `StoreAddr` to `PoolAddr`.
+- Reanmed `StoreError` to `PoolError`.
+- TCP server generics order. The error generics come last now.
 - `encoding::ccsds::PacketIdValidator` renamed to `ValidatorU16Id`, which lives in the crate root.
   It can be used for both CCSDS packet ID and CCSDS APID validation.
 - `EventManager::try_event_handling` not expects a mutable error handling closure instead of
@@ -71,6 +109,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ## Removed
 
 - Remove `objects` module.
+- Removed CCSDS and PUS distributor modules. Their worth is questionable in an architecture
+  where routing traits are sufficient and the core logic to demultiplex and distribute packets
+  is simple enough to be application code.
 
 # [v0.2.0-rc.0] 2024-02-21
 

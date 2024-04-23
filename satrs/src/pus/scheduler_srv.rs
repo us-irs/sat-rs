@@ -1,12 +1,12 @@
 use super::scheduler::PusSchedulerProvider;
 use super::verification::{VerificationReporter, VerificationReportingProvider};
 use super::{
-    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiverCore,
-    EcssTmSenderCore, MpscTcReceiver, MpscTmInSharedPoolSender, MpscTmInSharedPoolSenderBounded,
-    PusServiceHelper, PusTmAsVec,
+    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiver,
+    EcssTmSender, MpscTcReceiver, PusServiceHelper,
 };
 use crate::pool::PoolProvider;
 use crate::pus::{PusPacketHandlerResult, PusPacketHandlingError};
+use crate::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use alloc::string::ToString;
 use spacepackets::ecss::{scheduling, PusPacket};
 use spacepackets::time::cds::CdsTime;
@@ -21,8 +21,8 @@ use std::sync::mpsc;
 /// [Self::scheduler] and [Self::scheduler_mut] function and then use the scheduler API to release
 /// telecommands when applicable.
 pub struct PusSchedServiceHandler<
-    TcReceiver: EcssTcReceiverCore,
-    TmSender: EcssTmSenderCore,
+    TcReceiver: EcssTcReceiver,
+    TmSender: EcssTmSender,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
     PusScheduler: PusSchedulerProvider,
@@ -33,8 +33,8 @@ pub struct PusSchedServiceHandler<
 }
 
 impl<
-        TcReceiver: EcssTcReceiverCore,
-        TmSender: EcssTmSenderCore,
+        TcReceiver: EcssTcReceiver,
+        TmSender: EcssTmSender,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
         Scheduler: PusSchedulerProvider,
@@ -212,7 +212,7 @@ impl<
 /// mpsc queues.
 pub type PusService11SchedHandlerDynWithMpsc<PusScheduler> = PusSchedServiceHandler<
     MpscTcReceiver,
-    mpsc::Sender<PusTmAsVec>,
+    mpsc::Sender<PacketAsVec>,
     EcssTcInVecConverter,
     VerificationReporter,
     PusScheduler,
@@ -221,7 +221,7 @@ pub type PusService11SchedHandlerDynWithMpsc<PusScheduler> = PusSchedServiceHand
 /// queues.
 pub type PusService11SchedHandlerDynWithBoundedMpsc<PusScheduler> = PusSchedServiceHandler<
     MpscTcReceiver,
-    mpsc::SyncSender<PusTmAsVec>,
+    mpsc::SyncSender<PacketAsVec>,
     EcssTcInVecConverter,
     VerificationReporter,
     PusScheduler,
@@ -230,7 +230,7 @@ pub type PusService11SchedHandlerDynWithBoundedMpsc<PusScheduler> = PusSchedServ
 /// mpsc queues.
 pub type PusService11SchedHandlerStaticWithMpsc<PusScheduler> = PusSchedServiceHandler<
     MpscTcReceiver,
-    MpscTmInSharedPoolSender,
+    PacketSenderWithSharedPool,
     EcssTcInSharedStoreConverter,
     VerificationReporter,
     PusScheduler,
@@ -239,7 +239,7 @@ pub type PusService11SchedHandlerStaticWithMpsc<PusScheduler> = PusSchedServiceH
 /// mpsc queues.
 pub type PusService11SchedHandlerStaticWithBoundedMpsc<PusScheduler> = PusSchedServiceHandler<
     MpscTcReceiver,
-    MpscTmInSharedPoolSenderBounded,
+    PacketSenderWithSharedPool,
     EcssTcInSharedStoreConverter,
     VerificationReporter,
     PusScheduler,
@@ -257,10 +257,8 @@ mod tests {
         verification::{RequestId, TcStateAccepted, VerificationToken},
         EcssTcInSharedStoreConverter,
     };
-    use crate::pus::{
-        MpscTcReceiver, MpscTmInSharedPoolSenderBounded, PusPacketHandlerResult,
-        PusPacketHandlingError,
-    };
+    use crate::pus::{MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError};
+    use crate::tmtc::PacketSenderWithSharedPool;
     use alloc::collections::VecDeque;
     use delegate::delegate;
     use spacepackets::ecss::scheduling::Subservice;
@@ -279,7 +277,7 @@ mod tests {
         common: PusServiceHandlerWithSharedStoreCommon,
         handler: PusSchedServiceHandler<
             MpscTcReceiver,
-            MpscTmInSharedPoolSenderBounded,
+            PacketSenderWithSharedPool,
             EcssTcInSharedStoreConverter,
             VerificationReporter,
             TestScheduler,
@@ -317,9 +315,13 @@ mod tests {
                 .expect("acceptance success failure")
         }
 
+        fn send_tc(&self, token: &VerificationToken<TcStateAccepted>, tc: &PusTcCreator) {
+            self.common
+                .send_tc(self.handler.service_helper.id(), token, tc);
+        }
+
         delegate! {
             to self.common {
-                fn send_tc(&self, token: &VerificationToken<TcStateAccepted>, tc: &PusTcCreator);
                 fn read_next_tm(&mut self) -> PusTmReader<'_>;
                 fn check_no_tm_available(&self) -> bool;
                 fn check_next_verification_tm(&self, subservice: u8, expected_request_id: RequestId);
@@ -342,7 +344,7 @@ mod tests {
         fn reset(
             &mut self,
             _store: &mut (impl crate::pool::PoolProvider + ?Sized),
-        ) -> Result<(), crate::pool::StoreError> {
+        ) -> Result<(), crate::pool::PoolError> {
             self.reset_count += 1;
             Ok(())
         }

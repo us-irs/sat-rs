@@ -5,7 +5,7 @@ use satrs::event_man::{EventMessageU32, EventRoutingError};
 use satrs::params::WritableToBeBytes;
 use satrs::pus::event::EventTmHookProvider;
 use satrs::pus::verification::VerificationReporter;
-use satrs::pus::EcssTmSenderCore;
+use satrs::pus::EcssTmSender;
 use satrs::request::UniqueApidTargetId;
 use satrs::{
     event_man::{
@@ -38,7 +38,7 @@ impl EventTmHookProvider for EventApidSetter {
 
 /// The PUS event handler subscribes for all events and converts them into ECSS PUS 5 event
 /// packets. It also handles the verification completion of PUS event service requests.
-pub struct PusEventHandler<TmSender: EcssTmSenderCore> {
+pub struct PusEventHandler<TmSender: EcssTmSender> {
     event_request_rx: mpsc::Receiver<EventRequestWithToken>,
     pus_event_dispatcher: DefaultPusEventU32Dispatcher<()>,
     pus_event_man_rx: mpsc::Receiver<EventMessageU32>,
@@ -49,7 +49,7 @@ pub struct PusEventHandler<TmSender: EcssTmSenderCore> {
     event_apid_setter: EventApidSetter,
 }
 
-impl<TmSender: EcssTmSenderCore> PusEventHandler<TmSender> {
+impl<TmSender: EcssTmSender> PusEventHandler<TmSender> {
     pub fn new(
         tm_sender: TmSender,
         verif_handler: VerificationReporter,
@@ -177,12 +177,12 @@ impl EventManagerWrapper {
     }
 }
 
-pub struct EventHandler<TmSender: EcssTmSenderCore> {
+pub struct EventHandler<TmSender: EcssTmSender> {
     pub event_man_wrapper: EventManagerWrapper,
     pub pus_event_handler: PusEventHandler<TmSender>,
 }
 
-impl<TmSender: EcssTmSenderCore> EventHandler<TmSender> {
+impl<TmSender: EcssTmSender> EventHandler<TmSender> {
     pub fn new(
         tm_sender: TmSender,
         event_request_rx: mpsc::Receiver<EventRequestWithToken>,

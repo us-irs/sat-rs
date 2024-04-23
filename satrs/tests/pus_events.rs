@@ -7,8 +7,8 @@ use satrs::params::U32Pair;
 use satrs::params::{Params, ParamsHeapless, WritableToBeBytes};
 use satrs::pus::event_man::{DefaultPusEventMgmtBackend, EventReporter, PusEventDispatcher};
 use satrs::pus::test_util::TEST_COMPONENT_ID_0;
-use satrs::pus::PusTmAsVec;
 use satrs::request::UniqueApidTargetId;
+use satrs::tmtc::PacketAsVec;
 use spacepackets::ecss::tm::PusTmReader;
 use spacepackets::ecss::{PusError, PusPacket};
 use std::sync::mpsc::{self, SendError, TryRecvError};
@@ -37,7 +37,7 @@ fn test_threaded_usage() {
     let pus_event_man_send_provider = EventU32SenderMpsc::new(1, pus_event_man_tx);
     event_man.subscribe_all(pus_event_man_send_provider.target_id());
     event_man.add_sender(pus_event_man_send_provider);
-    let (event_tx, event_rx) = mpsc::channel::<PusTmAsVec>();
+    let (event_tx, event_rx) = mpsc::channel::<PacketAsVec>();
     let reporter =
         EventReporter::new(TEST_ID.raw(), 0x02, 0, 128).expect("Creating event reporter failed");
     let pus_event_man = PusEventDispatcher::new(reporter, DefaultPusEventMgmtBackend::default());

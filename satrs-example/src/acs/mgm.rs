@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use satrs::mode::{
     ModeAndSubmode, ModeError, ModeProvider, ModeReply, ModeRequest, ModeRequestHandler,
 };
-use satrs::pus::{EcssTmSenderCore, PusTmVariant};
+use satrs::pus::{EcssTmSender, PusTmVariant};
 use satrs::request::{GenericMessage, MessageMetadata, UniqueApidTargetId};
 use satrs_example::config::components::PUS_MODE_SERVICE;
 
@@ -64,7 +64,7 @@ pub struct MpscModeLeafInterface {
 /// Example MGM device handler strongly based on the LIS3MDL MEMS device.
 #[derive(new)]
 #[allow(clippy::too_many_arguments)]
-pub struct MgmHandlerLis3Mdl<ComInterface: SpiInterface, TmSender: EcssTmSenderCore> {
+pub struct MgmHandlerLis3Mdl<ComInterface: SpiInterface, TmSender: EcssTmSender> {
     id: UniqueApidTargetId,
     dev_str: &'static str,
     mode_interface: MpscModeLeafInterface,
@@ -85,9 +85,7 @@ pub struct MgmHandlerLis3Mdl<ComInterface: SpiInterface, TmSender: EcssTmSenderC
     stamp_helper: TimeStampHelper,
 }
 
-impl<ComInterface: SpiInterface, TmSender: EcssTmSenderCore>
-    MgmHandlerLis3Mdl<ComInterface, TmSender>
-{
+impl<ComInterface: SpiInterface, TmSender: EcssTmSender> MgmHandlerLis3Mdl<ComInterface, TmSender> {
     pub fn periodic_operation(&mut self) {
         self.stamp_helper.update_from_now();
         // Handle requests.
@@ -203,7 +201,7 @@ impl<ComInterface: SpiInterface, TmSender: EcssTmSenderCore>
     }
 }
 
-impl<ComInterface: SpiInterface, TmSender: EcssTmSenderCore> ModeProvider
+impl<ComInterface: SpiInterface, TmSender: EcssTmSender> ModeProvider
     for MgmHandlerLis3Mdl<ComInterface, TmSender>
 {
     fn mode_and_submode(&self) -> ModeAndSubmode {
@@ -211,7 +209,7 @@ impl<ComInterface: SpiInterface, TmSender: EcssTmSenderCore> ModeProvider
     }
 }
 
-impl<ComInterface: SpiInterface, TmSender: EcssTmSenderCore> ModeRequestHandler
+impl<ComInterface: SpiInterface, TmSender: EcssTmSender> ModeRequestHandler
     for MgmHandlerLis3Mdl<ComInterface, TmSender>
 {
     type Error = ModeError;

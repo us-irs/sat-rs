@@ -132,7 +132,7 @@ impl EventReportCreator {
 #[cfg(feature = "alloc")]
 mod alloc_mod {
     use super::*;
-    use crate::pus::{EcssTmSenderCore, EcssTmtcError};
+    use crate::pus::{EcssTmSender, EcssTmtcError};
     use crate::ComponentId;
     use alloc::vec;
     use alloc::vec::Vec;
@@ -194,7 +194,7 @@ mod alloc_mod {
 
         pub fn event_info(
             &self,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             params: Option<&[u8]>,
@@ -211,7 +211,7 @@ mod alloc_mod {
 
         pub fn event_low_severity(
             &self,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             params: Option<&[u8]>,
@@ -228,7 +228,7 @@ mod alloc_mod {
 
         pub fn event_medium_severity(
             &self,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             params: Option<&[u8]>,
@@ -245,7 +245,7 @@ mod alloc_mod {
 
         pub fn event_high_severity(
             &self,
-            sender: &(impl EcssTmSenderCore + ?Sized),
+            sender: &(impl EcssTmSender + ?Sized),
             time_stamp: &[u8],
             event_id: impl EcssEnumeration,
             params: Option<&[u8]>,
@@ -268,7 +268,7 @@ mod tests {
     use crate::events::{EventU32, Severity};
     use crate::pus::test_util::TEST_COMPONENT_ID_0;
     use crate::pus::tests::CommonTmInfo;
-    use crate::pus::{ChannelWithId, EcssTmSenderCore, EcssTmtcError, PusTmVariant};
+    use crate::pus::{ChannelWithId, EcssTmSender, EcssTmtcError, PusTmVariant};
     use crate::ComponentId;
     use spacepackets::ecss::PusError;
     use spacepackets::ByteConversionError;
@@ -301,7 +301,7 @@ mod tests {
         }
     }
 
-    impl EcssTmSenderCore for TestSender {
+    impl EcssTmSender for TestSender {
         fn send_tm(&self, sender_id: ComponentId, tm: PusTmVariant) -> Result<(), EcssTmtcError> {
             match tm {
                 PusTmVariant::InStore(_) => {

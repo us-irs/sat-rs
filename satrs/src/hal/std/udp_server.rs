@@ -1,7 +1,8 @@
 //! Generic UDP TC server.
-use crate::tmtc::{ReceivesTc, ReceivesTcCore};
-use std::boxed::Box;
-use std::io::{Error, ErrorKind};
+use crate::tmtc::PacketSenderRaw;
+use crate::ComponentId;
+use core::fmt::Debug;
+use std::io::{self, ErrorKind};
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::vec;
 use std::vec::Vec;
@@ -11,45 +12,46 @@ use std::vec::Vec;
 ///
 /// It caches all received telecomands into a vector. The maximum expected telecommand size should
 /// be declared upfront. This avoids dynamic allocation during run-time. The user can specify a TC
-/// receiver in form of a special trait object which implements [ReceivesTc]. Please note that the
-/// receiver should copy out the received data if it the data is required past the
-/// [ReceivesTcCore::pass_tc] call.
+/// sender in form of a special trait object which implements [PacketSenderRaw]. For example, this
+/// can be used to send the telecommands to a centralized TC source component for further
+/// processing and routing.
 ///
 /// # Examples
 ///
 /// ```
 /// use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+/// use std::sync::mpsc;
 /// use spacepackets::ecss::WritablePusPacket;
 /// use satrs::hal::std::udp_server::UdpTcServer;
-/// use satrs::tmtc::{ReceivesTc, ReceivesTcCore};
+/// use satrs::ComponentId;
+/// use satrs::tmtc::PacketSenderRaw;
 /// use spacepackets::SpHeader;
 /// use spacepackets::ecss::tc::PusTcCreator;
 ///
-/// #[derive (Default)]
-/// struct PingReceiver {}
-/// impl ReceivesTcCore for PingReceiver {
-///    type Error = ();
-///    fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
-///         assert_eq!(tc_raw.len(), 13);
-///         Ok(())
-///     }
-/// }
+/// const UDP_SERVER_ID: ComponentId = 0x05;
 ///
-/// let mut buf = [0; 32];
+/// let (packet_sender, packet_receiver) = mpsc::channel();
 /// let dest_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 7777);
-/// let ping_receiver = PingReceiver::default();
-/// let mut udp_tc_server = UdpTcServer::new(dest_addr, 2048, Box::new(ping_receiver))
+/// let mut udp_tc_server = UdpTcServer::new(UDP_SERVER_ID, dest_addr, 2048, packet_sender)
 ///       .expect("Creating UDP TMTC server failed");
 /// let sph = SpHeader::new_from_apid(0x02);
 /// let pus_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
-/// let len = pus_tc
-///     .write_to_bytes(&mut buf)
-///     .expect("Error writing PUS TC packet");
-/// assert_eq!(len, 13);
-/// let client = UdpSocket::bind("127.0.0.1:7778").expect("Connecting to UDP server failed");
+/// // Can not fail.
+/// let ping_tc_raw = pus_tc.to_vec().unwrap();
+///
+/// // Now create a UDP client and send the ping telecommand to the server.
+/// let client = UdpSocket::bind("127.0.0.1:0").expect("creating UDP client failed");
 /// client
-///     .send_to(&buf[0..len], dest_addr)
+///     .send_to(&ping_tc_raw, dest_addr)
 ///     .expect("Error sending PUS TC via UDP");
+/// let recv_result = udp_tc_server.try_recv_tc();
+/// assert!(recv_result.is_ok());
+/// // The packet is received by the UDP TC server and sent via the mpsc channel.
+/// let sent_packet_with_sender = packet_receiver.try_recv().expect("expected telecommand");
+/// assert_eq!(sent_packet_with_sender.packet, ping_tc_raw);
+/// assert_eq!(sent_packet_with_sender.sender_id, UDP_SERVER_ID);
+/// // No more packets received.
+/// matches!(packet_receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
 /// ```
 ///
 /// The [satrs-example crate](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/satrs-example)
@@ -57,65 +59,45 @@ use std::vec::Vec;
 /// [example code](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example/src/tmtc.rs#L67)
 /// on how to use this TC server. It uses the server to receive PUS telecommands on a specific port
 /// and then forwards them to a generic CCSDS packet receiver.
-pub struct UdpTcServer<E> {
+pub struct UdpTcServer<TcSender: PacketSenderRaw<Error = SendError>, SendError> {
+    pub id: ComponentId,
     pub socket: UdpSocket,
     recv_buf: Vec<u8>,
     sender_addr: Option<SocketAddr>,
-    tc_receiver: Box<dyn ReceivesTc<Error = E>>,
+    pub tc_sender: TcSender,
 }
 
-#[derive(Debug)]
-pub enum ReceiveResult<E> {
+#[derive(Debug, thiserror::Error)]
+pub enum ReceiveResult<SendError: Debug + 'static> {
+    #[error("nothing was received")]
     NothingReceived,
-    IoError(Error),
-    ReceiverError(E),
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error(transparent)]
+    Send(SendError),
 }
 
-impl<E> From<Error> for ReceiveResult<E> {
-    fn from(e: Error) -> Self {
-        ReceiveResult::IoError(e)
-    }
-}
-
-impl<E: PartialEq> PartialEq for ReceiveResult<E> {
-    fn eq(&self, other: &Self) -> bool {
-        use ReceiveResult::*;
-        match (self, other) {
-            (IoError(ref e), IoError(ref other_e)) => e.kind() == other_e.kind(),
-            (NothingReceived, NothingReceived) => true,
-            (ReceiverError(e), ReceiverError(other_e)) => e == other_e,
-            _ => false,
-        }
-    }
-}
-
-impl<E: Eq + PartialEq> Eq for ReceiveResult<E> {}
-
-impl<E: 'static> ReceivesTcCore for UdpTcServer<E> {
-    type Error = E;
-
-    fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
-        self.tc_receiver.pass_tc(tc_raw)
-    }
-}
-
-impl<E: 'static> UdpTcServer<E> {
+impl<TcSender: PacketSenderRaw<Error = SendError>, SendError: Debug + 'static>
+    UdpTcServer<TcSender, SendError>
+{
     pub fn new<A: ToSocketAddrs>(
+        id: ComponentId,
         addr: A,
         max_recv_size: usize,
-        tc_receiver: Box<dyn ReceivesTc<Error = E>>,
-    ) -> Result<Self, Error> {
+        tc_sender: TcSender,
+    ) -> Result<Self, io::Error> {
         let server = Self {
+            id,
             socket: UdpSocket::bind(addr)?,
             recv_buf: vec![0; max_recv_size],
             sender_addr: None,
-            tc_receiver,
+            tc_sender,
         };
         server.socket.set_nonblocking(true)?;
         Ok(server)
     }
 
-    pub fn try_recv_tc(&mut self) -> Result<(usize, SocketAddr), ReceiveResult<E>> {
+    pub fn try_recv_tc(&mut self) -> Result<(usize, SocketAddr), ReceiveResult<SendError>> {
         let res = match self.socket.recv_from(&mut self.recv_buf) {
             Ok(res) => res,
             Err(e) => {
@@ -128,9 +110,9 @@ impl<E: 'static> UdpTcServer<E> {
         };
         let (num_bytes, from) = res;
         self.sender_addr = Some(from);
-        self.tc_receiver
-            .pass_tc(&self.recv_buf[0..num_bytes])
-            .map_err(|e| ReceiveResult::ReceiverError(e))?;
+        self.tc_sender
+            .send_packet(self.id, &self.recv_buf[0..num_bytes])
+            .map_err(ReceiveResult::Send)?;
         Ok(res)
     }
 
@@ -142,29 +124,35 @@ impl<E: 'static> UdpTcServer<E> {
 #[cfg(test)]
 mod tests {
     use crate::hal::std::udp_server::{ReceiveResult, UdpTcServer};
-    use crate::tmtc::ReceivesTcCore;
+    use crate::queue::GenericSendError;
+    use crate::tmtc::PacketSenderRaw;
+    use crate::ComponentId;
+    use core::cell::RefCell;
     use spacepackets::ecss::tc::PusTcCreator;
     use spacepackets::ecss::WritablePusPacket;
     use spacepackets::SpHeader;
-    use std::boxed::Box;
     use std::collections::VecDeque;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
     use std::vec::Vec;
 
     fn is_send<T: Send>(_: &T) {}
 
+    const UDP_SERVER_ID: ComponentId = 0x05;
+
     #[derive(Default)]
     struct PingReceiver {
-        pub sent_cmds: VecDeque<Vec<u8>>,
+        pub sent_cmds: RefCell<VecDeque<Vec<u8>>>,
     }
 
-    impl ReceivesTcCore for PingReceiver {
-        type Error = ();
+    impl PacketSenderRaw for PingReceiver {
+        type Error = GenericSendError;
 
-        fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
+        fn send_packet(&self, sender_id: ComponentId, tc_raw: &[u8]) -> Result<(), Self::Error> {
+            assert_eq!(sender_id, UDP_SERVER_ID);
             let mut sent_data = Vec::new();
             sent_data.extend_from_slice(tc_raw);
-            self.sent_cmds.push_back(sent_data);
+            let mut queue = self.sent_cmds.borrow_mut();
+            queue.push_back(sent_data);
             Ok(())
         }
     }
@@ -175,7 +163,7 @@ mod tests {
         let dest_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 7777);
         let ping_receiver = PingReceiver::default();
         is_send(&ping_receiver);
-        let mut udp_tc_server = UdpTcServer::new(dest_addr, 2048, Box::new(ping_receiver))
+        let mut udp_tc_server = UdpTcServer::new(UDP_SERVER_ID, dest_addr, 2048, ping_receiver)
             .expect("Creating UDP TMTC server failed");
         is_send(&udp_tc_server);
         let sph = SpHeader::new_from_apid(0x02);
@@ -195,9 +183,10 @@ mod tests {
             udp_tc_server.last_sender().expect("No sender set"),
             local_addr
         );
-        let ping_receiver: &mut PingReceiver = udp_tc_server.tc_receiver.downcast_mut().unwrap();
-        assert_eq!(ping_receiver.sent_cmds.len(), 1);
-        let sent_cmd = ping_receiver.sent_cmds.pop_front().unwrap();
+        let ping_receiver = &mut udp_tc_server.tc_sender;
+        let mut queue = ping_receiver.sent_cmds.borrow_mut();
+        assert_eq!(queue.len(), 1);
+        let sent_cmd = queue.pop_front().unwrap();
         assert_eq!(sent_cmd, buf[0..len]);
     }
 
@@ -205,11 +194,11 @@ mod tests {
     fn test_nothing_received() {
         let dest_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 7779);
         let ping_receiver = PingReceiver::default();
-        let mut udp_tc_server = UdpTcServer::new(dest_addr, 2048, Box::new(ping_receiver))
+        let mut udp_tc_server = UdpTcServer::new(UDP_SERVER_ID, dest_addr, 2048, ping_receiver)
             .expect("Creating UDP TMTC server failed");
         let res = udp_tc_server.try_recv_tc();
         assert!(res.is_err());
         let err = res.unwrap_err();
-        assert_eq!(err, ReceiveResult::NothingReceived);
+        matches!(err, ReceiveResult::NothingReceived);
     }
 }

@@ -24,11 +24,6 @@ A lot of the architecture and general design considerations are based on the
 through the 2 missions [FLP](https://www.irs.uni-stuttgart.de/en/research/satellitetechnology-and-instruments/smallsatelliteprogram/flying-laptop/)
 and [EIVE](https://www.irs.uni-stuttgart.de/en/research/satellitetechnology-and-instruments/smallsatelliteprogram/EIVE/).
 
-This framework is in the early stages of development. Important features are missing. New releases
-with breaking changes are released regularly, with all changes documented inside respective
-changelog files. You should only use this framework if your are willing to work in this
-environment.
-
 # Overview
 
 This project currently contains following crates:

@@ -9,13 +9,13 @@ use std::sync::mpsc::Sender;
 
 use super::verification::VerificationReportingProvider;
 use super::{
-    EcssTcInMemConverter, EcssTcReceiverCore, EcssTmSenderCore, GenericConversionError,
+    EcssTcInMemConverter, EcssTcReceiver, EcssTmSender, GenericConversionError,
     GenericRoutingError, PusServiceHelper,
 };
 
 pub struct PusEventServiceHandler<
-    TcReceiver: EcssTcReceiverCore,
-    TmSender: EcssTmSenderCore,
+    TcReceiver: EcssTcReceiver,
+    TmSender: EcssTmSender,
     TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
 > {
@@ -25,8 +25,8 @@ pub struct PusEventServiceHandler<
 }
 
 impl<
-        TcReceiver: EcssTcReceiverCore,
-        TmSender: EcssTmSenderCore,
+        TcReceiver: EcssTcReceiver,
+        TmSender: EcssTmSender,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
     > PusEventServiceHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
@@ -167,7 +167,8 @@ mod tests {
     use crate::pus::verification::{
         RequestId, VerificationReporter, VerificationReportingProvider,
     };
-    use crate::pus::{GenericConversionError, MpscTcReceiver, MpscTmInSharedPoolSenderBounded};
+    use crate::pus::{GenericConversionError, MpscTcReceiver};
+    use crate::tmtc::PacketSenderWithSharedPool;
     use crate::{
         events::EventU32,
         pus::{
@@ -186,7 +187,7 @@ mod tests {
         common: PusServiceHandlerWithSharedStoreCommon,
         handler: PusEventServiceHandler<
             MpscTcReceiver,
-            MpscTmInSharedPoolSenderBounded,
+            PacketSenderWithSharedPool,
             EcssTcInSharedStoreConverter,
             VerificationReporter,
         >,
@@ -212,9 +213,13 @@ mod tests {
                 .expect("acceptance success failure")
         }
 
+        fn send_tc(&self, token: &VerificationToken<TcStateAccepted>, tc: &PusTcCreator) {
+            self.common
+                .send_tc(self.handler.service_helper.id(), token, tc);
+        }
+
         delegate! {
             to self.common {
-                fn send_tc(&self, token: &VerificationToken<TcStateAccepted>, tc: &PusTcCreator);
                 fn read_next_tm(&mut self) -> PusTmReader<'_>;
                 fn check_no_tm_available(&self) -> bool;
                 fn check_next_verification_tm(&self, subservice: u8, expected_request_id: RequestId);

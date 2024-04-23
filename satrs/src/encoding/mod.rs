@@ -6,9 +6,14 @@ pub use crate::encoding::cobs::{encode_packet_with_cobs, parse_buffer_for_cobs_e
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use alloc::{collections::VecDeque, vec::Vec};
+    use core::cell::RefCell;
 
-    use crate::tmtc::ReceivesTcCore;
+    use alloc::collections::VecDeque;
+
+    use crate::{
+        tmtc::{PacketAsVec, PacketSenderRaw},
+        ComponentId,
+    };
 
     use super::cobs::encode_packet_with_cobs;
 
@@ -17,14 +22,15 @@ pub(crate) mod tests {
 
     #[derive(Default)]
     pub(crate) struct TcCacher {
-        pub(crate) tc_queue: VecDeque<Vec<u8>>,
+        pub(crate) tc_queue: RefCell<VecDeque<PacketAsVec>>,
     }
 
-    impl ReceivesTcCore for TcCacher {
+    impl PacketSenderRaw for TcCacher {
         type Error = ();
 
-        fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
-            self.tc_queue.push_back(tc_raw.to_vec());
+        fn send_packet(&self, sender_id: ComponentId, tc_raw: &[u8]) -> Result<(), Self::Error> {
+            let mut mut_queue = self.tc_queue.borrow_mut();
+            mut_queue.push_back(PacketAsVec::new(sender_id, tc_raw.to_vec()));
             Ok(())
         }
     }

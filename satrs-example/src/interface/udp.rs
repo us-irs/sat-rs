@@ -1,20 +1,22 @@
+use core::fmt::Debug;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc;
 
 use log::{info, warn};
-use satrs::pus::{PusTmAsVec, PusTmInPool};
+use satrs::tmtc::{PacketAsVec, PacketInPool, PacketSenderRaw};
 use satrs::{
     hal::std::udp_server::{ReceiveResult, UdpTcServer},
     pool::{PoolProviderWithGuards, SharedStaticMemoryPool},
-    tmtc::CcsdsError,
 };
+
+use crate::pus::HandlingStatus;
 
 pub trait UdpTmHandler {
     fn send_tm_to_udp_client(&mut self, socket: &UdpSocket, recv_addr: &SocketAddr);
 }
 
 pub struct StaticUdpTmHandler {
-    pub tm_rx: mpsc::Receiver<PusTmInPool>,
+    pub tm_rx: mpsc::Receiver<PacketInPool>,
     pub tm_store: SharedStaticMemoryPool,
 }
 
@@ -43,7 +45,7 @@ impl UdpTmHandler for StaticUdpTmHandler {
 }
 
 pub struct DynamicUdpTmHandler {
-    pub tm_rx: mpsc::Receiver<PusTmAsVec>,
+    pub tm_rx: mpsc::Receiver<PacketAsVec>,
 }
 
 impl UdpTmHandler for DynamicUdpTmHandler {
@@ -64,49 +66,57 @@ impl UdpTmHandler for DynamicUdpTmHandler {
     }
 }
 
-pub struct UdpTmtcServer<TmHandler: UdpTmHandler, SendError> {
-    pub udp_tc_server: UdpTcServer<CcsdsError<SendError>>,
+pub struct UdpTmtcServer<
+    TcSender: PacketSenderRaw<Error = SendError>,
+    TmHandler: UdpTmHandler,
+    SendError,
+> {
+    pub udp_tc_server: UdpTcServer<TcSender, SendError>,
     pub tm_handler: TmHandler,
 }
 
-impl<TmHandler: UdpTmHandler, SendError: core::fmt::Debug + 'static>
-    UdpTmtcServer<TmHandler, SendError>
+impl<
+        TcSender: PacketSenderRaw<Error = SendError>,
+        TmHandler: UdpTmHandler,
+        SendError: Debug + 'static,
+    > UdpTmtcServer<TcSender, TmHandler, SendError>
 {
     pub fn periodic_operation(&mut self) {
-        while self.poll_tc_server() {}
+        loop {
+            if self.poll_tc_server() == HandlingStatus::Empty {
+                break;
+            }
+        }
         if let Some(recv_addr) = self.udp_tc_server.last_sender() {
             self.tm_handler
                 .send_tm_to_udp_client(&self.udp_tc_server.socket, &recv_addr);
         }
     }
 
-    fn poll_tc_server(&mut self) -> bool {
+    fn poll_tc_server(&mut self) -> HandlingStatus {
         match self.udp_tc_server.try_recv_tc() {
-            Ok(_) => true,
-            Err(e) => match e {
-                ReceiveResult::ReceiverError(e) => match e {
-                    CcsdsError::ByteConversionError(e) => {
-                        warn!("packet error: {e:?}");
-                        true
+            Ok(_) => HandlingStatus::HandledOne,
+            Err(e) => {
+                match e {
+                    ReceiveResult::NothingReceived => (),
+                    ReceiveResult::Io(e) => {
+                        warn!("IO error {e}");
                     }
-                    CcsdsError::CustomError(e) => {
-                        warn!("mpsc custom error {e:?}");
-                        true
+                    ReceiveResult::Send(send_error) => {
+                        warn!("send error {send_error:?}");
                     }
-                },
-                ReceiveResult::IoError(e) => {
-                    warn!("IO error {e}");
-                    false
                 }
-                ReceiveResult::NothingReceived => false,
-            },
+                HandlingStatus::Empty
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
     use std::{
+        cell::RefCell,
         collections::VecDeque,
         net::IpAddr,
         sync::{Arc, Mutex},
@@ -117,21 +127,26 @@ mod tests {
             ecss::{tc::PusTcCreator, WritablePusPacket},
             SpHeader,
         },
-        tmtc::ReceivesTcCore,
+        tmtc::PacketSenderRaw,
+        ComponentId,
     };
     use satrs_example::config::{components, OBSW_SERVER_ADDR};
 
     use super::*;
 
-    #[derive(Default, Debug, Clone)]
-    pub struct TestReceiver {
-        tc_vec: Arc<Mutex<VecDeque<Vec<u8>>>>,
+    const UDP_SERVER_ID: ComponentId = 0x05;
+
+    #[derive(Default, Debug)]
+    pub struct TestSender {
+        tc_vec: RefCell<VecDeque<PacketAsVec>>,
     }
 
-    impl ReceivesTcCore for TestReceiver {
-        type Error = CcsdsError<()>;
-        fn pass_tc(&mut self, tc_raw: &[u8]) -> Result<(), Self::Error> {
-            self.tc_vec.lock().unwrap().push_back(tc_raw.to_vec());
+    impl PacketSenderRaw for TestSender {
+        type Error = ();
+
+        fn send_packet(&self, sender_id: ComponentId, tc_raw: &[u8]) -> Result<(), Self::Error> {
+            let mut mut_queue = self.tc_vec.borrow_mut();
+            mut_queue.push_back(PacketAsVec::new(sender_id, tc_raw.to_vec()));
             Ok(())
         }
     }
@@ -150,9 +165,10 @@ mod tests {
     #[test]
     fn test_basic() {
         let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), 0);
-        let test_receiver = TestReceiver::default();
-        let tc_queue = test_receiver.tc_vec.clone();
-        let udp_tc_server = UdpTcServer::new(sock_addr, 2048, Box::new(test_receiver)).unwrap();
+        let test_receiver = TestSender::default();
+        // let tc_queue = test_receiver.tc_vec.clone();
+        let udp_tc_server =
+            UdpTcServer::new(UDP_SERVER_ID, sock_addr, 2048, test_receiver).unwrap();
         let tm_handler = TestTmHandler::default();
         let tm_handler_calls = tm_handler.addrs_to_send_to.clone();
         let mut udp_dyn_server = UdpTmtcServer {
@@ -160,16 +176,18 @@ mod tests {
             tm_handler,
         };
         udp_dyn_server.periodic_operation();
-        assert!(tc_queue.lock().unwrap().is_empty());
+        let queue = udp_dyn_server.udp_tc_server.tc_sender.tc_vec.borrow();
+        assert!(queue.is_empty());
         assert!(tm_handler_calls.lock().unwrap().is_empty());
     }
 
     #[test]
     fn test_transactions() {
-        let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), 0);
-        let test_receiver = TestReceiver::default();
-        let tc_queue = test_receiver.tc_vec.clone();
-        let udp_tc_server = UdpTcServer::new(sock_addr, 2048, Box::new(test_receiver)).unwrap();
+        let sock_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let test_receiver = TestSender::default();
+        // let tc_queue = test_receiver.tc_vec.clone();
+        let udp_tc_server =
+            UdpTcServer::new(UDP_SERVER_ID, sock_addr, 2048, test_receiver).unwrap();
         let server_addr = udp_tc_server.socket.local_addr().unwrap();
         let tm_handler = TestTmHandler::default();
         let tm_handler_calls = tm_handler.addrs_to_send_to.clone();
@@ -183,14 +201,15 @@ mod tests {
             .unwrap();
         let client = UdpSocket::bind("127.0.0.1:0").expect("Connecting to UDP server failed");
         let client_addr = client.local_addr().unwrap();
-        client.connect(server_addr).unwrap();
-        client.send(&ping_tc).unwrap();
+        println!("{}", server_addr);
+        client.send_to(&ping_tc, server_addr).unwrap();
         udp_dyn_server.periodic_operation();
         {
-            let mut tc_queue = tc_queue.lock().unwrap();
-            assert!(!tc_queue.is_empty());
-            let received_tc = tc_queue.pop_front().unwrap();
-            assert_eq!(received_tc, ping_tc);
+            let mut queue = udp_dyn_server.udp_tc_server.tc_sender.tc_vec.borrow_mut();
+            assert!(!queue.is_empty());
+            let packet_with_sender = queue.pop_front().unwrap();
+            assert_eq!(packet_with_sender.packet, ping_tc);
+            assert_eq!(packet_with_sender.sender_id, UDP_SERVER_ID);
         }
 
         {
@@ -201,7 +220,9 @@ mod tests {
             assert_eq!(received_addr, client_addr);
         }
         udp_dyn_server.periodic_operation();
-        assert!(tc_queue.lock().unwrap().is_empty());
+        let queue = udp_dyn_server.udp_tc_server.tc_sender.tc_vec.borrow();
+        assert!(queue.is_empty());
+        drop(queue);
         // Still tries to send to the same client.
         {
             let mut tm_handler_calls = tm_handler_calls.lock().unwrap();

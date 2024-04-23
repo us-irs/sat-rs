@@ -2,10 +2,13 @@
 //!
 //! This module contains structures to make working with the PUS C standard easier.
 //! The satrs-example application contains various usage examples of these components.
-use crate::pool::{StoreAddr, StoreError};
+use crate::pool::{PoolAddr, PoolError};
 use crate::pus::verification::{TcStateAccepted, TcStateToken, VerificationToken};
 use crate::queue::{GenericReceiveError, GenericSendError};
 use crate::request::{GenericMessage, MessageMetadata, RequestId};
+#[cfg(feature = "alloc")]
+use crate::tmtc::PacketAsVec;
+use crate::tmtc::PacketInPool;
 use crate::ComponentId;
 use core::fmt::{Display, Formatter};
 use core::time::Duration;
@@ -44,12 +47,12 @@ use self::verification::VerificationReportingProvider;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PusTmVariant<'time, 'src_data> {
-    InStore(StoreAddr),
+    InStore(PoolAddr),
     Direct(PusTmCreator<'time, 'src_data>),
 }
 
-impl From<StoreAddr> for PusTmVariant<'_, '_> {
-    fn from(value: StoreAddr) -> Self {
+impl From<PoolAddr> for PusTmVariant<'_, '_> {
+    fn from(value: PoolAddr) -> Self {
         Self::InStore(value)
     }
 }
@@ -62,10 +65,10 @@ impl<'time, 'src_data> From<PusTmCreator<'time, 'src_data>> for PusTmVariant<'ti
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EcssTmtcError {
-    Store(StoreError),
+    Store(PoolError),
     ByteConversion(ByteConversionError),
     Pus(PusError),
-    CantSendAddr(StoreAddr),
+    CantSendAddr(PoolAddr),
     CantSendDirectTm,
     Send(GenericSendError),
     Receive(GenericReceiveError),
@@ -99,8 +102,8 @@ impl Display for EcssTmtcError {
     }
 }
 
-impl From<StoreError> for EcssTmtcError {
-    fn from(value: StoreError) -> Self {
+impl From<PoolError> for EcssTmtcError {
+    fn from(value: PoolError) -> Self {
         Self::Store(value)
     }
 }
@@ -153,15 +156,15 @@ pub trait ChannelWithId: Send {
 /// Generic trait for a user supplied sender object.
 ///
 /// This sender object is responsible for sending PUS telemetry to a TM sink.
-pub trait EcssTmSenderCore: Send {
-    fn send_tm(&self, source_id: ComponentId, tm: PusTmVariant) -> Result<(), EcssTmtcError>;
+pub trait EcssTmSender: Send {
+    fn send_tm(&self, sender_id: ComponentId, tm: PusTmVariant) -> Result<(), EcssTmtcError>;
 }
 
 /// Generic trait for a user supplied sender object.
 ///
 /// This sender object is responsible for sending PUS telecommands to a TC recipient. Each
 /// telecommand can optionally have a token which contains its verification state.
-pub trait EcssTcSenderCore {
+pub trait EcssTcSender {
     fn send_tc(&self, tc: PusTcCreator, token: Option<TcStateToken>) -> Result<(), EcssTmtcError>;
 }
 
@@ -169,32 +172,32 @@ pub trait EcssTcSenderCore {
 #[derive(Default)]
 pub struct EcssTmDummySender {}
 
-impl EcssTmSenderCore for EcssTmDummySender {
+impl EcssTmSender for EcssTmDummySender {
     fn send_tm(&self, _source_id: ComponentId, _tm: PusTmVariant) -> Result<(), EcssTmtcError> {
         Ok(())
     }
 }
 
-/// A PUS telecommand packet can be stored in memory using different methods. Right now,
+/// A PUS telecommand packet can be stored in memory and sent using different methods. Right now,
 /// storage inside a pool structure like [crate::pool::StaticMemoryPool], and storage inside a
 /// `Vec<u8>` are supported.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TcInMemory {
-    StoreAddr(StoreAddr),
+    Pool(PacketInPool),
     #[cfg(feature = "alloc")]
-    Vec(alloc::vec::Vec<u8>),
+    Vec(PacketAsVec),
 }
 
-impl From<StoreAddr> for TcInMemory {
-    fn from(value: StoreAddr) -> Self {
-        Self::StoreAddr(value)
+impl From<PacketInPool> for TcInMemory {
+    fn from(value: PacketInPool) -> Self {
+        Self::Pool(value)
     }
 }
 
 #[cfg(feature = "alloc")]
-impl From<alloc::vec::Vec<u8>> for TcInMemory {
-    fn from(value: alloc::vec::Vec<u8>) -> Self {
+impl From<PacketAsVec> for TcInMemory {
+    fn from(value: PacketAsVec) -> Self {
         Self::Vec(value)
     }
 }
@@ -262,25 +265,26 @@ impl From<PusError> for TryRecvTmtcError {
     }
 }
 
-impl From<StoreError> for TryRecvTmtcError {
-    fn from(value: StoreError) -> Self {
+impl From<PoolError> for TryRecvTmtcError {
+    fn from(value: PoolError) -> Self {
         Self::Tmtc(value.into())
     }
 }
 
 /// Generic trait for a user supplied receiver object.
-pub trait EcssTcReceiverCore {
+pub trait EcssTcReceiver {
     fn recv_tc(&self) -> Result<EcssTcAndToken, TryRecvTmtcError>;
 }
 
-/// Generic trait for objects which can receive ECSS PUS telecommands. This trait is
-/// implemented by the [crate::tmtc::pus_distrib::PusDistributor] objects to allow passing PUS TC
-/// packets into it. It is generally assumed that the telecommand is stored in some pool structure,
-/// and the store address is passed as well. This allows efficient zero-copy forwarding of
-/// telecommands.
-pub trait ReceivesEcssPusTc {
+/// Generic trait for objects which can send ECSS PUS telecommands.
+pub trait PacketSenderPusTc: Send {
     type Error;
-    fn pass_pus_tc(&mut self, header: &SpHeader, pus_tc: &PusTcReader) -> Result<(), Self::Error>;
+    fn send_pus_tc(
+        &self,
+        sender_id: ComponentId,
+        header: &SpHeader,
+        pus_tc: &PusTcReader,
+    ) -> Result<(), Self::Error>;
 }
 
 pub trait ActiveRequestMapProvider<V>: Sized {
@@ -326,7 +330,7 @@ pub trait PusReplyHandler<ActiveRequestInfo: ActiveRequestProvider, ReplyType> {
         &mut self,
         reply: &GenericMessage<ReplyType>,
         active_request: &ActiveRequestInfo,
-        tm_sender: &impl EcssTmSenderCore,
+        tm_sender: &impl EcssTmSender,
         verification_handler: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<bool, Self::Error>;
@@ -334,14 +338,14 @@ pub trait PusReplyHandler<ActiveRequestInfo: ActiveRequestProvider, ReplyType> {
     fn handle_unrequested_reply(
         &mut self,
         reply: &GenericMessage<ReplyType>,
-        tm_sender: &impl EcssTmSenderCore,
+        tm_sender: &impl EcssTmSender,
     ) -> Result<(), Self::Error>;
 
     /// Handle the timeout of an active request.
     fn handle_request_timeout(
         &mut self,
         active_request: &ActiveRequestInfo,
-        tm_sender: &impl EcssTmSenderCore,
+        tm_sender: &impl EcssTmSender,
         verification_handler: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<(), Self::Error>;
@@ -353,9 +357,7 @@ pub mod alloc_mod {
 
     use super::*;
 
-    use crate::pus::verification::VerificationReportingProvider;
-
-    /// Extension trait for [EcssTmSenderCore].
+    /// Extension trait for [EcssTmSender].
     ///
     /// It provides additional functionality, for example by implementing the [Downcast] trait
     /// and the [DynClone] trait.
@@ -366,37 +368,36 @@ pub mod alloc_mod {
     /// [DynClone] allows cloning the trait object as long as the boxed object implements
     /// [Clone].
     #[cfg(feature = "alloc")]
-    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
-    pub trait EcssTmSender: EcssTmSenderCore + Downcast + DynClone {
+    pub trait EcssTmSenderExt: EcssTmSender + Downcast + DynClone {
         // Remove this once trait upcasting coercion has been implemented.
         // Tracking issue: https://github.com/rust-lang/rust/issues/65991
-        fn upcast(&self) -> &dyn EcssTmSenderCore;
+        fn upcast(&self) -> &dyn EcssTmSender;
         // Remove this once trait upcasting coercion has been implemented.
         // Tracking issue: https://github.com/rust-lang/rust/issues/65991
-        fn upcast_mut(&mut self) -> &mut dyn EcssTmSenderCore;
+        fn upcast_mut(&mut self) -> &mut dyn EcssTmSender;
     }
 
-    /// Blanket implementation for all types which implement [EcssTmSenderCore] and are clonable.
-    impl<T> EcssTmSender for T
+    /// Blanket implementation for all types which implement [EcssTmSender] and are clonable.
+    impl<T> EcssTmSenderExt for T
     where
-        T: EcssTmSenderCore + Clone + 'static,
+        T: EcssTmSender + Clone + 'static,
     {
         // Remove this once trait upcasting coercion has been implemented.
         // Tracking issue: https://github.com/rust-lang/rust/issues/65991
-        fn upcast(&self) -> &dyn EcssTmSenderCore {
+        fn upcast(&self) -> &dyn EcssTmSender {
             self
         }
         // Remove this once trait upcasting coercion has been implemented.
         // Tracking issue: https://github.com/rust-lang/rust/issues/65991
-        fn upcast_mut(&mut self) -> &mut dyn EcssTmSenderCore {
+        fn upcast_mut(&mut self) -> &mut dyn EcssTmSender {
             self
         }
     }
 
-    dyn_clone::clone_trait_object!(EcssTmSender);
-    impl_downcast!(EcssTmSender);
+    dyn_clone::clone_trait_object!(EcssTmSenderExt);
+    impl_downcast!(EcssTmSenderExt);
 
-    /// Extension trait for [EcssTcSenderCore].
+    /// Extension trait for [EcssTcSender].
     ///
     /// It provides additional functionality, for example by implementing the [Downcast] trait
     /// and the [DynClone] trait.
@@ -407,16 +408,15 @@ pub mod alloc_mod {
     /// [DynClone] allows cloning the trait object as long as the boxed object implements
     /// [Clone].
     #[cfg(feature = "alloc")]
-    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
-    pub trait EcssTcSender: EcssTcSenderCore + Downcast + DynClone {}
+    pub trait EcssTcSenderExt: EcssTcSender + Downcast + DynClone {}
 
-    /// Blanket implementation for all types which implement [EcssTcSenderCore] and are clonable.
-    impl<T> EcssTcSender for T where T: EcssTcSenderCore + Clone + 'static {}
+    /// Blanket implementation for all types which implement [EcssTcSender] and are clonable.
+    impl<T> EcssTcSenderExt for T where T: EcssTcSender + Clone + 'static {}
 
-    dyn_clone::clone_trait_object!(EcssTcSender);
-    impl_downcast!(EcssTcSender);
+    dyn_clone::clone_trait_object!(EcssTcSenderExt);
+    impl_downcast!(EcssTcSenderExt);
 
-    /// Extension trait for [EcssTcReceiverCore].
+    /// Extension trait for [EcssTcReceiver].
     ///
     /// It provides additional functionality, for example by implementing the [Downcast] trait
     /// and the [DynClone] trait.
@@ -427,13 +427,12 @@ pub mod alloc_mod {
     /// [DynClone] allows cloning the trait object as long as the boxed object implements
     /// [Clone].
     #[cfg(feature = "alloc")]
-    #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
-    pub trait EcssTcReceiver: EcssTcReceiverCore + Downcast {}
+    pub trait EcssTcReceiverExt: EcssTcReceiver + Downcast {}
 
-    /// Blanket implementation for all types which implement [EcssTcReceiverCore] and are clonable.
-    impl<T> EcssTcReceiver for T where T: EcssTcReceiverCore + 'static {}
+    /// Blanket implementation for all types which implement [EcssTcReceiver] and are clonable.
+    impl<T> EcssTcReceiverExt for T where T: EcssTcReceiver + 'static {}
 
-    impl_downcast!(EcssTcReceiver);
+    impl_downcast!(EcssTcReceiverExt);
 
     /// This trait is an abstraction for the conversion of a PUS telecommand into a generic request
     /// type.
@@ -457,7 +456,7 @@ pub mod alloc_mod {
             &mut self,
             token: VerificationToken<TcStateAccepted>,
             tc: &PusTcReader,
-            tm_sender: &(impl EcssTmSenderCore + ?Sized),
+            tm_sender: &(impl EcssTmSender + ?Sized),
             verif_reporter: &impl VerificationReportingProvider,
             time_stamp: &[u8],
         ) -> Result<(ActiveRequestInfo, Request), Self::Error>;
@@ -549,7 +548,6 @@ pub mod alloc_mod {
         >
     {
         #[cfg(feature = "std")]
-        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
         pub fn new_from_now(
             active_request_map: ActiveRequestMap,
             fail_data_buf_size: usize,
@@ -636,7 +634,6 @@ pub mod alloc_mod {
 
         /// Update the current time used for timeout checks based on the current OS time.
         #[cfg(feature = "std")]
-        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
         pub fn update_time_from_now(&mut self) -> Result<(), std::time::SystemTimeError> {
             self.current_time = UnixTimestamp::from_now()?;
             Ok(())
@@ -651,22 +648,20 @@ pub mod alloc_mod {
 }
 
 #[cfg(feature = "std")]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
 pub mod std_mod {
     use crate::pool::{
-        PoolProvider, PoolProviderWithGuards, SharedStaticMemoryPool, StoreAddr, StoreError,
+        PoolAddr, PoolError, PoolProvider, PoolProviderWithGuards, SharedStaticMemoryPool,
     };
     use crate::pus::verification::{TcStateAccepted, VerificationToken};
     use crate::pus::{
-        EcssTcAndToken, EcssTcReceiverCore, EcssTmSenderCore, EcssTmtcError, GenericReceiveError,
+        EcssTcAndToken, EcssTcReceiver, EcssTmSender, EcssTmtcError, GenericReceiveError,
         GenericSendError, PusTmVariant, TryRecvTmtcError,
     };
-    use crate::tmtc::tm_helper::SharedTmPool;
+    use crate::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
     use crate::ComponentId;
     use alloc::vec::Vec;
     use core::time::Duration;
     use spacepackets::ecss::tc::PusTcReader;
-    use spacepackets::ecss::tm::PusTmCreator;
     use spacepackets::ecss::WritablePusPacket;
     use spacepackets::time::StdTimestampError;
     use spacepackets::ByteConversionError;
@@ -680,25 +675,20 @@ pub mod std_mod {
 
     use super::verification::{TcStateToken, VerificationReportingProvider};
     use super::{AcceptedEcssTcAndToken, ActiveRequestProvider, TcInMemory};
+    use crate::tmtc::PacketInPool;
 
-    #[derive(Debug)]
-    pub struct PusTmInPool {
-        pub source_id: ComponentId,
-        pub store_addr: StoreAddr,
-    }
-
-    impl From<mpsc::SendError<StoreAddr>> for EcssTmtcError {
-        fn from(_: mpsc::SendError<StoreAddr>) -> Self {
+    impl From<mpsc::SendError<PoolAddr>> for EcssTmtcError {
+        fn from(_: mpsc::SendError<PoolAddr>) -> Self {
             Self::Send(GenericSendError::RxDisconnected)
         }
     }
 
-    impl EcssTmSenderCore for mpsc::Sender<PusTmInPool> {
+    impl EcssTmSender for mpsc::Sender<PacketInPool> {
         fn send_tm(&self, source_id: ComponentId, tm: PusTmVariant) -> Result<(), EcssTmtcError> {
             match tm {
                 PusTmVariant::InStore(store_addr) => self
-                    .send(PusTmInPool {
-                        source_id,
+                    .send(PacketInPool {
+                        sender_id: source_id,
                         store_addr,
                     })
                     .map_err(|_| GenericSendError::RxDisconnected)?,
@@ -708,12 +698,12 @@ pub mod std_mod {
         }
     }
 
-    impl EcssTmSenderCore for mpsc::SyncSender<PusTmInPool> {
+    impl EcssTmSender for mpsc::SyncSender<PacketInPool> {
         fn send_tm(&self, source_id: ComponentId, tm: PusTmVariant) -> Result<(), EcssTmtcError> {
             match tm {
                 PusTmVariant::InStore(store_addr) => self
-                    .try_send(PusTmInPool {
-                        source_id,
+                    .try_send(PacketInPool {
+                        sender_id: source_id,
                         store_addr,
                     })
                     .map_err(|e| EcssTmtcError::Send(e.into()))?,
@@ -723,21 +713,15 @@ pub mod std_mod {
         }
     }
 
-    #[derive(Debug)]
-    pub struct PusTmAsVec {
-        pub source_id: ComponentId,
-        pub packet: Vec<u8>,
-    }
+    pub type MpscTmAsVecSender = mpsc::Sender<PacketAsVec>;
 
-    pub type MpscTmAsVecSender = mpsc::Sender<PusTmAsVec>;
-
-    impl EcssTmSenderCore for MpscTmAsVecSender {
+    impl EcssTmSender for MpscTmAsVecSender {
         fn send_tm(&self, source_id: ComponentId, tm: PusTmVariant) -> Result<(), EcssTmtcError> {
             match tm {
                 PusTmVariant::InStore(addr) => return Err(EcssTmtcError::CantSendAddr(addr)),
                 PusTmVariant::Direct(tm) => self
-                    .send(PusTmAsVec {
-                        source_id,
+                    .send(PacketAsVec {
+                        sender_id: source_id,
                         packet: tm.to_vec()?,
                     })
                     .map_err(|e| EcssTmtcError::Send(e.into()))?,
@@ -746,15 +730,15 @@ pub mod std_mod {
         }
     }
 
-    pub type MpscTmAsVecSenderBounded = mpsc::SyncSender<PusTmAsVec>;
+    pub type MpscTmAsVecSenderBounded = mpsc::SyncSender<PacketAsVec>;
 
-    impl EcssTmSenderCore for MpscTmAsVecSenderBounded {
+    impl EcssTmSender for MpscTmAsVecSenderBounded {
         fn send_tm(&self, source_id: ComponentId, tm: PusTmVariant) -> Result<(), EcssTmtcError> {
             match tm {
                 PusTmVariant::InStore(addr) => return Err(EcssTmtcError::CantSendAddr(addr)),
                 PusTmVariant::Direct(tm) => self
-                    .send(PusTmAsVec {
-                        source_id,
+                    .send(PacketAsVec {
+                        sender_id: source_id,
                         packet: tm.to_vec()?,
                     })
                     .map_err(|e| EcssTmtcError::Send(e.into()))?,
@@ -762,48 +746,10 @@ pub mod std_mod {
             Ok(())
         }
     }
-
-    #[derive(Clone)]
-    pub struct TmInSharedPoolSender<Sender: EcssTmSenderCore> {
-        shared_tm_store: SharedTmPool,
-        sender: Sender,
-    }
-
-    impl<Sender: EcssTmSenderCore> TmInSharedPoolSender<Sender> {
-        pub fn send_direct_tm(
-            &self,
-            source_id: ComponentId,
-            tm: PusTmCreator,
-        ) -> Result<(), EcssTmtcError> {
-            let addr = self.shared_tm_store.add_pus_tm(&tm)?;
-            self.sender.send_tm(source_id, PusTmVariant::InStore(addr))
-        }
-    }
-
-    impl<Sender: EcssTmSenderCore> EcssTmSenderCore for TmInSharedPoolSender<Sender> {
-        fn send_tm(&self, source_id: ComponentId, tm: PusTmVariant) -> Result<(), EcssTmtcError> {
-            if let PusTmVariant::Direct(tm) = tm {
-                return self.send_direct_tm(source_id, tm);
-            }
-            self.sender.send_tm(source_id, tm)
-        }
-    }
-
-    impl<Sender: EcssTmSenderCore> TmInSharedPoolSender<Sender> {
-        pub fn new(shared_tm_store: SharedTmPool, sender: Sender) -> Self {
-            Self {
-                shared_tm_store,
-                sender,
-            }
-        }
-    }
-
-    pub type MpscTmInSharedPoolSender = TmInSharedPoolSender<mpsc::Sender<PusTmInPool>>;
-    pub type MpscTmInSharedPoolSenderBounded = TmInSharedPoolSender<mpsc::SyncSender<PusTmInPool>>;
 
     pub type MpscTcReceiver = mpsc::Receiver<EcssTcAndToken>;
 
-    impl EcssTcReceiverCore for MpscTcReceiver {
+    impl EcssTcReceiver for MpscTcReceiver {
         fn recv_tc(&self) -> Result<EcssTcAndToken, TryRecvTmtcError> {
             self.try_recv().map_err(|e| match e {
                 TryRecvError::Empty => TryRecvTmtcError::Empty,
@@ -819,16 +765,14 @@ pub mod std_mod {
         use super::*;
         use crossbeam_channel as cb;
 
-        pub type TmInSharedPoolSenderWithCrossbeam = TmInSharedPoolSender<cb::Sender<PusTmInPool>>;
-
-        impl From<cb::SendError<StoreAddr>> for EcssTmtcError {
-            fn from(_: cb::SendError<StoreAddr>) -> Self {
+        impl From<cb::SendError<PoolAddr>> for EcssTmtcError {
+            fn from(_: cb::SendError<PoolAddr>) -> Self {
                 Self::Send(GenericSendError::RxDisconnected)
             }
         }
 
-        impl From<cb::TrySendError<StoreAddr>> for EcssTmtcError {
-            fn from(value: cb::TrySendError<StoreAddr>) -> Self {
+        impl From<cb::TrySendError<PoolAddr>> for EcssTmtcError {
+            fn from(value: cb::TrySendError<PoolAddr>) -> Self {
                 match value {
                     cb::TrySendError::Full(_) => Self::Send(GenericSendError::QueueFull(None)),
                     cb::TrySendError::Disconnected(_) => {
@@ -838,37 +782,31 @@ pub mod std_mod {
             }
         }
 
-        impl EcssTmSenderCore for cb::Sender<PusTmInPool> {
+        impl EcssTmSender for cb::Sender<PacketInPool> {
             fn send_tm(
                 &self,
-                source_id: ComponentId,
+                sender_id: ComponentId,
                 tm: PusTmVariant,
             ) -> Result<(), EcssTmtcError> {
                 match tm {
                     PusTmVariant::InStore(addr) => self
-                        .try_send(PusTmInPool {
-                            source_id,
-                            store_addr: addr,
-                        })
+                        .try_send(PacketInPool::new(sender_id, addr))
                         .map_err(|e| EcssTmtcError::Send(e.into()))?,
                     PusTmVariant::Direct(_) => return Err(EcssTmtcError::CantSendDirectTm),
                 };
                 Ok(())
             }
         }
-        impl EcssTmSenderCore for cb::Sender<PusTmAsVec> {
+        impl EcssTmSender for cb::Sender<PacketAsVec> {
             fn send_tm(
                 &self,
-                source_id: ComponentId,
+                sender_id: ComponentId,
                 tm: PusTmVariant,
             ) -> Result<(), EcssTmtcError> {
                 match tm {
                     PusTmVariant::InStore(addr) => return Err(EcssTmtcError::CantSendAddr(addr)),
                     PusTmVariant::Direct(tm) => self
-                        .send(PusTmAsVec {
-                            source_id,
-                            packet: tm.to_vec()?,
-                        })
+                        .send(PacketAsVec::new(sender_id, tm.to_vec()?))
                         .map_err(|e| EcssTmtcError::Send(e.into()))?,
                 };
                 Ok(())
@@ -1010,6 +948,8 @@ pub mod std_mod {
 
         fn tc_slice_raw(&self) -> &[u8];
 
+        fn sender_id(&self) -> Option<ComponentId>;
+
         fn cache_and_convert(
             &mut self,
             possible_packet: &TcInMemory,
@@ -1032,6 +972,7 @@ pub mod std_mod {
     /// [SharedStaticMemoryPool].
     #[derive(Default, Clone)]
     pub struct EcssTcInVecConverter {
+        sender_id: Option<ComponentId>,
         pub pus_tc_raw: Option<Vec<u8>>,
     }
 
@@ -1039,14 +980,19 @@ pub mod std_mod {
         fn cache(&mut self, tc_in_memory: &TcInMemory) -> Result<(), PusTcFromMemError> {
             self.pus_tc_raw = None;
             match tc_in_memory {
-                super::TcInMemory::StoreAddr(_) => {
+                super::TcInMemory::Pool(_packet_in_pool) => {
                     return Err(PusTcFromMemError::InvalidFormat(tc_in_memory.clone()));
                 }
-                super::TcInMemory::Vec(vec) => {
-                    self.pus_tc_raw = Some(vec.clone());
+                super::TcInMemory::Vec(packet_with_sender) => {
+                    self.pus_tc_raw = Some(packet_with_sender.packet.clone());
+                    self.sender_id = Some(packet_with_sender.sender_id);
                 }
             };
             Ok(())
+        }
+
+        fn sender_id(&self) -> Option<ComponentId> {
+            self.sender_id
         }
 
         fn tc_slice_raw(&self) -> &[u8] {
@@ -1062,6 +1008,7 @@ pub mod std_mod {
     /// packets should be avoided. Please note that this structure is not able to convert TCs which
     /// are stored as a `Vec<u8>`.
     pub struct EcssTcInSharedStoreConverter {
+        sender_id: Option<ComponentId>,
         shared_tc_store: SharedStaticMemoryPool,
         pus_buf: Vec<u8>,
     }
@@ -1069,15 +1016,16 @@ pub mod std_mod {
     impl EcssTcInSharedStoreConverter {
         pub fn new(shared_tc_store: SharedStaticMemoryPool, max_expected_tc_size: usize) -> Self {
             Self {
+                sender_id: None,
                 shared_tc_store,
                 pus_buf: alloc::vec![0; max_expected_tc_size],
             }
         }
 
-        pub fn copy_tc_to_buf(&mut self, addr: StoreAddr) -> Result<(), PusTcFromMemError> {
+        pub fn copy_tc_to_buf(&mut self, addr: PoolAddr) -> Result<(), PusTcFromMemError> {
             // Keep locked section as short as possible.
             let mut tc_pool = self.shared_tc_store.write().map_err(|_| {
-                PusTcFromMemError::EcssTmtc(EcssTmtcError::Store(StoreError::LockError))
+                PusTcFromMemError::EcssTmtc(EcssTmtcError::Store(PoolError::LockError))
             })?;
             let tc_size = tc_pool.len_of_data(&addr).map_err(EcssTmtcError::Store)?;
             if tc_size > self.pus_buf.len() {
@@ -1099,8 +1047,9 @@ pub mod std_mod {
     impl EcssTcInMemConverter for EcssTcInSharedStoreConverter {
         fn cache(&mut self, tc_in_memory: &TcInMemory) -> Result<(), PusTcFromMemError> {
             match tc_in_memory {
-                super::TcInMemory::StoreAddr(addr) => {
-                    self.copy_tc_to_buf(*addr)?;
+                super::TcInMemory::Pool(packet_in_pool) => {
+                    self.copy_tc_to_buf(packet_in_pool.store_addr)?;
+                    self.sender_id = Some(packet_in_pool.sender_id);
                 }
                 super::TcInMemory::Vec(_) => {
                     return Err(PusTcFromMemError::InvalidFormat(tc_in_memory.clone()));
@@ -1112,11 +1061,15 @@ pub mod std_mod {
         fn tc_slice_raw(&self) -> &[u8] {
             self.pus_buf.as_ref()
         }
+
+        fn sender_id(&self) -> Option<ComponentId> {
+            self.sender_id
+        }
     }
 
     pub struct PusServiceBase<
-        TcReceiver: EcssTcReceiverCore,
-        TmSender: EcssTmSenderCore,
+        TcReceiver: EcssTcReceiver,
+        TmSender: EcssTmSender,
         VerificationReporter: VerificationReportingProvider,
     > {
         pub id: ComponentId,
@@ -1135,8 +1088,8 @@ pub mod std_mod {
     /// by using the [EcssTcInMemConverter] abstraction. This object provides some convenience
     /// methods to make the generic parts of TC handling easier.
     pub struct PusServiceHelper<
-        TcReceiver: EcssTcReceiverCore,
-        TmSender: EcssTmSenderCore,
+        TcReceiver: EcssTcReceiver,
+        TmSender: EcssTmSender,
         TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
     > {
@@ -1145,8 +1098,8 @@ pub mod std_mod {
     }
 
     impl<
-            TcReceiver: EcssTcReceiverCore,
-            TmSender: EcssTmSenderCore,
+            TcReceiver: EcssTcReceiver,
+            TmSender: EcssTmSender,
             TcInMemConverter: EcssTcInMemConverter,
             VerificationReporter: VerificationReportingProvider,
         > PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
@@ -1177,7 +1130,7 @@ pub mod std_mod {
             &self.common.tm_sender
         }
 
-        /// This function can be used to poll the internal [EcssTcReceiverCore] object for the next
+        /// This function can be used to poll the internal [EcssTcReceiver] object for the next
         /// telecommand packet. It will return `Ok(None)` if there are not packets available.
         /// In any other case, it will perform the acceptance of the ECSS TC packet using the
         /// internal [VerificationReportingProvider] object. It will then return the telecommand
@@ -1236,14 +1189,14 @@ pub mod std_mod {
     pub type PusServiceHelperStaticWithMpsc<TcInMemConverter, VerificationReporter> =
         PusServiceHelper<
             MpscTcReceiver,
-            MpscTmInSharedPoolSender,
+            PacketSenderWithSharedPool,
             TcInMemConverter,
             VerificationReporter,
         >;
     pub type PusServiceHelperStaticWithBoundedMpsc<TcInMemConverter, VerificationReporter> =
         PusServiceHelper<
             MpscTcReceiver,
-            MpscTmInSharedPoolSenderBounded,
+            PacketSenderWithSharedPool,
             TcInMemConverter,
             VerificationReporter,
         >;
@@ -1313,7 +1266,7 @@ pub mod tests {
 
     use crate::pool::{PoolProvider, SharedStaticMemoryPool, StaticMemoryPool, StaticPoolConfig};
     use crate::pus::verification::{RequestId, VerificationReporter};
-    use crate::tmtc::tm_helper::SharedTmPool;
+    use crate::tmtc::{PacketAsVec, PacketInPool, PacketSenderWithSharedPool, SharedPacketPool};
     use crate::ComponentId;
 
     use super::test_util::{TEST_APID, TEST_COMPONENT_ID_0};
@@ -1370,14 +1323,14 @@ pub mod tests {
         pus_buf: RefCell<[u8; 2048]>,
         tm_buf: [u8; 2048],
         tc_pool: SharedStaticMemoryPool,
-        tm_pool: SharedTmPool,
+        tm_pool: SharedPacketPool,
         tc_sender: mpsc::SyncSender<EcssTcAndToken>,
-        tm_receiver: mpsc::Receiver<PusTmInPool>,
+        tm_receiver: mpsc::Receiver<PacketInPool>,
     }
 
     pub type PusServiceHelperStatic = PusServiceHelper<
         MpscTcReceiver,
-        MpscTmInSharedPoolSenderBounded,
+        PacketSenderWithSharedPool,
         EcssTcInSharedStoreConverter,
         VerificationReporter,
     >;
@@ -1392,14 +1345,16 @@ pub mod tests {
             let tc_pool = StaticMemoryPool::new(pool_cfg.clone());
             let tm_pool = StaticMemoryPool::new(pool_cfg);
             let shared_tc_pool = SharedStaticMemoryPool::new(RwLock::new(tc_pool));
-            let shared_tm_pool = SharedTmPool::new(tm_pool);
+            let shared_tm_pool = SharedStaticMemoryPool::new(RwLock::new(tm_pool));
+            let shared_tm_pool_wrapper = SharedPacketPool::new(&shared_tm_pool);
             let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::sync_channel(10);
             let (tm_tx, tm_rx) = mpsc::sync_channel(10);
 
             let verif_cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
             let verification_handler =
                 VerificationReporter::new(TEST_COMPONENT_ID_0.id(), &verif_cfg);
-            let test_srv_tm_sender = TmInSharedPoolSender::new(shared_tm_pool.clone(), tm_tx);
+            let test_srv_tm_sender =
+                PacketSenderWithSharedPool::new(tm_tx, shared_tm_pool_wrapper.clone());
             let in_store_converter =
                 EcssTcInSharedStoreConverter::new(shared_tc_pool.clone(), 2048);
             (
@@ -1407,7 +1362,7 @@ pub mod tests {
                     pus_buf: RefCell::new([0; 2048]),
                     tm_buf: [0; 2048],
                     tc_pool: shared_tc_pool,
-                    tm_pool: shared_tm_pool,
+                    tm_pool: shared_tm_pool_wrapper,
                     tc_sender: test_srv_tc_tx,
                     tm_receiver: tm_rx,
                 },
@@ -1420,7 +1375,12 @@ pub mod tests {
                 ),
             )
         }
-        pub fn send_tc(&self, token: &VerificationToken<TcStateAccepted>, tc: &PusTcCreator) {
+        pub fn send_tc(
+            &self,
+            sender_id: ComponentId,
+            token: &VerificationToken<TcStateAccepted>,
+            tc: &PusTcCreator,
+        ) {
             let mut mut_buf = self.pus_buf.borrow_mut();
             let tc_size = tc.write_to_bytes(mut_buf.as_mut_slice()).unwrap();
             let mut tc_pool = self.tc_pool.write().unwrap();
@@ -1428,7 +1388,10 @@ pub mod tests {
             drop(tc_pool);
             // Send accepted TC to test service handler.
             self.tc_sender
-                .send(EcssTcAndToken::new(addr, *token))
+                .send(EcssTcAndToken::new(
+                    PacketInPool::new(sender_id, addr),
+                    *token,
+                ))
                 .expect("sending tc failed");
         }
 
@@ -1469,7 +1432,7 @@ pub mod tests {
     pub struct PusServiceHandlerWithVecCommon {
         current_tm: Option<Vec<u8>>,
         tc_sender: mpsc::Sender<EcssTcAndToken>,
-        tm_receiver: mpsc::Receiver<PusTmAsVec>,
+        tm_receiver: mpsc::Receiver<PacketAsVec>,
     }
     pub type PusServiceHelperDynamic = PusServiceHelper<
         MpscTcReceiver,
@@ -1542,11 +1505,19 @@ pub mod tests {
     }
 
     impl PusServiceHandlerWithVecCommon {
-        pub fn send_tc(&self, token: &VerificationToken<TcStateAccepted>, tc: &PusTcCreator) {
+        pub fn send_tc(
+            &self,
+            sender_id: ComponentId,
+            token: &VerificationToken<TcStateAccepted>,
+            tc: &PusTcCreator,
+        ) {
             // Send accepted TC to test service handler.
             self.tc_sender
                 .send(EcssTcAndToken::new(
-                    TcInMemory::Vec(tc.to_vec().expect("pus tc conversion to vec failed")),
+                    TcInMemory::Vec(PacketAsVec::new(
+                        sender_id,
+                        tc.to_vec().expect("pus tc conversion to vec failed"),
+                    )),
                     *token,
                 ))
                 .expect("sending tc failed");

@@ -14,7 +14,7 @@ use spacepackets::{ByteConversionError, CcsdsPacket};
 #[cfg(feature = "std")]
 use std::error::Error;
 
-use crate::pool::{PoolProvider, StoreError};
+use crate::pool::{PoolError, PoolProvider};
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
 
@@ -151,7 +151,7 @@ pub enum ScheduleError {
     },
     /// Nested time-tagged commands are not allowed.
     NestedScheduledTc,
-    StoreError(StoreError),
+    StoreError(PoolError),
     TcDataEmpty,
     TimestampError(TimestampError),
     WrongSubservice(u8),
@@ -206,8 +206,8 @@ impl From<PusError> for ScheduleError {
     }
 }
 
-impl From<StoreError> for ScheduleError {
-    fn from(e: StoreError) -> Self {
+impl From<PoolError> for ScheduleError {
+    fn from(e: PoolError) -> Self {
         Self::StoreError(e)
     }
 }
@@ -240,7 +240,7 @@ impl Error for ScheduleError {
 pub trait PusSchedulerProvider {
     type TimeProvider: CcsdsTimeProvider + TimeReader;
 
-    fn reset(&mut self, store: &mut (impl PoolProvider + ?Sized)) -> Result<(), StoreError>;
+    fn reset(&mut self, store: &mut (impl PoolProvider + ?Sized)) -> Result<(), PoolError>;
 
     fn is_enabled(&self) -> bool;
 
@@ -345,12 +345,9 @@ pub mod alloc_mod {
         },
         vec::Vec,
     };
-    use spacepackets::time::{
-        cds::{self, DaysLen24Bits},
-        UnixTime,
-    };
+    use spacepackets::time::cds::{self, DaysLen24Bits};
 
-    use crate::pool::StoreAddr;
+    use crate::pool::PoolAddr;
 
     use super::*;
 
@@ -371,8 +368,8 @@ pub mod alloc_mod {
     }
 
     enum DeletionResult {
-        WithoutStoreDeletion(Option<StoreAddr>),
-        WithStoreDeletion(Result<bool, StoreError>),
+        WithoutStoreDeletion(Option<PoolAddr>),
+        WithStoreDeletion(Result<bool, PoolError>),
     }
 
     /// This is the core data structure for scheduling PUS telecommands with [alloc] support.
@@ -426,7 +423,6 @@ pub mod alloc_mod {
 
         /// Like [Self::new], but sets the `init_current_time` parameter to the current system time.
         #[cfg(feature = "std")]
-        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
         pub fn new_with_current_init_time(time_margin: Duration) -> Result<Self, SystemTimeError> {
             Ok(Self::new(UnixTime::now()?, time_margin))
         }
@@ -528,7 +524,7 @@ pub mod alloc_mod {
             &mut self,
             time_window: TimeWindow<TimeProvider>,
             pool: &mut (impl PoolProvider + ?Sized),
-        ) -> Result<u64, (u64, StoreError)> {
+        ) -> Result<u64, (u64, PoolError)> {
             let range = self.retrieve_by_time_filter(time_window);
             let mut del_packets = 0;
             let mut res_if_fails = None;
@@ -558,7 +554,7 @@ pub mod alloc_mod {
         pub fn delete_all(
             &mut self,
             pool: &mut (impl PoolProvider + ?Sized),
-        ) -> Result<u64, (u64, StoreError)> {
+        ) -> Result<u64, (u64, PoolError)> {
             self.delete_by_time_filter(TimeWindow::<cds::CdsTime>::new_select_all(), pool)
         }
 
@@ -604,7 +600,7 @@ pub mod alloc_mod {
         /// Please note that this function will stop on the first telecommand with a request ID match.
         /// In case of duplicate IDs (which should generally not happen), this function needs to be
         /// called repeatedly.
-        pub fn delete_by_request_id(&mut self, req_id: &RequestId) -> Option<StoreAddr> {
+        pub fn delete_by_request_id(&mut self, req_id: &RequestId) -> Option<PoolAddr> {
             if let DeletionResult::WithoutStoreDeletion(v) =
                 self.delete_by_request_id_internal_without_store_deletion(req_id)
             {
@@ -618,7 +614,7 @@ pub mod alloc_mod {
             &mut self,
             req_id: &RequestId,
             pool: &mut (impl PoolProvider + ?Sized),
-        ) -> Result<bool, StoreError> {
+        ) -> Result<bool, PoolError> {
             if let DeletionResult::WithStoreDeletion(v) =
                 self.delete_by_request_id_internal_with_store_deletion(req_id, pool)
             {
@@ -670,7 +666,6 @@ pub mod alloc_mod {
         }
 
         #[cfg(feature = "std")]
-        #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
         pub fn update_time_from_now(&mut self) -> Result<(), SystemTimeError> {
             self.current_time = UnixTime::now()?;
             Ok(())
@@ -696,7 +691,7 @@ pub mod alloc_mod {
             releaser: R,
             tc_store: &mut (impl PoolProvider + ?Sized),
             tc_buf: &mut [u8],
-        ) -> Result<u64, (u64, StoreError)> {
+        ) -> Result<u64, (u64, PoolError)> {
             self.release_telecommands_internal(releaser, tc_store, Some(tc_buf))
         }
 
@@ -710,7 +705,7 @@ pub mod alloc_mod {
             &mut self,
             releaser: R,
             tc_store: &mut (impl PoolProvider + ?Sized),
-        ) -> Result<u64, (u64, StoreError)> {
+        ) -> Result<u64, (u64, PoolError)> {
             self.release_telecommands_internal(releaser, tc_store, None)
         }
 
@@ -719,7 +714,7 @@ pub mod alloc_mod {
             mut releaser: R,
             tc_store: &mut (impl PoolProvider + ?Sized),
             mut tc_buf: Option<&mut [u8]>,
-        ) -> Result<u64, (u64, StoreError)> {
+        ) -> Result<u64, (u64, PoolError)> {
             let tcs_to_release = self.telecommands_to_release();
             let mut released_tcs = 0;
             let mut store_error = Ok(());
@@ -765,7 +760,7 @@ pub mod alloc_mod {
             mut releaser: R,
             tc_store: &(impl PoolProvider + ?Sized),
             tc_buf: &mut [u8],
-        ) -> Result<alloc::vec::Vec<TcInfo>, (alloc::vec::Vec<TcInfo>, StoreError)> {
+        ) -> Result<alloc::vec::Vec<TcInfo>, (alloc::vec::Vec<TcInfo>, PoolError)> {
             let tcs_to_release = self.telecommands_to_release();
             let mut released_tcs = alloc::vec::Vec::new();
             for tc in tcs_to_release {
@@ -796,7 +791,7 @@ pub mod alloc_mod {
         /// The holding store for the telecommands needs to be passed so all the stored telecommands
         /// can be deleted to avoid a memory leak. If at last one deletion operation fails, the error
         /// will be returned but the method will still try to delete all the commands in the schedule.
-        fn reset(&mut self, store: &mut (impl PoolProvider + ?Sized)) -> Result<(), StoreError> {
+        fn reset(&mut self, store: &mut (impl PoolProvider + ?Sized)) -> Result<(), PoolError> {
             self.enabled = false;
             let mut deletion_ok = Ok(());
             for tc_lists in &mut self.tc_map {
@@ -854,7 +849,7 @@ pub mod alloc_mod {
 mod tests {
     use super::*;
     use crate::pool::{
-        PoolProvider, StaticMemoryPool, StaticPoolAddr, StaticPoolConfig, StoreAddr, StoreError,
+        PoolAddr, PoolError, PoolProvider, StaticMemoryPool, StaticPoolAddr, StaticPoolConfig,
     };
     use alloc::collections::btree_map::Range;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
@@ -993,7 +988,7 @@ mod tests {
             .insert_unwrapped_and_stored_tc(
                 UnixTime::new_only_secs(100),
                 TcInfo::new(
-                    StoreAddr::from(StaticPoolAddr {
+                    PoolAddr::from(StaticPoolAddr {
                         pool_idx: 0,
                         packet_idx: 1,
                     }),
@@ -1010,7 +1005,7 @@ mod tests {
             .insert_unwrapped_and_stored_tc(
                 UnixTime::new_only_secs(100),
                 TcInfo::new(
-                    StoreAddr::from(StaticPoolAddr {
+                    PoolAddr::from(StaticPoolAddr {
                         pool_idx: 0,
                         packet_idx: 2,
                     }),
@@ -1054,8 +1049,8 @@ mod tests {
 
     fn common_check(
         enabled: bool,
-        store_addr: &StoreAddr,
-        expected_store_addrs: Vec<StoreAddr>,
+        store_addr: &PoolAddr,
+        expected_store_addrs: Vec<PoolAddr>,
         counter: &mut usize,
     ) {
         assert!(enabled);
@@ -1064,8 +1059,8 @@ mod tests {
     }
     fn common_check_disabled(
         enabled: bool,
-        store_addr: &StoreAddr,
-        expected_store_addrs: Vec<StoreAddr>,
+        store_addr: &PoolAddr,
+        expected_store_addrs: Vec<PoolAddr>,
         counter: &mut usize,
     ) {
         assert!(!enabled);
@@ -1519,7 +1514,7 @@ mod tests {
         // TC could not even be read..
         assert_eq!(err.0, 0);
         match err.1 {
-            StoreError::DataDoesNotExist(addr) => {
+            PoolError::DataDoesNotExist(addr) => {
                 assert_eq!(tc_info_0.addr(), addr);
             }
             _ => panic!("unexpected error {}", err.1),
@@ -1542,7 +1537,7 @@ mod tests {
         assert!(reset_res.is_err());
         let err = reset_res.unwrap_err();
         match err {
-            StoreError::DataDoesNotExist(addr) => {
+            PoolError::DataDoesNotExist(addr) => {
                 assert_eq!(addr, tc_info_0.addr());
             }
             _ => panic!("unexpected error {err}"),
@@ -1644,7 +1639,7 @@ mod tests {
         let err = insert_res.unwrap_err();
         match err {
             ScheduleError::StoreError(e) => match e {
-                StoreError::StoreFull(_) => {}
+                PoolError::StoreFull(_) => {}
                 _ => panic!("unexpected store error {e}"),
             },
             _ => panic!("unexpected error {err}"),
