@@ -114,6 +114,7 @@ impl<
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
     use std::{
         cell::RefCell,
         collections::VecDeque,
@@ -182,7 +183,7 @@ mod tests {
 
     #[test]
     fn test_transactions() {
-        let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), 0);
+        let sock_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let test_receiver = TestSender::default();
         // let tc_queue = test_receiver.tc_vec.clone();
         let udp_tc_server =
@@ -200,8 +201,8 @@ mod tests {
             .unwrap();
         let client = UdpSocket::bind("127.0.0.1:0").expect("Connecting to UDP server failed");
         let client_addr = client.local_addr().unwrap();
-        client.connect(server_addr).unwrap();
-        client.send(&ping_tc).unwrap();
+        println!("{}", server_addr);
+        client.send_to(&ping_tc, server_addr).unwrap();
         udp_dyn_server.periodic_operation();
         {
             let mut queue = udp_dyn_server.udp_tc_server.tc_sender.tc_vec.borrow_mut();
