@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 - `parse_for_ccsds_space_packets` did not detect CCSDS space packets at the buffer end with the
   smallest possible size of 7 bytes.
+- TCP server component now re-registers the internal `mio::Poll` object if the client reset
+  the connection unexpectedly. Not doing so prevented the server from functioning properly
+  after a re-connect.
 
 # [v0.2.0-rc.3] 2024-04-17
 
