@@ -1,11 +1,11 @@
 use satrs::event_man::{
     EventManagerWithMpsc, EventMessage, EventMessageU32, EventRoutingError, EventSendProvider,
-    EventU32SenderMpsc, MpscEventU32Receiver,
+    EventU32SenderMpsc,
 };
 use satrs::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
 use satrs::params::U32Pair;
 use satrs::params::{Params, ParamsHeapless, WritableToBeBytes};
-use satrs::pus::event_man::{DefaultPusEventMgmtBackend, EventReporter, PusEventDispatcher};
+use satrs::pus::event_man::{DefaultPusEventReportingMap, EventReporter, PusEventTmCreatorWithMap};
 use satrs::pus::test_util::TEST_COMPONENT_ID_0;
 use satrs::request::UniqueApidTargetId;
 use satrs::tmtc::PacketAsVec;
@@ -29,18 +29,18 @@ pub enum CustomTmSenderError {
 
 #[test]
 fn test_threaded_usage() {
-    let (event_sender, event_man_receiver) = mpsc::channel();
-    let event_receiver = MpscEventU32Receiver::new(event_man_receiver);
-    let mut event_man = EventManagerWithMpsc::new(event_receiver);
+    let (event_tx, event_rx) = mpsc::sync_channel(100);
+    let mut event_man = EventManagerWithMpsc::new(event_rx);
 
     let (pus_event_man_tx, pus_event_man_rx) = mpsc::channel();
     let pus_event_man_send_provider = EventU32SenderMpsc::new(1, pus_event_man_tx);
     event_man.subscribe_all(pus_event_man_send_provider.target_id());
     event_man.add_sender(pus_event_man_send_provider);
-    let (event_tx, event_rx) = mpsc::channel::<PacketAsVec>();
+    let (event_packet_tx, event_packet_rx) = mpsc::channel::<PacketAsVec>();
     let reporter =
         EventReporter::new(TEST_ID.raw(), 0x02, 0, 128).expect("Creating event reporter failed");
-    let pus_event_man = PusEventDispatcher::new(reporter, DefaultPusEventMgmtBackend::default());
+    let pus_event_man =
+        PusEventTmCreatorWithMap::new(reporter, DefaultPusEventReportingMap::default());
     let error_handler = |event_msg: &EventMessageU32, error: EventRoutingError| {
         panic!("received routing error for event {event_msg:?}: {error:?}");
     };
@@ -54,7 +54,7 @@ fn test_threaded_usage() {
                 Ok(event_msg) => {
                     let gen_event = |aux_data| {
                         pus_event_man.generate_pus_event_tm_generic(
-                            &event_tx,
+                            &event_packet_tx,
                             &EMPTY_STAMP,
                             event_msg.event(),
                             aux_data,
@@ -100,14 +100,14 @@ fn test_threaded_usage() {
 
     // Event sender and TM checker thread
     let jh1 = thread::spawn(move || {
-        event_sender
+        event_tx
             .send(EventMessage::new(
                 TEST_COMPONENT_ID_0.id(),
                 INFO_EVENT.into(),
             ))
             .expect("Sending info event failed");
         loop {
-            match event_rx.try_recv() {
+            match event_packet_rx.try_recv() {
                 // Event TM received successfully
                 Ok(event_tm) => {
                     let tm = PusTmReader::new(event_tm.packet.as_slice(), 7)
@@ -129,7 +129,7 @@ fn test_threaded_usage() {
                 }
             }
         }
-        event_sender
+        event_tx
             .send(EventMessage::new_with_params(
                 TEST_COMPONENT_ID_0.id(),
                 LOW_SEV_EVENT,
@@ -137,7 +137,7 @@ fn test_threaded_usage() {
             ))
             .expect("Sending low severity event failed");
         loop {
-            match event_rx.try_recv() {
+            match event_packet_rx.try_recv() {
                 // Event TM received successfully
                 Ok(event_tm) => {
                     let tm = PusTmReader::new(event_tm.packet.as_slice(), 7)

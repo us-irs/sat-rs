@@ -28,7 +28,7 @@ pub use heapless_mod::*;
 /// structure to track disabled events. A more primitive and embedded friendly
 /// solution could track this information in a static or pre-allocated list which contains
 /// the disabled events.
-pub trait PusEventMgmtBackendProvider<Event: GenericEvent> {
+pub trait PusEventReportingMapProvider<Event: GenericEvent> {
     type Error;
 
     fn event_enabled(&self, event: &Event) -> bool;
@@ -56,7 +56,7 @@ pub mod heapless_mod {
     {
     }
 
-    impl<const N: usize, Provider: GenericEvent> PusEventMgmtBackendProvider<Provider>
+    impl<const N: usize, Provider: GenericEvent> PusEventReportingMapProvider<Provider>
         for HeaplessPusMgmtBackendProvider<N, Provider>
     {
         type Error = ();
@@ -105,20 +105,23 @@ impl From<EcssTmtcError> for EventManError {
 pub mod alloc_mod {
     use core::marker::PhantomData;
 
-    use crate::events::EventU16;
+    use crate::{
+        events::EventU16,
+        pus::event::{DummyEventHook, EventTmHookProvider},
+    };
 
     use super::*;
 
     /// Default backend provider which uses a hash set as the event reporting status container
-    /// like mentioned in the example of the [PusEventMgmtBackendProvider] documentation.
+    /// like mentioned in the example of the [PusEventReportingMapProvider] documentation.
     ///
     /// This provider is a good option for host systems or larger embedded systems where
     /// the expected occasional memory allocation performed by the [HashSet] is not an issue.
-    pub struct DefaultPusEventMgmtBackend<Event: GenericEvent = EventU32> {
+    pub struct DefaultPusEventReportingMap<Event: GenericEvent = EventU32> {
         disabled: HashSet<Event>,
     }
 
-    impl<Event: GenericEvent> Default for DefaultPusEventMgmtBackend<Event> {
+    impl<Event: GenericEvent> Default for DefaultPusEventReportingMap<Event> {
         fn default() -> Self {
             Self {
                 disabled: HashSet::default(),
@@ -126,51 +129,54 @@ pub mod alloc_mod {
         }
     }
 
-    impl<EV: GenericEvent + PartialEq + Eq + Hash + Copy + Clone> PusEventMgmtBackendProvider<EV>
-        for DefaultPusEventMgmtBackend<EV>
+    impl<Event: GenericEvent + PartialEq + Eq + Hash + Copy + Clone>
+        PusEventReportingMapProvider<Event> for DefaultPusEventReportingMap<Event>
     {
         type Error = ();
 
-        fn event_enabled(&self, event: &EV) -> bool {
+        fn event_enabled(&self, event: &Event) -> bool {
             !self.disabled.contains(event)
         }
 
-        fn enable_event_reporting(&mut self, event: &EV) -> Result<bool, Self::Error> {
+        fn enable_event_reporting(&mut self, event: &Event) -> Result<bool, Self::Error> {
             Ok(self.disabled.remove(event))
         }
 
-        fn disable_event_reporting(&mut self, event: &EV) -> Result<bool, Self::Error> {
+        fn disable_event_reporting(&mut self, event: &Event) -> Result<bool, Self::Error> {
             Ok(self.disabled.insert(*event))
         }
     }
 
-    pub struct PusEventDispatcher<
-        B: PusEventMgmtBackendProvider<EV, Error = E>,
-        EV: GenericEvent,
-        E,
+    pub struct PusEventTmCreatorWithMap<
+        ReportingMap: PusEventReportingMapProvider<Event>,
+        Event: GenericEvent,
+        EventTmHook: EventTmHookProvider = DummyEventHook,
     > {
-        reporter: EventReporter,
-        backend: B,
-        phantom: PhantomData<(E, EV)>,
+        pub reporter: EventReporter<EventTmHook>,
+        reporting_map: ReportingMap,
+        phantom: PhantomData<Event>,
     }
 
-    impl<B: PusEventMgmtBackendProvider<Event, Error = E>, Event: GenericEvent, E>
-        PusEventDispatcher<B, Event, E>
+    impl<
+            ReportingMap: PusEventReportingMapProvider<Event>,
+            Event: GenericEvent,
+            EventTmHook: EventTmHookProvider,
+        > PusEventTmCreatorWithMap<ReportingMap, Event, EventTmHook>
     {
-        pub fn new(reporter: EventReporter, backend: B) -> Self {
+        pub fn new(reporter: EventReporter<EventTmHook>, backend: ReportingMap) -> Self {
             Self {
                 reporter,
-                backend,
+                reporting_map: backend,
                 phantom: PhantomData,
             }
         }
 
-        pub fn enable_tm_for_event(&mut self, event: &Event) -> Result<bool, E> {
-            self.backend.enable_event_reporting(event)
+        pub fn enable_tm_for_event(&mut self, event: &Event) -> Result<bool, ReportingMap::Error> {
+            self.reporting_map.enable_event_reporting(event)
         }
 
-        pub fn disable_tm_for_event(&mut self, event: &Event) -> Result<bool, E> {
-            self.backend.disable_event_reporting(event)
+        pub fn disable_tm_for_event(&mut self, event: &Event) -> Result<bool, ReportingMap::Error> {
+            self.reporting_map.disable_event_reporting(event)
         }
 
         pub fn generate_pus_event_tm_generic(
@@ -180,7 +186,7 @@ pub mod alloc_mod {
             event: Event,
             params: Option<&[u8]>,
         ) -> Result<bool, EventManError> {
-            if !self.backend.event_enabled(&event) {
+            if !self.reporting_map.event_enabled(&event) {
                 return Ok(false);
             }
             match event.severity() {
@@ -208,31 +214,33 @@ pub mod alloc_mod {
         }
     }
 
-    impl<EV: GenericEvent + Copy + PartialEq + Eq + Hash>
-        PusEventDispatcher<DefaultPusEventMgmtBackend<EV>, EV, ()>
+    impl<Event: GenericEvent + Copy + PartialEq + Eq + Hash, EventTmHook: EventTmHookProvider>
+        PusEventTmCreatorWithMap<DefaultPusEventReportingMap<Event>, Event, EventTmHook>
     {
-        pub fn new_with_default_backend(reporter: EventReporter) -> Self {
+        pub fn new_with_default_backend(reporter: EventReporter<EventTmHook>) -> Self {
             Self {
                 reporter,
-                backend: DefaultPusEventMgmtBackend::default(),
+                reporting_map: DefaultPusEventReportingMap::default(),
                 phantom: PhantomData,
             }
         }
     }
 
-    impl<B: PusEventMgmtBackendProvider<EventU32, Error = E>, E> PusEventDispatcher<B, EventU32, E> {
+    impl<ReportingMap: PusEventReportingMapProvider<EventU32>>
+        PusEventTmCreatorWithMap<ReportingMap, EventU32>
+    {
         pub fn enable_tm_for_event_with_sev<Severity: HasSeverity>(
             &mut self,
             event: &EventU32TypedSev<Severity>,
-        ) -> Result<bool, E> {
-            self.backend.enable_event_reporting(event.as_ref())
+        ) -> Result<bool, ReportingMap::Error> {
+            self.reporting_map.enable_event_reporting(event.as_ref())
         }
 
         pub fn disable_tm_for_event_with_sev<Severity: HasSeverity>(
             &mut self,
             event: &EventU32TypedSev<Severity>,
-        ) -> Result<bool, E> {
-            self.backend.disable_event_reporting(event.as_ref())
+        ) -> Result<bool, ReportingMap::Error> {
+            self.reporting_map.disable_event_reporting(event.as_ref())
         }
 
         pub fn generate_pus_event_tm<Severity: HasSeverity>(
@@ -246,10 +254,10 @@ pub mod alloc_mod {
         }
     }
 
-    pub type DefaultPusEventU16Dispatcher<E> =
-        PusEventDispatcher<DefaultPusEventMgmtBackend<EventU16>, EventU16, E>;
-    pub type DefaultPusEventU32Dispatcher<E> =
-        PusEventDispatcher<DefaultPusEventMgmtBackend<EventU32>, EventU32, E>;
+    pub type DefaultPusEventU16TmCreator<EventTmHook = DummyEventHook> =
+        PusEventTmCreatorWithMap<DefaultPusEventReportingMap<EventU16>, EventU16, EventTmHook>;
+    pub type DefaultPusEventU32TmCreator<EventTmHook = DummyEventHook> =
+        PusEventTmCreatorWithMap<DefaultPusEventReportingMap<EventU32>, EventU32, EventTmHook>;
 }
 #[cfg(test)]
 mod tests {
@@ -265,16 +273,16 @@ mod tests {
     const TEST_APID: u16 = 0x02;
     const TEST_ID: UniqueApidTargetId = UniqueApidTargetId::new(TEST_APID, 0x05);
 
-    fn create_basic_man_1() -> DefaultPusEventU32Dispatcher<()> {
+    fn create_basic_man_1() -> DefaultPusEventU32TmCreator {
         let reporter = EventReporter::new(TEST_ID.raw(), TEST_APID, 0, 128)
             .expect("Creating event repoter failed");
-        PusEventDispatcher::new_with_default_backend(reporter)
+        PusEventTmCreatorWithMap::new_with_default_backend(reporter)
     }
-    fn create_basic_man_2() -> DefaultPusEventU32Dispatcher<()> {
+    fn create_basic_man_2() -> DefaultPusEventU32TmCreator {
         let reporter = EventReporter::new(TEST_ID.raw(), TEST_APID, 0, 128)
             .expect("Creating event repoter failed");
-        let backend = DefaultPusEventMgmtBackend::default();
-        PusEventDispatcher::new(reporter, backend)
+        let backend = DefaultPusEventReportingMap::default();
+        PusEventTmCreatorWithMap::new(reporter, backend)
     }
 
     #[test]

@@ -23,7 +23,7 @@ use super::HandlingStatus;
 pub fn create_test_service_static(
     tm_sender: PacketSenderWithSharedPool,
     tc_pool: SharedStaticMemoryPool,
-    event_sender: mpsc::Sender<EventMessageU32>,
+    event_sender: mpsc::SyncSender<EventMessageU32>,
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
 ) -> TestCustomServiceWrapper<PacketSenderWithSharedPool, EcssTcInSharedStoreConverter> {
     let pus17_handler = PusService17TestHandler::new(PusServiceHelper::new(
@@ -41,7 +41,7 @@ pub fn create_test_service_static(
 
 pub fn create_test_service_dynamic(
     tm_funnel_tx: mpsc::Sender<PacketAsVec>,
-    event_sender: mpsc::Sender<EventMessageU32>,
+    event_sender: mpsc::SyncSender<EventMessageU32>,
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
 ) -> TestCustomServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {
     let pus17_handler = PusService17TestHandler::new(PusServiceHelper::new(
@@ -61,7 +61,7 @@ pub struct TestCustomServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: Ec
 {
     pub handler:
         PusService17TestHandler<MpscTcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
-    pub test_srv_event_sender: mpsc::Sender<EventMessageU32>,
+    pub test_srv_event_sender: mpsc::SyncSender<EventMessageU32>,
 }
 
 impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>

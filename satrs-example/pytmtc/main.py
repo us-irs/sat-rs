@@ -144,7 +144,9 @@ class PusHandler(GenericApidHandlerBase):
             )
             src_data = tm_packet.source_data
             event_u32 = EventU32.unpack(src_data)
-            _LOGGER.info(f"Received event packet. Event: {event_u32}")
+            _LOGGER.info(
+                f"Received event packet. Source APID: {Apid(tm_packet.apid)!r}, Event: {event_u32}"
+            )
             if event_u32.group_id == 0 and event_u32.unique_id == 0:
                 _LOGGER.info("Received test event")
         elif service == 17:

@@ -11,7 +11,7 @@ use crate::events::EventHandler;
 use crate::interface::udp::DynamicUdpTmHandler;
 use crate::pus::stack::PusStack;
 use crate::tmtc::tc_source::{TcSourceTaskDynamic, TcSourceTaskStatic};
-use crate::tmtc::tm_sink::{TmFunnelDynamic, TmFunnelStatic};
+use crate::tmtc::tm_sink::{TmSinkDynamic, TmSinkStatic};
 use log::info;
 use pus::test::create_test_service_dynamic;
 use satrs::hal::std::tcp_server::ServerConfig;
@@ -54,11 +54,11 @@ fn static_tmtc_pool_main() {
     let shared_tm_pool_wrapper = SharedPacketPool::new(&shared_tm_pool);
     let shared_tc_pool_wrapper = SharedPacketPool::new(&shared_tc_pool);
     let (tc_source_tx, tc_source_rx) = mpsc::sync_channel(50);
-    let (tm_funnel_tx, tm_funnel_rx) = mpsc::sync_channel(50);
+    let (tm_sink_tx, tm_sink_rx) = mpsc::sync_channel(50);
     let (tm_server_tx, tm_server_rx) = mpsc::sync_channel(50);
 
-    let tm_funnel_tx_sender =
-        PacketSenderWithSharedPool::new(tm_funnel_tx.clone(), shared_tm_pool_wrapper.clone());
+    let tm_sink_tx_sender =
+        PacketSenderWithSharedPool::new(tm_sink_tx.clone(), shared_tm_pool_wrapper.clone());
 
     let (mgm_handler_composite_tx, mgm_handler_composite_rx) =
         mpsc::channel::<GenericMessage<CompositeRequest>>();
@@ -80,11 +80,12 @@ fn static_tmtc_pool_main() {
     // Create event handling components
     // These sender handles are used to send event requests, for example to enable or disable
     // certain events.
+    let (event_tx, event_rx) = mpsc::sync_channel(100);
     let (event_request_tx, event_request_rx) = mpsc::channel::<EventRequestWithToken>();
 
     // The event task is the core handler to perform the event routing and TM handling as specified
     // in the sat-rs documentation.
-    let mut event_handler = EventHandler::new(tm_funnel_tx.clone(), event_request_rx);
+    let mut event_handler = EventHandler::new(tm_sink_tx.clone(), event_rx, event_request_rx);
 
     let (pus_test_tx, pus_test_rx) = mpsc::channel();
     let (pus_event_tx, pus_event_rx) = mpsc::channel();
@@ -106,39 +107,39 @@ fn static_tmtc_pool_main() {
         mode_tc_sender: pus_mode_tx,
     };
     let pus_test_service = create_test_service_static(
-        tm_funnel_tx_sender.clone(),
+        tm_sink_tx_sender.clone(),
         shared_tc_pool.clone(),
-        event_handler.clone_event_sender(),
+        event_tx.clone(),
         pus_test_rx,
     );
     let pus_scheduler_service = create_scheduler_service_static(
-        tm_funnel_tx_sender.clone(),
+        tm_sink_tx_sender.clone(),
         tc_source.clone(),
         pus_sched_rx,
         create_sched_tc_pool(),
     );
     let pus_event_service = create_event_service_static(
-        tm_funnel_tx_sender.clone(),
+        tm_sink_tx_sender.clone(),
         shared_tc_pool.clone(),
         pus_event_rx,
         event_request_tx,
     );
     let pus_action_service = create_action_service_static(
-        tm_funnel_tx_sender.clone(),
+        tm_sink_tx_sender.clone(),
         shared_tc_pool.clone(),
         pus_action_rx,
         request_map.clone(),
         pus_action_reply_rx,
     );
     let pus_hk_service = create_hk_service_static(
-        tm_funnel_tx_sender.clone(),
+        tm_sink_tx_sender.clone(),
         shared_tc_pool.clone(),
         pus_hk_rx,
         request_map.clone(),
         pus_hk_reply_rx,
     );
     let pus_mode_service = create_mode_service_static(
-        tm_funnel_tx_sender.clone(),
+        tm_sink_tx_sender.clone(),
         shared_tc_pool.clone(),
         pus_mode_rx,
         request_map,
@@ -156,7 +157,7 @@ fn static_tmtc_pool_main() {
     let mut tmtc_task = TcSourceTaskStatic::new(
         shared_tc_pool_wrapper.clone(),
         tc_source_rx,
-        PusTcDistributor::new(tm_funnel_tx_sender, pus_router),
+        PusTcDistributor::new(tm_sink_tx_sender, pus_router),
     );
 
     let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
@@ -186,10 +187,10 @@ fn static_tmtc_pool_main() {
     )
     .expect("tcp server creation failed");
 
-    let mut tm_funnel = TmFunnelStatic::new(
+    let mut tm_sink = TmSinkStatic::new(
         shared_tm_pool_wrapper,
         sync_tm_tcp_source,
-        tm_funnel_rx,
+        tm_sink_rx,
         tm_server_tx,
     );
 
@@ -209,7 +210,7 @@ fn static_tmtc_pool_main() {
         mode_leaf_interface,
         mgm_handler_composite_rx,
         pus_hk_reply_tx,
-        tm_funnel_tx,
+        tm_sink_tx,
         dummy_spi_interface,
         shared_mgm_set,
     );
@@ -240,9 +241,9 @@ fn static_tmtc_pool_main() {
 
     info!("Starting TM funnel task");
     let jh_tm_funnel = thread::Builder::new()
-        .name("TM Funnel".to_string())
+        .name("tm sink".to_string())
         .spawn(move || loop {
-            tm_funnel.operation();
+            tm_sink.operation();
         })
         .unwrap();
 
@@ -314,10 +315,11 @@ fn dyn_tmtc_pool_main() {
     // Create event handling components
     // These sender handles are used to send event requests, for example to enable or disable
     // certain events.
+    let (event_tx, event_rx) = mpsc::sync_channel(100);
     let (event_request_tx, event_request_rx) = mpsc::channel::<EventRequestWithToken>();
     // The event task is the core handler to perform the event routing and TM handling as specified
     // in the sat-rs documentation.
-    let mut event_handler = EventHandler::new(tm_funnel_tx.clone(), event_request_rx);
+    let mut event_handler = EventHandler::new(tm_funnel_tx.clone(), event_rx, event_request_rx);
 
     let (pus_test_tx, pus_test_rx) = mpsc::channel();
     let (pus_event_tx, pus_event_rx) = mpsc::channel();
@@ -339,11 +341,8 @@ fn dyn_tmtc_pool_main() {
         mode_tc_sender: pus_mode_tx,
     };
 
-    let pus_test_service = create_test_service_dynamic(
-        tm_funnel_tx.clone(),
-        event_handler.clone_event_sender(),
-        pus_test_rx,
-    );
+    let pus_test_service =
+        create_test_service_dynamic(tm_funnel_tx.clone(), event_tx.clone(), pus_test_rx);
     let pus_scheduler_service = create_scheduler_service_dynamic(
         tm_funnel_tx.clone(),
         tc_source_tx.clone(),
@@ -411,7 +410,7 @@ fn dyn_tmtc_pool_main() {
     )
     .expect("tcp server creation failed");
 
-    let mut tm_funnel = TmFunnelDynamic::new(sync_tm_tcp_source, tm_funnel_rx, tm_server_tx);
+    let mut tm_funnel = TmSinkDynamic::new(sync_tm_tcp_source, tm_funnel_rx, tm_server_tx);
 
     let (mgm_handler_mode_reply_to_parent_tx, _mgm_handler_mode_reply_to_parent_rx) =
         mpsc::channel();
