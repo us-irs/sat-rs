@@ -7,6 +7,7 @@ use spacepackets::ByteConversionError;
 /// Simple [u16] based result code type which also allows to group related resultcodes.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct ResultU16 {
     group_id: u8,
     unique_id: u8,
@@ -19,14 +20,27 @@ impl ResultU16 {
             unique_id,
         }
     }
+
     pub fn raw(&self) -> u16 {
         ((self.group_id as u16) << 8) | self.unique_id as u16
     }
+
     pub fn group_id(&self) -> u8 {
         self.group_id
     }
+
     pub fn unique_id(&self) -> u8 {
         self.unique_id
+    }
+
+    pub fn from_be_bytes(bytes: [u8; 2]) -> Self {
+        Self::from(u16::from_be_bytes(bytes))
+    }
+}
+
+impl From<u16> for ResultU16 {
+    fn from(value: u16) -> Self {
+        Self::new(((value >> 8) & 0xff) as u8, (value & 0xff) as u8)
     }
 }
 
@@ -84,5 +98,14 @@ mod tests {
         assert_eq!(written, 2);
         assert_eq!(buf[0], 1);
         assert_eq!(buf[1], 1);
+        let read_back = ResultU16::from_be_bytes(buf);
+        assert_eq!(read_back, result_code);
+    }
+
+    #[test]
+    fn test_from_u16() {
+        let result_code = ResultU16::new(1, 1);
+        let result_code_2 = ResultU16::from(result_code.raw());
+        assert_eq!(result_code, result_code_2);
     }
 }

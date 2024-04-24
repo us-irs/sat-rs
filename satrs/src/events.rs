@@ -794,6 +794,8 @@ mod tests {
         assert!(HIGH_SEV_EVENT.write_to_be_bytes(&mut buf).is_ok());
         let val_from_raw = u32::from_be_bytes(buf);
         assert_eq!(val_from_raw, 0xFFFFFFFF);
+        let event_read_back = EventU32::from_be_bytes(buf);
+        assert_eq!(event_read_back, HIGH_SEV_EVENT);
     }
 
     #[test]
@@ -802,6 +804,8 @@ mod tests {
         assert!(HIGH_SEV_EVENT_SMALL.write_to_be_bytes(&mut buf).is_ok());
         let val_from_raw = u16::from_be_bytes(buf);
         assert_eq!(val_from_raw, 0xFFFF);
+        let event_read_back = EventU16::from_be_bytes(buf);
+        assert_eq!(event_read_back, HIGH_SEV_EVENT_SMALL);
     }
 
     #[test]

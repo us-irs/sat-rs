@@ -17,12 +17,17 @@ version = "1"
 default-features = false
 optional = true
 
+[dependencies.defmt]
+version = "0.3"
+optional = true
+
 [dependencies.spacepackets]
 version = ">0.9, <=0.11"
 default-features = false
 
 [features]
 serde = ["dep:serde", "spacepackets/serde"]
+spacepackets = ["dep:defmt", "spacepackets/defmt"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "doc_cfg", "--generate-link-to-definition"]
