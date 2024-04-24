@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.1.4] 2024-04-24
+
+## Added
+
+- `ResultU16::from_be_bytes`
+- `From<u16>` impl for `ResultU16`.
+- Optional `defmt` support: `defmt::Format` impl on `ResultU16` if the `defmt` feature is
+  activated.
+
 # [v0.1.3] 2024-04-16
 
 Allow `spacepackets` range starting with v0.10 and v0.11.
