@@ -70,18 +70,23 @@ impl TmFunnelCommon {
     }
 
     fn packet_printout(tm: &PusTmZeroCopyWriter) {
-        info!("Sending PUS TM[{},{}]", tm.service(), tm.subservice());
+        info!(
+            "Sending PUS TM[{},{}] with APID {}",
+            tm.service(),
+            tm.subservice(),
+            tm.apid()
+        );
     }
 }
 
-pub struct TmFunnelStatic {
+pub struct TmSinkStatic {
     common: TmFunnelCommon,
     shared_tm_store: SharedPacketPool,
     tm_funnel_rx: mpsc::Receiver<PacketInPool>,
     tm_server_tx: mpsc::SyncSender<PacketInPool>,
 }
 
-impl TmFunnelStatic {
+impl TmSinkStatic {
     pub fn new(
         shared_tm_store: SharedPacketPool,
         sync_tm_tcp_source: SyncTcpTmSource,
@@ -121,13 +126,13 @@ impl TmFunnelStatic {
     }
 }
 
-pub struct TmFunnelDynamic {
+pub struct TmSinkDynamic {
     common: TmFunnelCommon,
     tm_funnel_rx: mpsc::Receiver<PacketAsVec>,
     tm_server_tx: mpsc::Sender<PacketAsVec>,
 }
 
-impl TmFunnelDynamic {
+impl TmSinkDynamic {
     pub fn new(
         sync_tm_tcp_source: SyncTcpTmSource,
         tm_funnel_rx: mpsc::Receiver<PacketAsVec>,

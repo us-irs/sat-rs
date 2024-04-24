@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.2.0-rc.5] 2024-04-23
+
+## Changed
+
+- Removed `MpscEventReceiver`, the `EventReceiveProvider` trait is implemented directly
+  on `mpsc::Receiver<EventMessage<Event>>`
+- Renamed `PusEventDispatcher` to `PusEventTmCreatorWithMap`.
+- Renamed `DefaultPusEventU32Dispatcher` to `DefaultPusEventU32EventCreator`.
+- Renamed `PusEventMgmtBackendProvider` renamed to `PusEventReportingMap`.
+
 # [v0.2.0-rc.4] 2024-04-23
 
 ## Changed
