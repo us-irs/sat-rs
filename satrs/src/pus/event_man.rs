@@ -190,22 +190,22 @@ pub mod alloc_mod {
                 return Ok(false);
             }
             match event.severity() {
-                Severity::INFO => self
+                Severity::Info => self
                     .reporter
                     .event_info(sender, time_stamp, event, params)
                     .map(|_| true)
                     .map_err(|e| e.into()),
-                Severity::LOW => self
+                Severity::Low => self
                     .reporter
                     .event_low_severity(sender, time_stamp, event, params)
                     .map(|_| true)
                     .map_err(|e| e.into()),
-                Severity::MEDIUM => self
+                Severity::Medium => self
                     .reporter
                     .event_medium_severity(sender, time_stamp, event, params)
                     .map(|_| true)
                     .map_err(|e| e.into()),
-                Severity::HIGH => self
+                Severity::High => self
                     .reporter
                     .event_high_severity(sender, time_stamp, event, params)
                     .map(|_| true)
@@ -266,9 +266,8 @@ mod tests {
     use crate::{events::SeverityInfo, tmtc::PacketAsVec};
     use std::sync::mpsc::{self, TryRecvError};
 
-    const INFO_EVENT: EventU32TypedSev<SeverityInfo> =
-        EventU32TypedSev::<SeverityInfo>::const_new(1, 0);
-    const LOW_SEV_EVENT: EventU32 = EventU32::const_new(Severity::LOW, 1, 5);
+    const INFO_EVENT: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::<SeverityInfo>::new(1, 0);
+    const LOW_SEV_EVENT: EventU32 = EventU32::new(Severity::Low, 1, 5);
     const EMPTY_STAMP: [u8; 7] = [0; 7];
     const TEST_APID: u16 = 0x02;
     const TEST_ID: UniqueApidTargetId = UniqueApidTargetId::new(TEST_APID, 0x05);

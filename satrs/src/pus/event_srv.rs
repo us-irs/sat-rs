@@ -181,7 +181,7 @@ mod tests {
 
     use super::PusEventServiceHandler;
 
-    const TEST_EVENT_0: EventU32 = EventU32::const_new(crate::events::Severity::INFO, 5, 25);
+    const TEST_EVENT_0: EventU32 = EventU32::new(crate::events::Severity::Info, 5, 25);
 
     struct Pus5HandlerWithStoreTester {
         common: PusServiceHandlerWithSharedStoreCommon,

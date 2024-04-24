@@ -295,7 +295,7 @@ impl<
                         for id in ids {
                             if let Some(sender) = self.sender_map.get_send_event_provider(id) {
                                 if let Err(e) = sender.send(EventMessage::new_generic(
-                                    *id,
+                                    event_msg.sender_id,
                                     event_msg.event,
                                     event_msg.params.as_ref(),
                                 )) {
@@ -597,7 +597,7 @@ mod tests {
     use std::format;
     use std::sync::mpsc::{self};
 
-    const TEST_EVENT: EventU32 = EventU32::const_new(Severity::INFO, 0, 5);
+    const TEST_EVENT: EventU32 = EventU32::new(Severity::Info, 0, 5);
 
     fn check_next_event(
         expected: EventU32,
@@ -614,6 +614,7 @@ mod tests {
         res: EventRoutingResult<EventU32, Params>,
         expected: EventU32,
         expected_num_sent: u32,
+        expected_sender_id: ComponentId,
     ) {
         assert!(matches!(res, EventRoutingResult::Handled { .. }));
         if let EventRoutingResult::Handled {
@@ -622,6 +623,7 @@ mod tests {
         } = res
         {
             assert_eq!(event_msg.event, expected);
+            assert_eq!(event_msg.sender_id, expected_sender_id);
             assert_eq!(num_recipients, expected_num_sent);
         }
     }
@@ -634,8 +636,8 @@ mod tests {
     #[test]
     fn test_basic() {
         let (event_sender, mut event_man) = generic_event_man();
-        let event_grp_0 = EventU32::new(Severity::INFO, 0, 0).unwrap();
-        let event_grp_1_0 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
+        let event_grp_0 = EventU32::new(Severity::Info, 0, 0);
+        let event_grp_1_0 = EventU32::new(Severity::High, 1, 0);
         let (single_event_sender, single_event_receiver) = mpsc::channel();
         let single_event_listener = EventSenderMpsc::new(0, single_event_sender);
         event_man.subscribe_single(&event_grp_0, single_event_listener.target_id());
@@ -653,8 +655,7 @@ mod tests {
             .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), event_grp_0))
             .expect("Sending single error failed");
         let res = event_man.try_event_handling(&error_handler);
-        // assert!(res.is_ok());
-        check_handled_event(res, event_grp_0, 1);
+        check_handled_event(res, event_grp_0, 1, TEST_COMPONENT_ID_0.id());
         check_next_event(event_grp_0, &single_event_receiver);
 
         // Test event which is sent to all group listeners
@@ -662,7 +663,7 @@ mod tests {
             .send(EventMessage::new(TEST_COMPONENT_ID_1.id(), event_grp_1_0))
             .expect("Sending group error failed");
         let res = event_man.try_event_handling(&error_handler);
-        check_handled_event(res, event_grp_1_0, 1);
+        check_handled_event(res, event_grp_1_0, 1, TEST_COMPONENT_ID_1.id());
         check_next_event(event_grp_1_0, &group_event_receiver_0);
     }
 
@@ -672,7 +673,7 @@ mod tests {
             panic!("routing error occurred for event {:?}: {:?}", event_msg, e);
         };
         let (event_sender, mut event_man) = generic_event_man();
-        let event_grp_0 = EventU32::new(Severity::INFO, 0, 0).unwrap();
+        let event_grp_0 = EventU32::new(Severity::Info, 0, 0);
         let (single_event_sender, single_event_receiver) = mpsc::channel();
         let single_event_listener = EventSenderMpsc::new(0, single_event_sender);
         event_man.subscribe_single(&event_grp_0, single_event_listener.target_id());
@@ -685,7 +686,7 @@ mod tests {
             ))
             .expect("Sending group error failed");
         let res = event_man.try_event_handling(&error_handler);
-        check_handled_event(res, event_grp_0, 1);
+        check_handled_event(res, event_grp_0, 1, TEST_COMPONENT_ID_0.id());
         let aux = check_next_event(event_grp_0, &single_event_receiver);
         assert!(aux.is_some());
         let aux = aux.unwrap();
@@ -707,8 +708,8 @@ mod tests {
         let res = event_man.try_event_handling(error_handler);
         assert!(matches!(res, EventRoutingResult::Empty));
 
-        let event_grp_0 = EventU32::new(Severity::INFO, 0, 0).unwrap();
-        let event_grp_1_0 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
+        let event_grp_0 = EventU32::new(Severity::Info, 0, 0);
+        let event_grp_1_0 = EventU32::new(Severity::High, 1, 0);
         let (event_grp_0_sender, event_grp_0_receiver) = mpsc::channel();
         let event_grp_0_and_1_listener = EventU32SenderMpsc::new(0, event_grp_0_sender);
         event_man.subscribe_group(
@@ -728,9 +729,9 @@ mod tests {
             .send(EventMessage::new(TEST_COMPONENT_ID_1.id(), event_grp_1_0))
             .expect("Sendign Event Group 1 failed");
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_grp_0, 1);
+        check_handled_event(res, event_grp_0, 1, TEST_COMPONENT_ID_0.id());
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_grp_1_0, 1);
+        check_handled_event(res, event_grp_1_0, 1, TEST_COMPONENT_ID_1.id());
 
         check_next_event(event_grp_0, &event_grp_0_receiver);
         check_next_event(event_grp_1_0, &event_grp_0_receiver);
@@ -744,8 +745,8 @@ mod tests {
             panic!("routing error occurred for event {:?}: {:?}", event_msg, e);
         };
         let (event_sender, mut event_man) = generic_event_man();
-        let event_0 = EventU32::new(Severity::INFO, 0, 5).unwrap();
-        let event_1 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
+        let event_0 = EventU32::new(Severity::Info, 0, 5);
+        let event_1 = EventU32::new(Severity::High, 1, 0);
         let (event_0_tx_0, event_0_rx_0) = mpsc::channel();
         let (event_0_tx_1, event_0_rx_1) = mpsc::channel();
         let event_listener_0 = EventU32SenderMpsc::new(0, event_0_tx_0);
@@ -760,7 +761,7 @@ mod tests {
             .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), event_0))
             .expect("Triggering Event 0 failed");
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_0, 2);
+        check_handled_event(res, event_0, 2, TEST_COMPONENT_ID_0.id());
         check_next_event(event_0, &event_0_rx_0);
         check_next_event(event_0, &event_0_rx_1);
         event_man.subscribe_group(event_1.group_id(), event_listener_0_sender_id);
@@ -773,9 +774,9 @@ mod tests {
 
         // 3 Events messages will be sent now
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_0, 2);
+        check_handled_event(res, event_0, 2, TEST_COMPONENT_ID_0.id());
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_1, 1);
+        check_handled_event(res, event_1, 1, TEST_COMPONENT_ID_1.id());
         // Both the single event and the group event should arrive now
         check_next_event(event_0, &event_0_rx_0);
         check_next_event(event_1, &event_0_rx_0);
@@ -787,7 +788,7 @@ mod tests {
             .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), event_1))
             .expect("Triggering Event 1 failed");
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_1, 1);
+        check_handled_event(res, event_1, 1, TEST_COMPONENT_ID_0.id());
     }
 
     #[test]
@@ -797,8 +798,8 @@ mod tests {
         };
         let (event_sender, event_receiver) = mpsc::channel();
         let mut event_man = EventManagerWithMpsc::new(event_receiver);
-        let event_0 = EventU32::new(Severity::INFO, 0, 5).unwrap();
-        let event_1 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
+        let event_0 = EventU32::new(Severity::Info, 0, 5);
+        let event_1 = EventU32::new(Severity::High, 1, 0);
         let (event_0_tx_0, all_events_rx) = mpsc::channel();
         let all_events_listener = EventU32SenderMpsc::new(0, event_0_tx_0);
         event_man.subscribe_all(all_events_listener.target_id());
@@ -810,9 +811,9 @@ mod tests {
             .send(EventMessage::new(TEST_COMPONENT_ID_1.id(), event_1))
             .expect("Triggering event 1 failed");
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_0, 1);
+        check_handled_event(res, event_0, 1, TEST_COMPONENT_ID_0.id());
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_1, 1);
+        check_handled_event(res, event_1, 1, TEST_COMPONENT_ID_1.id());
         check_next_event(event_0, &all_events_rx);
         check_next_event(event_1, &all_events_rx);
     }

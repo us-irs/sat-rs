@@ -331,10 +331,10 @@ mod tests {
 
     fn severity_to_subservice(severity: Severity) -> Subservice {
         match severity {
-            Severity::INFO => Subservice::TmInfoReport,
-            Severity::LOW => Subservice::TmLowSeverityReport,
-            Severity::MEDIUM => Subservice::TmMediumSeverityReport,
-            Severity::HIGH => Subservice::TmHighSeverityReport,
+            Severity::Info => Subservice::TmInfoReport,
+            Severity::Low => Subservice::TmLowSeverityReport,
+            Severity::Medium => Subservice::TmMediumSeverityReport,
+            Severity::High => Subservice::TmHighSeverityReport,
         }
     }
 
@@ -347,22 +347,22 @@ mod tests {
         aux_data: Option<&[u8]>,
     ) {
         match severity {
-            Severity::INFO => {
+            Severity::Info => {
                 reporter
                     .event_info(sender, time_stamp, event, aux_data)
                     .expect("Error reporting info event");
             }
-            Severity::LOW => {
+            Severity::Low => {
                 reporter
                     .event_low_severity(sender, time_stamp, event, aux_data)
                     .expect("Error reporting low event");
             }
-            Severity::MEDIUM => {
+            Severity::Medium => {
                 reporter
                     .event_medium_severity(sender, time_stamp, event, aux_data)
                     .expect("Error reporting medium event");
             }
-            Severity::HIGH => {
+            Severity::High => {
                 reporter
                     .event_high_severity(sender, time_stamp, event, aux_data)
                     .expect("Error reporting high event");
@@ -389,7 +389,7 @@ mod tests {
         if let Some(err_data) = error_data {
             error_copy.extend_from_slice(err_data);
         }
-        let event = EventU32::new(severity, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
+        let event = EventU32::new_checked(severity, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
             .expect("Error creating example event");
         report_basic_event(
             &mut reporter,
@@ -417,35 +417,35 @@ mod tests {
 
     #[test]
     fn basic_info_event_generation() {
-        basic_event_test(4, Severity::INFO, None);
+        basic_event_test(4, Severity::Info, None);
     }
 
     #[test]
     fn basic_low_severity_event() {
-        basic_event_test(4, Severity::LOW, None);
+        basic_event_test(4, Severity::Low, None);
     }
 
     #[test]
     fn basic_medium_severity_event() {
-        basic_event_test(4, Severity::MEDIUM, None);
+        basic_event_test(4, Severity::Medium, None);
     }
 
     #[test]
     fn basic_high_severity_event() {
-        basic_event_test(4, Severity::HIGH, None);
+        basic_event_test(4, Severity::High, None);
     }
 
     #[test]
     fn event_with_info_string() {
         let info_string = "Test Information";
-        basic_event_test(32, Severity::INFO, Some(info_string.as_bytes()));
+        basic_event_test(32, Severity::Info, Some(info_string.as_bytes()));
     }
 
     #[test]
     fn low_severity_with_raw_err_data() {
         let raw_err_param: i32 = -1;
         let raw_err = raw_err_param.to_be_bytes();
-        basic_event_test(8, Severity::LOW, Some(&raw_err))
+        basic_event_test(8, Severity::Low, Some(&raw_err))
     }
 
     fn check_buf_too_small(
@@ -454,7 +454,7 @@ mod tests {
         expected_found_len: usize,
     ) {
         let time_stamp_empty: [u8; 7] = [0; 7];
-        let event = EventU32::new(Severity::INFO, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
+        let event = EventU32::new_checked(Severity::Info, EXAMPLE_GROUP_ID, EXAMPLE_EVENT_ID_0)
             .expect("Error creating example event");
         let err = reporter.event_info(sender, &time_stamp_empty, event, None);
         assert!(err.is_err());

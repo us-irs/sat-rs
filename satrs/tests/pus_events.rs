@@ -14,9 +14,8 @@ use spacepackets::ecss::{PusError, PusPacket};
 use std::sync::mpsc::{self, SendError, TryRecvError};
 use std::thread;
 
-const INFO_EVENT: EventU32TypedSev<SeverityInfo> =
-    EventU32TypedSev::<SeverityInfo>::const_new(1, 0);
-const LOW_SEV_EVENT: EventU32 = EventU32::const_new(Severity::LOW, 1, 5);
+const INFO_EVENT: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::<SeverityInfo>::new(1, 0);
+const LOW_SEV_EVENT: EventU32 = EventU32::new(Severity::Low, 1, 5);
 const EMPTY_STAMP: [u8; 7] = [0; 7];
 const TEST_APID: u16 = 0x02;
 const TEST_ID: UniqueApidTargetId = UniqueApidTargetId::new(TEST_APID, 0x05);
