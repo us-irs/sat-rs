@@ -84,6 +84,10 @@ version = "0.8"
 features = ["os-poll", "net"]
 optional = true
 
+[dependencies.defmt]
+version = "0.3"
+optional = true
+
 [dev-dependencies]
 serde = "1"
 zerocopy = "0.7"
@@ -120,7 +124,7 @@ alloc = [
 serde = ["dep:serde", "spacepackets/serde", "satrs-shared/serde"]
 crossbeam = ["crossbeam-channel"]
 heapless = ["dep:heapless"]
-defmt = ["spacepackets/defmt"]
+defmt = ["dep:defmt", "spacepackets/defmt"]
 test_util = []
 doc-images = []
 

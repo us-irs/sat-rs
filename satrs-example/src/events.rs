@@ -210,4 +210,47 @@ impl<TmSender: EcssTmSender> EventHandler<TmSender> {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use satrs::{
+        events::EventU32,
+        pus::verification::VerificationReporterCfg,
+        spacepackets::{ecss::tm::PusTmReader, CcsdsPacket},
+        tmtc::PacketAsVec,
+    };
+
+    use super::*;
+
+    const TEST_CREATOR_ID: UniqueApidTargetId = UniqueApidTargetId::new(1, 2);
+
+    #[test]
+    fn test_basic() {
+        let (event_tx, event_rx) = mpsc::sync_channel(10);
+        let (_event_req_tx, event_req_rx) = mpsc::sync_channel(10);
+        let (tm_sender, tm_receiver) = mpsc::channel();
+        let verif_reporter_cfg = VerificationReporterCfg::new(0x05, 2, 2, 128).unwrap();
+        let verif_reporter =
+            VerificationReporter::new(PUS_EVENT_MANAGEMENT.id(), &verif_reporter_cfg);
+        let mut event_manager = EventManagerWithBoundedMpsc::new(event_rx);
+        let mut pus_event_handler = PusEventHandler::<mpsc::Sender<PacketAsVec>>::new(
+            tm_sender,
+            verif_reporter,
+            &mut event_manager,
+            event_req_rx,
+        );
+        event_tx
+            .send(EventMessageU32::new(
+                TEST_CREATOR_ID.id(),
+                EventU32::new(satrs::events::Severity::Info, 1, 1),
+            ))
+            .expect("failed to send event");
+        pus_event_handler.handle_event_requests();
+        event_manager.try_event_handling(|_, _| {});
+        pus_event_handler.generate_pus_event_tm();
+        let tm_packet = tm_receiver.try_recv().expect("failed to receive TM packet");
+        assert_eq!(tm_packet.sender_id, PUS_EVENT_MANAGEMENT.id());
+        let tm_reader = PusTmReader::new(&tm_packet.packet, 7)
+            .expect("failed to create TM reader")
+            .0;
+        assert_eq!(tm_reader.apid(), TEST_CREATOR_ID.apid);
+    }
+}

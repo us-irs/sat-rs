@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Renamed `PusEventDispatcher` to `PusEventTmCreatorWithMap`.
 - Renamed `DefaultPusEventU32Dispatcher` to `DefaultPusEventU32EventCreator`.
 - Renamed `PusEventMgmtBackendProvider` renamed to `PusEventReportingMap`.
+- Reanmed Event `const_new` methods to `new` and the former `new` methods to `new_checked`.
 
 # [v0.2.0-rc.4] 2024-04-23
 

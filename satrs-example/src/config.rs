@@ -38,8 +38,7 @@ pub enum GroupId {
 pub const OBSW_SERVER_ADDR: Ipv4Addr = Ipv4Addr::UNSPECIFIED;
 pub const SERVER_PORT: u16 = 7301;
 
-pub const TEST_EVENT: EventU32TypedSev<SeverityInfo> =
-    EventU32TypedSev::<SeverityInfo>::const_new(0, 0);
+pub const TEST_EVENT: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::<SeverityInfo>::new(0, 0);
 
 lazy_static! {
     pub static ref PACKET_ID_VALIDATOR: HashSet<PacketId> = {
