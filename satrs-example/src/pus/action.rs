@@ -1,12 +1,12 @@
 use log::{error, warn};
 use satrs::action::{ActionRequest, ActionRequestVariant};
-use satrs::params::WritableToBeBytes;
 use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::action::{
     ActionReplyPus, ActionReplyVariant, ActivePusActionRequestStd, DefaultActiveActionRequestMap,
 };
 use satrs::pus::verification::{
-    FailParams, FailParamsWithStep, TcStateAccepted, TcStateStarted, VerificationReporter,
+    handle_completion_failure_with_generic_params, handle_step_failure_with_generic_params,
+    FailParamHelper, FailParams, TcStateAccepted, TcStateStarted, VerificationReporter,
     VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
@@ -61,7 +61,7 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPus> for ActionReplyH
         active_request: &ActivePusActionRequestStd,
         tm_sender: &(impl EcssTmSender + ?Sized),
         verification_handler: &impl VerificationReportingProvider,
-        time_stamp: &[u8],
+        timestamp: &[u8],
     ) -> Result<bool, Self::Error> {
         let verif_token: VerificationToken<TcStateStarted> = active_request
             .token()
@@ -69,15 +69,23 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPus> for ActionReplyH
             .expect("invalid token state");
         let remove_entry = match &reply.message.variant {
             ActionReplyVariant::CompletionFailed { error_code, params } => {
-                let mut fail_data_len = 0;
-                if let Some(params) = params {
-                    fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
-                }
-                verification_handler.completion_failure(
+                let error_propagated = handle_completion_failure_with_generic_params(
                     tm_sender,
                     verif_token,
-                    FailParams::new(time_stamp, error_code, &self.fail_data_buf[..fail_data_len]),
+                    verification_handler,
+                    FailParamHelper {
+                        error_code,
+                        params: params.as_ref(),
+                        timestamp,
+                        small_data_buf: &mut self.fail_data_buf,
+                    },
                 )?;
+                if !error_propagated {
+                    log::warn!(
+                        "error params for completion failure were not propated: {:?}",
+                        params.as_ref()
+                    );
+                }
                 true
             }
             ActionReplyVariant::StepFailed {
@@ -85,31 +93,35 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPus> for ActionReplyH
                 step,
                 params,
             } => {
-                let mut fail_data_len = 0;
-                if let Some(params) = params {
-                    fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
-                }
-                verification_handler.step_failure(
+                let error_propagated = handle_step_failure_with_generic_params(
                     tm_sender,
                     verif_token,
-                    FailParamsWithStep::new(
-                        time_stamp,
-                        &EcssEnumU16::new(*step),
+                    verification_handler,
+                    FailParamHelper {
                         error_code,
-                        &self.fail_data_buf[..fail_data_len],
-                    ),
+                        params: params.as_ref(),
+                        timestamp,
+                        small_data_buf: &mut self.fail_data_buf,
+                    },
+                    &EcssEnumU16::new(*step),
                 )?;
+                if !error_propagated {
+                    log::warn!(
+                        "error params for completion failure were not propated: {:?}",
+                        params.as_ref()
+                    );
+                }
                 true
             }
             ActionReplyVariant::Completed => {
-                verification_handler.completion_success(tm_sender, verif_token, time_stamp)?;
+                verification_handler.completion_success(tm_sender, verif_token, timestamp)?;
                 true
             }
             ActionReplyVariant::StepSuccess { step } => {
                 verification_handler.step_success(
                     tm_sender,
                     &verif_token,
-                    time_stamp,
+                    timestamp,
                     EcssEnumU16::new(*step),
                 )?;
                 false

@@ -407,7 +407,7 @@ mod tests {
             severity_to_subservice(severity) as u8
         );
         assert_eq!(tm_info.common.dest_id, 0);
-        assert_eq!(tm_info.common.time_stamp, time_stamp_empty);
+        assert_eq!(tm_info.common.timestamp, time_stamp_empty);
         assert_eq!(tm_info.common.msg_counter, 0);
         assert_eq!(tm_info.common.apid, EXAMPLE_APID);
         assert_eq!(tm_info.event, event);

@@ -2,7 +2,6 @@ use std::sync::mpsc::{self};
 
 use crate::pus::create_verification_reporter;
 use satrs::event_man::{EventMessageU32, EventRoutingError};
-use satrs::params::WritableToBeBytes;
 use satrs::pus::event::EventTmHookProvider;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::EcssTmSender;
@@ -42,6 +41,7 @@ pub struct PusEventHandler<TmSender: EcssTmSender> {
     tm_sender: TmSender,
     time_provider: CdsTime,
     timestamp: [u8; 7],
+    small_data_buf: [u8; 64],
     verif_handler: VerificationReporter,
 }
 
@@ -82,6 +82,7 @@ impl<TmSender: EcssTmSender> PusEventHandler<TmSender> {
             pus_event_man_rx,
             time_provider: CdsTime::new_with_u16_days(0, 0),
             timestamp: [0; 7],
+            small_data_buf: [0; 64],
             verif_handler,
             tm_sender,
         }
@@ -132,21 +133,26 @@ impl<TmSender: EcssTmSender> PusEventHandler<TmSender> {
             // Perform the generation of PUS event packets
             match self.pus_event_man_rx.try_recv() {
                 Ok(event_msg) => {
-                    update_time(&mut self.time_provider, &mut self.timestamp);
-                    let param_vec = event_msg.params().map_or(Vec::new(), |param| {
-                        param.to_vec().expect("failed to convert params to vec")
-                    });
                     // We use the TM modification hook to set the sender APID for each event.
                     self.pus_event_tm_creator.reporter.tm_hook.next_apid =
                         UniqueApidTargetId::from(event_msg.sender_id()).apid;
-                    self.pus_event_tm_creator
-                        .generate_pus_event_tm_generic(
+                    update_time(&mut self.time_provider, &mut self.timestamp);
+                    let generation_result = self
+                        .pus_event_tm_creator
+                        .generate_pus_event_tm_generic_with_generic_params(
                             &self.tm_sender,
                             &self.timestamp,
                             event_msg.event(),
-                            Some(&param_vec),
+                            &mut self.small_data_buf,
+                            event_msg.params(),
                         )
                         .expect("Sending TM as event failed");
+                    if !generation_result.params_were_propagated {
+                        log::warn!(
+                            "Event TM parameters were not propagated: {:?}",
+                            event_msg.params()
+                        );
+                    }
                 }
                 Err(e) => match e {
                     mpsc::TryRecvError::Empty => break,

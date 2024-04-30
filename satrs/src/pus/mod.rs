@@ -1284,36 +1284,46 @@ pub mod tests {
         pub seq_count: u16,
         pub msg_counter: u16,
         pub dest_id: u16,
-        pub time_stamp: [u8; 7],
+        pub timestamp: Vec<u8>,
     }
 
     impl CommonTmInfo {
-        pub fn new_zero_seq_count(
+        pub fn new(
             subservice: u8,
             apid: u16,
+            seq_count: u16,
+            msg_counter: u16,
             dest_id: u16,
-            time_stamp: [u8; 7],
+            timestamp: &[u8],
         ) -> Self {
             Self {
                 subservice,
                 apid,
-                seq_count: 0,
-                msg_counter: 0,
+                seq_count,
+                msg_counter,
                 dest_id,
-                time_stamp,
+                timestamp: timestamp.to_vec(),
             }
+        }
+        pub fn new_zero_seq_count(
+            subservice: u8,
+            apid: u16,
+            dest_id: u16,
+            timestamp: &[u8],
+        ) -> Self {
+            Self::new(subservice, apid, 0, 0, dest_id, timestamp)
         }
 
         pub fn new_from_tm(tm: &PusTmCreator) -> Self {
-            let mut time_stamp = [0; 7];
-            time_stamp.clone_from_slice(&tm.timestamp()[0..7]);
+            let mut timestamp = [0; 7];
+            timestamp.clone_from_slice(&tm.timestamp()[0..7]);
             Self {
                 subservice: PusPacket::subservice(tm),
                 apid: tm.apid(),
                 seq_count: tm.seq_count(),
                 msg_counter: tm.msg_counter(),
                 dest_id: tm.dest_id(),
-                time_stamp,
+                timestamp: timestamp.to_vec(),
             }
         }
     }
