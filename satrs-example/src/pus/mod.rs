@@ -439,20 +439,17 @@ where
             return Ok(());
         }
         let active_request = active_req_opt.unwrap();
-        let request_finished = self
-            .reply_handler
-            .handle_reply(
-                reply,
-                active_request,
-                &self.service_helper.common.tm_sender,
-                &self.service_helper.common.verif_reporter,
-                time_stamp,
-            )
-            .unwrap_or(false);
-        if request_finished {
+        let result = self.reply_handler.handle_reply(
+            reply,
+            active_request,
+            &self.service_helper.common.tm_sender,
+            &self.service_helper.common.verif_reporter,
+            time_stamp,
+        );
+        if result.is_err() || (result.is_ok() && *result.as_ref().unwrap()) {
             self.active_request_map.remove(reply.request_id());
         }
-        Ok(())
+        result.map(|_| ())
     }
 
     pub fn check_for_request_timeouts(&mut self) {

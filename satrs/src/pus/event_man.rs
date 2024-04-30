@@ -107,6 +107,7 @@ pub mod alloc_mod {
 
     use crate::{
         events::EventU16,
+        params::{Params, WritableToBeBytes},
         pus::event::{DummyEventHook, EventTmHookProvider},
     };
 
@@ -145,6 +146,12 @@ pub mod alloc_mod {
         fn disable_event_reporting(&mut self, event: &Event) -> Result<bool, Self::Error> {
             Ok(self.disabled.insert(*event))
         }
+    }
+
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    pub struct EventGenerationResult {
+        pub event_was_enabled: bool,
+        pub params_were_propagated: bool,
     }
 
     pub struct PusEventTmCreatorWithMap<
@@ -212,6 +219,53 @@ pub mod alloc_mod {
                     .map_err(|e| e.into()),
             }
         }
+
+        pub fn generate_pus_event_tm_generic_with_generic_params(
+            &self,
+            sender: &(impl EcssTmSender + ?Sized),
+            time_stamp: &[u8],
+            event: Event,
+            small_data_buf: &mut [u8],
+            params: Option<&Params>,
+        ) -> Result<EventGenerationResult, EventManError> {
+            let mut result = EventGenerationResult {
+                event_was_enabled: false,
+                params_were_propagated: true,
+            };
+            if params.is_none() {
+                result.event_was_enabled =
+                    self.generate_pus_event_tm_generic(sender, time_stamp, event, None)?;
+                return Ok(result);
+            }
+            let params = params.unwrap();
+            result.event_was_enabled = match params {
+                Params::Heapless(heapless_param) => {
+                    heapless_param
+                        .write_to_be_bytes(&mut small_data_buf[..heapless_param.written_len()])
+                        .map_err(EcssTmtcError::ByteConversion)?;
+                    self.generate_pus_event_tm_generic(
+                        sender,
+                        time_stamp,
+                        event,
+                        Some(small_data_buf),
+                    )?
+                }
+                Params::Vec(vec) => {
+                    self.generate_pus_event_tm_generic(sender, time_stamp, event, Some(vec))?
+                }
+                Params::String(string) => self.generate_pus_event_tm_generic(
+                    sender,
+                    time_stamp,
+                    event,
+                    Some(string.as_bytes()),
+                )?,
+                _ => {
+                    result.params_were_propagated = false;
+                    self.generate_pus_event_tm_generic(sender, time_stamp, event, None)?
+                }
+            };
+            Ok(result)
+        }
     }
 
     impl<Event: GenericEvent + Copy + PartialEq + Eq + Hash, EventTmHook: EventTmHookProvider>
@@ -261,6 +315,12 @@ pub mod alloc_mod {
 }
 #[cfg(test)]
 mod tests {
+    use alloc::string::{String, ToString};
+    use alloc::vec;
+    use spacepackets::ecss::event::Subservice;
+    use spacepackets::ecss::tm::PusTmReader;
+    use spacepackets::ecss::PusPacket;
+
     use super::*;
     use crate::request::UniqueApidTargetId;
     use crate::{events::SeverityInfo, tmtc::PacketAsVec};
@@ -335,5 +395,71 @@ mod tests {
             .expect("Sending info event failed");
         assert!(event_sent);
         event_rx.try_recv().expect("No info event received");
+    }
+
+    #[test]
+    fn test_event_with_generic_string_param() {
+        let event_man = create_basic_man_1();
+        let mut small_data_buf = [0; 128];
+        let param_data = "hello world";
+        let (event_tx, event_rx) = mpsc::channel::<PacketAsVec>();
+        let res = event_man.generate_pus_event_tm_generic_with_generic_params(
+            &event_tx,
+            &EMPTY_STAMP,
+            INFO_EVENT.into(),
+            &mut small_data_buf,
+            Some(&param_data.to_string().into()),
+        );
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert!(res.event_was_enabled);
+        assert!(res.params_were_propagated);
+        let event_tm = event_rx.try_recv().expect("no event received");
+        let (tm, _) = PusTmReader::new(&event_tm.packet, 7).expect("reading TM failed");
+        assert_eq!(tm.service(), 5);
+        assert_eq!(tm.subservice(), Subservice::TmInfoReport as u8);
+        assert_eq!(tm.user_data().len(), 4 + param_data.len());
+        let u32_event = u32::from_be_bytes(tm.user_data()[0..4].try_into().unwrap());
+        assert_eq!(u32_event, INFO_EVENT.raw());
+        let string_data = String::from_utf8_lossy(&tm.user_data()[4..]);
+        assert_eq!(string_data, param_data);
+    }
+
+    #[test]
+    fn test_event_with_generic_vec_param() {
+        let event_man = create_basic_man_1();
+        let mut small_data_buf = [0; 128];
+        let param_data = vec![1, 2, 3, 4];
+        let (event_tx, event_rx) = mpsc::channel::<PacketAsVec>();
+        let res = event_man.generate_pus_event_tm_generic_with_generic_params(
+            &event_tx,
+            &EMPTY_STAMP,
+            INFO_EVENT.into(),
+            &mut small_data_buf,
+            Some(&param_data.clone().into()),
+        );
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert!(res.event_was_enabled);
+        assert!(res.params_were_propagated);
+        let event_tm = event_rx.try_recv().expect("no event received");
+        let (tm, _) = PusTmReader::new(&event_tm.packet, 7).expect("reading TM failed");
+        assert_eq!(tm.service(), 5);
+        assert_eq!(tm.subservice(), Subservice::TmInfoReport as u8);
+        assert_eq!(tm.user_data().len(), 4 + param_data.len());
+        let u32_event = u32::from_be_bytes(tm.user_data()[0..4].try_into().unwrap());
+        assert_eq!(u32_event, INFO_EVENT.raw());
+        let vec_data = tm.user_data()[4..].to_vec();
+        assert_eq!(vec_data, param_data);
+    }
+
+    #[test]
+    fn test_event_with_generic_store_param_not_propagated() {
+        // TODO: Test this.
+    }
+
+    #[test]
+    fn test_event_with_generic_heapless_param() {
+        // TODO: Test this.
     }
 }

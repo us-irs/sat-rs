@@ -643,52 +643,18 @@ impl From<&str> for Params {
     }
 }
 
-/// Please note while [WritableToBeBytes] is implemented for [Params], the default implementation
-/// will not be able to process the [Params::Store] parameter variant.
-impl WritableToBeBytes for Params {
+impl WritableToBeBytes for ParamsHeapless {
     fn written_len(&self) -> usize {
         match self {
-            Params::Heapless(p) => match p {
-                ParamsHeapless::Raw(raw) => raw.written_len(),
-                ParamsHeapless::EcssEnum(enumeration) => enumeration.written_len(),
-            },
-            Params::Store(_) => 0,
-            #[cfg(feature = "alloc")]
-            Params::Vec(vec) => vec.len(),
-            #[cfg(feature = "alloc")]
-            Params::String(string) => string.len(),
+            ParamsHeapless::Raw(raw) => raw.written_len(),
+            ParamsHeapless::EcssEnum(ecss_enum) => ecss_enum.written_len(),
         }
     }
 
     fn write_to_be_bytes(&self, buf: &mut [u8]) -> Result<usize, ByteConversionError> {
         match self {
-            Params::Heapless(p) => match p {
-                ParamsHeapless::Raw(raw) => raw.write_to_be_bytes(buf),
-                ParamsHeapless::EcssEnum(enumeration) => enumeration.write_to_be_bytes(buf),
-            },
-            Params::Store(_) => Ok(0),
-            #[cfg(feature = "alloc")]
-            Params::Vec(vec) => {
-                if buf.len() < vec.len() {
-                    return Err(ByteConversionError::ToSliceTooSmall {
-                        found: buf.len(),
-                        expected: vec.len(),
-                    });
-                }
-                buf[0..vec.len()].copy_from_slice(vec);
-                Ok(vec.len())
-            }
-            #[cfg(feature = "alloc")]
-            Params::String(string) => {
-                if buf.len() < string.len() {
-                    return Err(ByteConversionError::ToSliceTooSmall {
-                        found: buf.len(),
-                        expected: string.len(),
-                    });
-                }
-                buf[0..string.len()].copy_from_slice(string.as_bytes());
-                Ok(string.len())
-            }
+            ParamsHeapless::Raw(raw) => raw.write_to_be_bytes(buf),
+            ParamsHeapless::EcssEnum(ecss_enum) => ecss_enum.write_to_be_bytes(buf),
         }
     }
 }
@@ -837,10 +803,9 @@ mod tests {
     #[test]
     fn test_params_written_len_raw() {
         let param_raw = ParamsRaw::from((500_u32, 1000_u32));
-        let param: Params = Params::Heapless(param_raw.into());
-        assert_eq!(param.written_len(), 8);
+        assert_eq!(param_raw.written_len(), 8);
         let mut buf: [u8; 8] = [0; 8];
-        param
+        param_raw
             .write_to_be_bytes(&mut buf)
             .expect("writing to buffer failed");
         assert_eq!(u32::from_be_bytes(buf[0..4].try_into().unwrap()), 500);
@@ -848,21 +813,28 @@ mod tests {
     }
 
     #[test]
-    fn test_params_written_string() {
-        let string = "Test String".to_string();
-        let param = Params::String(string.clone());
-        assert_eq!(param.written_len(), string.len());
-        let vec = param.to_vec().unwrap();
-        let string_conv_back = String::from_utf8(vec).expect("conversion to string failed");
-        assert_eq!(string_conv_back, string);
+    fn test_heapless_param_writable_trait_raw() {
+        let param_heapless = ParamsHeapless::Raw(ParamsRaw::from((500_u32, 1000_u32)));
+        assert_eq!(param_heapless.written_len(), 8);
+        let mut buf: [u8; 8] = [0; 8];
+        let size = param_heapless
+            .write_to_be_bytes(&mut buf)
+            .expect("writing failed");
+        assert_eq!(size, 8);
+        assert_eq!(u32::from_be_bytes(buf[0..4].try_into().unwrap()), 500);
+        assert_eq!(u32::from_be_bytes(buf[4..8].try_into().unwrap()), 1000);
     }
 
     #[test]
-    fn test_params_written_vec() {
-        let vec: Vec<u8> = alloc::vec![1, 2, 3, 4, 5];
-        let param = Params::Vec(vec.clone());
-        assert_eq!(param.written_len(), vec.len());
-        assert_eq!(param.to_vec().expect("writing vec params failed"), vec);
+    fn test_heapless_param_writable_trait_ecss_enum() {
+        let param_heapless = ParamsHeapless::EcssEnum(ParamsEcssEnum::U16(5.into()));
+        assert_eq!(param_heapless.written_len(), 2);
+        let mut buf: [u8; 2] = [0; 2];
+        let size = param_heapless
+            .write_to_be_bytes(&mut buf)
+            .expect("writing failed");
+        assert_eq!(size, 2);
+        assert_eq!(u16::from_be_bytes(buf[0..2].try_into().unwrap()), 5);
     }
 
     #[test]
