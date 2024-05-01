@@ -322,7 +322,7 @@ mod tests {
         match result.unwrap() {
             DirectPusPacketHandlerResult::Handled(handled) => {
                 assert_eq!(handled, HandlingStatus::Empty);
-            },
+            }
             _ => panic!("unexpected result"),
         }
     }
