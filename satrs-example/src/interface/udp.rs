@@ -3,13 +3,12 @@ use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc;
 
 use log::{info, warn};
+use satrs::pus::HandlingStatus;
 use satrs::tmtc::{PacketAsVec, PacketInPool, PacketSenderRaw};
 use satrs::{
     hal::std::udp_server::{ReceiveResult, UdpTcServer},
     pool::{PoolProviderWithGuards, SharedStaticMemoryPool},
 };
-
-use crate::pus::HandlingStatus;
 
 pub trait UdpTmHandler {
     fn send_tm_to_udp_client(&mut self, socket: &UdpSocket, recv_addr: &SocketAddr);

@@ -8,8 +8,9 @@ use satrs::pus::scheduler::{PusScheduler, TcInfo};
 use satrs::pus::scheduler_srv::PusSchedServiceHandler;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
-    EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    EcssTmSender, MpscTcReceiver, MpscTmAsVecSender, PusPacketHandlerResult, PusServiceHelper,
+    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcInMemConverter,
+    EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTmSender, MpscTcReceiver,
+    MpscTmAsVecSender, PartialPusHandlingError, PusServiceHelper,
 };
 use satrs::tmtc::{PacketAsVec, PacketInPool, PacketSenderWithSharedPool};
 use satrs::ComponentId;
@@ -105,25 +106,25 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
     }
 
     pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        match self
-            .pus_11_handler
-            .poll_and_handle_next_tc(time_stamp, &mut self.sched_tc_pool)
-        {
+        let error_handler = |patial_error: &PartialPusHandlingError| {
+            log::warn!("PUS 11 partial error: {:?}", patial_error);
+        };
+        match self.pus_11_handler.poll_and_handle_next_tc(
+            error_handler,
+            time_stamp,
+            &mut self.sched_tc_pool,
+        ) {
             Ok(result) => match result {
-                PusPacketHandlerResult::RequestHandled => {}
-                PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {
-                    warn!("PUS11 partial packet handling success: {e:?}")
+                DirectPusPacketHandlerResult::Handled(handling_status) => return handling_status,
+                DirectPusPacketHandlerResult::CustomSubservice(invalid, _) => {
+                    warn!("PUS 11 invalid subservice {invalid}");
                 }
-                PusPacketHandlerResult::CustomSubservice(invalid, _) => {
-                    warn!("PUS11 invalid subservice {invalid}");
+                DirectPusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
+                    warn!("PUS 11 Subservice {subservice} not implemented");
                 }
-                PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
-                    warn!("PUS11: Subservice {subservice} not implemented");
-                }
-                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
             },
             Err(error) => {
-                error!("PUS packet handling error: {error:?}")
+                error!("PUS 11 packet handling error: {error:?}")
             }
         }
         HandlingStatus::HandledOne

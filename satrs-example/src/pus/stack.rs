@@ -2,8 +2,12 @@ use crate::pus::mode::ModeServiceWrapper;
 use derive_new::new;
 use satrs::{
     pus::{EcssTcInMemConverter, EcssTmSender},
-    spacepackets::time::{cds, TimeWriter},
+    spacepackets::{
+        ecss::PusServiceId,
+        time::{cds, TimeWriter},
+    },
 };
+use satrs_example::config::CustomPusServiceId;
 
 use super::{
     action::ActionServiceWrapper, event::EventServiceWrapper, hk::HkServiceWrapper,
@@ -32,6 +36,7 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
             .expect("time stamp generation error")
             .to_vec()
             .unwrap();
+        // Hot loop which will run continuously until all request and reply handling is done.
         loop {
             let mut nothing_to_do = true;
             let mut is_srv_finished =
@@ -46,33 +51,46 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
                     }
                 };
             is_srv_finished(
-                17,
-                self.test_srv.poll_and_handle_next_packet(&time_stamp),
+                PusServiceId::Test as u8,
+                self.test_srv.poll_and_handle_next_tc(&time_stamp),
                 None,
             );
             is_srv_finished(
-                11,
+                PusServiceId::Scheduling as u8,
                 self.schedule_srv.poll_and_handle_next_tc(&time_stamp),
                 None,
             );
-            is_srv_finished(5, self.event_srv.poll_and_handle_next_tc(&time_stamp), None);
             is_srv_finished(
-                8,
-                self.action_srv_wrapper.poll_and_handle_next_tc(&time_stamp),
+                PusServiceId::Event as u8,
+                self.event_srv.poll_and_handle_next_tc(&time_stamp),
+                None,
+            );
+            is_srv_finished(
+                PusServiceId::Action as u8,
+                self.action_srv_wrapper
+                    .poll_and_handle_next_tc_default_handler(&time_stamp),
                 Some(
                     self.action_srv_wrapper
-                        .poll_and_handle_next_reply(&time_stamp),
+                        .poll_and_handle_next_reply_default_handler(&time_stamp),
                 ),
             );
             is_srv_finished(
-                3,
-                self.hk_srv_wrapper.poll_and_handle_next_tc(&time_stamp),
-                Some(self.hk_srv_wrapper.poll_and_handle_next_reply(&time_stamp)),
+                PusServiceId::Housekeeping as u8,
+                self.hk_srv_wrapper
+                    .poll_and_handle_next_tc_default_handler(&time_stamp),
+                Some(
+                    self.hk_srv_wrapper
+                        .poll_and_handle_next_reply_default_handler(&time_stamp),
+                ),
             );
             is_srv_finished(
-                200,
-                self.mode_srv.poll_and_handle_next_tc(&time_stamp),
-                Some(self.mode_srv.poll_and_handle_next_reply(&time_stamp)),
+                CustomPusServiceId::Mode as u8,
+                self.mode_srv
+                    .poll_and_handle_next_tc_default_handler(&time_stamp),
+                Some(
+                    self.mode_srv
+                        .poll_and_handle_next_reply_default_handler(&time_stamp),
+                ),
             );
             if nothing_to_do {
                 // Timeout checking is only done once.

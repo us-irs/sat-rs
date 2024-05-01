@@ -1,4 +1,4 @@
-use log::{error, warn};
+use log::warn;
 use satrs::action::{ActionRequest, ActionRequestVariant};
 use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::action::{
@@ -12,7 +12,7 @@ use satrs::pus::verification::{
 use satrs::pus::{
     ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
     EcssTcInVecConverter, EcssTmSender, EcssTmtcError, GenericConversionError, MpscTcReceiver,
-    MpscTmAsVecSender, PusPacketHandlerResult, PusReplyHandler, PusServiceHelper,
+    MpscTmAsVecSender, PusPacketHandlingError, PusReplyHandler, PusServiceHelper,
     PusTcToRequestConverter,
 };
 use satrs::request::{GenericMessage, UniqueApidTargetId};
@@ -278,43 +278,23 @@ pub struct ActionServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTc
 impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
     for ActionServiceWrapper<TmSender, TcInMemConverter>
 {
-    /// Returns [true] if the packet handling is finished.
-    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        match self.service.poll_and_handle_next_tc(time_stamp) {
-            Ok(result) => match result {
-                PusPacketHandlerResult::RequestHandled => {}
-                PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {
-                    warn!("PUS 8 partial packet handling success: {e:?}")
-                }
-                PusPacketHandlerResult::CustomSubservice(invalid, _) => {
-                    warn!("PUS 8 invalid subservice {invalid}");
-                }
-                PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
-                    warn!("PUS 8 subservice {subservice} not implemented");
-                }
-                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
-            },
-            Err(error) => {
-                error!("PUS packet handling error: {error:?}");
-                // To avoid permanent loops on error cases.
-                return HandlingStatus::Empty;
-            }
+    const SERVICE_ID: u8 = 8;
+    const SERVICE_STR: &'static str = "action";
+
+    delegate::delegate! {
+        to self.service {
+            fn poll_and_handle_next_tc(
+                &mut self,
+                time_stamp: &[u8],
+            ) -> Result<HandlingStatus, PusPacketHandlingError>;
+
+            fn poll_and_handle_next_reply(
+                &mut self,
+                time_stamp: &[u8],
+            ) -> Result<HandlingStatus, EcssTmtcError>;
+
+            fn check_for_request_timeouts(&mut self);
         }
-        HandlingStatus::HandledOne
-    }
-
-    fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        // This only fails if all senders disconnected. Treat it like an empty queue.
-        self.service
-            .poll_and_check_next_reply(time_stamp)
-            .unwrap_or_else(|e| {
-                warn!("PUS 8: Handling reply failed with error {e:?}");
-                HandlingStatus::Empty
-            })
-    }
-
-    fn check_for_request_timeouts(&mut self) {
-        self.service.check_for_request_timeouts();
     }
 }
 
@@ -429,7 +409,7 @@ mod tests {
             }
             let result = result.unwrap();
             match result {
-                PusPacketHandlerResult::RequestHandled => (),
+                HandlingStatus::HandledOne => (),
                 _ => panic!("unexpected result {result:?}"),
             }
         }
@@ -441,19 +421,19 @@ mod tests {
             }
             let result = result.unwrap();
             match result {
-                PusPacketHandlerResult::Empty => (),
+                HandlingStatus::Empty => (),
                 _ => panic!("unexpected result {result:?}"),
             }
         }
 
         pub fn verify_next_reply_is_handled_properly(&mut self, time_stamp: &[u8]) {
-            let result = self.service.poll_and_check_next_reply(time_stamp);
+            let result = self.service.poll_and_handle_next_reply(time_stamp);
             assert!(result.is_ok());
             assert_eq!(result.unwrap(), HandlingStatus::HandledOne);
         }
 
         pub fn verify_all_replies_handled(&mut self, time_stamp: &[u8]) {
-            let result = self.service.poll_and_check_next_reply(time_stamp);
+            let result = self.service.poll_and_handle_next_reply(time_stamp);
             assert!(result.is_ok());
             assert_eq!(result.unwrap(), HandlingStatus::Empty);
         }

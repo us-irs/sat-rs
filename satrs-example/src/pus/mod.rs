@@ -8,8 +8,8 @@ use satrs::pus::verification::{
 use satrs::pus::{
     ActiveRequestMapProvider, ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter,
     EcssTcReceiver, EcssTmSender, EcssTmtcError, GenericConversionError, GenericRoutingError,
-    PusPacketHandlerResult, PusPacketHandlingError, PusReplyHandler, PusRequestRouter,
-    PusServiceHelper, PusTcToRequestConverter, TcInMemory,
+    HandlingStatus, PusPacketHandlingError, PusReplyHandler, PusRequestRouter, PusServiceHelper,
+    PusTcToRequestConverter, TcInMemory,
 };
 use satrs::queue::{GenericReceiveError, GenericSendError};
 use satrs::request::{Apid, GenericMessage, MessageMetadata};
@@ -30,12 +30,6 @@ pub mod mode;
 pub mod scheduler;
 pub mod stack;
 pub mod test;
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub enum HandlingStatus {
-    Empty,
-    HandledOne,
-}
 
 pub fn create_verification_reporter(owner_id: ComponentId, apid: Apid) -> VerificationReporter {
     let verif_cfg = VerificationReporterCfg::new(apid, 1, 2, 8).unwrap();
@@ -79,7 +73,7 @@ impl<TmSender: EcssTmSender> PusTcDistributor<TmSender> {
     pub fn handle_tc_packet_vec(
         &mut self,
         packet_as_vec: PacketAsVec,
-    ) -> Result<PusPacketHandlerResult, GenericSendError> {
+    ) -> Result<HandlingStatus, GenericSendError> {
         self.handle_tc_generic(packet_as_vec.sender_id, None, &packet_as_vec.packet)
     }
 
@@ -87,7 +81,7 @@ impl<TmSender: EcssTmSender> PusTcDistributor<TmSender> {
         &mut self,
         packet_in_pool: PacketInPool,
         pus_tc_copy: &[u8],
-    ) -> Result<PusPacketHandlerResult, GenericSendError> {
+    ) -> Result<HandlingStatus, GenericSendError> {
         self.handle_tc_generic(
             packet_in_pool.sender_id,
             Some(packet_in_pool.store_addr),
@@ -100,7 +94,7 @@ impl<TmSender: EcssTmSender> PusTcDistributor<TmSender> {
         sender_id: ComponentId,
         addr_opt: Option<PoolAddr>,
         raw_tc: &[u8],
-    ) -> Result<PusPacketHandlerResult, GenericSendError> {
+    ) -> Result<HandlingStatus, GenericSendError> {
         let pus_tc_result = PusTcReader::new(raw_tc);
         if pus_tc_result.is_err() {
             log::warn!(
@@ -109,7 +103,8 @@ impl<TmSender: EcssTmSender> PusTcDistributor<TmSender> {
                 pus_tc_result.unwrap_err()
             );
             log::warn!("raw data: {:x?}", raw_tc);
-            return Ok(PusPacketHandlerResult::RequestHandled);
+            // TODO: Shouldn't this be an error?
+            return Ok(HandlingStatus::HandledOne);
         }
         let pus_tc = pus_tc_result.unwrap().0;
         let init_token = self.verif_reporter.add_tc(&pus_tc);
@@ -189,14 +184,53 @@ impl<TmSender: EcssTmSender> PusTcDistributor<TmSender> {
                 }
             }
         }
-        Ok(PusPacketHandlerResult::RequestHandled)
+        Ok(HandlingStatus::HandledOne)
     }
 }
 
 pub trait TargetedPusService {
-    /// Returns [true] if the packet handling is finished.
-    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus;
-    fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> HandlingStatus;
+    const SERVICE_ID: u8;
+    const SERVICE_STR: &'static str;
+
+    fn poll_and_handle_next_tc_default_handler(&mut self, time_stamp: &[u8]) -> HandlingStatus {
+        let result = self.poll_and_handle_next_tc(time_stamp);
+        if let Err(e) = result {
+            log::error!(
+                "PUS service {}({})packet handling error: {:?}",
+                Self::SERVICE_ID,
+                Self::SERVICE_STR,
+                e
+            );
+            // To avoid permanent loops on error cases.
+            return HandlingStatus::Empty;
+        }
+        result.unwrap()
+    }
+
+    fn poll_and_handle_next_reply_default_handler(&mut self, time_stamp: &[u8]) -> HandlingStatus {
+        // This only fails if all senders disconnected. Treat it like an empty queue.
+        self.poll_and_handle_next_reply(time_stamp)
+            .unwrap_or_else(|e| {
+                warn!(
+                    "PUS servce {}({}): Handling reply failed with error {:?}",
+                    Self::SERVICE_ID,
+                    Self::SERVICE_STR,
+                    e
+                );
+                HandlingStatus::Empty
+            })
+    }
+
+    fn poll_and_handle_next_tc(
+        &mut self,
+        time_stamp: &[u8],
+    ) -> Result<HandlingStatus, PusPacketHandlingError>;
+
+    fn poll_and_handle_next_reply(
+        &mut self,
+        time_stamp: &[u8],
+    ) -> Result<HandlingStatus, EcssTmtcError>;
+
     fn check_for_request_timeouts(&mut self);
 }
 
@@ -297,10 +331,10 @@ where
     pub fn poll_and_handle_next_tc(
         &mut self,
         time_stamp: &[u8],
-    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+    ) -> Result<HandlingStatus, PusPacketHandlingError> {
         let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
         if possible_packet.is_none() {
-            return Ok(PusPacketHandlerResult::Empty);
+            return Ok(HandlingStatus::Empty);
         }
         let ecss_tc_and_token = possible_packet.unwrap();
         self.service_helper
@@ -356,7 +390,7 @@ where
                 return Err(e.into());
             }
         }
-        Ok(PusPacketHandlerResult::RequestHandled)
+        Ok(HandlingStatus::HandledOne)
     }
 
     fn handle_conversion_to_request_error(
@@ -409,7 +443,7 @@ where
         }
     }
 
-    pub fn poll_and_check_next_reply(
+    pub fn poll_and_handle_next_reply(
         &mut self,
         time_stamp: &[u8],
     ) -> Result<HandlingStatus, EcssTmtcError> {
