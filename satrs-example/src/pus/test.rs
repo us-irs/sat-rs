@@ -1,5 +1,5 @@
 use crate::pus::create_verification_reporter;
-use log::{info, warn};
+use log::info;
 use satrs::event_man::{EventMessage, EventMessageU32};
 use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::test::PusService17TestHandler;
@@ -10,15 +10,13 @@ use satrs::pus::{
 };
 use satrs::pus::{EcssTcInSharedStoreConverter, PartialPusHandlingError};
 use satrs::spacepackets::ecss::tc::PusTcReader;
-use satrs::spacepackets::ecss::PusPacket;
-use satrs::spacepackets::time::cds::CdsTime;
-use satrs::spacepackets::time::TimeWriter;
+use satrs::spacepackets::ecss::{PusPacket, PusServiceId};
 use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use satrs_example::config::components::PUS_TEST_SERVICE;
 use satrs_example::config::{tmtc_err, TEST_EVENT};
 use std::sync::mpsc;
 
-use super::HandlingStatus;
+use super::{DirectPusService, HandlingStatus};
 
 pub fn create_test_service_static(
     tm_sender: PacketSenderWithSharedPool,
@@ -64,18 +62,36 @@ pub struct TestCustomServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: Ec
     pub test_srv_event_sender: mpsc::SyncSender<EventMessageU32>,
 }
 
+impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> DirectPusService
+    for TestCustomServiceWrapper<TmSender, TcInMemConverter>
+{
+    const SERVICE_ID: u8 = PusServiceId::Test as u8;
+
+    const SERVICE_STR: &'static str = "test";
+}
+
 impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
     TestCustomServiceWrapper<TmSender, TcInMemConverter>
 {
-    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        let error_handler = |patial_error: &PartialPusHandlingError| {
-            log::warn!("PUS 17 partial error: {:?}", patial_error);
+    pub fn poll_and_handle_next_tc(&mut self, timestamp: &[u8]) -> HandlingStatus {
+        let error_handler = |partial_error: &PartialPusHandlingError| {
+            log::warn!(
+                "PUS {}({}) partial error: {:?}",
+                Self::SERVICE_ID,
+                Self::SERVICE_STR,
+                partial_error
+            );
         };
         let res = self
             .handler
-            .poll_and_handle_next_tc(error_handler, time_stamp);
-        if res.is_err() {
-            warn!("PUS 17 handler error: {:?}", res.unwrap_err());
+            .poll_and_handle_next_tc(error_handler, timestamp);
+        if let Err(e) = res {
+            log::warn!(
+                "PUS {}({}) error: {:?}",
+                Self::SERVICE_ID,
+                Self::SERVICE_STR,
+                e
+            );
             return HandlingStatus::HandledOne;
         }
         match res.unwrap() {
@@ -87,7 +103,12 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
                 return handling_status;
             }
             DirectPusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
-                warn!("PUS17: Subservice {subservice} not implemented")
+                log::warn!(
+                    "PUS {}({}) subservice {} not implemented",
+                    Self::SERVICE_ID,
+                    Self::SERVICE_STR,
+                    subservice
+                );
             }
             DirectPusPacketHandlerResult::CustomSubservice(subservice, token) => {
                 let (tc, _) = PusTcReader::new(
@@ -97,29 +118,34 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
                         .tc_slice_raw(),
                 )
                 .unwrap();
-                let time_stamper = CdsTime::now_with_u16_days().unwrap();
-                let mut stamp_buf: [u8; 7] = [0; 7];
-                time_stamper.write_to_bytes(&mut stamp_buf).unwrap();
                 if subservice == 128 {
-                    info!("Generating test event");
+                    info!("generating test event");
                     self.test_srv_event_sender
                         .send(EventMessage::new(PUS_TEST_SERVICE.id(), TEST_EVENT.into()))
                         .expect("Sending test event failed");
-                    let start_token = self
-                        .handler
-                        .service_helper
-                        .verif_reporter()
-                        .start_success(self.handler.service_helper.tm_sender(), token, &stamp_buf)
-                        .expect("Error sending start success");
-                    self.handler
-                        .service_helper
-                        .verif_reporter()
-                        .completion_success(
-                            self.handler.service_helper.tm_sender(),
-                            start_token,
-                            &stamp_buf,
-                        )
-                        .expect("Error sending completion success");
+                    match self.handler.service_helper.verif_reporter().start_success(
+                        self.handler.service_helper.tm_sender(),
+                        token,
+                        timestamp,
+                    ) {
+                        Ok(started_token) => {
+                            if let Err(e) = self
+                                .handler
+                                .service_helper
+                                .verif_reporter()
+                                .completion_success(
+                                    self.handler.service_helper.tm_sender(),
+                                    started_token,
+                                    timestamp,
+                                )
+                            {
+                                error_handler(&PartialPusHandlingError::Verification(e));
+                            }
+                        }
+                        Err(e) => {
+                            error_handler(&PartialPusHandlingError::Verification(e));
+                        }
+                    }
                 } else {
                     let fail_data = [tc.subservice()];
                     self.handler
@@ -129,7 +155,7 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
                             self.handler.service_helper.tm_sender(),
                             token,
                             FailParams::new(
-                                &stamp_buf,
+                                timestamp,
                                 &tmtc_err::INVALID_PUS_SUBSERVICE,
                                 &fail_data,
                             ),

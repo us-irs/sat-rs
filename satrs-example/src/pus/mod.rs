@@ -524,6 +524,11 @@ pub fn generic_pus_request_timeout_handler(
     Ok(())
 }
 
+pub trait DirectPusService {
+    const SERVICE_ID: u8;
+    const SERVICE_STR: &'static str;
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use std::time::Duration;
