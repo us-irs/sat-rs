@@ -54,11 +54,11 @@ pub type GenericActionReplyPus = GenericMessage<ActionReplyPus>;
 
 impl GenericActionReplyPus {
     pub fn new_action_reply(
-        requestor_info: MessageMetadata,
+        replier_info: MessageMetadata,
         action_id: ActionId,
         reply: ActionReplyVariant,
     ) -> Self {
-        Self::new(requestor_info, ActionReplyPus::new(action_id, reply))
+        Self::new(replier_info, ActionReplyPus::new(action_id, reply))
     }
 }
 

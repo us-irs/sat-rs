@@ -7,8 +7,9 @@ use satrs::pus::event_man::EventRequestWithToken;
 use satrs::pus::event_srv::PusEventServiceHandler;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
-    EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    EcssTmSender, MpscTcReceiver, MpscTmAsVecSender, PusPacketHandlerResult, PusServiceHelper,
+    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcInMemConverter,
+    EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTmSender, MpscTcReceiver,
+    MpscTmAsVecSender, PartialPusHandlingError, PusServiceHelper,
 };
 use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use satrs_example::config::components::PUS_EVENT_MANAGEMENT;
@@ -65,22 +66,24 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
     EventServiceWrapper<TmSender, TcInMemConverter>
 {
     pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        match self.handler.poll_and_handle_next_tc(time_stamp) {
+        let error_handler = |partial_error: &PartialPusHandlingError| {
+            log::warn!("PUS 5 partial error: {:?}", partial_error);
+        };
+        match self
+            .handler
+            .poll_and_handle_next_tc(error_handler, time_stamp)
+        {
             Ok(result) => match result {
-                PusPacketHandlerResult::RequestHandled => {}
-                PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {
-                    warn!("PUS 5 partial packet handling success: {e:?}")
-                }
-                PusPacketHandlerResult::CustomSubservice(invalid, _) => {
+                DirectPusPacketHandlerResult::Handled(handling_status) => return handling_status,
+                DirectPusPacketHandlerResult::CustomSubservice(invalid, _) => {
                     warn!("PUS 5 invalid subservice {invalid}");
                 }
-                PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
+                DirectPusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
                     warn!("PUS 5 subservice {subservice} not implemented");
                 }
-                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
             },
             Err(error) => {
-                error!("PUS packet handling error: {error:?}")
+                error!("PUS 5 packet handling error: {error:?}")
             }
         }
         HandlingStatus::HandledOne

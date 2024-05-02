@@ -45,6 +45,15 @@ pub use std_mod::*;
 
 use self::verification::VerificationReportingProvider;
 
+/// Generic handling status for an object which is able to continuosly handle a queue to handle
+/// request or replies until the queue is empty.
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum HandlingStatus {
+    HandledOne,
+    Empty,
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PusTmVariant<'time, 'src_data> {
     InStore(PoolAddr),
@@ -649,14 +658,11 @@ pub mod alloc_mod {
 
 #[cfg(feature = "std")]
 pub mod std_mod {
+    use super::*;
     use crate::pool::{
         PoolAddr, PoolError, PoolProvider, PoolProviderWithGuards, SharedStaticMemoryPool,
     };
     use crate::pus::verification::{TcStateAccepted, VerificationToken};
-    use crate::pus::{
-        EcssTcAndToken, EcssTcReceiver, EcssTmSender, EcssTmtcError, GenericReceiveError,
-        GenericSendError, PusTmVariant, TryRecvTmtcError,
-    };
     use crate::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
     use crate::ComponentId;
     use alloc::vec::Vec;
@@ -920,26 +926,24 @@ pub mod std_mod {
         #[error("generic timestamp generation error")]
         Time(#[from] StdTimestampError),
         #[error("error sending telemetry: {0}")]
-        TmSend(#[from] EcssTmtcError),
+        TmSend(EcssTmtcError),
         #[error("error sending verification message")]
-        Verification,
+        Verification(EcssTmtcError),
         #[error("invalid verification token")]
         NoVerificationToken,
     }
 
     /// Generic result type for handlers which can process PUS packets.
     #[derive(Debug, Clone)]
-    pub enum PusPacketHandlerResult {
-        RequestHandled,
-        RequestHandledPartialSuccess(PartialPusHandlingError),
+    pub enum DirectPusPacketHandlerResult {
+        Handled(HandlingStatus),
         SubserviceNotImplemented(u8, VerificationToken<TcStateAccepted>),
         CustomSubservice(u8, VerificationToken<TcStateAccepted>),
-        Empty,
     }
 
-    impl From<PartialPusHandlingError> for PusPacketHandlerResult {
-        fn from(value: PartialPusHandlingError) -> Self {
-            Self::RequestHandledPartialSuccess(value)
+    impl From<HandlingStatus> for DirectPusPacketHandlerResult {
+        fn from(value: HandlingStatus) -> Self {
+            Self::Handled(value)
         }
     }
 
@@ -1222,7 +1226,7 @@ pub mod test_util {
 
     use super::{
         verification::{self, TcStateAccepted, VerificationToken},
-        PusPacketHandlerResult, PusPacketHandlingError,
+        DirectPusPacketHandlerResult, PusPacketHandlingError,
     };
 
     pub const TEST_APID: u16 = 0x101;
@@ -1246,7 +1250,8 @@ pub mod test_util {
     }
 
     pub trait SimplePusPacketHandler {
-        fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
+        fn handle_one_tc(&mut self)
+            -> Result<DirectPusPacketHandlerResult, PusPacketHandlingError>;
     }
 }
 

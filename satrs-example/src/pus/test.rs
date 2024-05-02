@@ -4,11 +4,11 @@ use satrs::event_man::{EventMessage, EventMessageU32};
 use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::test::PusService17TestHandler;
 use satrs::pus::verification::{FailParams, VerificationReporter, VerificationReportingProvider};
-use satrs::pus::EcssTcInSharedStoreConverter;
 use satrs::pus::{
-    EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter, EcssTmSender, MpscTcReceiver,
-    MpscTmAsVecSender, PusPacketHandlerResult, PusServiceHelper,
+    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter,
+    EcssTmSender, MpscTcReceiver, MpscTmAsVecSender, PusServiceHelper,
 };
+use satrs::pus::{EcssTcInSharedStoreConverter, PartialPusHandlingError};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusPacket;
 use satrs::spacepackets::time::cds::CdsTime;
@@ -67,27 +67,29 @@ pub struct TestCustomServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: Ec
 impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
     TestCustomServiceWrapper<TmSender, TcInMemConverter>
 {
-    pub fn poll_and_handle_next_packet(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        let res = self.handler.poll_and_handle_next_tc(time_stamp);
+    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
+        let error_handler = |patial_error: &PartialPusHandlingError| {
+            log::warn!("PUS 17 partial error: {:?}", patial_error);
+        };
+        let res = self
+            .handler
+            .poll_and_handle_next_tc(error_handler, time_stamp);
         if res.is_err() {
-            warn!("PUS17 handler failed with error {:?}", res.unwrap_err());
+            warn!("PUS 17 handler error: {:?}", res.unwrap_err());
             return HandlingStatus::HandledOne;
         }
         match res.unwrap() {
-            PusPacketHandlerResult::RequestHandled => {
-                info!("Received PUS ping command TC[17,1]");
-                info!("Sent ping reply PUS TM[17,2]");
+            DirectPusPacketHandlerResult::Handled(handling_status) => {
+                if handling_status == HandlingStatus::HandledOne {
+                    info!("Received PUS ping command TC[17,1]");
+                    info!("Sent ping reply PUS TM[17,2]");
+                }
+                return handling_status;
             }
-            PusPacketHandlerResult::RequestHandledPartialSuccess(partial_err) => {
-                warn!(
-                    "Handled PUS ping command with partial success: {:?}",
-                    partial_err
-                );
-            }
-            PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
+            DirectPusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
                 warn!("PUS17: Subservice {subservice} not implemented")
             }
-            PusPacketHandlerResult::CustomSubservice(subservice, token) => {
+            DirectPusPacketHandlerResult::CustomSubservice(subservice, token) => {
                 let (tc, _) = PusTcReader::new(
                     self.handler
                         .service_helper
@@ -135,7 +137,6 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
                         .expect("Sending start failure verification failed");
                 }
             }
-            PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
         }
         HandlingStatus::HandledOne
     }

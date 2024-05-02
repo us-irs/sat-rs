@@ -1,5 +1,5 @@
 use crate::pus::{
-    PartialPusHandlingError, PusPacketHandlerResult, PusPacketHandlingError, PusTmVariant,
+    DirectPusPacketHandlerResult, PartialPusHandlingError, PusPacketHandlingError, PusTmVariant,
 };
 use crate::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
@@ -10,7 +10,7 @@ use std::sync::mpsc;
 use super::verification::{VerificationReporter, VerificationReportingProvider};
 use super::{
     EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiver,
-    EcssTmSender, GenericConversionError, MpscTcReceiver, PusServiceHelper,
+    EcssTmSender, GenericConversionError, HandlingStatus, MpscTcReceiver, PusServiceHelper,
 };
 
 /// This is a helper class for [std] environments to handle generic PUS 17 (test service) packets.
@@ -43,13 +43,14 @@ impl<
         Self { service_helper }
     }
 
-    pub fn poll_and_handle_next_tc(
+    pub fn poll_and_handle_next_tc<ErrorCb: FnMut(&PartialPusHandlingError)>(
         &mut self,
+        mut error_callback: ErrorCb,
         time_stamp: &[u8],
-    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+    ) -> Result<DirectPusPacketHandlerResult, PusPacketHandlingError> {
         let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
         if possible_packet.is_none() {
-            return Ok(PusPacketHandlerResult::Empty);
+            return Ok(HandlingStatus::Empty.into());
         }
         let ecss_tc_and_token = possible_packet.unwrap();
         self.service_helper
@@ -60,21 +61,16 @@ impl<
             return Err(GenericConversionError::WrongService(tc.service()).into());
         }
         if tc.subservice() == 1 {
-            let mut partial_error = None;
-            let result = self
-                .service_helper
-                .verif_reporter()
-                .start_success(
-                    &self.service_helper.common.tm_sender,
-                    ecss_tc_and_token.token,
-                    time_stamp,
-                )
-                .map_err(|_| PartialPusHandlingError::Verification);
-            let start_token = if let Ok(result) = result {
-                Some(result)
-            } else {
-                partial_error = Some(result.unwrap_err());
-                None
+            let opt_started_token = match self.service_helper.verif_reporter().start_success(
+                &self.service_helper.common.tm_sender,
+                ecss_tc_and_token.token,
+                time_stamp,
+            ) {
+                Ok(token) => Some(token),
+                Err(e) => {
+                    error_callback(&PartialPusHandlingError::Verification(e));
+                    None
+                }
             };
             // Sequence count will be handled centrally in TM funnel.
             // It is assumed that the verification reporter was built with a valid APID, so we use
@@ -83,42 +79,30 @@ impl<
                 SpHeader::new_for_unseg_tm(self.service_helper.verif_reporter().apid(), 0, 0);
             let tc_header = PusTmSecondaryHeader::new_simple(17, 2, time_stamp);
             let ping_reply = PusTmCreator::new(reply_header, tc_header, &[], true);
-            let result = self
+            if let Err(e) = self
                 .service_helper
                 .common
                 .tm_sender
                 .send_tm(self.service_helper.id(), PusTmVariant::Direct(ping_reply))
-                .map_err(PartialPusHandlingError::TmSend);
-            if let Err(err) = result {
-                partial_error = Some(err);
+            {
+                error_callback(&PartialPusHandlingError::TmSend(e));
             }
-
-            if let Some(start_token) = start_token {
-                if self
-                    .service_helper
-                    .verif_reporter()
-                    .completion_success(
-                        &self.service_helper.common.tm_sender,
-                        start_token,
-                        time_stamp,
-                    )
-                    .is_err()
-                {
-                    partial_error = Some(PartialPusHandlingError::Verification)
+            if let Some(start_token) = opt_started_token {
+                if let Err(e) = self.service_helper.verif_reporter().completion_success(
+                    &self.service_helper.common.tm_sender,
+                    start_token,
+                    time_stamp,
+                ) {
+                    error_callback(&PartialPusHandlingError::Verification(e));
                 }
             }
-            if let Some(partial_error) = partial_error {
-                return Ok(PusPacketHandlerResult::RequestHandledPartialSuccess(
-                    partial_error,
-                ));
-            };
         } else {
-            return Ok(PusPacketHandlerResult::CustomSubservice(
+            return Ok(DirectPusPacketHandlerResult::CustomSubservice(
                 tc.subservice(),
                 ecss_tc_and_token.token,
             ));
         }
-        Ok(PusPacketHandlerResult::RequestHandled)
+        Ok(HandlingStatus::HandledOne.into())
     }
 }
 
@@ -158,8 +142,9 @@ mod tests {
     };
     use crate::pus::verification::{TcStateAccepted, VerificationToken};
     use crate::pus::{
-        EcssTcInSharedStoreConverter, EcssTcInVecConverter, GenericConversionError, MpscTcReceiver,
-        MpscTmAsVecSender, PusPacketHandlerResult, PusPacketHandlingError,
+        DirectPusPacketHandlerResult, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
+        GenericConversionError, HandlingStatus, MpscTcReceiver, MpscTmAsVecSender,
+        PartialPusHandlingError, PusPacketHandlingError,
     };
     use crate::tmtc::PacketSenderWithSharedPool;
     use crate::ComponentId;
@@ -221,9 +206,12 @@ mod tests {
         }
     }
     impl SimplePusPacketHandler for Pus17HandlerWithStoreTester {
-        fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        fn handle_one_tc(
+            &mut self,
+        ) -> Result<DirectPusPacketHandlerResult, PusPacketHandlingError> {
             let time_stamp = cds::CdsTime::new_with_u16_days(0, 0).to_vec().unwrap();
-            self.handler.poll_and_handle_next_tc(&time_stamp)
+            self.handler
+                .poll_and_handle_next_tc(|_partial_error: &PartialPusHandlingError| {}, &time_stamp)
         }
     }
 
@@ -276,9 +264,12 @@ mod tests {
         }
     }
     impl SimplePusPacketHandler for Pus17HandlerWithVecTester {
-        fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        fn handle_one_tc(
+            &mut self,
+        ) -> Result<DirectPusPacketHandlerResult, PusPacketHandlingError> {
             let time_stamp = cds::CdsTime::new_with_u16_days(0, 0).to_vec().unwrap();
-            self.handler.poll_and_handle_next_tc(&time_stamp)
+            self.handler
+                .poll_and_handle_next_tc(|_partial_error: &PartialPusHandlingError| {}, &time_stamp)
         }
     }
 
@@ -328,10 +319,11 @@ mod tests {
         let mut test_harness = Pus17HandlerWithStoreTester::new(0);
         let result = test_harness.handle_one_tc();
         assert!(result.is_ok());
-        let result = result.unwrap();
-        if let PusPacketHandlerResult::Empty = result {
-        } else {
-            panic!("unexpected result type {result:?}")
+        match result.unwrap() {
+            DirectPusPacketHandlerResult::Handled(handled) => {
+                assert_eq!(handled, HandlingStatus::Empty);
+            }
+            _ => panic!("unexpected result"),
         }
     }
 
@@ -367,7 +359,7 @@ mod tests {
         let result = test_harness.handle_one_tc();
         assert!(result.is_ok());
         let result = result.unwrap();
-        if let PusPacketHandlerResult::CustomSubservice(subservice, _) = result {
+        if let DirectPusPacketHandlerResult::CustomSubservice(subservice, _) = result {
             assert_eq!(subservice, 200);
         } else {
             panic!("unexpected result type {result:?}")
