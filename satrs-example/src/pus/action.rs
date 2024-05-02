@@ -17,7 +17,7 @@ use satrs::pus::{
 };
 use satrs::request::{GenericMessage, UniqueApidTargetId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
-use satrs::spacepackets::ecss::{EcssEnumU16, PusPacket};
+use satrs::spacepackets::ecss::{EcssEnumU16, PusPacket, PusServiceId};
 use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use satrs_example::config::components::PUS_ACTION_SERVICE;
 use satrs_example::config::tmtc_err;
@@ -278,7 +278,7 @@ pub struct ActionServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTc
 impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
     for ActionServiceWrapper<TmSender, TcInMemConverter>
 {
-    const SERVICE_ID: u8 = 8;
+    const SERVICE_ID: u8 = PusServiceId::Action as u8;
     const SERVICE_STR: &'static str = "action";
 
     delegate::delegate! {

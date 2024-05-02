@@ -13,7 +13,7 @@ use satrs::pus::{
 };
 use satrs::request::{GenericMessage, UniqueApidTargetId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
-use satrs::spacepackets::ecss::{hk, PusPacket};
+use satrs::spacepackets::ecss::{hk, PusPacket, PusServiceId};
 use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use satrs_example::config::components::PUS_HK_SERVICE;
 use satrs_example::config::{hk_err, tmtc_err};
@@ -299,8 +299,7 @@ pub struct HkServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMe
 impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
     for HkServiceWrapper<TmSender, TcInMemConverter>
 {
-    const SERVICE_ID: u8 = 3;
-
+    const SERVICE_ID: u8 = PusServiceId::Housekeeping as u8;
     const SERVICE_STR: &'static str = "housekeeping";
 
     delegate::delegate! {
