@@ -26,31 +26,6 @@ pub struct PusStack<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConvert
 impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
     PusStack<TmSender, TcInMemConverter>
 {
-    pub fn direct_service_checker<S: DirectPusService>(
-        service: &mut S,
-        timestamp: &[u8],
-        nothing_to_do: &mut bool,
-    ) {
-        let handling_status = service.poll_and_handle_next_tc(timestamp);
-        if handling_status == HandlingStatus::HandledOne {
-            *nothing_to_do = false;
-        }
-    }
-
-    pub fn targeted_service_checker<S: TargetedPusService>(
-        service: &mut S,
-        timestamp: &[u8],
-        nothing_to_do: &mut bool,
-    ) {
-        let request_handling = service.poll_and_handle_next_tc_default_handler(timestamp);
-        let reply_handling = service.poll_and_handle_next_reply_default_handler(timestamp);
-        if request_handling == HandlingStatus::HandledOne
-            || reply_handling == HandlingStatus::HandledOne
-        {
-            *nothing_to_do = false;
-        }
-    }
-
     pub fn periodic_operation(&mut self) {
         // Release all telecommands which reached their release time before calling the service
         // handlers.
@@ -59,6 +34,7 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
             .expect("time stamp generation error")
             .to_vec()
             .unwrap();
+        let mut loop_count = 0_u32;
         // Hot loop which will run continuously until all request and reply handling is done.
         loop {
             let mut nothing_to_do = true;
@@ -83,6 +59,37 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
                 self.mode_srv.check_for_request_timeouts();
                 break;
             }
+            // Safety mechanism to avoid infinite loops.
+            loop_count += 1;
+            if loop_count >= 500 {
+                log::warn!("reached PUS stack loop count 500, breaking");
+                break;
+            }
+        }
+    }
+
+    pub fn direct_service_checker<S: DirectPusService>(
+        service: &mut S,
+        timestamp: &[u8],
+        nothing_to_do: &mut bool,
+    ) {
+        let handling_status = service.poll_and_handle_next_tc(timestamp);
+        if handling_status == HandlingStatus::HandledOne {
+            *nothing_to_do = false;
+        }
+    }
+
+    pub fn targeted_service_checker<S: TargetedPusService>(
+        service: &mut S,
+        timestamp: &[u8],
+        nothing_to_do: &mut bool,
+    ) {
+        let request_handling = service.poll_and_handle_next_tc_default_handler(timestamp);
+        let reply_handling = service.poll_and_handle_next_reply_default_handler(timestamp);
+        if request_handling == HandlingStatus::HandledOne
+            || reply_handling == HandlingStatus::HandledOne
+        {
+            *nothing_to_do = false;
         }
     }
 }
