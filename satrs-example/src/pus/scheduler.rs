@@ -2,7 +2,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::pus::create_verification_reporter;
-use log::{error, info, warn};
+use log::info;
 use satrs::pool::{PoolProvider, StaticMemoryPool};
 use satrs::pus::scheduler::{PusScheduler, TcInfo};
 use satrs::pus::scheduler_srv::PusSchedServiceHandler;
@@ -12,11 +12,12 @@ use satrs::pus::{
     EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTmSender, MpscTcReceiver,
     MpscTmAsVecSender, PartialPusHandlingError, PusServiceHelper,
 };
+use satrs::spacepackets::ecss::PusServiceId;
 use satrs::tmtc::{PacketAsVec, PacketInPool, PacketSenderWithSharedPool};
 use satrs::ComponentId;
 use satrs_example::config::components::PUS_SCHED_SERVICE;
 
-use super::HandlingStatus;
+use super::{DirectPusService, HandlingStatus};
 
 pub trait TcReleaser {
     fn release(&mut self, sender_id: ComponentId, enabled: bool, info: &TcInfo, tc: &[u8]) -> bool;
@@ -77,6 +78,13 @@ pub struct SchedulingServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: Ec
     pub releaser_buf: [u8; 4096],
     pub tc_releaser: Box<dyn TcReleaser + Send>,
 }
+impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> DirectPusService
+    for SchedulingServiceWrapper<TmSender, TcInMemConverter>
+{
+    const SERVICE_ID: u8 = PusServiceId::Verification as u8;
+
+    const SERVICE_STR: &'static str = "verification";
+}
 
 impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
     SchedulingServiceWrapper<TmSender, TcInMemConverter>
@@ -106,25 +114,46 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
     }
 
     pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        let error_handler = |patial_error: &PartialPusHandlingError| {
-            log::warn!("PUS 11 partial error: {:?}", patial_error);
+        let error_handler = |partial_error: &PartialPusHandlingError| {
+            log::warn!(
+                "PUS {}({}) partial error: {:?}",
+                Self::SERVICE_ID,
+                Self::SERVICE_STR,
+                partial_error
+            );
         };
-        match self.pus_11_handler.poll_and_handle_next_tc(
+
+        let result = self.pus_11_handler.poll_and_handle_next_tc(
             error_handler,
             time_stamp,
             &mut self.sched_tc_pool,
-        ) {
-            Ok(result) => match result {
-                DirectPusPacketHandlerResult::Handled(handling_status) => return handling_status,
-                DirectPusPacketHandlerResult::CustomSubservice(invalid, _) => {
-                    warn!("PUS 11 invalid subservice {invalid}");
-                }
-                DirectPusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
-                    warn!("PUS 11 Subservice {subservice} not implemented");
-                }
-            },
-            Err(error) => {
-                error!("PUS 11 packet handling error: {error:?}")
+        );
+        if let Err(e) = result {
+            log::warn!(
+                "PUS {}({}) error: {:?}",
+                Self::SERVICE_ID,
+                Self::SERVICE_STR,
+                e
+            );
+            return HandlingStatus::HandledOne;
+        }
+        match result.unwrap() {
+            DirectPusPacketHandlerResult::Handled(handling_status) => return handling_status,
+            DirectPusPacketHandlerResult::CustomSubservice(subservice, _) => {
+                log::warn!(
+                    "PUS {}({}) subservice {} not implemented",
+                    Self::SERVICE_ID,
+                    Self::SERVICE_STR,
+                    subservice
+                );
+            }
+            DirectPusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
+                log::warn!(
+                    "PUS {}({}) subservice {} not implemented",
+                    Self::SERVICE_ID,
+                    Self::SERVICE_STR,
+                    subservice
+                );
             }
         }
         HandlingStatus::HandledOne
