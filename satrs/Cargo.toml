@@ -1,6 +1,6 @@
 [package]
 name = "satrs"
-version = "0.2.0-rc.5"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.71.1"
 authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
