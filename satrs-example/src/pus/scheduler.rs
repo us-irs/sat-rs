@@ -108,7 +108,8 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> DirectPusSe
                 Self::SERVICE_STR,
                 e
             );
-            return HandlingStatus::HandledOne;
+            // To avoid permanent loops on continuous errors.
+            return HandlingStatus::Empty;
         }
         match result.unwrap() {
             DirectPusPacketHandlerResult::Handled(handling_status) => return handling_status,
