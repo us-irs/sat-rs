@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.2.0] 2024-05-02
+
+## Changed
+
+- Various improvements for the PUS stack components.
+
+## Added
+
+- Added `HandlingStatus` enumeration.
+
 # [v0.2.0-rc.5] 2024-04-24
 
 ## Added
