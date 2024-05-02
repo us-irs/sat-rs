@@ -78,6 +78,7 @@ pub struct SchedulingServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: Ec
     pub releaser_buf: [u8; 4096],
     pub tc_releaser: Box<dyn TcReleaser + Send>,
 }
+
 impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> DirectPusService
     for SchedulingServiceWrapper<TmSender, TcInMemConverter>
 {

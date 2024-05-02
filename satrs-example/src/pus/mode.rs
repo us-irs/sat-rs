@@ -272,7 +272,6 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> TargetedPus
     for ModeServiceWrapper<TmSender, TcInMemConverter>
 {
     const SERVICE_ID: u8 = CustomPusServiceId::Mode as u8;
-
     const SERVICE_STR: &'static str = "mode";
 
     delegate::delegate! {
