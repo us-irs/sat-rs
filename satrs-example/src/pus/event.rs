@@ -68,12 +68,8 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> DirectPusSe
     const SERVICE_ID: u8 = PusServiceId::Event as u8;
 
     const SERVICE_STR: &'static str = "events";
-}
 
-impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
-    EventServiceWrapper<TmSender, TcInMemConverter>
-{
-    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
+    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
         let error_handler = |partial_error: &PartialPusHandlingError| {
             log::warn!(
                 "PUS {}({}) partial error: {:?}",

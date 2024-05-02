@@ -33,7 +33,7 @@ pub fn create_test_service_static(
     ));
     TestCustomServiceWrapper {
         handler: pus17_handler,
-        test_srv_event_sender: event_sender,
+        event_tx: event_sender,
     }
 }
 
@@ -51,7 +51,7 @@ pub fn create_test_service_dynamic(
     ));
     TestCustomServiceWrapper {
         handler: pus17_handler,
-        test_srv_event_sender: event_sender,
+        event_tx: event_sender,
     }
 }
 
@@ -59,7 +59,7 @@ pub struct TestCustomServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: Ec
 {
     pub handler:
         PusService17TestHandler<MpscTcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
-    pub test_srv_event_sender: mpsc::SyncSender<EventMessageU32>,
+    pub event_tx: mpsc::SyncSender<EventMessageU32>,
 }
 
 impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> DirectPusService
@@ -68,12 +68,8 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> DirectPusSe
     const SERVICE_ID: u8 = PusServiceId::Test as u8;
 
     const SERVICE_STR: &'static str = "test";
-}
 
-impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
-    TestCustomServiceWrapper<TmSender, TcInMemConverter>
-{
-    pub fn poll_and_handle_next_tc(&mut self, timestamp: &[u8]) -> HandlingStatus {
+    fn poll_and_handle_next_tc(&mut self, timestamp: &[u8]) -> HandlingStatus {
         let error_handler = |partial_error: &PartialPusHandlingError| {
             log::warn!(
                 "PUS {}({}) partial error: {:?}",
@@ -120,7 +116,7 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
                 .unwrap();
                 if subservice == 128 {
                     info!("generating test event");
-                    self.test_srv_event_sender
+                    self.event_tx
                         .send(EventMessage::new(PUS_TEST_SERVICE.id(), TEST_EVENT.into()))
                         .expect("Sending test event failed");
                     match self.handler.service_helper.verif_reporter().start_success(
