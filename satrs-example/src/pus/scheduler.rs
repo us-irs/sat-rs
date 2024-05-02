@@ -84,36 +84,8 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> DirectPusSe
     const SERVICE_ID: u8 = PusServiceId::Verification as u8;
 
     const SERVICE_STR: &'static str = "verification";
-}
 
-impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
-    SchedulingServiceWrapper<TmSender, TcInMemConverter>
-{
-    pub fn release_tcs(&mut self) {
-        let id = self.pus_11_handler.service_helper.id();
-        let releaser = |enabled: bool, info: &TcInfo, tc: &[u8]| -> bool {
-            self.tc_releaser.release(id, enabled, info, tc)
-        };
-
-        self.pus_11_handler
-            .scheduler_mut()
-            .update_time_from_now()
-            .unwrap();
-        let released_tcs = self
-            .pus_11_handler
-            .scheduler_mut()
-            .release_telecommands_with_buffer(
-                releaser,
-                &mut self.sched_tc_pool,
-                &mut self.releaser_buf,
-            )
-            .expect("releasing TCs failed");
-        if released_tcs > 0 {
-            info!("{released_tcs} TC(s) released from scheduler");
-        }
-    }
-
-    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
+    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
         let error_handler = |partial_error: &PartialPusHandlingError| {
             log::warn!(
                 "PUS {}({}) partial error: {:?}",
@@ -157,6 +129,34 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
             }
         }
         HandlingStatus::HandledOne
+    }
+}
+
+impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
+    SchedulingServiceWrapper<TmSender, TcInMemConverter>
+{
+    pub fn release_tcs(&mut self) {
+        let id = self.pus_11_handler.service_helper.id();
+        let releaser = |enabled: bool, info: &TcInfo, tc: &[u8]| -> bool {
+            self.tc_releaser.release(id, enabled, info, tc)
+        };
+
+        self.pus_11_handler
+            .scheduler_mut()
+            .update_time_from_now()
+            .unwrap();
+        let released_tcs = self
+            .pus_11_handler
+            .scheduler_mut()
+            .release_telecommands_with_buffer(
+                releaser,
+                &mut self.sched_tc_pool,
+                &mut self.releaser_buf,
+            )
+            .expect("releasing TCs failed");
+        if released_tcs > 0 {
+            info!("{released_tcs} TC(s) released from scheduler");
+        }
     }
 }
 

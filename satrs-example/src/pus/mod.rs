@@ -234,6 +234,15 @@ pub trait TargetedPusService {
     fn check_for_request_timeouts(&mut self);
 }
 
+/// Generic trait for services which handle packets directly. Kept minimal right now because
+/// of the difficulty to allow flexible user code for these services..
+pub trait DirectPusService {
+    const SERVICE_ID: u8;
+    const SERVICE_STR: &'static str;
+
+    fn poll_and_handle_next_tc(&mut self, timestamp: &[u8]) -> HandlingStatus;
+}
+
 /// This is a generic handler class for all PUS services where a PUS telecommand is converted
 /// to a targeted request.
 ///
@@ -522,11 +531,6 @@ pub fn generic_pus_request_timeout_handler(
         FailParams::new(time_stamp, &tmtc_err::REQUEST_TIMEOUT, &[]),
     )?;
     Ok(())
-}
-
-pub trait DirectPusService {
-    const SERVICE_ID: u8;
-    const SERVICE_STR: &'static str;
 }
 
 #[cfg(test)]
