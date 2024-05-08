@@ -16,10 +16,13 @@ use log::info;
 use pus::test::create_test_service_dynamic;
 use satrs::hal::std::tcp_server::ServerConfig;
 use satrs::hal::std::udp_server::UdpTcServer;
+use satrs::pus::HandlingStatus;
 use satrs::request::GenericMessage;
 use satrs::tmtc::{PacketSenderWithSharedPool, SharedPacketPool};
 use satrs_example::config::pool::{create_sched_tc_pool, create_static_pools};
-use satrs_example::config::tasks::{FREQ_MS_AOCS, FREQ_MS_PUS_STACK, FREQ_MS_UDP_TMTC};
+use satrs_example::config::tasks::{
+    FREQ_MS_AOCS, FREQ_MS_PUS_STACK, FREQ_MS_UDP_TMTC, SIM_CLIENT_IDLE_DELAY_MS,
+};
 use satrs_example::config::{OBSW_SERVER_ADDR, PACKET_ID_VALIDATOR, SERVER_PORT};
 
 use crate::acs::mgm::{
@@ -269,7 +272,9 @@ fn static_tmtc_pool_main() {
             thread::Builder::new()
                 .name("sat-rs sim adapter".to_string())
                 .spawn(move || loop {
-                    sim_client.operation();
+                    if sim_client.operation() == HandlingStatus::Empty {
+                        std::thread::sleep(Duration::from_millis(SIM_CLIENT_IDLE_DELAY_MS));
+                    }
                 })
                 .unwrap(),
         );
@@ -506,7 +511,9 @@ fn dyn_tmtc_pool_main() {
             thread::Builder::new()
                 .name("sat-rs sim adapter".to_string())
                 .spawn(move || loop {
-                    sim_client.operation();
+                    if sim_client.operation() == HandlingStatus::Empty {
+                        std::thread::sleep(Duration::from_millis(SIM_CLIENT_IDLE_DELAY_MS));
+                    }
                 })
                 .unwrap(),
         );

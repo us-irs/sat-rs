@@ -340,3 +340,8 @@ impl<ComInterface: SpiInterface, TmSender: EcssTmSender> ModeRequestHandler
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // TODO: Add some basic tests for the modes of the device.
+}

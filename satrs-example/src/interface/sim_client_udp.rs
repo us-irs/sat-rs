@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use satrs::pus::HandlingStatus;
 use satrs_minisim::{
     udp::SIM_CTRL_PORT, SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimReply,
     SimRequest,
@@ -94,7 +95,7 @@ impl SimClientUdp {
         }
     }
 
-    pub fn operation(&mut self) {
+    pub fn operation(&mut self) -> HandlingStatus {
         let mut no_sim_requests_handled = true;
         let mut no_data_from_udp_server_received = true;
         loop {
@@ -157,8 +158,9 @@ impl SimClientUdp {
             }
         }
         if no_sim_requests_handled && no_data_from_udp_server_received {
-            std::thread::sleep(Duration::from_millis(5));
+            return HandlingStatus::Empty;
         }
+        HandlingStatus::HandledOne
     }
 
     pub fn add_reply_recipient(
@@ -168,4 +170,11 @@ impl SimClientUdp {
     ) {
         self.reply_map.0.insert(component, reply_sender);
     }
+}
+
+#[cfg(test)]
+pub mod tests {
+    // TODO: Write some basic tests which verify that the ping/pong handling/check for the
+    // constructor works as expected.
+    fn test_basic() {}
 }
