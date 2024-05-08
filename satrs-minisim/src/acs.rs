@@ -188,10 +188,10 @@ pub mod tests {
     use satrs_minisim::{
         acs::{
             lis3mdl::{self, MgmLis3MdlReply},
-            MgmRequest, MgtDipole, MgtHkSet, MgtReply, MgtRequest,
+            MgmRequestLis3Mdl, MgtDipole, MgtHkSet, MgtReply, MgtRequest,
         },
         eps::PcduSwitch,
-        SerializableSimMsgPayload, SimMessageProvider, SimRequest, SimTarget,
+        SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimRequest,
     };
 
     use crate::{eps::tests::switch_device_on, test_helpers::SimTestbench};
@@ -199,7 +199,7 @@ pub mod tests {
     #[test]
     fn test_basic_mgm_request() {
         let mut sim_testbench = SimTestbench::new();
-        let request = SimRequest::new_with_epoch_time(MgmRequest::RequestSensorData);
+        let request = SimRequest::new_with_epoch_time(MgmRequestLis3Mdl::RequestSensorData);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
@@ -208,7 +208,7 @@ pub mod tests {
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());
         let sim_reply = sim_reply.unwrap();
-        assert_eq!(sim_reply.component(), SimTarget::MgmLis3Mdl);
+        assert_eq!(sim_reply.component(), SimComponent::MgmLis3Mdl);
         let reply = MgmLis3MdlReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
         assert_eq!(reply.common.switch_state, SwitchStateBinary::Off);
@@ -222,7 +222,7 @@ pub mod tests {
         let mut sim_testbench = SimTestbench::new();
         switch_device_on(&mut sim_testbench, PcduSwitch::Mgm);
 
-        let mut request = SimRequest::new_with_epoch_time(MgmRequest::RequestSensorData);
+        let mut request = SimRequest::new_with_epoch_time(MgmRequestLis3Mdl::RequestSensorData);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
@@ -231,12 +231,12 @@ pub mod tests {
         let mut sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_some());
         let mut sim_reply = sim_reply_res.unwrap();
-        assert_eq!(sim_reply.component(), SimTarget::MgmLis3Mdl);
+        assert_eq!(sim_reply.component(), SimComponent::MgmLis3Mdl);
         let first_reply = MgmLis3MdlReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
         sim_testbench.step_by(Duration::from_millis(50));
 
-        request = SimRequest::new_with_epoch_time(MgmRequest::RequestSensorData);
+        request = SimRequest::new_with_epoch_time(MgmRequestLis3Mdl::RequestSensorData);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");

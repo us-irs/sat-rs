@@ -150,6 +150,7 @@ impl SimUdpServer {
 mod tests {
     use std::{
         io::ErrorKind,
+        net::{SocketAddr, UdpSocket},
         sync::{
             atomic::{AtomicBool, Ordering},
             mpsc, Arc,
@@ -159,7 +160,6 @@ mod tests {
 
     use satrs_minisim::{
         eps::{PcduReply, PcduRequest},
-        udp::{ReceptionError, SimUdpClient},
         SimCtrlReply, SimCtrlRequest, SimReply, SimRequest,
     };
 
@@ -171,8 +171,57 @@ mod tests {
     // Wait time to ensure even possibly laggy systems like CI servers can run the tests.
     const SERVER_WAIT_TIME_MS: u64 = 50;
 
+    #[derive(thiserror::Error, Debug)]
+    pub enum ReceptionError {
+        #[error("IO error: {0}")]
+        Io(#[from] std::io::Error),
+        #[error("Serde JSON error: {0}")]
+        SerdeJson(#[from] serde_json::Error),
+    }
+
+    pub struct SimUdpTestClient {
+        socket: UdpSocket,
+        pub reply_buf: [u8; 4096],
+    }
+
+    impl SimUdpTestClient {
+        pub fn new(
+            server_addr: &SocketAddr,
+            non_blocking: bool,
+            read_timeot_ms: Option<u64>,
+        ) -> std::io::Result<Self> {
+            let socket = UdpSocket::bind("127.0.0.1:0")?;
+            socket.set_nonblocking(non_blocking)?;
+            socket
+                .connect(server_addr)
+                .expect("could not connect to server addr");
+            if let Some(read_timeout) = read_timeot_ms {
+                // Set a read timeout so the test does not hang on failures.
+                socket.set_read_timeout(Some(Duration::from_millis(read_timeout)))?;
+            }
+            Ok(Self {
+                socket,
+                reply_buf: [0; 4096],
+            })
+        }
+
+        pub fn send_request(&self, sim_request: &SimRequest) -> std::io::Result<usize> {
+            self.socket.send(
+                &serde_json::to_vec(sim_request).expect("conversion of request to vector failed"),
+            )
+        }
+
+        pub fn recv_raw(&mut self) -> std::io::Result<usize> {
+            self.socket.recv(&mut self.reply_buf)
+        }
+
+        pub fn recv_sim_reply(&mut self) -> Result<SimReply, ReceptionError> {
+            let read_len = self.recv_raw()?;
+            Ok(serde_json::from_slice(&self.reply_buf[0..read_len])?)
+        }
+    }
     struct UdpTestbench {
-        client: SimUdpClient,
+        client: SimUdpTestClient,
         stop_signal: Arc<AtomicBool>,
         request_receiver: mpsc::Receiver<SimRequest>,
         reply_sender: mpsc::Sender<SimReply>,
@@ -197,7 +246,7 @@ mod tests {
             let server_addr = server.server_addr()?;
             Ok((
                 Self {
-                    client: SimUdpClient::new(
+                    client: SimUdpTestClient::new(
                         &server_addr,
                         client_non_blocking,
                         client_read_timeout_ms,
