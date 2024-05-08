@@ -20,12 +20,12 @@
 //! ```
 //! use satrs::events::{EventU16, EventU32, EventU32TypedSev, Severity, SeverityHigh, SeverityInfo};
 //!
-//! const MSG_RECVD: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::const_new(1, 0);
-//! const MSG_FAILED: EventU32 = EventU32::const_new(Severity::LOW, 1, 1);
+//! const MSG_RECVD: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::new(1, 0);
+//! const MSG_FAILED: EventU32 = EventU32::new(Severity::Low, 1, 1);
 //!
-//! const TEMPERATURE_HIGH: EventU32TypedSev<SeverityHigh> = EventU32TypedSev::const_new(2, 0);
+//! const TEMPERATURE_HIGH: EventU32TypedSev<SeverityHigh> = EventU32TypedSev::new(2, 0);
 //!
-//! let small_event = EventU16::new(Severity::INFO, 3, 0);
+//! let small_event = EventU16::new(Severity::Info, 3, 0);
 //! ```
 use core::fmt::Debug;
 use core::hash::Hash;
@@ -40,12 +40,17 @@ pub type LargestEventRaw = u32;
 /// Using a type definition allows to change this to u32 in the future more easily
 pub type LargestGroupIdRaw = u16;
 
+pub const MAX_GROUP_ID_U32_EVENT: u16 = 2_u16.pow(14) - 1;
+pub const MAX_GROUP_ID_U16_EVENT: u16 = 2_u16.pow(6) - 1;
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Severity {
-    INFO = 0,
-    LOW = 1,
-    MEDIUM = 2,
-    HIGH = 3,
+    Info = 0,
+    Low = 1,
+    Medium = 2,
+    High = 3,
 }
 
 pub trait HasSeverity: Debug + PartialEq + Eq + Copy + Clone {
@@ -56,28 +61,28 @@ pub trait HasSeverity: Debug + PartialEq + Eq + Copy + Clone {
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct SeverityInfo {}
 impl HasSeverity for SeverityInfo {
-    const SEVERITY: Severity = Severity::INFO;
+    const SEVERITY: Severity = Severity::Info;
 }
 
 /// Type level support struct
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct SeverityLow {}
 impl HasSeverity for SeverityLow {
-    const SEVERITY: Severity = Severity::LOW;
+    const SEVERITY: Severity = Severity::Low;
 }
 
 /// Type level support struct
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct SeverityMedium {}
 impl HasSeverity for SeverityMedium {
-    const SEVERITY: Severity = Severity::MEDIUM;
+    const SEVERITY: Severity = Severity::Medium;
 }
 
 /// Type level support struct
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct SeverityHigh {}
 impl HasSeverity for SeverityHigh {
-    const SEVERITY: Severity = Severity::HIGH;
+    const SEVERITY: Severity = Severity::High;
 }
 
 pub trait GenericEvent: EcssEnumeration + Copy + Clone {
@@ -99,27 +104,29 @@ impl TryFrom<u8> for Severity {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            x if x == Severity::INFO as u8 => Ok(Severity::INFO),
-            x if x == Severity::LOW as u8 => Ok(Severity::LOW),
-            x if x == Severity::MEDIUM as u8 => Ok(Severity::MEDIUM),
-            x if x == Severity::HIGH as u8 => Ok(Severity::HIGH),
+            x if x == Severity::Info as u8 => Ok(Severity::Info),
+            x if x == Severity::Low as u8 => Ok(Severity::Low),
+            x if x == Severity::Medium as u8 => Ok(Severity::Medium),
+            x if x == Severity::High as u8 => Ok(Severity::High),
             _ => Err(()),
         }
     }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-struct EventBase<RAW, GID, UID> {
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+struct EventBase<Raw, GroupId, UniqueId> {
     severity: Severity,
-    group_id: GID,
-    unique_id: UID,
-    phantom: PhantomData<RAW>,
+    group_id: GroupId,
+    unique_id: UniqueId,
+    phantom: PhantomData<Raw>,
 }
 
-impl<RAW: ToBeBytes, GID, UID> EventBase<RAW, GID, UID> {
+impl<Raw: ToBeBytes, GroupId, UniqueId> EventBase<Raw, GroupId, UniqueId> {
     fn write_to_bytes(
         &self,
-        raw: RAW,
+        raw: Raw,
         buf: &mut [u8],
         width: usize,
     ) -> Result<usize, ByteConversionError> {
@@ -267,6 +274,7 @@ macro_rules! const_from_fn {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EventU32 {
     base: EventBase<u32, u16, u16>,
 }
@@ -309,12 +317,12 @@ impl EventU32 {
     ///        next 14 bits after the severity. Therefore, the size is limited by dec 16383 hex 0x3FFF.
     /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
     ///       raw event ID
-    pub fn new(
+    pub fn new_checked(
         severity: Severity,
         group_id: <Self as GenericEvent>::GroupId,
         unique_id: <Self as GenericEvent>::UniqueId,
     ) -> Option<Self> {
-        if group_id > (2u16.pow(14) - 1) {
+        if group_id > MAX_GROUP_ID_U32_EVENT {
             return None;
         }
         Some(Self {
@@ -326,12 +334,14 @@ impl EventU32 {
             },
         })
     }
-    pub const fn const_new(
+
+    /// This constructor will panic if the passed group is is larger than [MAX_GROUP_ID_U32_EVENT].
+    pub const fn new(
         severity: Severity,
         group_id: <Self as GenericEvent>::GroupId,
         unique_id: <Self as GenericEvent>::UniqueId,
     ) -> Self {
-        if group_id > (2u16.pow(14) - 1) {
+        if group_id > MAX_GROUP_ID_U32_EVENT {
             panic!("Group ID too large");
         }
         Self {
@@ -344,48 +354,14 @@ impl EventU32 {
         }
     }
 
+    pub fn from_be_bytes(bytes: [u8; 4]) -> Self {
+        Self::from(u32::from_be_bytes(bytes))
+    }
+
     const_from_fn!(const_from_info, EventU32TypedSev, SeverityInfo);
     const_from_fn!(const_from_low, EventU32TypedSev, SeverityLow);
     const_from_fn!(const_from_medium, EventU32TypedSev, SeverityMedium);
     const_from_fn!(const_from_high, EventU32TypedSev, SeverityHigh);
-}
-
-impl<SEVERITY: HasSeverity> EventU32TypedSev<SEVERITY> {
-    /// This is similar to [EventU32::new] but the severity is a type generic, which allows to
-    /// have distinct types for events with different severities
-    pub fn new(
-        group_id: <Self as GenericEvent>::GroupId,
-        unique_id: <Self as GenericEvent>::UniqueId,
-    ) -> Option<Self> {
-        let event = EventU32::new(SEVERITY::SEVERITY, group_id, unique_id)?;
-        Some(Self {
-            event,
-            phantom: PhantomData,
-        })
-    }
-
-    /// Const version of [Self::new], but panics on invalid group ID input values.
-    pub const fn const_new(
-        group_id: <Self as GenericEvent>::GroupId,
-        unique_id: <Self as GenericEvent>::UniqueId,
-    ) -> Self {
-        let event = EventU32::const_new(SEVERITY::SEVERITY, group_id, unique_id);
-        Self {
-            event,
-            phantom: PhantomData,
-        }
-    }
-
-    fn try_from_generic(expected: Severity, raw: u32) -> Result<Self, Severity> {
-        let severity = Severity::try_from(((raw >> 30) & 0b11) as u8).unwrap();
-        if severity != expected {
-            return Err(severity);
-        }
-        Ok(Self::const_new(
-            ((raw >> 16) & 0x3FFF) as u16,
-            (raw & 0xFFFF) as u16,
-        ))
-    }
 }
 
 impl From<u32> for EventU32 {
@@ -395,14 +371,9 @@ impl From<u32> for EventU32 {
         let group_id = ((raw >> 16) & 0x3FFF) as u16;
         let unique_id = (raw & 0xFFFF) as u16;
         // Sanitized input, should never fail
-        Self::const_new(severity, group_id, unique_id)
+        Self::new(severity, group_id, unique_id)
     }
 }
-
-try_from_impls!(SeverityInfo, Severity::INFO, u32, EventU32TypedSev);
-try_from_impls!(SeverityLow, Severity::LOW, u32, EventU32TypedSev);
-try_from_impls!(SeverityMedium, Severity::MEDIUM, u32, EventU32TypedSev);
-try_from_impls!(SeverityHigh, Severity::HIGH, u32, EventU32TypedSev);
 
 impl UnsignedEnum for EventU32 {
     fn size(&self) -> usize {
@@ -424,6 +395,49 @@ impl EcssEnumeration for EventU32 {
     }
 }
 
+impl<SEVERITY: HasSeverity> EventU32TypedSev<SEVERITY> {
+    /// This is similar to [EventU32::new] but the severity is a type generic, which allows to
+    /// have distinct types for events with different severities
+    pub fn new_checked(
+        group_id: <Self as GenericEvent>::GroupId,
+        unique_id: <Self as GenericEvent>::UniqueId,
+    ) -> Option<Self> {
+        let event = EventU32::new_checked(SEVERITY::SEVERITY, group_id, unique_id)?;
+        Some(Self {
+            event,
+            phantom: PhantomData,
+        })
+    }
+
+    /// This constructor will panic if the `group_id` is larger than [MAX_GROUP_ID_U32_EVENT].
+    pub const fn new(
+        group_id: <Self as GenericEvent>::GroupId,
+        unique_id: <Self as GenericEvent>::UniqueId,
+    ) -> Self {
+        let event = EventU32::new(SEVERITY::SEVERITY, group_id, unique_id);
+        Self {
+            event,
+            phantom: PhantomData,
+        }
+    }
+
+    fn try_from_generic(expected: Severity, raw: u32) -> Result<Self, Severity> {
+        let severity = Severity::try_from(((raw >> 30) & 0b11) as u8).unwrap();
+        if severity != expected {
+            return Err(severity);
+        }
+        Ok(Self::new(
+            ((raw >> 16) & 0x3FFF) as u16,
+            (raw & 0xFFFF) as u16,
+        ))
+    }
+}
+
+try_from_impls!(SeverityInfo, Severity::Info, u32, EventU32TypedSev);
+try_from_impls!(SeverityLow, Severity::Low, u32, EventU32TypedSev);
+try_from_impls!(SeverityMedium, Severity::Medium, u32, EventU32TypedSev);
+try_from_impls!(SeverityHigh, Severity::High, u32, EventU32TypedSev);
+
 //noinspection RsTraitImplementation
 impl<SEVERITY: HasSeverity> UnsignedEnum for EventU32TypedSev<SEVERITY> {
     delegate!(to self.event {
@@ -441,6 +455,8 @@ impl<SEVERITY: HasSeverity> EcssEnumeration for EventU32TypedSev<SEVERITY> {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct EventU16 {
     base: EventBase<u16, u8, u8>,
 }
@@ -475,7 +491,7 @@ impl EventU16 {
     ///        next 6 bits after the severity. Therefore, the size is limited by dec 63 hex 0x3F.
     /// * `unique_id`: Each event has a unique 8 bit ID occupying the last 8 bits of the
     ///       raw event ID
-    pub fn new(
+    pub fn new_checked(
         severity: Severity,
         group_id: <Self as GenericEvent>::GroupId,
         unique_id: <Self as GenericEvent>::UniqueId,
@@ -493,8 +509,8 @@ impl EventU16 {
         })
     }
 
-    /// Const version of [Self::new], but panics on invalid group ID input values.
-    pub const fn const_new(
+    /// This constructor will panic if the `group_id` is larger than [MAX_GROUP_ID_U16_EVENT].
+    pub const fn new(
         severity: Severity,
         group_id: <Self as GenericEvent>::GroupId,
         unique_id: <Self as GenericEvent>::UniqueId,
@@ -511,51 +527,25 @@ impl EventU16 {
             },
         }
     }
+    pub fn from_be_bytes(bytes: [u8; 2]) -> Self {
+        Self::from(u16::from_be_bytes(bytes))
+    }
+
     const_from_fn!(const_from_info, EventU16TypedSev, SeverityInfo);
     const_from_fn!(const_from_low, EventU16TypedSev, SeverityLow);
     const_from_fn!(const_from_medium, EventU16TypedSev, SeverityMedium);
     const_from_fn!(const_from_high, EventU16TypedSev, SeverityHigh);
 }
 
-impl<SEVERITY: HasSeverity> EventU16TypedSev<SEVERITY> {
-    /// This is similar to [EventU16::new] but the severity is a type generic, which allows to
-    /// have distinct types for events with different severities
-    pub fn new(
-        group_id: <Self as GenericEvent>::GroupId,
-        unique_id: <Self as GenericEvent>::UniqueId,
-    ) -> Option<Self> {
-        let event = EventU16::new(SEVERITY::SEVERITY, group_id, unique_id)?;
-        Some(Self {
-            event,
-            phantom: PhantomData,
-        })
-    }
-
-    /// Const version of [Self::new], but panics on invalid group ID input values.
-    pub const fn const_new(
-        group_id: <Self as GenericEvent>::GroupId,
-        unique_id: <Self as GenericEvent>::UniqueId,
-    ) -> Self {
-        let event = EventU16::const_new(SEVERITY::SEVERITY, group_id, unique_id);
-        Self {
-            event,
-            phantom: PhantomData,
-        }
-    }
-
-    fn try_from_generic(expected: Severity, raw: u16) -> Result<Self, Severity> {
+impl From<u16> for EventU16 {
+    fn from(raw: <Self as GenericEvent>::Raw) -> Self {
         let severity = Severity::try_from(((raw >> 14) & 0b11) as u8).unwrap();
-        if severity != expected {
-            return Err(severity);
-        }
-        Ok(Self::const_new(
-            ((raw >> 8) & 0x3F) as u8,
-            (raw & 0xFF) as u8,
-        ))
+        let group_id = ((raw >> 8) & 0x3F) as u8;
+        let unique_id = (raw & 0xFF) as u8;
+        // Sanitized input, new call should never fail
+        Self::new(severity, group_id, unique_id)
     }
 }
-
-impl_event_provider!(EventU16, EventU16TypedSev, u16, u8, u8);
 
 impl UnsignedEnum for EventU16 {
     fn size(&self) -> usize {
@@ -577,6 +567,43 @@ impl EcssEnumeration for EventU16 {
     }
 }
 
+impl<SEVERITY: HasSeverity> EventU16TypedSev<SEVERITY> {
+    /// This is similar to [EventU16::new] but the severity is a type generic, which allows to
+    /// have distinct types for events with different severities
+    pub fn new_checked(
+        group_id: <Self as GenericEvent>::GroupId,
+        unique_id: <Self as GenericEvent>::UniqueId,
+    ) -> Option<Self> {
+        let event = EventU16::new_checked(SEVERITY::SEVERITY, group_id, unique_id)?;
+        Some(Self {
+            event,
+            phantom: PhantomData,
+        })
+    }
+
+    /// This constructor will panic if the `group_id` is larger than [MAX_GROUP_ID_U16_EVENT].
+    pub const fn new(
+        group_id: <Self as GenericEvent>::GroupId,
+        unique_id: <Self as GenericEvent>::UniqueId,
+    ) -> Self {
+        let event = EventU16::new(SEVERITY::SEVERITY, group_id, unique_id);
+        Self {
+            event,
+            phantom: PhantomData,
+        }
+    }
+
+    fn try_from_generic(expected: Severity, raw: u16) -> Result<Self, Severity> {
+        let severity = Severity::try_from(((raw >> 14) & 0b11) as u8).unwrap();
+        if severity != expected {
+            return Err(severity);
+        }
+        Ok(Self::new(((raw >> 8) & 0x3F) as u8, (raw & 0xFF) as u8))
+    }
+}
+
+impl_event_provider!(EventU16, EventU16TypedSev, u16, u8, u8);
+
 //noinspection RsTraitImplementation
 impl<SEVERITY: HasSeverity> UnsignedEnum for EventU16TypedSev<SEVERITY> {
     delegate!(to self.event {
@@ -593,20 +620,10 @@ impl<SEVERITY: HasSeverity> EcssEnumeration for EventU16TypedSev<SEVERITY> {
     });
 }
 
-impl From<u16> for EventU16 {
-    fn from(raw: <Self as GenericEvent>::Raw) -> Self {
-        let severity = Severity::try_from(((raw >> 14) & 0b11) as u8).unwrap();
-        let group_id = ((raw >> 8) & 0x3F) as u8;
-        let unique_id = (raw & 0xFF) as u8;
-        // Sanitized input, new call should never fail
-        Self::const_new(severity, group_id, unique_id)
-    }
-}
-
-try_from_impls!(SeverityInfo, Severity::INFO, u16, EventU16TypedSev);
-try_from_impls!(SeverityLow, Severity::LOW, u16, EventU16TypedSev);
-try_from_impls!(SeverityMedium, Severity::MEDIUM, u16, EventU16TypedSev);
-try_from_impls!(SeverityHigh, Severity::HIGH, u16, EventU16TypedSev);
+try_from_impls!(SeverityInfo, Severity::Info, u16, EventU16TypedSev);
+try_from_impls!(SeverityLow, Severity::Low, u16, EventU16TypedSev);
+try_from_impls!(SeverityMedium, Severity::Medium, u16, EventU16TypedSev);
+try_from_impls!(SeverityHigh, Severity::High, u16, EventU16TypedSev);
 
 impl<Severity: HasSeverity> PartialEq<EventU32> for EventU32TypedSev<Severity> {
     #[inline]
@@ -647,12 +664,10 @@ mod tests {
         assert_eq!(size_of::<T>(), val);
     }
 
-    const INFO_EVENT: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::const_new(0, 0);
-    const INFO_EVENT_SMALL: EventU16TypedSev<SeverityInfo> = EventU16TypedSev::const_new(0, 0);
-    const HIGH_SEV_EVENT: EventU32TypedSev<SeverityHigh> =
-        EventU32TypedSev::const_new(0x3FFF, 0xFFFF);
-    const HIGH_SEV_EVENT_SMALL: EventU16TypedSev<SeverityHigh> =
-        EventU16TypedSev::const_new(0x3F, 0xff);
+    const INFO_EVENT: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::new(0, 0);
+    const INFO_EVENT_SMALL: EventU16TypedSev<SeverityInfo> = EventU16TypedSev::new(0, 0);
+    const HIGH_SEV_EVENT: EventU32TypedSev<SeverityHigh> = EventU32TypedSev::new(0x3FFF, 0xFFFF);
+    const HIGH_SEV_EVENT_SMALL: EventU16TypedSev<SeverityHigh> = EventU16TypedSev::new(0x3F, 0xff);
 
     /// This working is a test in itself.
     const INFO_REDUCED: EventU32 = EventU32::const_from_info(INFO_EVENT);
@@ -683,7 +698,7 @@ mod tests {
 
     #[test]
     fn test_normal_event_getters() {
-        assert_eq!(INFO_EVENT.severity(), Severity::INFO);
+        assert_eq!(INFO_EVENT.severity(), Severity::Info);
         assert_eq!(INFO_EVENT.unique_id(), 0);
         assert_eq!(INFO_EVENT.group_id(), 0);
         let raw_event = INFO_EVENT.raw();
@@ -692,7 +707,7 @@ mod tests {
 
     #[test]
     fn test_small_event_getters() {
-        assert_eq!(INFO_EVENT_SMALL.severity(), Severity::INFO);
+        assert_eq!(INFO_EVENT_SMALL.severity(), Severity::Info);
         assert_eq!(INFO_EVENT_SMALL.unique_id(), 0);
         assert_eq!(INFO_EVENT_SMALL.group_id(), 0);
         let raw_event = INFO_EVENT_SMALL.raw();
@@ -701,7 +716,7 @@ mod tests {
 
     #[test]
     fn all_ones_event_regular() {
-        assert_eq!(HIGH_SEV_EVENT.severity(), Severity::HIGH);
+        assert_eq!(HIGH_SEV_EVENT.severity(), Severity::High);
         assert_eq!(HIGH_SEV_EVENT.group_id(), 0x3FFF);
         assert_eq!(HIGH_SEV_EVENT.unique_id(), 0xFFFF);
         let raw_event = HIGH_SEV_EVENT.raw();
@@ -710,7 +725,7 @@ mod tests {
 
     #[test]
     fn all_ones_event_small() {
-        assert_eq!(HIGH_SEV_EVENT_SMALL.severity(), Severity::HIGH);
+        assert_eq!(HIGH_SEV_EVENT_SMALL.severity(), Severity::High);
         assert_eq!(HIGH_SEV_EVENT_SMALL.group_id(), 0x3F);
         assert_eq!(HIGH_SEV_EVENT_SMALL.unique_id(), 0xFF);
         let raw_event = HIGH_SEV_EVENT_SMALL.raw();
@@ -719,18 +734,19 @@ mod tests {
 
     #[test]
     fn invalid_group_id_normal() {
-        assert!(EventU32TypedSev::<SeverityMedium>::new(2_u16.pow(14), 0).is_none());
+        assert!(EventU32TypedSev::<SeverityMedium>::new_checked(2_u16.pow(14), 0).is_none());
     }
 
     #[test]
     fn invalid_group_id_small() {
-        assert!(EventU16TypedSev::<SeverityMedium>::new(2_u8.pow(6), 0).is_none());
+        assert!(EventU16TypedSev::<SeverityMedium>::new_checked(2_u8.pow(6), 0).is_none());
     }
 
     #[test]
     fn regular_new() {
         assert_eq!(
-            EventU32TypedSev::<SeverityInfo>::new(0, 0).expect("Creating regular event failed"),
+            EventU32TypedSev::<SeverityInfo>::new_checked(0, 0)
+                .expect("Creating regular event failed"),
             INFO_EVENT
         );
     }
@@ -738,7 +754,8 @@ mod tests {
     #[test]
     fn small_new() {
         assert_eq!(
-            EventU16TypedSev::<SeverityInfo>::new(0, 0).expect("Creating regular event failed"),
+            EventU16TypedSev::<SeverityInfo>::new_checked(0, 0)
+                .expect("Creating regular event failed"),
             INFO_EVENT_SMALL
         );
     }
@@ -777,6 +794,8 @@ mod tests {
         assert!(HIGH_SEV_EVENT.write_to_be_bytes(&mut buf).is_ok());
         let val_from_raw = u32::from_be_bytes(buf);
         assert_eq!(val_from_raw, 0xFFFFFFFF);
+        let event_read_back = EventU32::from_be_bytes(buf);
+        assert_eq!(event_read_back, HIGH_SEV_EVENT);
     }
 
     #[test]
@@ -785,6 +804,8 @@ mod tests {
         assert!(HIGH_SEV_EVENT_SMALL.write_to_be_bytes(&mut buf).is_ok());
         let val_from_raw = u16::from_be_bytes(buf);
         assert_eq!(val_from_raw, 0xFFFF);
+        let event_read_back = EventU16::from_be_bytes(buf);
+        assert_eq!(event_read_back, HIGH_SEV_EVENT_SMALL);
     }
 
     #[test]
@@ -815,13 +836,13 @@ mod tests {
     fn severity_from_invalid_raw_val() {
         let invalid = 0xFF;
         assert!(Severity::try_from(invalid).is_err());
-        let invalid = Severity::HIGH as u8 + 1;
+        let invalid = Severity::High as u8 + 1;
         assert!(Severity::try_from(invalid).is_err());
     }
 
     #[test]
     fn reduction() {
-        let event = EventU32TypedSev::<SeverityInfo>::const_new(1, 1);
+        let event = EventU32TypedSev::<SeverityInfo>::new(1, 1);
         let raw = event.raw();
         let reduced: EventU32 = event.into();
         assert_eq!(reduced.group_id(), 1);

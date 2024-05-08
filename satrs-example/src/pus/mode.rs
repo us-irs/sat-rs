@@ -1,5 +1,4 @@
 use derive_new::new;
-use log::{error, warn};
 use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -9,7 +8,7 @@ use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
     DefaultActiveRequestMap, EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
-    EcssTcInVecConverter, MpscTcReceiver, MpscTmAsVecSender, PusPacketHandlerResult,
+    EcssTcInVecConverter, MpscTcReceiver, MpscTmAsVecSender, PusPacketHandlingError,
     PusServiceHelper,
 };
 use satrs::request::GenericMessage;
@@ -36,7 +35,7 @@ use satrs::{
     ComponentId,
 };
 use satrs_example::config::components::PUS_MODE_SERVICE;
-use satrs_example::config::{mode_err, tmtc_err};
+use satrs_example::config::{mode_err, tmtc_err, CustomPusServiceId};
 
 use super::{
     create_verification_reporter, generic_pus_request_timeout_handler, HandlingStatus,
@@ -272,44 +271,26 @@ pub struct ModeServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcIn
 impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
     for ModeServiceWrapper<TmSender, TcInMemConverter>
 {
-    /// Returns [true] if the packet handling is finished.
-    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        match self.service.poll_and_handle_next_tc(time_stamp) {
-            Ok(result) => match result {
-                PusPacketHandlerResult::RequestHandled => {}
-                PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {
-                    warn!("PUS mode service: partial packet handling success: {e:?}")
-                }
-                PusPacketHandlerResult::CustomSubservice(invalid, _) => {
-                    warn!("PUS mode service: invalid subservice {invalid}");
-                }
-                PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
-                    warn!("PUS mode service: {subservice} not implemented");
-                }
-                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
-            },
-            Err(error) => {
-                error!("PUS mode service: packet handling error: {error:?}");
-                // To avoid permanent loops on error cases.
-                return HandlingStatus::Empty;
-            }
+    const SERVICE_ID: u8 = CustomPusServiceId::Mode as u8;
+    const SERVICE_STR: &'static str = "mode";
+
+    delegate::delegate! {
+        to self.service {
+            fn poll_and_handle_next_tc(
+                &mut self,
+                time_stamp: &[u8],
+            ) -> Result<HandlingStatus, PusPacketHandlingError>;
+
+            fn poll_and_handle_next_reply(
+                &mut self,
+                time_stamp: &[u8],
+            ) -> Result<HandlingStatus, EcssTmtcError>;
+
+            fn check_for_request_timeouts(&mut self);
         }
-        HandlingStatus::HandledOne
-    }
-
-    fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        self.service
-            .poll_and_check_next_reply(time_stamp)
-            .unwrap_or_else(|e| {
-                warn!("PUS action service: Handling reply failed with error {e:?}");
-                HandlingStatus::HandledOne
-            })
-    }
-
-    fn check_for_request_timeouts(&mut self) {
-        self.service.check_for_request_timeouts();
     }
 }
+
 #[cfg(test)]
 mod tests {
     use satrs::pus::test_util::{TEST_APID, TEST_COMPONENT_ID_0, TEST_UNIQUE_ID_0};

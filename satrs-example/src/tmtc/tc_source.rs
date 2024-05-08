@@ -1,12 +1,13 @@
 use satrs::{
     pool::PoolProvider,
+    pus::HandlingStatus,
     tmtc::{PacketAsVec, PacketInPool, PacketSenderWithSharedPool, SharedPacketPool},
 };
 use std::sync::mpsc::{self, TryRecvError};
 
 use satrs::pus::MpscTmAsVecSender;
 
-use crate::pus::{HandlingStatus, PusTcDistributor};
+use crate::pus::PusTcDistributor;
 
 // TC source components where static pools are the backing memory of the received telecommands.
 pub struct TcSourceTaskStatic {

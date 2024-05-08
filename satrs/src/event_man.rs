@@ -1,14 +1,12 @@
 //! Event management and forwarding
 //!
-//! This module provides components to perform event routing. The most important component for this
-//! task is the [EventManager]. It receives all events and then routes them to event subscribers
-//! where appropriate. One common use case for satellite systems is to offer a light-weight
-//! publish-subscribe mechanism and IPC mechanism for software and hardware events which are also
-//! packaged as telemetry (TM) or can trigger a system response.
-//!
 //! It is recommended to read the
 //! [sat-rs book chapter](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/book/events.html)
-//! about events first:
+//! about events first.
+//!
+//! This module provides components to perform event routing. The most important component for this
+//! task is the [EventManager]. It receives all events and then routes them to event subscribers
+//! where appropriate.
 //!
 //! The event manager has a listener table abstracted by the [ListenerMapProvider], which maps
 //! listener groups identified by [ListenerKey]s to a [listener ID][ComponentId].
@@ -21,8 +19,8 @@
 //!
 //!  1. Provide a concrete [EventReceiveProvider] implementation. This abstraction allow to use different
 //!     message queue backends. A straightforward implementation where dynamic memory allocation is
-//!     not a big concern could use [std::sync::mpsc::channel] to do this and is provided in
-//!     form of the [MpscEventReceiver].
+//!     not a big concern would be to use the [std::sync::mpsc::Receiver] handle. The trait is
+//!     already implemented for this type.
 //!  2. To set up event creators, create channel pairs using some message queue implementation.
 //!     Each event creator gets a (cloned) sender component which allows it to send events to the
 //!     manager.
@@ -44,6 +42,12 @@
 //! You can check [integration test](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs/tests/pus_events.rs)
 //! for a concrete example using multi-threading where events are routed to
 //! different threads.
+//!
+//! The [satrs-example](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example)
+//! also contains a full event manager instance and exposes a test event via the PUS test service.
+//! The [PUS event](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example/src/pus/event.rs)
+//! module and the generic [events module](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example/src/events.rs)
+//! show how the event management modules can be integrated into a more complex software.
 use crate::events::{EventU16, EventU32, GenericEvent, LargestEventRaw, LargestGroupIdRaw};
 use crate::params::Params;
 use crate::queue::GenericSendError;
@@ -157,9 +161,10 @@ pub trait SenderMapProvider<
 ///  * `SenderMap`: [SenderMapProvider]  which maps channel IDs to send providers.
 ///  * `ListenerMap`: [ListenerMapProvider] which maps listener keys to channel IDs.
 ///  * `EventSender`: [EventSendProvider] contained within the sender map which sends the events.
-///  * `Ev`: The event type. This type must implement the [GenericEvent]. Currently only [EventU32]
+///  * `Event`: The event type. This type must implement the [GenericEvent]. Currently only [EventU32]
 ///     and [EventU16] are supported.
-///  * `Data`: Auxiliary data which is sent with the event to provide optional context information
+///  * `ParamProvider`: Auxiliary data which is sent with the event to provide optional context
+///    information
 pub struct EventManager<
     EventReceiver: EventReceiveProvider<Event, ParamProvider>,
     SenderMap: SenderMapProvider<EventSender, Event, ParamProvider>,
@@ -290,7 +295,7 @@ impl<
                         for id in ids {
                             if let Some(sender) = self.sender_map.get_send_event_provider(id) {
                                 if let Err(e) = sender.send(EventMessage::new_generic(
-                                    *id,
+                                    event_msg.sender_id,
                                     event_msg.event,
                                     event_msg.params.as_ref(),
                                 )) {
@@ -331,11 +336,11 @@ pub mod alloc_mod {
 
     /// Helper type which constrains the sender map and listener map generics to the [DefaultSenderMap]
     /// and the [DefaultListenerMap]. It uses regular mpsc channels as the message queue backend.
-    pub type EventManagerWithMpsc<EV = EventU32, AUX = Params> = EventManager<
-        MpscEventReceiver,
-        DefaultSenderMap<EventSenderMpsc<EV>, EV, AUX>,
+    pub type EventManagerWithMpsc<Event = EventU32, ParamProvider = Params> = EventManager<
+        EventU32ReceiverMpsc<ParamProvider>,
+        DefaultSenderMap<EventSenderMpsc<Event>, Event, ParamProvider>,
         DefaultListenerMap,
-        EventSenderMpsc<EV>,
+        EventSenderMpsc<Event>,
     >;
 
     /// Helper type which constrains the sender map and listener map generics to the [DefaultSenderMap]
@@ -343,7 +348,7 @@ pub mod alloc_mod {
     /// [bounded mpsc senders](https://doc.rust-lang.org/std/sync/mpsc/struct.SyncSender.html) as the
     /// message queue backend.
     pub type EventManagerWithBoundedMpsc<Event = EventU32, ParamProvider = Params> = EventManager<
-        MpscEventReceiver,
+        EventU32ReceiverMpsc<ParamProvider>,
         DefaultSenderMap<EventSenderMpscBounded<Event>, Event, ParamProvider>,
         DefaultListenerMap,
         EventSenderMpscBounded<Event>,
@@ -479,20 +484,16 @@ pub mod std_mod {
     use super::*;
     use std::sync::mpsc;
 
-    pub struct MpscEventReceiver<Event: GenericEvent + Send = EventU32> {
-        receiver: mpsc::Receiver<EventMessage<Event>>,
-    }
-
-    impl<Event: GenericEvent + Send> MpscEventReceiver<Event> {
-        pub fn new(receiver: mpsc::Receiver<EventMessage<Event>>) -> Self {
-            Self { receiver }
-        }
-    }
-    impl<Event: GenericEvent + Send> EventReceiveProvider<Event> for MpscEventReceiver<Event> {
+    impl<Event: GenericEvent + Send, ParamProvider: Debug>
+        EventReceiveProvider<Event, ParamProvider>
+        for mpsc::Receiver<EventMessage<Event, ParamProvider>>
+    {
         type Error = GenericReceiveError;
 
-        fn try_recv_event(&self) -> Result<Option<EventMessage<Event>>, Self::Error> {
-            match self.receiver.try_recv() {
+        fn try_recv_event(
+            &self,
+        ) -> Result<Option<EventMessage<Event, ParamProvider>>, Self::Error> {
+            match self.try_recv() {
                 Ok(msg) => Ok(Some(msg)),
                 Err(e) => match e {
                     mpsc::TryRecvError::Empty => Ok(None),
@@ -504,8 +505,10 @@ pub mod std_mod {
         }
     }
 
-    pub type MpscEventU32Receiver = MpscEventReceiver<EventU32>;
-    pub type MpscEventU16Receiver = MpscEventReceiver<EventU16>;
+    pub type EventU32ReceiverMpsc<ParamProvider = Params> =
+        mpsc::Receiver<EventMessage<EventU32, ParamProvider>>;
+    pub type EventU16ReceiverMpsc<ParamProvider = Params> =
+        mpsc::Receiver<EventMessage<EventU16, ParamProvider>>;
 
     /// Generic event sender which uses a regular [mpsc::Sender] as the messaging backend to
     /// send events.
@@ -594,7 +597,7 @@ mod tests {
     use std::format;
     use std::sync::mpsc::{self};
 
-    const TEST_EVENT: EventU32 = EventU32::const_new(Severity::INFO, 0, 5);
+    const TEST_EVENT: EventU32 = EventU32::new(Severity::Info, 0, 5);
 
     fn check_next_event(
         expected: EventU32,
@@ -611,6 +614,7 @@ mod tests {
         res: EventRoutingResult<EventU32, Params>,
         expected: EventU32,
         expected_num_sent: u32,
+        expected_sender_id: ComponentId,
     ) {
         assert!(matches!(res, EventRoutingResult::Handled { .. }));
         if let EventRoutingResult::Handled {
@@ -619,21 +623,21 @@ mod tests {
         } = res
         {
             assert_eq!(event_msg.event, expected);
+            assert_eq!(event_msg.sender_id, expected_sender_id);
             assert_eq!(num_recipients, expected_num_sent);
         }
     }
 
     fn generic_event_man() -> (mpsc::Sender<EventMessageU32>, EventManagerWithMpsc) {
-        let (event_sender, manager_queue) = mpsc::channel();
-        let event_man_receiver = MpscEventReceiver::new(manager_queue);
-        (event_sender, EventManager::new(event_man_receiver))
+        let (event_sender, event_receiver) = mpsc::channel();
+        (event_sender, EventManager::new(event_receiver))
     }
 
     #[test]
     fn test_basic() {
         let (event_sender, mut event_man) = generic_event_man();
-        let event_grp_0 = EventU32::new(Severity::INFO, 0, 0).unwrap();
-        let event_grp_1_0 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
+        let event_grp_0 = EventU32::new(Severity::Info, 0, 0);
+        let event_grp_1_0 = EventU32::new(Severity::High, 1, 0);
         let (single_event_sender, single_event_receiver) = mpsc::channel();
         let single_event_listener = EventSenderMpsc::new(0, single_event_sender);
         event_man.subscribe_single(&event_grp_0, single_event_listener.target_id());
@@ -651,8 +655,7 @@ mod tests {
             .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), event_grp_0))
             .expect("Sending single error failed");
         let res = event_man.try_event_handling(&error_handler);
-        // assert!(res.is_ok());
-        check_handled_event(res, event_grp_0, 1);
+        check_handled_event(res, event_grp_0, 1, TEST_COMPONENT_ID_0.id());
         check_next_event(event_grp_0, &single_event_receiver);
 
         // Test event which is sent to all group listeners
@@ -660,7 +663,7 @@ mod tests {
             .send(EventMessage::new(TEST_COMPONENT_ID_1.id(), event_grp_1_0))
             .expect("Sending group error failed");
         let res = event_man.try_event_handling(&error_handler);
-        check_handled_event(res, event_grp_1_0, 1);
+        check_handled_event(res, event_grp_1_0, 1, TEST_COMPONENT_ID_1.id());
         check_next_event(event_grp_1_0, &group_event_receiver_0);
     }
 
@@ -670,7 +673,7 @@ mod tests {
             panic!("routing error occurred for event {:?}: {:?}", event_msg, e);
         };
         let (event_sender, mut event_man) = generic_event_man();
-        let event_grp_0 = EventU32::new(Severity::INFO, 0, 0).unwrap();
+        let event_grp_0 = EventU32::new(Severity::Info, 0, 0);
         let (single_event_sender, single_event_receiver) = mpsc::channel();
         let single_event_listener = EventSenderMpsc::new(0, single_event_sender);
         event_man.subscribe_single(&event_grp_0, single_event_listener.target_id());
@@ -683,7 +686,7 @@ mod tests {
             ))
             .expect("Sending group error failed");
         let res = event_man.try_event_handling(&error_handler);
-        check_handled_event(res, event_grp_0, 1);
+        check_handled_event(res, event_grp_0, 1, TEST_COMPONENT_ID_0.id());
         let aux = check_next_event(event_grp_0, &single_event_receiver);
         assert!(aux.is_some());
         let aux = aux.unwrap();
@@ -705,8 +708,8 @@ mod tests {
         let res = event_man.try_event_handling(error_handler);
         assert!(matches!(res, EventRoutingResult::Empty));
 
-        let event_grp_0 = EventU32::new(Severity::INFO, 0, 0).unwrap();
-        let event_grp_1_0 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
+        let event_grp_0 = EventU32::new(Severity::Info, 0, 0);
+        let event_grp_1_0 = EventU32::new(Severity::High, 1, 0);
         let (event_grp_0_sender, event_grp_0_receiver) = mpsc::channel();
         let event_grp_0_and_1_listener = EventU32SenderMpsc::new(0, event_grp_0_sender);
         event_man.subscribe_group(
@@ -726,9 +729,9 @@ mod tests {
             .send(EventMessage::new(TEST_COMPONENT_ID_1.id(), event_grp_1_0))
             .expect("Sendign Event Group 1 failed");
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_grp_0, 1);
+        check_handled_event(res, event_grp_0, 1, TEST_COMPONENT_ID_0.id());
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_grp_1_0, 1);
+        check_handled_event(res, event_grp_1_0, 1, TEST_COMPONENT_ID_1.id());
 
         check_next_event(event_grp_0, &event_grp_0_receiver);
         check_next_event(event_grp_1_0, &event_grp_0_receiver);
@@ -742,8 +745,8 @@ mod tests {
             panic!("routing error occurred for event {:?}: {:?}", event_msg, e);
         };
         let (event_sender, mut event_man) = generic_event_man();
-        let event_0 = EventU32::new(Severity::INFO, 0, 5).unwrap();
-        let event_1 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
+        let event_0 = EventU32::new(Severity::Info, 0, 5);
+        let event_1 = EventU32::new(Severity::High, 1, 0);
         let (event_0_tx_0, event_0_rx_0) = mpsc::channel();
         let (event_0_tx_1, event_0_rx_1) = mpsc::channel();
         let event_listener_0 = EventU32SenderMpsc::new(0, event_0_tx_0);
@@ -758,7 +761,7 @@ mod tests {
             .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), event_0))
             .expect("Triggering Event 0 failed");
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_0, 2);
+        check_handled_event(res, event_0, 2, TEST_COMPONENT_ID_0.id());
         check_next_event(event_0, &event_0_rx_0);
         check_next_event(event_0, &event_0_rx_1);
         event_man.subscribe_group(event_1.group_id(), event_listener_0_sender_id);
@@ -771,9 +774,9 @@ mod tests {
 
         // 3 Events messages will be sent now
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_0, 2);
+        check_handled_event(res, event_0, 2, TEST_COMPONENT_ID_0.id());
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_1, 1);
+        check_handled_event(res, event_1, 1, TEST_COMPONENT_ID_1.id());
         // Both the single event and the group event should arrive now
         check_next_event(event_0, &event_0_rx_0);
         check_next_event(event_1, &event_0_rx_0);
@@ -785,7 +788,7 @@ mod tests {
             .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), event_1))
             .expect("Triggering Event 1 failed");
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_1, 1);
+        check_handled_event(res, event_1, 1, TEST_COMPONENT_ID_0.id());
     }
 
     #[test]
@@ -793,11 +796,10 @@ mod tests {
         let error_handler = |event_msg: &EventMessageU32, e: EventRoutingError| {
             panic!("routing error occurred for event {:?}: {:?}", event_msg, e);
         };
-        let (event_sender, manager_queue) = mpsc::channel();
-        let event_man_receiver = MpscEventReceiver::new(manager_queue);
-        let mut event_man = EventManagerWithMpsc::new(event_man_receiver);
-        let event_0 = EventU32::new(Severity::INFO, 0, 5).unwrap();
-        let event_1 = EventU32::new(Severity::HIGH, 1, 0).unwrap();
+        let (event_sender, event_receiver) = mpsc::channel();
+        let mut event_man = EventManagerWithMpsc::new(event_receiver);
+        let event_0 = EventU32::new(Severity::Info, 0, 5);
+        let event_1 = EventU32::new(Severity::High, 1, 0);
         let (event_0_tx_0, all_events_rx) = mpsc::channel();
         let all_events_listener = EventU32SenderMpsc::new(0, event_0_tx_0);
         event_man.subscribe_all(all_events_listener.target_id());
@@ -809,9 +811,9 @@ mod tests {
             .send(EventMessage::new(TEST_COMPONENT_ID_1.id(), event_1))
             .expect("Triggering event 1 failed");
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_0, 1);
+        check_handled_event(res, event_0, 1, TEST_COMPONENT_ID_0.id());
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, event_1, 1);
+        check_handled_event(res, event_1, 1, TEST_COMPONENT_ID_1.id());
         check_next_event(event_0, &all_events_rx);
         check_next_event(event_1, &all_events_rx);
     }

@@ -1,23 +1,23 @@
-use log::{error, warn};
+use log::warn;
 use satrs::action::{ActionRequest, ActionRequestVariant};
-use satrs::params::WritableToBeBytes;
 use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::action::{
     ActionReplyPus, ActionReplyVariant, ActivePusActionRequestStd, DefaultActiveActionRequestMap,
 };
 use satrs::pus::verification::{
-    FailParams, FailParamsWithStep, TcStateAccepted, TcStateStarted, VerificationReporter,
+    handle_completion_failure_with_generic_params, handle_step_failure_with_generic_params,
+    FailParamHelper, FailParams, TcStateAccepted, TcStateStarted, VerificationReporter,
     VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
     ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
     EcssTcInVecConverter, EcssTmSender, EcssTmtcError, GenericConversionError, MpscTcReceiver,
-    MpscTmAsVecSender, PusPacketHandlerResult, PusReplyHandler, PusServiceHelper,
+    MpscTmAsVecSender, PusPacketHandlingError, PusReplyHandler, PusServiceHelper,
     PusTcToRequestConverter,
 };
 use satrs::request::{GenericMessage, UniqueApidTargetId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
-use satrs::spacepackets::ecss::{EcssEnumU16, PusPacket};
+use satrs::spacepackets::ecss::{EcssEnumU16, PusPacket, PusServiceId};
 use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use satrs_example::config::components::PUS_ACTION_SERVICE;
 use satrs_example::config::tmtc_err;
@@ -61,7 +61,7 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPus> for ActionReplyH
         active_request: &ActivePusActionRequestStd,
         tm_sender: &(impl EcssTmSender + ?Sized),
         verification_handler: &impl VerificationReportingProvider,
-        time_stamp: &[u8],
+        timestamp: &[u8],
     ) -> Result<bool, Self::Error> {
         let verif_token: VerificationToken<TcStateStarted> = active_request
             .token()
@@ -69,15 +69,23 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPus> for ActionReplyH
             .expect("invalid token state");
         let remove_entry = match &reply.message.variant {
             ActionReplyVariant::CompletionFailed { error_code, params } => {
-                let mut fail_data_len = 0;
-                if let Some(params) = params {
-                    fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
-                }
-                verification_handler.completion_failure(
+                let error_propagated = handle_completion_failure_with_generic_params(
                     tm_sender,
                     verif_token,
-                    FailParams::new(time_stamp, error_code, &self.fail_data_buf[..fail_data_len]),
+                    verification_handler,
+                    FailParamHelper {
+                        error_code,
+                        params: params.as_ref(),
+                        timestamp,
+                        small_data_buf: &mut self.fail_data_buf,
+                    },
                 )?;
+                if !error_propagated {
+                    log::warn!(
+                        "error params for completion failure were not propated: {:?}",
+                        params.as_ref()
+                    );
+                }
                 true
             }
             ActionReplyVariant::StepFailed {
@@ -85,31 +93,35 @@ impl PusReplyHandler<ActivePusActionRequestStd, ActionReplyPus> for ActionReplyH
                 step,
                 params,
             } => {
-                let mut fail_data_len = 0;
-                if let Some(params) = params {
-                    fail_data_len = params.write_to_be_bytes(&mut self.fail_data_buf)?;
-                }
-                verification_handler.step_failure(
+                let error_propagated = handle_step_failure_with_generic_params(
                     tm_sender,
                     verif_token,
-                    FailParamsWithStep::new(
-                        time_stamp,
-                        &EcssEnumU16::new(*step),
+                    verification_handler,
+                    FailParamHelper {
                         error_code,
-                        &self.fail_data_buf[..fail_data_len],
-                    ),
+                        params: params.as_ref(),
+                        timestamp,
+                        small_data_buf: &mut self.fail_data_buf,
+                    },
+                    &EcssEnumU16::new(*step),
                 )?;
+                if !error_propagated {
+                    log::warn!(
+                        "error params for completion failure were not propated: {:?}",
+                        params.as_ref()
+                    );
+                }
                 true
             }
             ActionReplyVariant::Completed => {
-                verification_handler.completion_success(tm_sender, verif_token, time_stamp)?;
+                verification_handler.completion_success(tm_sender, verif_token, timestamp)?;
                 true
             }
             ActionReplyVariant::StepSuccess { step } => {
                 verification_handler.step_success(
                     tm_sender,
                     &verif_token,
-                    time_stamp,
+                    timestamp,
                     EcssEnumU16::new(*step),
                 )?;
                 false
@@ -266,43 +278,23 @@ pub struct ActionServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTc
 impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
     for ActionServiceWrapper<TmSender, TcInMemConverter>
 {
-    /// Returns [true] if the packet handling is finished.
-    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        match self.service.poll_and_handle_next_tc(time_stamp) {
-            Ok(result) => match result {
-                PusPacketHandlerResult::RequestHandled => {}
-                PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {
-                    warn!("PUS 8 partial packet handling success: {e:?}")
-                }
-                PusPacketHandlerResult::CustomSubservice(invalid, _) => {
-                    warn!("PUS 8 invalid subservice {invalid}");
-                }
-                PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
-                    warn!("PUS 8 subservice {subservice} not implemented");
-                }
-                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
-            },
-            Err(error) => {
-                error!("PUS packet handling error: {error:?}");
-                // To avoid permanent loops on error cases.
-                return HandlingStatus::Empty;
-            }
+    const SERVICE_ID: u8 = PusServiceId::Action as u8;
+    const SERVICE_STR: &'static str = "action";
+
+    delegate::delegate! {
+        to self.service {
+            fn poll_and_handle_next_tc(
+                &mut self,
+                time_stamp: &[u8],
+            ) -> Result<HandlingStatus, PusPacketHandlingError>;
+
+            fn poll_and_handle_next_reply(
+                &mut self,
+                time_stamp: &[u8],
+            ) -> Result<HandlingStatus, EcssTmtcError>;
+
+            fn check_for_request_timeouts(&mut self);
         }
-        HandlingStatus::HandledOne
-    }
-
-    fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        // This only fails if all senders disconnected. Treat it like an empty queue.
-        self.service
-            .poll_and_check_next_reply(time_stamp)
-            .unwrap_or_else(|e| {
-                warn!("PUS 8: Handling reply failed with error {e:?}");
-                HandlingStatus::Empty
-            })
-    }
-
-    fn check_for_request_timeouts(&mut self) {
-        self.service.check_for_request_timeouts();
     }
 }
 
@@ -417,7 +409,7 @@ mod tests {
             }
             let result = result.unwrap();
             match result {
-                PusPacketHandlerResult::RequestHandled => (),
+                HandlingStatus::HandledOne => (),
                 _ => panic!("unexpected result {result:?}"),
             }
         }
@@ -429,19 +421,19 @@ mod tests {
             }
             let result = result.unwrap();
             match result {
-                PusPacketHandlerResult::Empty => (),
+                HandlingStatus::Empty => (),
                 _ => panic!("unexpected result {result:?}"),
             }
         }
 
         pub fn verify_next_reply_is_handled_properly(&mut self, time_stamp: &[u8]) {
-            let result = self.service.poll_and_check_next_reply(time_stamp);
+            let result = self.service.poll_and_handle_next_reply(time_stamp);
             assert!(result.is_ok());
             assert_eq!(result.unwrap(), HandlingStatus::HandledOne);
         }
 
         pub fn verify_all_replies_handled(&mut self, time_stamp: &[u8]) {
-            let result = self.service.poll_and_check_next_reply(time_stamp);
+            let result = self.service.poll_and_handle_next_reply(time_stamp);
             assert!(result.is_ok());
             assert_eq!(result.unwrap(), HandlingStatus::Empty);
         }

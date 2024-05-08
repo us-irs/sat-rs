@@ -10,6 +10,7 @@ class Apid(enum.IntEnum):
     GENERIC_PUS = 2
     ACS = 3
     CFDP = 4
+    TMTC = 5
 
 
 class EventSeverity(enum.IntEnum):

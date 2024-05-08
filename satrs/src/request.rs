@@ -10,7 +10,7 @@ pub use std_mod::*;
 
 use spacepackets::{
     ecss::{tc::IsPusTelecommand, PusPacket},
-    ByteConversionError, CcsdsPacket,
+    ByteConversionError,
 };
 
 use crate::{queue::GenericTargetedMessagingError, ComponentId};
@@ -47,7 +47,7 @@ impl UniqueApidTargetId {
     /// This function attempts to build the ID from a PUS telecommand by extracting the APID
     /// and the first four bytes of the application data field as the target field.
     pub fn from_pus_tc(
-        tc: &(impl CcsdsPacket + PusPacket + IsPusTelecommand),
+        tc: &(impl PusPacket + IsPusTelecommand),
     ) -> Result<Self, ByteConversionError> {
         if tc.user_data().len() < 4 {
             return Err(ByteConversionError::FromSliceTooSmall {

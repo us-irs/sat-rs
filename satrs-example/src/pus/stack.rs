@@ -7,10 +7,12 @@ use satrs::{
 
 use super::{
     action::ActionServiceWrapper, event::EventServiceWrapper, hk::HkServiceWrapper,
-    scheduler::SchedulingServiceWrapper, test::TestCustomServiceWrapper, HandlingStatus,
-    TargetedPusService,
+    scheduler::SchedulingServiceWrapper, test::TestCustomServiceWrapper, DirectPusService,
+    HandlingStatus, TargetedPusService,
 };
 
+// TODO: For better extensibility, we could create 2 vectors: One for direct PUS services and one
+// for targeted services..
 #[derive(new)]
 pub struct PusStack<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> {
     test_srv: TestCustomServiceWrapper<TmSender, TcInMemConverter>,
@@ -28,52 +30,28 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
         // Release all telecommands which reached their release time before calling the service
         // handlers.
         self.schedule_srv.release_tcs();
-        let time_stamp = cds::CdsTime::now_with_u16_days()
+        let timestamp = cds::CdsTime::now_with_u16_days()
             .expect("time stamp generation error")
             .to_vec()
             .unwrap();
+        let mut loop_count = 0_u32;
+        // Hot loop which will run continuously until all request and reply handling is done.
         loop {
             let mut nothing_to_do = true;
-            let mut is_srv_finished =
-                |_srv_id: u8,
-                 tc_handling_status: HandlingStatus,
-                 reply_handling_status: Option<HandlingStatus>| {
-                    if tc_handling_status == HandlingStatus::HandledOne
-                        || (reply_handling_status.is_some()
-                            && reply_handling_status.unwrap() == HandlingStatus::HandledOne)
-                    {
-                        nothing_to_do = false;
-                    }
-                };
-            is_srv_finished(
-                17,
-                self.test_srv.poll_and_handle_next_packet(&time_stamp),
-                None,
+            Self::direct_service_checker(&mut self.test_srv, &timestamp, &mut nothing_to_do);
+            Self::direct_service_checker(&mut self.schedule_srv, &timestamp, &mut nothing_to_do);
+            Self::direct_service_checker(&mut self.event_srv, &timestamp, &mut nothing_to_do);
+            Self::targeted_service_checker(
+                &mut self.action_srv_wrapper,
+                &timestamp,
+                &mut nothing_to_do,
             );
-            is_srv_finished(
-                11,
-                self.schedule_srv.poll_and_handle_next_tc(&time_stamp),
-                None,
+            Self::targeted_service_checker(
+                &mut self.hk_srv_wrapper,
+                &timestamp,
+                &mut nothing_to_do,
             );
-            is_srv_finished(5, self.event_srv.poll_and_handle_next_tc(&time_stamp), None);
-            is_srv_finished(
-                8,
-                self.action_srv_wrapper.poll_and_handle_next_tc(&time_stamp),
-                Some(
-                    self.action_srv_wrapper
-                        .poll_and_handle_next_reply(&time_stamp),
-                ),
-            );
-            is_srv_finished(
-                3,
-                self.hk_srv_wrapper.poll_and_handle_next_tc(&time_stamp),
-                Some(self.hk_srv_wrapper.poll_and_handle_next_reply(&time_stamp)),
-            );
-            is_srv_finished(
-                200,
-                self.mode_srv.poll_and_handle_next_tc(&time_stamp),
-                Some(self.mode_srv.poll_and_handle_next_reply(&time_stamp)),
-            );
+            Self::targeted_service_checker(&mut self.mode_srv, &timestamp, &mut nothing_to_do);
             if nothing_to_do {
                 // Timeout checking is only done once.
                 self.action_srv_wrapper.check_for_request_timeouts();
@@ -81,6 +59,37 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
                 self.mode_srv.check_for_request_timeouts();
                 break;
             }
+            // Safety mechanism to avoid infinite loops.
+            loop_count += 1;
+            if loop_count >= 500 {
+                log::warn!("reached PUS stack loop count 500, breaking");
+                break;
+            }
+        }
+    }
+
+    pub fn direct_service_checker<S: DirectPusService>(
+        service: &mut S,
+        timestamp: &[u8],
+        nothing_to_do: &mut bool,
+    ) {
+        let handling_status = service.poll_and_handle_next_tc(timestamp);
+        if handling_status == HandlingStatus::HandledOne {
+            *nothing_to_do = false;
+        }
+    }
+
+    pub fn targeted_service_checker<S: TargetedPusService>(
+        service: &mut S,
+        timestamp: &[u8],
+        nothing_to_do: &mut bool,
+    ) {
+        let request_handling = service.poll_and_handle_next_tc_default_handler(timestamp);
+        let reply_handling = service.poll_and_handle_next_reply_default_handler(timestamp);
+        if request_handling == HandlingStatus::HandledOne
+            || reply_handling == HandlingStatus::HandledOne
+        {
+            *nothing_to_do = false;
         }
     }
 }

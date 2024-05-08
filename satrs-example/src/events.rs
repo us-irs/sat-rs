@@ -2,19 +2,15 @@ use std::sync::mpsc::{self};
 
 use crate::pus::create_verification_reporter;
 use satrs::event_man::{EventMessageU32, EventRoutingError};
-use satrs::params::WritableToBeBytes;
 use satrs::pus::event::EventTmHookProvider;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::EcssTmSender;
 use satrs::request::UniqueApidTargetId;
 use satrs::{
-    event_man::{
-        EventManagerWithBoundedMpsc, EventSendProvider, EventU32SenderMpscBounded,
-        MpscEventReceiver,
-    },
+    event_man::{EventManagerWithBoundedMpsc, EventSendProvider, EventU32SenderMpscBounded},
     pus::{
         event_man::{
-            DefaultPusEventU32Dispatcher, EventReporter, EventRequest, EventRequestWithToken,
+            DefaultPusEventU32TmCreator, EventReporter, EventRequest, EventRequestWithToken,
         },
         verification::{TcStateStarted, VerificationReportingProvider, VerificationToken},
     },
@@ -40,13 +36,13 @@ impl EventTmHookProvider for EventApidSetter {
 /// packets. It also handles the verification completion of PUS event service requests.
 pub struct PusEventHandler<TmSender: EcssTmSender> {
     event_request_rx: mpsc::Receiver<EventRequestWithToken>,
-    pus_event_dispatcher: DefaultPusEventU32Dispatcher<()>,
+    pus_event_tm_creator: DefaultPusEventU32TmCreator<EventApidSetter>,
     pus_event_man_rx: mpsc::Receiver<EventMessageU32>,
     tm_sender: TmSender,
     time_provider: CdsTime,
     timestamp: [u8; 7],
+    small_data_buf: [u8; 64],
     verif_handler: VerificationReporter,
-    event_apid_setter: EventApidSetter,
 }
 
 impl<TmSender: EcssTmSender> PusEventHandler<TmSender> {
@@ -61,9 +57,16 @@ impl<TmSender: EcssTmSender> PusEventHandler<TmSender> {
 
         // All events sent to the manager are routed to the PUS event manager, which generates PUS event
         // telemetry for each event.
-        let event_reporter = EventReporter::new(PUS_EVENT_MANAGEMENT.raw(), 0, 0, 128).unwrap();
+        let event_reporter = EventReporter::new_with_hook(
+            PUS_EVENT_MANAGEMENT.raw(),
+            0,
+            0,
+            128,
+            EventApidSetter::default(),
+        )
+        .unwrap();
         let pus_event_dispatcher =
-            DefaultPusEventU32Dispatcher::new_with_default_backend(event_reporter);
+            DefaultPusEventU32TmCreator::new_with_default_backend(event_reporter);
         let pus_event_man_send_provider = EventU32SenderMpscBounded::new(
             PUS_EVENT_MANAGEMENT.raw(),
             pus_event_man_tx,
@@ -75,13 +78,13 @@ impl<TmSender: EcssTmSender> PusEventHandler<TmSender> {
 
         Self {
             event_request_rx,
-            pus_event_dispatcher,
+            pus_event_tm_creator: pus_event_dispatcher,
             pus_event_man_rx,
             time_provider: CdsTime::new_with_u16_days(0, 0),
             timestamp: [0; 7],
+            small_data_buf: [0; 64],
             verif_handler,
             tm_sender,
-            event_apid_setter: EventApidSetter::default(),
         }
     }
 
@@ -95,73 +98,108 @@ impl<TmSender: EcssTmSender> PusEventHandler<TmSender> {
                 .completion_success(&self.tm_sender, started_token, timestamp)
                 .expect("Sending completion success failed");
         };
-        // handle event requests
-        if let Ok(event_req) = self.event_request_rx.try_recv() {
-            match event_req.request {
-                EventRequest::Enable(event) => {
-                    self.pus_event_dispatcher
-                        .enable_tm_for_event(&event)
-                        .expect("Enabling TM failed");
-                    update_time(&mut self.time_provider, &mut self.timestamp);
-                    report_completion(event_req, &self.timestamp);
-                }
-                EventRequest::Disable(event) => {
-                    self.pus_event_dispatcher
-                        .disable_tm_for_event(&event)
-                        .expect("Disabling TM failed");
-                    update_time(&mut self.time_provider, &mut self.timestamp);
-                    report_completion(event_req, &self.timestamp);
-                }
+        loop {
+            // handle event requests
+            match self.event_request_rx.try_recv() {
+                Ok(event_req) => match event_req.request {
+                    EventRequest::Enable(event) => {
+                        self.pus_event_tm_creator
+                            .enable_tm_for_event(&event)
+                            .expect("Enabling TM failed");
+                        update_time(&mut self.time_provider, &mut self.timestamp);
+                        report_completion(event_req, &self.timestamp);
+                    }
+                    EventRequest::Disable(event) => {
+                        self.pus_event_tm_creator
+                            .disable_tm_for_event(&event)
+                            .expect("Disabling TM failed");
+                        update_time(&mut self.time_provider, &mut self.timestamp);
+                        report_completion(event_req, &self.timestamp);
+                    }
+                },
+                Err(e) => match e {
+                    mpsc::TryRecvError::Empty => break,
+                    mpsc::TryRecvError::Disconnected => {
+                        log::warn!("all event request senders have disconnected");
+                        break;
+                    }
+                },
             }
         }
     }
 
     pub fn generate_pus_event_tm(&mut self) {
-        // Perform the generation of PUS event packets
-        if let Ok(event_msg) = self.pus_event_man_rx.try_recv() {
-            update_time(&mut self.time_provider, &mut self.timestamp);
-            let param_vec = event_msg.params().map_or(Vec::new(), |param| {
-                param.to_vec().expect("failed to convert params to vec")
-            });
-            self.event_apid_setter.next_apid = UniqueApidTargetId::from(event_msg.sender_id()).apid;
-            self.pus_event_dispatcher
-                .generate_pus_event_tm_generic(
-                    &self.tm_sender,
-                    &self.timestamp,
-                    event_msg.event(),
-                    Some(&param_vec),
-                )
-                .expect("Sending TM as event failed");
+        loop {
+            // Perform the generation of PUS event packets
+            match self.pus_event_man_rx.try_recv() {
+                Ok(event_msg) => {
+                    // We use the TM modification hook to set the sender APID for each event.
+                    self.pus_event_tm_creator.reporter.tm_hook.next_apid =
+                        UniqueApidTargetId::from(event_msg.sender_id()).apid;
+                    update_time(&mut self.time_provider, &mut self.timestamp);
+                    let generation_result = self
+                        .pus_event_tm_creator
+                        .generate_pus_event_tm_generic_with_generic_params(
+                            &self.tm_sender,
+                            &self.timestamp,
+                            event_msg.event(),
+                            &mut self.small_data_buf,
+                            event_msg.params(),
+                        )
+                        .expect("Sending TM as event failed");
+                    if !generation_result.params_were_propagated {
+                        log::warn!(
+                            "Event TM parameters were not propagated: {:?}",
+                            event_msg.params()
+                        );
+                    }
+                }
+                Err(e) => match e {
+                    mpsc::TryRecvError::Empty => break,
+                    mpsc::TryRecvError::Disconnected => {
+                        log::warn!("All event senders have disconnected");
+                        break;
+                    }
+                },
+            }
         }
     }
 }
 
-/// This is a thin wrapper around the event manager which also caches the sender component
-/// used to send events to the event manager.
-pub struct EventManagerWrapper {
+pub struct EventHandler<TmSender: EcssTmSender> {
+    pub pus_event_handler: PusEventHandler<TmSender>,
     event_manager: EventManagerWithBoundedMpsc,
-    event_sender: mpsc::Sender<EventMessageU32>,
 }
 
-impl EventManagerWrapper {
-    pub fn new() -> Self {
-        // The sender handle is the primary sender handle for all components which want to create events.
-        // The event manager will receive the RX handle to receive all the events.
-        let (event_sender, event_man_rx) = mpsc::channel();
-        let event_recv = MpscEventReceiver::new(event_man_rx);
+impl<TmSender: EcssTmSender> EventHandler<TmSender> {
+    pub fn new(
+        tm_sender: TmSender,
+        event_rx: mpsc::Receiver<EventMessageU32>,
+        event_request_rx: mpsc::Receiver<EventRequestWithToken>,
+    ) -> Self {
+        let mut event_manager = EventManagerWithBoundedMpsc::new(event_rx);
+        let pus_event_handler = PusEventHandler::new(
+            tm_sender,
+            create_verification_reporter(PUS_EVENT_MANAGEMENT.id(), PUS_EVENT_MANAGEMENT.apid),
+            &mut event_manager,
+            event_request_rx,
+        );
+
         Self {
-            event_manager: EventManagerWithBoundedMpsc::new(event_recv),
-            event_sender,
+            pus_event_handler,
+            event_manager,
         }
     }
 
-    // Returns a cached event sender to send events to the event manager for routing.
-    pub fn clone_event_sender(&self) -> mpsc::Sender<EventMessageU32> {
-        self.event_sender.clone()
-    }
-
+    #[allow(dead_code)]
     pub fn event_manager(&mut self) -> &mut EventManagerWithBoundedMpsc {
         &mut self.event_manager
+    }
+
+    pub fn periodic_operation(&mut self) {
+        self.pus_event_handler.handle_event_requests();
+        self.try_event_routing();
+        self.pus_event_handler.generate_pus_event_tm();
     }
 
     pub fn try_event_routing(&mut self) {
@@ -177,41 +215,83 @@ impl EventManagerWrapper {
     }
 }
 
-pub struct EventHandler<TmSender: EcssTmSender> {
-    pub event_man_wrapper: EventManagerWrapper,
-    pub pus_event_handler: PusEventHandler<TmSender>,
-}
+#[cfg(test)]
+mod tests {
+    use satrs::{
+        events::EventU32,
+        pus::verification::VerificationReporterCfg,
+        spacepackets::{
+            ecss::{tm::PusTmReader, PusPacket},
+            CcsdsPacket,
+        },
+        tmtc::PacketAsVec,
+    };
 
-impl<TmSender: EcssTmSender> EventHandler<TmSender> {
-    pub fn new(
-        tm_sender: TmSender,
-        event_request_rx: mpsc::Receiver<EventRequestWithToken>,
-    ) -> Self {
-        let mut event_man_wrapper = EventManagerWrapper::new();
-        let pus_event_handler = PusEventHandler::new(
-            tm_sender,
-            create_verification_reporter(PUS_EVENT_MANAGEMENT.id(), PUS_EVENT_MANAGEMENT.apid),
-            event_man_wrapper.event_manager(),
-            event_request_rx,
-        );
-        Self {
-            event_man_wrapper,
-            pus_event_handler,
+    use super::*;
+
+    const TEST_CREATOR_ID: UniqueApidTargetId = UniqueApidTargetId::new(1, 2);
+    const TEST_EVENT: EventU32 = EventU32::new(satrs::events::Severity::Info, 1, 1);
+
+    pub struct EventManagementTestbench {
+        pub event_tx: mpsc::SyncSender<EventMessageU32>,
+        pub event_manager: EventManagerWithBoundedMpsc,
+        pub tm_receiver: mpsc::Receiver<PacketAsVec>,
+        pub pus_event_handler: PusEventHandler<mpsc::Sender<PacketAsVec>>,
+    }
+
+    impl EventManagementTestbench {
+        pub fn new() -> Self {
+            let (event_tx, event_rx) = mpsc::sync_channel(10);
+            let (_event_req_tx, event_req_rx) = mpsc::sync_channel(10);
+            let (tm_sender, tm_receiver) = mpsc::channel();
+            let verif_reporter_cfg = VerificationReporterCfg::new(0x05, 2, 2, 128).unwrap();
+            let verif_reporter =
+                VerificationReporter::new(PUS_EVENT_MANAGEMENT.id(), &verif_reporter_cfg);
+            let mut event_manager = EventManagerWithBoundedMpsc::new(event_rx);
+            let pus_event_handler = PusEventHandler::<mpsc::Sender<PacketAsVec>>::new(
+                tm_sender,
+                verif_reporter,
+                &mut event_manager,
+                event_req_rx,
+            );
+            Self {
+                event_tx,
+                tm_receiver,
+                event_manager,
+                pus_event_handler,
+            }
         }
     }
 
-    pub fn clone_event_sender(&self) -> mpsc::Sender<EventMessageU32> {
-        self.event_man_wrapper.clone_event_sender()
+    #[test]
+    fn test_basic_event_generation() {
+        let mut testbench = EventManagementTestbench::new();
+        testbench
+            .event_tx
+            .send(EventMessageU32::new(
+                TEST_CREATOR_ID.id(),
+                EventU32::new(satrs::events::Severity::Info, 1, 1),
+            ))
+            .expect("failed to send event");
+        testbench.pus_event_handler.handle_event_requests();
+        testbench.event_manager.try_event_handling(|_, _| {});
+        testbench.pus_event_handler.generate_pus_event_tm();
+        let tm_packet = testbench
+            .tm_receiver
+            .try_recv()
+            .expect("failed to receive TM packet");
+        assert_eq!(tm_packet.sender_id, PUS_EVENT_MANAGEMENT.id());
+        let tm_reader = PusTmReader::new(&tm_packet.packet, 7)
+            .expect("failed to create TM reader")
+            .0;
+        assert_eq!(tm_reader.apid(), TEST_CREATOR_ID.apid);
+        assert_eq!(tm_reader.user_data().len(), 4);
+        let event_read_back = EventU32::from_be_bytes(tm_reader.user_data().try_into().unwrap());
+        assert_eq!(event_read_back, TEST_EVENT);
     }
 
-    #[allow(dead_code)]
-    pub fn event_manager(&mut self) -> &mut EventManagerWithBoundedMpsc {
-        self.event_man_wrapper.event_manager()
-    }
-
-    pub fn periodic_operation(&mut self) {
-        self.pus_event_handler.handle_event_requests();
-        self.event_man_wrapper.try_event_routing();
-        self.pus_event_handler.generate_pus_event_tm();
+    #[test]
+    fn test_basic_event_disabled() {
+        // TODO: Add test.
     }
 }

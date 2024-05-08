@@ -1,7 +1,7 @@
 use crate::events::EventU32;
 use crate::pus::event_man::{EventRequest, EventRequestWithToken};
 use crate::pus::verification::TcStateToken;
-use crate::pus::{PartialPusHandlingError, PusPacketHandlerResult, PusPacketHandlingError};
+use crate::pus::{DirectPusPacketHandlerResult, PartialPusHandlingError, PusPacketHandlingError};
 use crate::queue::GenericSendError;
 use spacepackets::ecss::event::Subservice;
 use spacepackets::ecss::PusPacket;
@@ -10,7 +10,7 @@ use std::sync::mpsc::Sender;
 use super::verification::VerificationReportingProvider;
 use super::{
     EcssTcInMemConverter, EcssTcReceiver, EcssTmSender, GenericConversionError,
-    GenericRoutingError, PusServiceHelper,
+    GenericRoutingError, HandlingStatus, PusServiceHelper,
 };
 
 pub struct PusEventServiceHandler<
@@ -46,13 +46,14 @@ impl<
         }
     }
 
-    pub fn poll_and_handle_next_tc(
+    pub fn poll_and_handle_next_tc<ErrorCb: FnMut(&PartialPusHandlingError)>(
         &mut self,
+        mut error_callback: ErrorCb,
         time_stamp: &[u8],
-    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+    ) -> Result<DirectPusPacketHandlerResult, PusPacketHandlingError> {
         let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
         if possible_packet.is_none() {
-            return Ok(PusPacketHandlerResult::Empty);
+            return Ok(HandlingStatus::Empty.into());
         }
         let ecss_tc_and_token = possible_packet.unwrap();
         self.service_helper
@@ -62,13 +63,13 @@ impl<
         let subservice = tc.subservice();
         let srv = Subservice::try_from(subservice);
         if srv.is_err() {
-            return Ok(PusPacketHandlerResult::CustomSubservice(
+            return Ok(DirectPusPacketHandlerResult::CustomSubservice(
                 tc.subservice(),
                 ecss_tc_and_token.token,
             ));
         }
-        let handle_enable_disable_request =
-            |enable: bool| -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        let mut handle_enable_disable_request =
+            |enable: bool| -> Result<DirectPusPacketHandlerResult, PusPacketHandlingError> {
                 if tc.user_data().len() < 4 {
                     return Err(GenericConversionError::NotEnoughAppData {
                         expected: 4,
@@ -79,21 +80,20 @@ impl<
                 let user_data = tc.user_data();
                 let event_u32 =
                     EventU32::from(u32::from_be_bytes(user_data[0..4].try_into().unwrap()));
-                let start_token = self
-                    .service_helper
-                    .common
-                    .verif_reporter
-                    .start_success(
-                        &self.service_helper.common.tm_sender,
-                        ecss_tc_and_token.token,
-                        time_stamp,
-                    )
-                    .map_err(|_| PartialPusHandlingError::Verification);
-                let partial_error = start_token.clone().err();
                 let mut token: TcStateToken = ecss_tc_and_token.token.into();
-                if let Ok(start_token) = start_token {
-                    token = start_token.into();
+                match self.service_helper.common.verif_reporter.start_success(
+                    &self.service_helper.common.tm_sender,
+                    ecss_tc_and_token.token,
+                    time_stamp,
+                ) {
+                    Ok(start_token) => {
+                        token = start_token.into();
+                    }
+                    Err(e) => {
+                        error_callback(&PartialPusHandlingError::Verification(e));
+                    }
                 }
+
                 let event_req_with_token = if enable {
                     EventRequestWithToken {
                         request: EventRequest::Enable(event_u32),
@@ -112,12 +112,7 @@ impl<
                             GenericSendError::RxDisconnected,
                         ))
                     })?;
-                if let Some(partial_error) = partial_error {
-                    return Ok(PusPacketHandlerResult::RequestHandledPartialSuccess(
-                        partial_error,
-                    ));
-                }
-                Ok(PusPacketHandlerResult::RequestHandled)
+                Ok(HandlingStatus::HandledOne.into())
             };
 
         match srv.unwrap() {
@@ -136,14 +131,14 @@ impl<
                 handle_enable_disable_request(false)?;
             }
             Subservice::TcReportDisabledList | Subservice::TmDisabledEventsReport => {
-                return Ok(PusPacketHandlerResult::SubserviceNotImplemented(
+                return Ok(DirectPusPacketHandlerResult::SubserviceNotImplemented(
                     subservice,
                     ecss_tc_and_token.token,
                 ));
             }
         }
 
-        Ok(PusPacketHandlerResult::RequestHandled)
+        Ok(HandlingStatus::HandledOne.into())
     }
 }
 
@@ -167,7 +162,7 @@ mod tests {
     use crate::pus::verification::{
         RequestId, VerificationReporter, VerificationReportingProvider,
     };
-    use crate::pus::{GenericConversionError, MpscTcReceiver};
+    use crate::pus::{GenericConversionError, HandlingStatus, MpscTcReceiver};
     use crate::tmtc::PacketSenderWithSharedPool;
     use crate::{
         events::EventU32,
@@ -175,13 +170,13 @@ mod tests {
             event_man::EventRequestWithToken,
             tests::PusServiceHandlerWithSharedStoreCommon,
             verification::{TcStateAccepted, VerificationToken},
-            EcssTcInSharedStoreConverter, PusPacketHandlerResult, PusPacketHandlingError,
+            DirectPusPacketHandlerResult, EcssTcInSharedStoreConverter, PusPacketHandlingError,
         },
     };
 
     use super::PusEventServiceHandler;
 
-    const TEST_EVENT_0: EventU32 = EventU32::const_new(crate::events::Severity::INFO, 5, 25);
+    const TEST_EVENT_0: EventU32 = EventU32::new(crate::events::Severity::Info, 5, 25);
 
     struct Pus5HandlerWithStoreTester {
         common: PusServiceHandlerWithSharedStoreCommon,
@@ -229,9 +224,11 @@ mod tests {
     }
 
     impl SimplePusPacketHandler for Pus5HandlerWithStoreTester {
-        fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        fn handle_one_tc(
+            &mut self,
+        ) -> Result<DirectPusPacketHandlerResult, PusPacketHandlingError> {
             let time_stamp = cds::CdsTime::new_with_u16_days(0, 0).to_vec().unwrap();
-            self.handler.poll_and_handle_next_tc(&time_stamp)
+            self.handler.poll_and_handle_next_tc(|_| {}, &time_stamp)
         }
     }
 
@@ -293,10 +290,13 @@ mod tests {
         let result = test_harness.handle_one_tc();
         assert!(result.is_ok());
         let result = result.unwrap();
-        if let PusPacketHandlerResult::Empty = result {
-        } else {
-            panic!("unexpected result type {result:?}")
-        }
+        assert!(
+            matches!(
+                result,
+                DirectPusPacketHandlerResult::Handled(HandlingStatus::Empty)
+            ),
+            "unexpected result type {result:?}"
+        )
     }
 
     #[test]
@@ -311,7 +311,7 @@ mod tests {
         let result = test_harness.handle_one_tc();
         assert!(result.is_ok());
         let result = result.unwrap();
-        if let PusPacketHandlerResult::CustomSubservice(subservice, _) = result {
+        if let DirectPusPacketHandlerResult::CustomSubservice(subservice, _) = result {
             assert_eq!(subservice, 200);
         } else {
             panic!("unexpected result type {result:?}")

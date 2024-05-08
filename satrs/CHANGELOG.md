@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.2.0] 2024-05-02
+
+## Changed
+
+- Various improvements for the PUS stack components.
+
+## Added
+
+- Added `HandlingStatus` enumeration.
+
+# [v0.2.0-rc.5] 2024-04-24
+
+## Added
+
+- Optional `defmt::Format` support for the event types, if the `defmt` feature is activated.
+
+## Changed
+
+- Removed `MpscEventReceiver`, the `EventReceiveProvider` trait is implemented directly
+  on `mpsc::Receiver<EventMessage<Event>>`
+- Renamed `PusEventDispatcher` to `PusEventTmCreatorWithMap`.
+- Renamed `DefaultPusEventU32Dispatcher` to `DefaultPusEventU32EventCreator`.
+- Renamed `PusEventMgmtBackendProvider` renamed to `PusEventReportingMap`.
+- Reanmed Event `const_new` methods to `new` and the former `new` methods to `new_checked`
+
 # [v0.2.0-rc.4] 2024-04-23
 
 ## Changed

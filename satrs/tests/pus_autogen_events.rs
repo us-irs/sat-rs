@@ -21,7 +21,7 @@ struct EventIntrospection {
 }
 
 //#[event(descr="This is some info event")]
-const INFO_EVENT_0: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::const_new(0, 0);
+const INFO_EVENT_0: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::new(0, 0);
 const INFO_EVENT_0_ERASED: EventU32 = EventU32::const_from_info(INFO_EVENT_0);
 
 // This is ideally auto-generated
@@ -36,7 +36,7 @@ const INFO_EVENT_0_INTROSPECTION: EventIntrospection = EventIntrospection {
 };
 
 //#[event(descr="This is some low severity event")]
-const SOME_LOW_SEV_EVENT: EventU32TypedSev<SeverityLow> = EventU32TypedSev::const_new(0, 12);
+const SOME_LOW_SEV_EVENT: EventU32TypedSev<SeverityLow> = EventU32TypedSev::new(0, 12);
 
 //const EVENT_LIST: [&'static Event; 2] = [&INFO_EVENT_0, &SOME_LOW_SEV_EVENT];
 
@@ -47,7 +47,7 @@ const TEST_GROUP_NAME_NAME: &str = "TEST_GROUP_NAME";
 
 //#[event(desc="Some medium severity event")]
 const MEDIUM_SEV_EVENT_IN_OTHER_GROUP: EventU32TypedSev<SeverityMedium> =
-    EventU32TypedSev::const_new(TEST_GROUP_NAME, 0);
+    EventU32TypedSev::new(TEST_GROUP_NAME, 0);
 const MEDIUM_SEV_EVENT_IN_OTHER_GROUP_REDUCED: EventU32 =
     EventU32::const_from_medium(MEDIUM_SEV_EVENT_IN_OTHER_GROUP);
 
@@ -62,7 +62,7 @@ const MEDIUM_SEV_EVENT_IN_OTHER_GROUP_INTROSPECTION: EventIntrospection = EventI
     info: "Some medium severity event",
 };
 
-const CONST_SLICE: &'static [u8] = &[0, 1, 2, 3];
+const CONST_SLICE: &[u8] = &[0, 1, 2, 3];
 const INTROSPECTION_FOR_TEST_GROUP_0: [&EventIntrospection; 2] =
     [&INFO_EVENT_0_INTROSPECTION, &INFO_EVENT_0_INTROSPECTION];
 
