@@ -19,12 +19,14 @@ use satrs::hal::std::udp_server::UdpTcServer;
 use satrs::request::GenericMessage;
 use satrs::tmtc::{PacketSenderWithSharedPool, SharedPacketPool};
 use satrs_example::config::pool::{create_sched_tc_pool, create_static_pools};
-use satrs_example::config::tasks::{
-    FREQ_MS_AOCS, FREQ_MS_EVENT_HANDLING, FREQ_MS_PUS_STACK, FREQ_MS_UDP_TMTC,
-};
+use satrs_example::config::tasks::{FREQ_MS_AOCS, FREQ_MS_PUS_STACK, FREQ_MS_UDP_TMTC};
 use satrs_example::config::{OBSW_SERVER_ADDR, PACKET_ID_VALIDATOR, SERVER_PORT};
 
-use crate::acs::mgm::{MgmHandlerLis3Mdl, MpscModeLeafInterface, SpiDummyInterface};
+use crate::acs::mgm::{
+    MgmHandlerLis3Mdl, MpscModeLeafInterface, SpiDummyInterface, SpiSimInterface,
+    SpiSimInterfaceWrapper,
+};
+use crate::interface::sim_client_udp::create_sim_client;
 use crate::interface::tcp::{SyncTcpTmSource, TcpTask};
 use crate::interface::udp::{StaticUdpTmHandler, UdpTmtcServer};
 use crate::logger::setup_logger;
@@ -59,6 +61,10 @@ fn static_tmtc_pool_main() {
 
     let tm_sink_tx_sender =
         PacketSenderWithSharedPool::new(tm_sink_tx.clone(), shared_tm_pool_wrapper.clone());
+
+    let (sim_request_tx, sim_request_rx) = mpsc::channel();
+    let (mgm_sim_reply_tx, mgm_sim_reply_rx) = mpsc::channel();
+    let mut opt_sim_client = create_sim_client(sim_request_rx);
 
     let (mgm_handler_composite_tx, mgm_handler_composite_rx) =
         mpsc::channel::<GenericMessage<CompositeRequest>>();
@@ -197,12 +203,21 @@ fn static_tmtc_pool_main() {
     let (mgm_handler_mode_reply_to_parent_tx, _mgm_handler_mode_reply_to_parent_rx) =
         mpsc::channel();
 
-    let dummy_spi_interface = SpiDummyInterface::default();
     let shared_mgm_set = Arc::default();
     let mode_leaf_interface = MpscModeLeafInterface {
         request_rx: mgm_handler_mode_rx,
         reply_tx_to_pus: pus_mode_reply_tx,
         reply_tx_to_parent: mgm_handler_mode_reply_to_parent_tx,
+    };
+
+    let mgm_spi_interface = if let Some(sim_client) = opt_sim_client.as_mut() {
+        sim_client.add_reply_recipient(satrs_minisim::SimComponent::MgmLis3Mdl, mgm_sim_reply_tx);
+        SpiSimInterfaceWrapper::Sim(SpiSimInterface {
+            sim_request_tx: sim_request_tx.clone(),
+            sim_reply_rx: mgm_sim_reply_rx,
+        })
+    } else {
+        SpiSimInterfaceWrapper::Dummy(SpiDummyInterface::default())
     };
     let mut mgm_handler = MgmHandlerLis3Mdl::new(
         MGM_HANDLER_0,
@@ -211,7 +226,7 @@ fn static_tmtc_pool_main() {
         mgm_handler_composite_rx,
         pus_hk_reply_tx,
         tm_sink_tx,
-        dummy_spi_interface,
+        mgm_spi_interface,
         shared_mgm_set,
     );
 
@@ -247,14 +262,18 @@ fn static_tmtc_pool_main() {
         })
         .unwrap();
 
-    info!("Starting event handling task");
-    let jh_event_handling = thread::Builder::new()
-        .name("sat-rs events".to_string())
-        .spawn(move || loop {
-            event_handler.periodic_operation();
-            thread::sleep(Duration::from_millis(FREQ_MS_EVENT_HANDLING));
-        })
-        .unwrap();
+    let mut opt_jh_sim_client = None;
+    if let Some(mut sim_client) = opt_sim_client {
+        info!("Starting UDP sim client task");
+        opt_jh_sim_client = Some(
+            thread::Builder::new()
+                .name("sat-rs sim adapter".to_string())
+                .spawn(move || loop {
+                    sim_client.operation();
+                })
+                .unwrap(),
+        );
+    }
 
     info!("Starting AOCS thread");
     let jh_aocs = thread::Builder::new()
@@ -269,6 +288,7 @@ fn static_tmtc_pool_main() {
     let jh_pus_handler = thread::Builder::new()
         .name("sat-rs pus".to_string())
         .spawn(move || loop {
+            event_handler.periodic_operation();
             pus_stack.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_PUS_STACK));
         })
@@ -283,9 +303,11 @@ fn static_tmtc_pool_main() {
     jh_tm_funnel
         .join()
         .expect("Joining TM Funnel thread failed");
-    jh_event_handling
-        .join()
-        .expect("Joining Event Manager thread failed");
+    if let Some(jh_sim_client) = opt_jh_sim_client {
+        jh_sim_client
+            .join()
+            .expect("Joining SIM client thread failed");
+    }
     jh_aocs.join().expect("Joining AOCS thread failed");
     jh_pus_handler
         .join()
@@ -297,6 +319,10 @@ fn dyn_tmtc_pool_main() {
     let (tc_source_tx, tc_source_rx) = mpsc::channel();
     let (tm_funnel_tx, tm_funnel_rx) = mpsc::channel();
     let (tm_server_tx, tm_server_rx) = mpsc::channel();
+
+    let (sim_request_tx, sim_request_rx) = mpsc::channel();
+    let (mgm_sim_reply_tx, mgm_sim_reply_rx) = mpsc::channel();
+    let mut opt_sim_client = create_sim_client(sim_request_rx);
 
     // Some request are targetable. This map is used to retrieve sender handles based on a target ID.
     let (mgm_handler_composite_tx, mgm_handler_composite_rx) =
@@ -414,12 +440,21 @@ fn dyn_tmtc_pool_main() {
 
     let (mgm_handler_mode_reply_to_parent_tx, _mgm_handler_mode_reply_to_parent_rx) =
         mpsc::channel();
-    let dummy_spi_interface = SpiDummyInterface::default();
     let shared_mgm_set = Arc::default();
     let mode_leaf_interface = MpscModeLeafInterface {
         request_rx: mgm_handler_mode_rx,
         reply_tx_to_pus: pus_mode_reply_tx,
         reply_tx_to_parent: mgm_handler_mode_reply_to_parent_tx,
+    };
+
+    let mgm_spi_interface = if let Some(sim_client) = opt_sim_client.as_mut() {
+        sim_client.add_reply_recipient(satrs_minisim::SimComponent::MgmLis3Mdl, mgm_sim_reply_tx);
+        SpiSimInterfaceWrapper::Sim(SpiSimInterface {
+            sim_request_tx: sim_request_tx.clone(),
+            sim_reply_rx: mgm_sim_reply_rx,
+        })
+    } else {
+        SpiSimInterfaceWrapper::Dummy(SpiDummyInterface::default())
     };
     let mut mgm_handler = MgmHandlerLis3Mdl::new(
         MGM_HANDLER_0,
@@ -428,7 +463,7 @@ fn dyn_tmtc_pool_main() {
         mgm_handler_composite_rx,
         pus_hk_reply_tx,
         tm_funnel_tx,
-        dummy_spi_interface,
+        mgm_spi_interface,
         shared_mgm_set,
     );
 
@@ -464,14 +499,18 @@ fn dyn_tmtc_pool_main() {
         })
         .unwrap();
 
-    info!("Starting event handling task");
-    let jh_event_handling = thread::Builder::new()
-        .name("sat-rs events".to_string())
-        .spawn(move || loop {
-            event_handler.periodic_operation();
-            thread::sleep(Duration::from_millis(FREQ_MS_EVENT_HANDLING));
-        })
-        .unwrap();
+    let mut opt_jh_sim_client = None;
+    if let Some(mut sim_client) = opt_sim_client {
+        info!("Starting UDP sim client task");
+        opt_jh_sim_client = Some(
+            thread::Builder::new()
+                .name("sat-rs sim adapter".to_string())
+                .spawn(move || loop {
+                    sim_client.operation();
+                })
+                .unwrap(),
+        );
+    }
 
     info!("Starting AOCS thread");
     let jh_aocs = thread::Builder::new()
@@ -487,6 +526,7 @@ fn dyn_tmtc_pool_main() {
         .name("sat-rs pus".to_string())
         .spawn(move || loop {
             pus_stack.periodic_operation();
+            event_handler.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_PUS_STACK));
         })
         .unwrap();
@@ -500,9 +540,11 @@ fn dyn_tmtc_pool_main() {
     jh_tm_funnel
         .join()
         .expect("Joining TM Funnel thread failed");
-    jh_event_handling
-        .join()
-        .expect("Joining Event Manager thread failed");
+    if let Some(jh_sim_client) = opt_jh_sim_client {
+        jh_sim_client
+            .join()
+            .expect("Joining SIM client thread failed");
+    }
     jh_aocs.join().expect("Joining AOCS thread failed");
     jh_pus_handler
         .join()

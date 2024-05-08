@@ -4,7 +4,10 @@ use satrs::queue::{GenericSendError, GenericTargetedMessagingError};
 use satrs::spacepackets::ecss::hk;
 use satrs::spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
 use satrs::spacepackets::SpHeader;
-use satrs_example::{DeviceMode, TimeStampHelper};
+use satrs_example::{DeviceMode, TimestampHelper};
+use satrs_minisim::acs::lis3mdl::{FIELD_LSB_PER_GAUSS_4_SENS, GAUSS_TO_MICROTESLA_FACTOR};
+use satrs_minisim::acs::MgmRequestLis3Mdl;
+use satrs_minisim::{SimReply, SimRequest};
 use std::sync::mpsc::{self};
 use std::sync::{Arc, Mutex};
 
@@ -20,9 +23,12 @@ use crate::requests::CompositeRequest;
 
 use serde::{Deserialize, Serialize};
 
-const GAUSS_TO_MICROTESLA_FACTOR: f32 = 100.0;
-// This is the selected resoltion for the STM LIS3MDL device for the 4 Gauss sensitivity setting.
-const FIELD_LSB_PER_GAUSS_4_SENS: f32 = 1.0 / 6842.0;
+pub const NR_OF_DATA_AND_CFG_REGISTERS: usize = 14;
+
+// Register adresses to access various bytes from the raw reply.
+pub const X_LOWBYTE_IDX: usize = 9;
+pub const Y_LOWBYTE_IDX: usize = 11;
+pub const Z_LOWBYTE_IDX: usize = 13;
 
 pub trait SpiInterface {
     type Error;
@@ -40,10 +46,50 @@ impl SpiInterface for SpiDummyInterface {
     type Error = ();
 
     fn transfer(&mut self, _tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error> {
-        rx[0..2].copy_from_slice(&self.dummy_val_0.to_be_bytes());
-        rx[2..4].copy_from_slice(&self.dummy_val_1.to_be_bytes());
-        rx[4..6].copy_from_slice(&self.dummy_val_2.to_be_bytes());
+        rx[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2].copy_from_slice(&self.dummy_val_0.to_le_bytes());
+        rx[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2].copy_from_slice(&self.dummy_val_1.to_be_bytes());
+        rx[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2].copy_from_slice(&self.dummy_val_2.to_be_bytes());
         Ok(())
+    }
+}
+
+pub struct SpiSimInterface {
+    pub sim_request_tx: mpsc::Sender<SimRequest>,
+    pub sim_reply_rx: mpsc::Receiver<SimReply>,
+}
+
+impl SpiInterface for SpiSimInterface {
+    type Error = ();
+
+    fn transfer(&mut self, tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error> {
+        let mgm_sensor_request = MgmRequestLis3Mdl::RequestSensorData;
+        self.sim_request_tx
+            .send(SimRequest::new_with_epoch_time(mgm_sensor_request))
+            .expect("failed to send request");
+        self.sim_reply_rx.recv().expect("reply timeout");
+        /*
+                let mgm_req_json = serde_json::to_string(&mgm_sensor_request)?;
+                self.udp_socket
+                    .send_to(mgm_req_json.as_bytes(), self.sim_addr)
+                    .unwrap();
+        */
+        Ok(())
+    }
+}
+
+pub enum SpiSimInterfaceWrapper {
+    Dummy(SpiDummyInterface),
+    Sim(SpiSimInterface),
+}
+
+impl SpiInterface for SpiSimInterfaceWrapper {
+    type Error = ();
+
+    fn transfer(&mut self, tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error> {
+        match self {
+            SpiSimInterfaceWrapper::Dummy(dummy) => dummy.transfer(tx, rx),
+            SpiSimInterfaceWrapper::Sim(sim_if) => sim_if.transfer(tx, rx),
+        }
     }
 }
 
@@ -76,13 +122,13 @@ pub struct MgmHandlerLis3Mdl<ComInterface: SpiInterface, TmSender: EcssTmSender>
     #[new(value = "ModeAndSubmode::new(satrs_example::DeviceMode::Off as u32, 0)")]
     mode_and_submode: ModeAndSubmode,
     #[new(default)]
-    tx_buf: [u8; 12],
+    tx_buf: [u8; 32],
     #[new(default)]
-    rx_buf: [u8; 12],
+    rx_buf: [u8; 32],
     #[new(default)]
     tm_buf: [u8; 16],
     #[new(default)]
-    stamp_helper: TimeStampHelper,
+    stamp_helper: TimestampHelper,
 }
 
 impl<ComInterface: SpiInterface, TmSender: EcssTmSender> MgmHandlerLis3Mdl<ComInterface, TmSender> {
@@ -94,17 +140,35 @@ impl<ComInterface: SpiInterface, TmSender: EcssTmSender> MgmHandlerLis3Mdl<ComIn
         if self.mode() == DeviceMode::Normal as u32 {
             log::trace!("polling LIS3MDL sensor {}", self.dev_str);
             // Communicate with the device.
-            let result = self.com_interface.transfer(&self.tx_buf, &mut self.rx_buf);
+            let result = self.com_interface.transfer(
+                &self.tx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
+                &mut self.rx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
+            );
             assert!(result.is_ok());
             // Actual data begins on the second byte, similarly to how a lot of SPI devices behave.
-            let x_raw = i16::from_be_bytes(self.rx_buf[1..3].try_into().unwrap());
-            let y_raw = i16::from_be_bytes(self.rx_buf[3..5].try_into().unwrap());
-            let z_raw = i16::from_be_bytes(self.rx_buf[5..7].try_into().unwrap());
+            let x_raw = i16::from_le_bytes(
+                self.rx_buf[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2]
+                    .try_into()
+                    .unwrap(),
+            );
+            let y_raw = i16::from_le_bytes(
+                self.rx_buf[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2]
+                    .try_into()
+                    .unwrap(),
+            );
+            let z_raw = i16::from_le_bytes(
+                self.rx_buf[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2]
+                    .try_into()
+                    .unwrap(),
+            );
             // Simple scaling to retrieve the float value, assuming a sensor resolution of
             let mut mgm_guard = self.shared_mgm_set.lock().unwrap();
-            mgm_guard.x = x_raw as f32 * GAUSS_TO_MICROTESLA_FACTOR * FIELD_LSB_PER_GAUSS_4_SENS;
-            mgm_guard.y = y_raw as f32 * GAUSS_TO_MICROTESLA_FACTOR * FIELD_LSB_PER_GAUSS_4_SENS;
-            mgm_guard.z = z_raw as f32 * GAUSS_TO_MICROTESLA_FACTOR * FIELD_LSB_PER_GAUSS_4_SENS;
+            mgm_guard.x =
+                x_raw as f32 * GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS;
+            mgm_guard.y =
+                y_raw as f32 * GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS;
+            mgm_guard.z =
+                z_raw as f32 * GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS;
             drop(mgm_guard);
         }
     }

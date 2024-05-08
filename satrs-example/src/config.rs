@@ -224,7 +224,6 @@ pub mod pool {
 
 pub mod tasks {
     pub const FREQ_MS_UDP_TMTC: u64 = 200;
-    pub const FREQ_MS_EVENT_HANDLING: u64 = 400;
     pub const FREQ_MS_AOCS: u64 = 500;
     pub const FREQ_MS_PUS_STACK: u64 = 200;
 }

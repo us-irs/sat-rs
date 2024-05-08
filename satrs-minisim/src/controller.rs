@@ -5,10 +5,10 @@ use asynchronix::{
     time::{Clock, MonotonicTime, SystemClock},
 };
 use satrs_minisim::{
-    acs::{MgmRequest, MgtRequest},
+    acs::{lis3mdl::MgmLis3MdlReply, MgmRequestLis3Mdl, MgtRequest},
     eps::PcduRequest,
-    SerializableSimMsgPayload, SimCtrlReply, SimCtrlRequest, SimMessageProvider, SimReply,
-    SimRequest, SimRequestError, SimTarget,
+    SerializableSimMsgPayload, SimComponent, SimCtrlReply, SimCtrlRequest, SimMessageProvider,
+    SimReply, SimRequest, SimRequestError,
 };
 
 use crate::{
@@ -22,7 +22,7 @@ pub struct SimController {
     pub request_receiver: mpsc::Receiver<SimRequest>,
     pub reply_sender: mpsc::Sender<SimReply>,
     pub simulation: Simulation,
-    pub mgm_addr: Address<MagnetometerModel>,
+    pub mgm_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
     pub pcdu_addr: Address<PcduModel>,
     pub mgt_addr: Address<MagnetorquerModel>,
 }
@@ -33,7 +33,7 @@ impl SimController {
         request_receiver: mpsc::Receiver<SimRequest>,
         reply_sender: mpsc::Sender<SimReply>,
         simulation: Simulation,
-        mgm_addr: Address<MagnetometerModel>,
+        mgm_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
         pcdu_addr: Address<PcduModel>,
         mgt_addr: Address<MagnetorquerModel>,
     ) -> Self {
@@ -70,11 +70,11 @@ impl SimController {
                     if request.timestamp < old_timestamp {
                         log::warn!("stale data with timestamp {:?} received", request.timestamp);
                     }
-                    if let Err(e) = match request.target() {
-                        SimTarget::SimCtrl => self.handle_ctrl_request(&request),
-                        SimTarget::Mgm => self.handle_mgm_request(&request),
-                        SimTarget::Mgt => self.handle_mgt_request(&request),
-                        SimTarget::Pcdu => self.handle_pcdu_request(&request),
+                    if let Err(e) = match request.component() {
+                        SimComponent::SimCtrl => self.handle_ctrl_request(&request),
+                        SimComponent::MgmLis3Mdl => self.handle_mgm_request(&request),
+                        SimComponent::Mgt => self.handle_mgt_request(&request),
+                        SimComponent::Pcdu => self.handle_pcdu_request(&request),
                     } {
                         self.handle_invalid_request_with_valid_target(e, &request)
                     }
@@ -100,10 +100,11 @@ impl SimController {
         }
         Ok(())
     }
+
     fn handle_mgm_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
-        let mgm_request = MgmRequest::from_sim_message(request)?;
+        let mgm_request = MgmRequestLis3Mdl::from_sim_message(request)?;
         match mgm_request {
-            MgmRequest::RequestSensorData => {
+            MgmRequestLis3Mdl::RequestSensorData => {
                 self.simulation.send_event(
                     MagnetometerModel::send_sensor_values,
                     (),
@@ -156,7 +157,7 @@ impl SimController {
     ) {
         log::warn!(
             "received invalid {:?} request: {:?}",
-            request.target(),
+            request.component(),
             error
         );
         self.reply_sender
@@ -183,7 +184,7 @@ mod tests {
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());
         let sim_reply = sim_reply.unwrap();
-        assert_eq!(sim_reply.target(), SimTarget::SimCtrl);
+        assert_eq!(sim_reply.component(), SimComponent::SimCtrl);
         let reply = SimCtrlReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
         assert_eq!(reply, SimCtrlReply::Pong);

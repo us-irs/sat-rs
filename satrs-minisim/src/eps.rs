@@ -76,7 +76,7 @@ pub(crate) mod tests {
     use std::time::Duration;
 
     use satrs_minisim::{
-        eps::PcduRequest, SerializableSimMsgPayload, SimMessageProvider, SimRequest, SimTarget,
+        eps::PcduRequest, SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimRequest,
     };
 
     use crate::test_helpers::SimTestbench;
@@ -122,7 +122,7 @@ pub(crate) mod tests {
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());
         let sim_reply = sim_reply.unwrap();
-        assert_eq!(sim_reply.target(), SimTarget::Pcdu);
+        assert_eq!(sim_reply.component(), SimComponent::Pcdu);
         let pcdu_reply = PcduReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize PCDU switch info");
         match pcdu_reply {
@@ -157,7 +157,7 @@ pub(crate) mod tests {
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());
         let sim_reply = sim_reply.unwrap();
-        assert_eq!(sim_reply.target(), SimTarget::Pcdu);
+        assert_eq!(sim_reply.component(), SimComponent::Pcdu);
         let pcdu_reply = PcduReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize PCDU switch info");
         match pcdu_reply {
