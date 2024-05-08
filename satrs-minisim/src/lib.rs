@@ -1,4 +1,7 @@
+use asynchronix::time::MonotonicTime;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
+pub const SIM_CTRL_UDP_PORT: u16 = 7303;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SimTarget {
@@ -19,6 +22,7 @@ pub struct SimMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SimRequest {
     inner: SimMessage,
+    pub timestamp: MonotonicTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,12 +57,22 @@ pub trait SimMessageProvider: Serialize + DeserializeOwned + Clone + Sized {
 }
 
 impl SimRequest {
-    pub fn new<T: SerializableSimMsgPayload<SimRequest>>(serializable_request: T) -> Self {
+    pub fn new_with_epoch_time<T: SerializableSimMsgPayload<SimRequest>>(
+        serializable_request: T,
+    ) -> Self {
+        Self::new(serializable_request, MonotonicTime::EPOCH)
+    }
+
+    pub fn new<T: SerializableSimMsgPayload<SimRequest>>(
+        serializable_request: T,
+        timestamp: MonotonicTime,
+    ) -> Self {
         Self {
             inner: SimMessage {
                 target: T::TARGET,
                 payload: serde_json::to_string(&serializable_request).unwrap(),
             },
+            timestamp,
         }
     }
 }
@@ -363,7 +377,7 @@ pub mod tests {
 
     #[test]
     fn test_basic_request() {
-        let sim_request = SimRequest::new(DummyRequest::Ping);
+        let sim_request = SimRequest::new_with_epoch_time(DummyRequest::Ping);
         assert_eq!(sim_request.target(), SimTarget::SimCtrl);
         assert_eq!(sim_request.msg_type(), SimMessageType::Request);
         let dummy_request =

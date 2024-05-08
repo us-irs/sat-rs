@@ -10,9 +10,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
 thiserror = "1"
+fern = "0.5"
+humantime = "2"
 
 [dependencies.asynchronix]
 version = "0.2.1"
+git = "https://github.com/asynchronics/asynchronix.git"
+branch = "main"
+features = ["serde"]
 
 [dependencies.satrs]
 path = "../satrs"

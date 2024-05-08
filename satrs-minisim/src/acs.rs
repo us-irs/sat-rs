@@ -189,11 +189,11 @@ pub mod tests {
     #[test]
     fn test_basic_mgm_request() {
         let mut sim_testbench = SimTestbench::new();
-        let request = SimRequest::new(MgmRequest::RequestSensorData);
+        let request = SimRequest::new_with_epoch_time(MgmRequest::RequestSensorData);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
-        sim_testbench.handle_sim_requests();
+        sim_testbench.handle_sim_requests_time_agnostic();
         sim_testbench.step();
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());
@@ -212,11 +212,11 @@ pub mod tests {
         let mut sim_testbench = SimTestbench::new();
         switch_device_on(&mut sim_testbench, PcduSwitch::Mgm);
 
-        let mut request = SimRequest::new(MgmRequest::RequestSensorData);
+        let mut request = SimRequest::new_with_epoch_time(MgmRequest::RequestSensorData);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
-        sim_testbench.handle_sim_requests();
+        sim_testbench.handle_sim_requests_time_agnostic();
         sim_testbench.step();
         let mut sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_some());
@@ -226,11 +226,11 @@ pub mod tests {
             .expect("failed to deserialize MGM sensor values");
         sim_testbench.step_by(Duration::from_millis(50));
 
-        request = SimRequest::new(MgmRequest::RequestSensorData);
+        request = SimRequest::new_with_epoch_time(MgmRequest::RequestSensorData);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
-        sim_testbench.handle_sim_requests();
+        sim_testbench.handle_sim_requests_time_agnostic();
         sim_testbench.step();
         sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_some());
@@ -245,11 +245,11 @@ pub mod tests {
     #[test]
     fn test_basic_mgt_request_is_off() {
         let mut sim_testbench = SimTestbench::new();
-        let request = SimRequest::new(MgtRequest::RequestHk);
+        let request = SimRequest::new_with_epoch_time(MgtRequest::RequestHk);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
-        sim_testbench.handle_sim_requests();
+        sim_testbench.handle_sim_requests_time_agnostic();
         sim_testbench.step();
         let sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_none());
@@ -259,12 +259,12 @@ pub mod tests {
     fn test_basic_mgt_request_is_on() {
         let mut sim_testbench = SimTestbench::new();
         switch_device_on(&mut sim_testbench, PcduSwitch::Mgt);
-        let request = SimRequest::new(MgtRequest::RequestHk);
+        let request = SimRequest::new_with_epoch_time(MgtRequest::RequestHk);
 
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
-        sim_testbench.handle_sim_requests();
+        sim_testbench.handle_sim_requests_time_agnostic();
         sim_testbench.step();
         let sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_some());
@@ -281,11 +281,11 @@ pub mod tests {
     }
 
     fn check_mgt_hk(sim_testbench: &mut SimTestbench, expected_hk_set: MgtHkSet) {
-        let request = SimRequest::new(MgtRequest::RequestHk);
+        let request = SimRequest::new_with_epoch_time(MgtRequest::RequestHk);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
-        sim_testbench.handle_sim_requests();
+        sim_testbench.handle_sim_requests_time_agnostic();
         sim_testbench.step();
         let sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_some());
@@ -309,14 +309,14 @@ pub mod tests {
             y: 200,
             z: 1000,
         };
-        let request = SimRequest::new(MgtRequest::ApplyTorque {
+        let request = SimRequest::new_with_epoch_time(MgtRequest::ApplyTorque {
             duration: Duration::from_millis(100),
             dipole: commanded_dipole,
         });
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
-        sim_testbench.handle_sim_requests();
+        sim_testbench.handle_sim_requests_time_agnostic();
         sim_testbench.step_by(Duration::from_millis(5));
 
         check_mgt_hk(
