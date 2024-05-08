@@ -89,7 +89,7 @@ impl SimMessageProvider for SimRequest {
 }
 
 /// A generic simulation reply type. Right now, the payload data is expected to be
-/// JSON, which might be changed inthe future.
+/// JSON, which might be changed in the future.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SimReply {
     inner: SimMessage,

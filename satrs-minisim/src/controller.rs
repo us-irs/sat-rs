@@ -16,6 +16,11 @@ use crate::{
     eps::PcduModel,
 };
 
+const SIM_CTRL_REQ_WIRETAPPING: bool = true;
+const MGM_REQ_WIRETAPPING: bool = true;
+const PCDU_REQ_WIRETAPPING: bool = true;
+const MGT_REQ_WIRETAPPING: bool = true;
+
 // The simulation controller processes requests and drives the simulation.
 pub struct SimController {
     pub sys_clock: SystemClock,
@@ -91,6 +96,9 @@ impl SimController {
 
     fn handle_ctrl_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
         let sim_ctrl_request = SimCtrlRequest::from_sim_message(request)?;
+        if SIM_CTRL_REQ_WIRETAPPING {
+            log::info!("received sim ctrl request: {:?}", sim_ctrl_request);
+        }
         match sim_ctrl_request {
             SimCtrlRequest::Ping => {
                 self.reply_sender
@@ -103,6 +111,9 @@ impl SimController {
 
     fn handle_mgm_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
         let mgm_request = MgmRequestLis3Mdl::from_sim_message(request)?;
+        if MGM_REQ_WIRETAPPING {
+            log::info!("received MGM request: {:?}", mgm_request);
+        }
         match mgm_request {
             MgmRequestLis3Mdl::RequestSensorData => {
                 self.simulation.send_event(
@@ -117,6 +128,9 @@ impl SimController {
 
     fn handle_pcdu_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
         let pcdu_request = PcduRequest::from_sim_message(request)?;
+        if PCDU_REQ_WIRETAPPING {
+            log::info!("received PCDU request: {:?}", pcdu_request);
+        }
         match pcdu_request {
             PcduRequest::RequestSwitchInfo => {
                 self.simulation
@@ -135,6 +149,9 @@ impl SimController {
 
     fn handle_mgt_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
         let mgt_request = MgtRequest::from_sim_message(request)?;
+        if MGT_REQ_WIRETAPPING {
+            log::info!("received MGT request: {:?}", mgt_request);
+        }
         match mgt_request {
             MgtRequest::ApplyTorque { duration, dipole } => self.simulation.send_event(
                 MagnetorquerModel::apply_torque,

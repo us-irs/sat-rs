@@ -61,18 +61,14 @@ pub struct SpiSimInterface {
 impl SpiInterface for SpiSimInterface {
     type Error = ();
 
-    fn transfer(&mut self, tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error> {
+    // Right now, we only support requesting sensor data and not configuration of the sensor.
+    fn transfer(&mut self, _tx: &[u8], _rx: &mut [u8]) -> Result<(), Self::Error> {
         let mgm_sensor_request = MgmRequestLis3Mdl::RequestSensorData;
         self.sim_request_tx
             .send(SimRequest::new_with_epoch_time(mgm_sensor_request))
             .expect("failed to send request");
         self.sim_reply_rx.recv().expect("reply timeout");
-        /*
-                let mgm_req_json = serde_json::to_string(&mgm_sensor_request)?;
-                self.udp_socket
-                    .send_to(mgm_req_json.as_bytes(), self.sim_addr)
-                    .unwrap();
-        */
+        // TODO: Write the sensor data to the raw buffer.
         Ok(())
     }
 }

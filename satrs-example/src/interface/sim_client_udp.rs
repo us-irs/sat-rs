@@ -5,7 +5,10 @@ use std::{
     time::Duration,
 };
 
-use satrs_minisim::{udp::SIM_CTRL_PORT, SimComponent, SimMessageProvider, SimReply, SimRequest};
+use satrs_minisim::{
+    udp::SIM_CTRL_PORT, SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimReply,
+    SimRequest,
+};
 use satrs_minisim::{SimCtrlReply, SimCtrlRequest};
 
 struct SimReplyMap(pub HashMap<SimComponent, mpsc::Sender<SimReply>>);
@@ -19,20 +22,9 @@ pub fn create_sim_client(sim_request_rx: mpsc::Receiver<SimRequest>) -> Option<S
             log::info!("simulator client connection success");
             return Some(sim_client);
         }
-        Err(e) => match e {
-            SimClientCreationResult::Io(e) => {
-                log::warn!("creating SIM client failed with io error {}", e);
-            }
-            SimClientCreationResult::Timeout => {
-                log::warn!("timeout when attempting connection to SIM client");
-            }
-            SimClientCreationResult::InvalidPingReply(reply) => {
-                log::warn!(
-                    "invalid ping reply when attempting connection to SIM client: {}",
-                    reply
-                );
-            }
-        },
+        Err(e) => {
+            log::warn!("sim client creation error: {}", e);
+        }
     }
     None
 }
@@ -44,7 +36,9 @@ pub enum SimClientCreationResult {
     #[error("timeout when trying to connect to sim UDP server")]
     Timeout,
     #[error("invalid ping reply when trying connection to UDP sim server")]
-    InvalidPingReply(#[from] serde_json::Error),
+    InvalidReplyJsonError(#[from] serde_json::Error),
+    #[error("invalid sim reply, not pong reply as expected: {0:?}")]
+    ReplyIsNotPong(SimReply),
 }
 
 pub struct SimClientUdp {
@@ -68,9 +62,14 @@ impl SimClientUdp {
         udp_client.send_to(sim_req_json.as_bytes(), simulator_addr)?;
         match udp_client.recv(&mut reply_buf) {
             Ok(reply_len) => {
-                let sim_reply: SimCtrlReply = serde_json::from_slice(&reply_buf[0..reply_len])?;
+                let sim_reply: SimReply = serde_json::from_slice(&reply_buf[0..reply_len])?;
+                if sim_reply.component() != SimComponent::SimCtrl {
+                    return Err(SimClientCreationResult::ReplyIsNotPong(sim_reply));
+                }
                 udp_client.set_read_timeout(None)?;
-                match sim_reply {
+                let sim_ctrl_reply =
+                    SimCtrlReply::from_sim_message(&sim_reply).expect("invalid SIM reply");
+                match sim_ctrl_reply {
                     SimCtrlReply::Pong => Ok(Self {
                         udp_client,
                         simulator_addr,
