@@ -4,15 +4,68 @@ import logging
 
 from spacepackets.ccsds import CdsShortTimestamp
 from spacepackets.ecss import PusTelecommand
+from spacepackets.seqcount import FileSeqCountProvider
+from tmtccmd import ProcedureWrapper, TcHandlerBase
 from tmtccmd.config import CmdTreeNode
+from tmtccmd.pus import VerificationWrapper
 from tmtccmd.pus.tc.s200_fsfw_mode import Mode
-from tmtccmd.tmtc import DefaultPusQueueHelper
+from tmtccmd.tmtc import (
+    DefaultPusQueueHelper,
+    FeedWrapper,
+    QueueWrapper,
+    SendCbParams,
+    TcProcedureType,
+    TcQueueEntryType,
+)
 from tmtccmd.pus.s11_tc_sched import create_time_tagged_cmd
 from tmtccmd.pus.s200_fsfw_mode import Subservice as ModeSubservice
 
 from pytmtc.common import AcsId, Apid
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class TcHandler(TcHandlerBase):
+    def __init__(
+        self,
+        seq_count_provider: FileSeqCountProvider,
+        verif_wrapper: VerificationWrapper,
+    ):
+        super(TcHandler, self).__init__()
+        self.seq_count_provider = seq_count_provider
+        self.verif_wrapper = verif_wrapper
+        self.queue_helper = DefaultPusQueueHelper(
+            queue_wrapper=QueueWrapper.empty(),
+            tc_sched_timestamp_len=CdsShortTimestamp.TIMESTAMP_SIZE,
+            seq_cnt_provider=seq_count_provider,
+            pus_verificator=self.verif_wrapper.pus_verificator,
+            default_pus_apid=None,
+        )
+
+    def send_cb(self, send_params: SendCbParams):
+        entry_helper = send_params.entry
+        if entry_helper.is_tc:
+            if entry_helper.entry_type == TcQueueEntryType.PUS_TC:
+                pus_tc_wrapper = entry_helper.to_pus_tc_entry()
+                raw_tc = pus_tc_wrapper.pus_tc.pack()
+                _LOGGER.info(f"Sending {pus_tc_wrapper.pus_tc}")
+                send_params.com_if.send(raw_tc)
+        elif entry_helper.entry_type == TcQueueEntryType.LOG:
+            log_entry = entry_helper.to_log_entry()
+            _LOGGER.info(log_entry.log_str)
+
+    def queue_finished_cb(self, info: ProcedureWrapper):
+        if info.proc_type == TcProcedureType.TREE_COMMANDING:
+            def_proc = info.to_tree_commanding_procedure()
+            _LOGGER.info(f"Queue handling finished for command {def_proc.cmd_path}")
+
+    def feed_cb(self, info: ProcedureWrapper, wrapper: FeedWrapper):
+        q = self.queue_helper
+        q.queue_wrapper = wrapper.queue_wrapper
+        if info.proc_type == TcProcedureType.TREE_COMMANDING:
+            def_proc = info.to_tree_commanding_procedure()
+            assert def_proc.cmd_path is not None
+            pack_pus_telecommands(q, def_proc.cmd_path)
 
 
 def create_cmd_definition_tree() -> CmdTreeNode:
