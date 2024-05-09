@@ -344,7 +344,7 @@ mod tests {
             .send_request(&SimRequest::new_with_epoch_time(SimCtrlRequest::Ping))
             .expect("sending request failed");
 
-        let sim_reply = SimReply::new(PcduReply::SwitchInfo(get_all_off_switch_map()));
+        let sim_reply = SimReply::new(&PcduReply::SwitchInfo(get_all_off_switch_map()));
         udp_testbench.send_reply(&sim_reply);
 
         udp_testbench.check_next_sim_reply(&sim_reply);
@@ -369,7 +369,7 @@ mod tests {
             .expect("sending request failed");
 
         // Send a reply to the server, ensure it gets forwarded to the client.
-        let sim_reply = SimReply::new(PcduReply::SwitchInfo(get_all_off_switch_map()));
+        let sim_reply = SimReply::new(&PcduReply::SwitchInfo(get_all_off_switch_map()));
         udp_testbench.send_reply(&sim_reply);
         std::thread::sleep(Duration::from_millis(SERVER_WAIT_TIME_MS));
 
@@ -388,7 +388,7 @@ mod tests {
         let server_thread = std::thread::spawn(move || udp_server.run());
 
         // Send a reply to the server. The client is not connected, so it won't get forwarded.
-        let sim_reply = SimReply::new(PcduReply::SwitchInfo(get_all_off_switch_map()));
+        let sim_reply = SimReply::new(&PcduReply::SwitchInfo(get_all_off_switch_map()));
         udp_testbench.send_reply(&sim_reply);
         std::thread::sleep(Duration::from_millis(10));
 
@@ -415,7 +415,7 @@ mod tests {
         let server_thread = std::thread::spawn(move || udp_server.run());
 
         // The server only caches up to 3 replies.
-        let sim_reply = SimReply::new(SimCtrlReply::Pong);
+        let sim_reply = SimReply::new(&SimCtrlReply::Pong);
         for _ in 0..4 {
             udp_testbench.send_reply(&sim_reply);
         }

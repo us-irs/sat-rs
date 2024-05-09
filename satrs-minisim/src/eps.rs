@@ -44,7 +44,7 @@ impl PcduModel {
     }
 
     pub fn send_switch_info(&mut self) {
-        let reply = SimReply::new(PcduReply::SwitchInfo(self.switcher_map.clone()));
+        let reply = SimReply::new(&PcduReply::SwitchInfo(self.switcher_map.clone()));
         self.reply_sender.send(reply).unwrap();
     }
 

@@ -96,11 +96,11 @@ pub struct SimReply {
 }
 
 impl SimReply {
-    pub fn new<T: SerializableSimMsgPayload<SimReply>>(serializable_reply: T) -> Self {
+    pub fn new<T: SerializableSimMsgPayload<SimReply>>(serializable_reply: &T) -> Self {
         Self {
             inner: SimMessage {
                 target: T::TARGET,
-                payload: serde_json::to_string(&serializable_reply).unwrap(),
+                payload: serde_json::to_string(serializable_reply).unwrap(),
             },
         }
     }
@@ -185,7 +185,7 @@ pub mod eps {
         const TARGET: SimComponent = SimComponent::Pcdu;
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
     pub enum PcduReply {
         SwitchInfo(SwitchMap),
     }
@@ -295,7 +295,7 @@ pub mod acs {
 
         impl MgmReplyProvider for MgmLis3MdlReply {
             fn create_mgm_reply(common: MgmReplyCommon) -> SimReply {
-                SimReply::new(Self::new(common))
+                SimReply::new(&Self::new(common))
             }
         }
     }
@@ -382,7 +382,7 @@ pub mod tests {
 
     #[test]
     fn test_basic_reply() {
-        let sim_reply = SimReply::new(DummyReply::Pong);
+        let sim_reply = SimReply::new(&DummyReply::Pong);
         assert_eq!(sim_reply.component(), SimComponent::SimCtrl);
         assert_eq!(sim_reply.msg_type(), SimMessageType::Reply);
         let dummy_request =

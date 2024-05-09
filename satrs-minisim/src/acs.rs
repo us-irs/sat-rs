@@ -153,7 +153,7 @@ impl MagnetorquerModel {
 
     pub fn send_housekeeping_data(&mut self) {
         self.reply_sender
-            .send(SimReply::new(MgtReply::Hk(MgtHkSet {
+            .send(SimReply::new(&MgtReply::Hk(MgtHkSet {
                 dipole: self.torque_dipole,
                 torquing: self.torquing,
             })))

@@ -102,7 +102,7 @@ impl SimController {
         match sim_ctrl_request {
             SimCtrlRequest::Ping => {
                 self.reply_sender
-                    .send(SimReply::new(SimCtrlReply::Pong))
+                    .send(SimReply::new(&SimCtrlReply::Pong))
                     .expect("sending reply from sim controller failed");
             }
         }
@@ -178,7 +178,7 @@ impl SimController {
             error
         );
         self.reply_sender
-            .send(SimReply::new(SimCtrlReply::from(error)))
+            .send(SimReply::new(&SimCtrlReply::from(error)))
             .expect("sending reply from sim controller failed");
     }
 }
