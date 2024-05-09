@@ -48,16 +48,17 @@ It is recommended to use a virtual environment to do this. To set up one in the 
 you can use `python3 -m venv venv` on Unix systems or `py -m venv venv` on Windows systems.
 After doing this, you can check the [venv tutorial](https://docs.python.org/3/tutorial/venv.html)
 on how to activate the environment and then use the following command to install the required
-dependency:
+dependency interactively:
 
 ```sh
-pip install -r requirements.txt
+pip install -e .
 ```
 
 Alternatively, if you would like to use the GUI functionality provided by `tmtccmd`, you can also
 install it manually with
 
 ```sh
+pip install -e .
 pip install tmtccmd[gui]
 ```
 

@@ -10,24 +10,9 @@ from tmtccmd.tmtc import DefaultPusQueueHelper
 from tmtccmd.pus.s11_tc_sched import create_time_tagged_cmd
 from tmtccmd.pus.s200_fsfw_mode import Subservice as ModeSubservice
 
-from common import AcsId, Apid
+from pytmtc.common import AcsId, Apid
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def create_set_mode_cmd(
-    apid: int, unique_id: int, mode: int, submode: int
-) -> PusTelecommand:
-    app_data = bytearray()
-    app_data.extend(struct.pack("!I", unique_id))
-    app_data.extend(struct.pack("!I", mode))
-    app_data.extend(struct.pack("!H", submode))
-    return PusTelecommand(
-        service=200,
-        subservice=ModeSubservice.TC_MODE_COMMAND,
-        apid=apid,
-        app_data=app_data,
-    )
 
 
 def create_cmd_definition_tree() -> CmdTreeNode:
@@ -75,6 +60,21 @@ def create_cmd_definition_tree() -> CmdTreeNode:
     root_node.add_child(acs_node)
 
     return root_node
+
+
+def create_set_mode_cmd(
+    apid: int, unique_id: int, mode: int, submode: int
+) -> PusTelecommand:
+    app_data = bytearray()
+    app_data.extend(struct.pack("!I", unique_id))
+    app_data.extend(struct.pack("!I", mode))
+    app_data.extend(struct.pack("!H", submode))
+    return PusTelecommand(
+        service=200,
+        subservice=ModeSubservice.TC_MODE_COMMAND,
+        apid=apid,
+        app_data=app_data,
+    )
 
 
 def pack_pus_telecommands(q: DefaultPusQueueHelper, cmd_path: str):

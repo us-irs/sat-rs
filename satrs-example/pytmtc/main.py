@@ -46,8 +46,8 @@ from spacepackets.seqcount import FileSeqCountProvider, PusFileSeqCountProvider
 from tmtccmd.util.obj_id import ObjectIdDictT
 
 
-import pus_tc
-from common import Apid, EventU32
+from pytmtc.pus_tc import pack_pus_telecommands, create_cmd_definition_tree
+from pytmtc.common import Apid, EventU32
 
 _LOGGER = logging.getLogger()
 
@@ -76,7 +76,7 @@ class SatRsConfigHook(HookBase):
 
     def get_command_definitions(self) -> CmdTreeNode:
         """This function should return the root node of the command definition tree."""
-        return pus_tc.create_cmd_definition_tree()
+        return create_cmd_definition_tree()
 
     def get_cmd_history(self) -> Optional[History]:
         """Optionlly return a history class for the past command paths which will be used
@@ -213,7 +213,7 @@ class TcHandler(TcHandlerBase):
         if info.proc_type == TcProcedureType.TREE_COMMANDING:
             def_proc = info.to_tree_commanding_procedure()
             assert def_proc.cmd_path is not None
-            pus_tc.pack_pus_telecommands(q, def_proc.cmd_path)
+            pack_pus_telecommands(q, def_proc.cmd_path)
 
 
 def main():
