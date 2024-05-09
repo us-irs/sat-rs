@@ -247,7 +247,7 @@ pub mod acs {
         pub const FIELD_LSB_PER_GAUSS_12_SENS: f32 = 1.0 / 2281.0;
         pub const FIELD_LSB_PER_GAUSS_16_SENS: f32 = 1.0 / 1711.0;
 
-        #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+        #[derive(Default, Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
         pub struct MgmLis3RawValues {
             pub x: i16,
             pub y: i16,

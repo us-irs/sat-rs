@@ -209,8 +209,8 @@ fn static_tmtc_pool_main() {
     let shared_mgm_set = Arc::default();
     let mode_leaf_interface = MpscModeLeafInterface {
         request_rx: mgm_handler_mode_rx,
-        reply_tx_to_pus: pus_mode_reply_tx,
-        reply_tx_to_parent: mgm_handler_mode_reply_to_parent_tx,
+        reply_to_pus_tx: pus_mode_reply_tx,
+        reply_to_parent_tx: mgm_handler_mode_reply_to_parent_tx,
     };
 
     let mgm_spi_interface = if let Some(sim_client) = opt_sim_client.as_mut() {
@@ -448,8 +448,8 @@ fn dyn_tmtc_pool_main() {
     let shared_mgm_set = Arc::default();
     let mode_leaf_interface = MpscModeLeafInterface {
         request_rx: mgm_handler_mode_rx,
-        reply_tx_to_pus: pus_mode_reply_tx,
-        reply_tx_to_parent: mgm_handler_mode_reply_to_parent_tx,
+        reply_to_pus_tx: pus_mode_reply_tx,
+        reply_to_parent_tx: mgm_handler_mode_reply_to_parent_tx,
     };
 
     let mgm_spi_interface = if let Some(sim_client) = opt_sim_client.as_mut() {
