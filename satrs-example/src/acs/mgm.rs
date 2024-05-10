@@ -10,6 +10,7 @@ use satrs_minisim::acs::lis3mdl::{
 };
 use satrs_minisim::acs::MgmRequestLis3Mdl;
 use satrs_minisim::{SerializableSimMsgPayload, SimReply, SimRequest};
+use std::fmt::Debug;
 use std::sync::mpsc::{self};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -34,7 +35,7 @@ pub const Y_LOWBYTE_IDX: usize = 11;
 pub const Z_LOWBYTE_IDX: usize = 13;
 
 pub trait SpiInterface {
-    type Error;
+    type Error: Debug;
     fn transfer(&mut self, tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error>;
 }
 
@@ -77,8 +78,8 @@ impl SpiInterface for SpiSimInterface {
         let sim_reply_lis3 =
             MgmLis3MdlReply::from_sim_message(&sim_reply).expect("failed to parse LIS3 reply");
         rx[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2].copy_from_slice(&sim_reply_lis3.raw.x.to_le_bytes());
-        rx[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2].copy_from_slice(&sim_reply_lis3.raw.y.to_be_bytes());
-        rx[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2].copy_from_slice(&sim_reply_lis3.raw.z.to_be_bytes());
+        rx[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2].copy_from_slice(&sim_reply_lis3.raw.y.to_le_bytes());
+        rx[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2].copy_from_slice(&sim_reply_lis3.raw.z.to_le_bytes());
         Ok(())
     }
 }
@@ -123,7 +124,7 @@ pub struct MgmHandlerLis3Mdl<ComInterface: SpiInterface, TmSender: EcssTmSender>
     composite_request_rx: mpsc::Receiver<GenericMessage<CompositeRequest>>,
     hk_reply_tx: mpsc::Sender<GenericMessage<HkReply>>,
     tm_sender: TmSender,
-    com_interface: ComInterface,
+    pub com_interface: ComInterface,
     shared_mgm_set: Arc<Mutex<MgmData>>,
     #[new(value = "ModeAndSubmode::new(satrs_example::DeviceMode::Off as u32, 0)")]
     mode_and_submode: ModeAndSubmode,
@@ -217,11 +218,12 @@ impl<ComInterface: SpiInterface, TmSender: EcssTmSender> MgmHandlerLis3Mdl<ComIn
     pub fn poll_sensor(&mut self) {
         // Communicate with the device. This is actually how to read the data from the LIS3 device
         // SPI interface.
-        let result = self.com_interface.transfer(
-            &self.tx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
-            &mut self.rx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
-        );
-        assert!(result.is_ok());
+        self.com_interface
+            .transfer(
+                &self.tx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
+                &mut self.rx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
+            )
+            .expect("failed to transfer data");
         let x_raw = i16::from_le_bytes(
             self.rx_buf[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2]
                 .try_into()
@@ -358,7 +360,7 @@ impl<ComInterface: SpiInterface, TmSender: EcssTmSender> ModeRequestHandler
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{atomic::AtomicU32, mpsc, Arc, Mutex};
+    use std::sync::{mpsc, Arc};
 
     use satrs::{
         mode::{ModeReply, ModeRequest},
@@ -372,40 +374,28 @@ mod tests {
 
     use super::*;
 
+    #[derive(Default)]
     pub struct TestInterface {
-        pub call_count: Arc<AtomicU32>,
-        pub next_mgm_data: Arc<Mutex<MgmLis3RawValues>>,
-    }
-
-    impl TestInterface {
-        pub fn new(
-            call_count: Arc<AtomicU32>,
-            next_mgm_data: Arc<Mutex<MgmLis3RawValues>>,
-        ) -> Self {
-            Self {
-                call_count,
-                next_mgm_data,
-            }
-        }
+        pub call_count: u32,
+        pub next_mgm_data: MgmLis3RawValues,
     }
 
     impl SpiInterface for TestInterface {
         type Error = ();
 
         fn transfer(&mut self, _tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error> {
-            let mgm_data = *self.next_mgm_data.lock().unwrap();
-            rx[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2].copy_from_slice(&mgm_data.x.to_le_bytes());
-            rx[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2].copy_from_slice(&mgm_data.y.to_be_bytes());
-            rx[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2].copy_from_slice(&mgm_data.z.to_be_bytes());
-            self.call_count
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            rx[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2]
+                .copy_from_slice(&self.next_mgm_data.x.to_le_bytes());
+            rx[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2]
+                .copy_from_slice(&self.next_mgm_data.y.to_le_bytes());
+            rx[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2]
+                .copy_from_slice(&self.next_mgm_data.z.to_le_bytes());
+            self.call_count += 1;
             Ok(())
         }
     }
 
     pub struct MgmTestbench {
-        pub spi_interface_call_count: Arc<AtomicU32>,
-        pub next_mgm_data: Arc<Mutex<MgmLis3RawValues>>,
         pub mode_request_tx: mpsc::Sender<GenericMessage<ModeRequest>>,
         pub mode_reply_rx_to_pus: mpsc::Receiver<GenericMessage<ModeReply>>,
         pub mode_reply_rx_to_parent: mpsc::Receiver<GenericMessage<ModeReply>>,
@@ -429,10 +419,6 @@ mod tests {
             let (hk_reply_tx, hk_reply_rx) = mpsc::channel();
             let (tm_tx, tm_rx) = mpsc::channel::<PacketAsVec>();
             let shared_mgm_set = Arc::default();
-            let next_mgm_data = Arc::new(Mutex::default());
-            let spi_interface_call_count = Arc::new(AtomicU32::new(0));
-            let test_interface =
-                TestInterface::new(spi_interface_call_count.clone(), next_mgm_data.clone());
             Self {
                 mode_request_tx: request_tx,
                 mode_reply_rx_to_pus: reply_rx_to_pus,
@@ -440,8 +426,6 @@ mod tests {
                 composite_request_tx,
                 tm_rx,
                 hk_reply_rx,
-                spi_interface_call_count,
-                next_mgm_data,
                 handler: MgmHandlerLis3Mdl::new(
                     UniqueApidTargetId::new(Apid::Acs as u16, 1),
                     "test-mgm",
@@ -449,7 +433,7 @@ mod tests {
                     composite_request_rx,
                     hk_reply_tx,
                     tm_tx,
-                    test_interface,
+                    TestInterface::default(),
                     shared_mgm_set,
                 ),
             }
@@ -459,12 +443,7 @@ mod tests {
     #[test]
     fn test_basic_handler() {
         let mut testbench = MgmTestbench::new();
-        assert_eq!(
-            testbench
-                .spi_interface_call_count
-                .load(std::sync::atomic::Ordering::Relaxed),
-            0
-        );
+        assert_eq!(testbench.handler.com_interface.call_count, 0);
         assert_eq!(
             testbench.handler.mode_and_submode().mode(),
             DeviceMode::Off as u32
@@ -472,12 +451,7 @@ mod tests {
         assert_eq!(testbench.handler.mode_and_submode().submode(), 0_u16);
         testbench.handler.periodic_operation();
         // Handler is OFF, no changes expected.
-        assert_eq!(
-            testbench
-                .spi_interface_call_count
-                .load(std::sync::atomic::Ordering::Relaxed),
-            0
-        );
+        assert_eq!(testbench.handler.com_interface.call_count, 0);
         assert_eq!(
             testbench.handler.mode_and_submode().mode(),
             DeviceMode::Off as u32
@@ -513,13 +487,44 @@ mod tests {
             _ => panic!("unexpected mode reply"),
         }
         // The device should have been polled once.
-        assert_eq!(
-            testbench
-                .spi_interface_call_count
-                .load(std::sync::atomic::Ordering::Relaxed),
-            1
-        );
-        // TODO: Check shared MGM set. The field values should be 0, but the entry should be valid.
-        // TODO: Set non-zero raw values for the next polled MGM set.
+        assert_eq!(testbench.handler.com_interface.call_count, 1);
+        let mgm_set = *testbench.handler.shared_mgm_set.lock().unwrap();
+        assert!(mgm_set.x < 0.001);
+        assert!(mgm_set.y < 0.001);
+        assert!(mgm_set.z < 0.001);
+        assert!(mgm_set.valid);
+    }
+
+    #[test]
+    fn test_normal_handler_mgm_set_conversion() {
+        let mut testbench = MgmTestbench::new();
+        let raw_values = MgmLis3RawValues {
+            x: 1000,
+            y: -1000,
+            z: 1000,
+        };
+        testbench.handler.com_interface.next_mgm_data = raw_values;
+        testbench
+            .mode_request_tx
+            .send(GenericMessage::new(
+                MessageMetadata::new(0, PUS_MODE_SERVICE.id()),
+                ModeRequest::SetMode(ModeAndSubmode::new(DeviceMode::Normal as u32, 0)),
+            ))
+            .expect("failed to send mode request");
+        testbench.handler.periodic_operation();
+        let mgm_set = *testbench.handler.shared_mgm_set.lock().unwrap();
+        let expected_x =
+            raw_values.x as f32 * GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS;
+        let expected_y =
+            raw_values.y as f32 * GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS;
+        let expected_z =
+            raw_values.z as f32 * GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS;
+        let x_diff = (mgm_set.x - expected_x).abs();
+        let y_diff = (mgm_set.y - expected_y).abs();
+        let z_diff = (mgm_set.z - expected_z).abs();
+        assert!(x_diff < 0.001, "x diff too large: {}", x_diff);
+        assert!(y_diff < 0.001, "y diff too large: {}", y_diff);
+        assert!(z_diff < 0.001, "z diff too large: {}", z_diff);
+        assert!(mgm_set.valid);
     }
 }
