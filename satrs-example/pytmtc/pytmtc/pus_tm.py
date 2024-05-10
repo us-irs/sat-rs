@@ -9,6 +9,7 @@ from tmtccmd.pus import VerificationWrapper
 from tmtccmd.tmtc import GenericApidHandlerBase
 
 from pytmtc.common import Apid, EventU32
+from pytmtc.hk import handle_hk_packet
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,16 +54,10 @@ class PusHandler(GenericApidHandlerBase):
                 self.verif_wrapper.log_to_console(tm_packet, res)
                 self.verif_wrapper.log_to_file(tm_packet, res)
         elif service == 3:
-            _LOGGER.info("No handling for HK packets implemented")
-            _LOGGER.info(f"Raw packet: 0x[{packet.hex(sep=',')}]")
             pus_tm = PusTm.unpack(
                 packet, timestamp_len=CdsShortTimestamp.TIMESTAMP_SIZE
             )
-            if pus_tm.subservice == 25:
-                if len(pus_tm.source_data) < 8:
-                    raise ValueError("No addressable ID in HK packet")
-                json_str = pus_tm.source_data[8:]
-                _LOGGER.info(json_str)
+            handle_hk_packet(pus_tm)
         elif service == 5:
             tm_packet = PusTm.unpack(
                 packet, timestamp_len=CdsShortTimestamp.TIMESTAMP_SIZE

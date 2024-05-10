@@ -34,6 +34,12 @@ pub const X_LOWBYTE_IDX: usize = 9;
 pub const Y_LOWBYTE_IDX: usize = 11;
 pub const Z_LOWBYTE_IDX: usize = 13;
 
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[repr(u32)]
+pub enum SetId {
+    SensorData = 0,
+}
+
 pub trait SpiInterface {
     type Error: Debug;
     fn transfer(&mut self, tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error>;
@@ -133,7 +139,7 @@ pub struct MgmHandlerLis3Mdl<ComInterface: SpiInterface, TmSender: EcssTmSender>
     #[new(default)]
     rx_buf: [u8; 32],
     #[new(default)]
-    tm_buf: [u8; 16],
+    tm_buf: [u8; 32],
     #[new(default)]
     stamp_helper: TimestampHelper,
 }
@@ -180,6 +186,9 @@ impl<ComInterface: SpiInterface, TmSender: EcssTmSender> MgmHandlerLis3Mdl<ComIn
     pub fn handle_hk_request(&mut self, requestor_info: &MessageMetadata, hk_request: &HkRequest) {
         match hk_request.variant {
             HkRequestVariant::OneShot => {
+                // TODO: We should provide a helper class for generating some of the boilerplate.
+                // This includes the APID, subservice, unique ID and set ID handling. The user
+                // should be able to simply specify the HK data as a slice.
                 self.hk_reply_tx
                     .send(GenericMessage::new(
                         *requestor_info,
@@ -194,15 +203,17 @@ impl<ComInterface: SpiInterface, TmSender: EcssTmSender> MgmHandlerLis3Mdl<ComIn
                     self.stamp_helper.stamp(),
                 );
                 let mgm_snapshot = *self.shared_mgm_set.lock().unwrap();
+                self.tm_buf[0..4].copy_from_slice(&self.id.unique_id.to_be_bytes());
+                self.tm_buf[4..8].copy_from_slice(&(SetId::SensorData as u32).to_be_bytes());
                 // Use binary serialization here. We want the data to be tightly packed.
-                self.tm_buf[0] = mgm_snapshot.valid as u8;
-                self.tm_buf[1..5].copy_from_slice(&mgm_snapshot.x.to_be_bytes());
-                self.tm_buf[5..9].copy_from_slice(&mgm_snapshot.y.to_be_bytes());
-                self.tm_buf[9..13].copy_from_slice(&mgm_snapshot.z.to_be_bytes());
+                self.tm_buf[8] = mgm_snapshot.valid as u8;
+                self.tm_buf[9..13].copy_from_slice(&mgm_snapshot.x.to_be_bytes());
+                self.tm_buf[13..17].copy_from_slice(&mgm_snapshot.y.to_be_bytes());
+                self.tm_buf[17..21].copy_from_slice(&mgm_snapshot.z.to_be_bytes());
                 let hk_tm = PusTmCreator::new(
                     SpHeader::new_from_apid(self.id.apid),
                     sec_header,
-                    &self.tm_buf[0..12],
+                    &self.tm_buf[0..21],
                     true,
                 );
                 self.tm_sender
