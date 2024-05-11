@@ -236,6 +236,7 @@ pub mod acs {
         y: -30.0,
         z: 30.0,
     };
+    pub const ALL_ONES_SENSOR_VAL: i16 = 0xffff_u16 as i16;
 
     pub mod lis3mdl {
         use super::*;
@@ -264,27 +265,39 @@ pub mod acs {
 
         impl MgmLis3MdlReply {
             pub fn new(common: MgmReplyCommon) -> Self {
-                let mut raw_reply: [u8; 7] = [0; 7];
-                let raw_x: i16 = (common.sensor_values.x
-                    / (GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS))
-                    .round() as i16;
-                let raw_y: i16 = (common.sensor_values.y
-                    / (GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS))
-                    .round() as i16;
-                let raw_z: i16 = (common.sensor_values.z
-                    / (GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS))
-                    .round() as i16;
-                // The first byte is a dummy byte.
-                raw_reply[1..3].copy_from_slice(&raw_x.to_be_bytes());
-                raw_reply[3..5].copy_from_slice(&raw_y.to_be_bytes());
-                raw_reply[5..7].copy_from_slice(&raw_z.to_be_bytes());
-                Self {
-                    common,
-                    raw: MgmLis3RawValues {
-                        x: raw_x,
-                        y: raw_y,
-                        z: raw_z,
+                match common.switch_state {
+                    SwitchStateBinary::Off => Self {
+                        common,
+                        raw: MgmLis3RawValues {
+                            x: ALL_ONES_SENSOR_VAL,
+                            y: ALL_ONES_SENSOR_VAL,
+                            z: ALL_ONES_SENSOR_VAL,
+                        },
                     },
+                    SwitchStateBinary::On => {
+                        let mut raw_reply: [u8; 7] = [0; 7];
+                        let raw_x: i16 = (common.sensor_values.x
+                            / (GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS))
+                            .round() as i16;
+                        let raw_y: i16 = (common.sensor_values.y
+                            / (GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS))
+                            .round() as i16;
+                        let raw_z: i16 = (common.sensor_values.z
+                            / (GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS))
+                            .round() as i16;
+                        // The first byte is a dummy byte.
+                        raw_reply[1..3].copy_from_slice(&raw_x.to_be_bytes());
+                        raw_reply[3..5].copy_from_slice(&raw_y.to_be_bytes());
+                        raw_reply[5..7].copy_from_slice(&raw_z.to_be_bytes());
+                        Self {
+                            common,
+                            raw: MgmLis3RawValues {
+                                x: raw_x,
+                                y: raw_y,
+                                z: raw_z,
+                            },
+                        }
+                    }
                 }
             }
         }

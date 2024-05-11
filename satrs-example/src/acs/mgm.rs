@@ -6,7 +6,7 @@ use satrs::spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
 use satrs::spacepackets::SpHeader;
 use satrs_example::{DeviceMode, TimestampHelper};
 use satrs_minisim::acs::lis3mdl::{
-    MgmLis3MdlReply, FIELD_LSB_PER_GAUSS_4_SENS, GAUSS_TO_MICROTESLA_FACTOR,
+    MgmLis3MdlReply, MgmLis3RawValues, FIELD_LSB_PER_GAUSS_4_SENS, GAUSS_TO_MICROTESLA_FACTOR,
 };
 use satrs_minisim::acs::MgmRequestLis3Mdl;
 use satrs_minisim::{SerializableSimMsgPayload, SimReply, SimRequest};
@@ -47,18 +47,16 @@ pub trait SpiInterface {
 
 #[derive(Default)]
 pub struct SpiDummyInterface {
-    pub dummy_val_0: i16,
-    pub dummy_val_1: i16,
-    pub dummy_val_2: i16,
+    pub dummy_values: MgmLis3RawValues,
 }
 
 impl SpiInterface for SpiDummyInterface {
     type Error = ();
 
     fn transfer(&mut self, _tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error> {
-        rx[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2].copy_from_slice(&self.dummy_val_0.to_le_bytes());
-        rx[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2].copy_from_slice(&self.dummy_val_1.to_be_bytes());
-        rx[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2].copy_from_slice(&self.dummy_val_2.to_be_bytes());
+        rx[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2].copy_from_slice(&self.dummy_values.x.to_le_bytes());
+        rx[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2].copy_from_slice(&self.dummy_values.y.to_be_bytes());
+        rx[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2].copy_from_slice(&self.dummy_values.z.to_be_bytes());
         Ok(())
     }
 }
@@ -74,18 +72,27 @@ impl SpiInterface for SpiSimInterface {
     // Right now, we only support requesting sensor data and not configuration of the sensor.
     fn transfer(&mut self, _tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error> {
         let mgm_sensor_request = MgmRequestLis3Mdl::RequestSensorData;
-        self.sim_request_tx
+        if let Err(e) = self
+            .sim_request_tx
             .send(SimRequest::new_with_epoch_time(mgm_sensor_request))
-            .expect("failed to send request");
-        let sim_reply = self
-            .sim_reply_rx
-            .recv_timeout(Duration::from_millis(100))
-            .expect("reply timeout");
-        let sim_reply_lis3 =
-            MgmLis3MdlReply::from_sim_message(&sim_reply).expect("failed to parse LIS3 reply");
-        rx[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2].copy_from_slice(&sim_reply_lis3.raw.x.to_le_bytes());
-        rx[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2].copy_from_slice(&sim_reply_lis3.raw.y.to_le_bytes());
-        rx[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2].copy_from_slice(&sim_reply_lis3.raw.z.to_le_bytes());
+        {
+            log::error!("failed to send MGM LIS3 request: {}", e);
+        }
+        match self.sim_reply_rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(sim_reply) => {
+                let sim_reply_lis3 = MgmLis3MdlReply::from_sim_message(&sim_reply)
+                    .expect("failed to parse LIS3 reply");
+                rx[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2]
+                    .copy_from_slice(&sim_reply_lis3.raw.x.to_le_bytes());
+                rx[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2]
+                    .copy_from_slice(&sim_reply_lis3.raw.y.to_le_bytes());
+                rx[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2]
+                    .copy_from_slice(&sim_reply_lis3.raw.z.to_le_bytes());
+            }
+            Err(e) => {
+                log::warn!("MGM LIS3 SIM reply timeout: {}", e);
+            }
+        }
         Ok(())
     }
 }

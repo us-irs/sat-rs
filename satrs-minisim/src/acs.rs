@@ -15,7 +15,7 @@ use satrs_minisim::{
 
 use crate::time::current_millis;
 
-// Earth magnetic field varies between -30 uT and 30 uT
+// Earth magnetic field varies between roughly -30 uT and 30 uT
 const AMPLITUDE_MGM_UT: f32 = 30.0;
 // Lets start with a simple frequency here.
 const FREQUENCY_MGM: f32 = 1.0;
@@ -26,14 +26,9 @@ const PHASE_Z: f32 = 0.2;
 
 /// Simple model for a magnetometer where the measure magnetic fields are modeled with sine waves.
 ///
-/// Please note that that a more realistic MGM model wouold include the following components
-/// which are not included here to simplify the model:
-///
-/// 1. It would probably generate signed [i16] values which need to be converted to SI units
-///    because it is a digital sensor
-/// 2. It would sample the magnetic field at a high fixed rate. This might not be possible for
-///    a general purpose OS, but self self-sampling at a relatively high rate (20-40 ms) might
-///    stil lbe possible.
+/// An ideal sensor would sample the magnetic field at a high fixed rate. This might not be
+/// possible for a general purpose OS, but self self-sampling at a relatively high rate (20-40 ms)
+/// might still be possible and is probably sufficient for many OBSW needs.
 pub struct MagnetometerModel<ReplyProvider: MgmReplyProvider> {
     pub switch_state: SwitchStateBinary,
     pub periodicity: Duration,

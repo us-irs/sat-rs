@@ -1,4 +1,5 @@
 mod acs;
+mod eps;
 mod events;
 mod hk;
 mod interface;
