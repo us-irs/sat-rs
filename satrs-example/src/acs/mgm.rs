@@ -233,6 +233,32 @@ impl<ComInterface: SpiInterface, TmSender: EcssTmSender> MgmHandlerLis3Mdl<ComIn
         }
     }
 
+    pub fn handle_mode_requests(&mut self) {
+        loop {
+            // TODO: Only allow one set mode request per cycle?
+            match self.mode_interface.request_rx.try_recv() {
+                Ok(msg) => {
+                    let result = self.handle_mode_request(msg);
+                    // TODO: Trigger event?
+                    if result.is_err() {
+                        log::warn!(
+                            "{}: mode request failed with error {:?}",
+                            self.dev_str,
+                            result.err().unwrap()
+                        );
+                    }
+                }
+                Err(e) => {
+                    if e != mpsc::TryRecvError::Empty {
+                        log::warn!("{}: failed to receive mode request: {:?}", self.dev_str, e);
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     pub fn poll_sensor(&mut self) {
         // Communicate with the device. This is actually how to read the data from the LIS3 device
         // SPI interface.
@@ -264,32 +290,6 @@ impl<ComInterface: SpiInterface, TmSender: EcssTmSender> MgmHandlerLis3Mdl<ComIn
         mgm_guard.z = z_raw as f32 * GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS;
         mgm_guard.valid = true;
         drop(mgm_guard);
-    }
-
-    pub fn handle_mode_requests(&mut self) {
-        loop {
-            // TODO: Only allow one set mode request per cycle?
-            match self.mode_interface.request_rx.try_recv() {
-                Ok(msg) => {
-                    let result = self.handle_mode_request(msg);
-                    // TODO: Trigger event?
-                    if result.is_err() {
-                        log::warn!(
-                            "{}: mode request failed with error {:?}",
-                            self.dev_str,
-                            result.err().unwrap()
-                        );
-                    }
-                }
-                Err(e) => {
-                    if e != mpsc::TryRecvError::Empty {
-                        log::warn!("{}: failed to receive mode request: {:?}", self.dev_str, e);
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
     }
 }
 
