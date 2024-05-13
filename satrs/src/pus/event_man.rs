@@ -50,12 +50,6 @@ pub mod heapless_mod {
         phantom: PhantomData<Provider>,
     }
 
-    /// Safety: All contained field are [Send] as well
-    unsafe impl<const N: usize, Event: GenericEvent + Send> Send
-        for HeaplessPusMgmtBackendProvider<N, Event>
-    {
-    }
-
     impl<const N: usize, Provider: GenericEvent> PusEventReportingMapProvider<Provider>
         for HeaplessPusMgmtBackendProvider<N, Provider>
     {
