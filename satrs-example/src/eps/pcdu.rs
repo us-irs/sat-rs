@@ -13,6 +13,7 @@ use satrs::{
     request::{GenericMessage, MessageMetadata, UniqueApidTargetId},
 };
 use satrs_example::{config::components::PUS_MODE_SERVICE, DeviceMode, TimestampHelper};
+use satrs_minisim::{SimReply, SimRequest};
 
 use crate::{acs::mgm::MpscModeLeafInterface, pus::hk::HkReply, requests::CompositeRequest};
 
@@ -22,7 +23,49 @@ pub trait SerialInterface {
     fn send(&self, data: &[u8]) -> Result<(), Self::Error>;
     /// Receive all replies received on the serial interface so far. This function takes a closure
     /// and call its for each received packet, passing the received packet into it.
-    fn recv_replies<ReplyHandler: FnMut(&[u8])>(&self, f: ReplyHandler) -> Result<(), Self::Error>;
+    fn try_recv_replies<ReplyHandler: FnMut(&[u8])>(
+        &self,
+        f: ReplyHandler,
+    ) -> Result<(), Self::Error>;
+}
+
+pub struct SimSerialInterface {
+    pub sim_request_tx: mpsc::Sender<SimRequest>,
+    pub sim_reply_rx: mpsc::Receiver<SimReply>,
+}
+
+impl SerialInterface for SimSerialInterface {
+    type Error = ();
+
+    fn send(&self, data: &[u8]) -> Result<(), Self::Error> {
+        let request: SimRequest = serde_json::from_slice(data).unwrap();
+        self.sim_request_tx
+            .send(request)
+            .expect("failed to send request to simulation");
+        Ok(())
+    }
+
+    fn try_recv_replies<ReplyHandler: FnMut(&[u8])>(
+        &self,
+        mut f: ReplyHandler,
+    ) -> Result<(), Self::Error> {
+        loop {
+            match self.sim_reply_rx.try_recv() {
+                Ok(reply) => {
+                    let reply = serde_json::to_string(&reply).unwrap();
+                    f(reply.as_bytes());
+                }
+                Err(e) => match e {
+                    mpsc::TryRecvError::Empty => break,
+                    mpsc::TryRecvError::Disconnected => {
+                        log::warn!("sim reply sender has disconnected");
+                        break;
+                    }
+                },
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -73,7 +116,9 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> PcduHandler<ComInter
                 self.handle_composite_requests();
                 self.handle_mode_requests();
             }
-            OpCode::PollAndRecvReplies => {}
+            OpCode::PollAndRecvReplies => {
+                self.poll_and_handle_replies();
+            }
         }
     }
 
@@ -138,6 +183,8 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> PcduHandler<ComInter
             }
         }
     }
+
+    pub fn poll_and_handle_replies(&mut self) {}
 }
 
 impl<ComInterface: SerialInterface, TmSender: EcssTmSender> ModeProvider

@@ -172,6 +172,13 @@ pub mod eps {
         Mgt = 1,
     }
 
+    #[derive(Debug, Copy, Clone)]
+    #[repr(u8)]
+    pub enum PcduRequestId {
+        SwitchDevice = 0,
+        RequestSwitchInfo = 1,
+    }
+
     #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
     pub enum PcduRequest {
         SwitchDevice {
@@ -180,6 +187,24 @@ pub mod eps {
         },
         RequestSwitchInfo,
     }
+
+    /*
+    impl PcduRequest {
+        /// The sole purpose of this method
+        pub fn write_to_be_bytes(&self, buf: &mut [u8]) {
+            match self {
+                PcduRequest::SwitchDevice { switch, state } => {
+                    buf[0] = PcduRequestId::SwitchDevice as u8;
+                    buf[1..3].copy_from_slice(&(*switch as u16).to_be_bytes());
+                    buf[4] = *state as u8;
+                }
+                PcduRequest::RequestSwitchInfo => {
+                    buf[0] = PcduRequestId::RequestSwitchInfo as u8;
+                }
+            }
+        }
+    }
+    */
 
     impl SerializableSimMsgPayload<SimRequest> for PcduRequest {
         const TARGET: SimComponent = SimComponent::Pcdu;
