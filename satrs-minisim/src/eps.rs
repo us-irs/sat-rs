@@ -104,7 +104,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn get_all_off_switch_map() -> SwitchMapBinary {
-        SwitchMapBinary::default()
+        SwitchMapBinaryWrapper::default().0
     }
 
     fn check_switch_state(sim_testbench: &mut SimTestbench, expected_switch_map: &SwitchMapBinary) {
