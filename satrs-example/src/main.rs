@@ -8,6 +8,9 @@ mod pus;
 mod requests;
 mod tmtc;
 
+use crate::eps::pcdu::{
+    PcduHandler, SerialInterfaceDummy, SerialInterfaceToSim, SerialSimInterfaceWrapper,
+};
 use crate::events::EventHandler;
 use crate::interface::udp::DynamicUdpTmHandler;
 use crate::pus::stack::PusStack;
@@ -45,7 +48,7 @@ use crate::requests::{CompositeRequest, GenericRequestRouter};
 use satrs::mode::ModeRequest;
 use satrs::pus::event_man::EventRequestWithToken;
 use satrs::spacepackets::{time::cds::CdsTime, time::TimeWriter};
-use satrs_example::config::components::{MGM_HANDLER_0, TCP_SERVER, UDP_SERVER};
+use satrs_example::config::components::{MGM_HANDLER_0, PCDU_HANDLER, TCP_SERVER, UDP_SERVER};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc;
 use std::sync::{Arc, RwLock};
@@ -68,11 +71,17 @@ fn static_tmtc_pool_main() {
 
     let (sim_request_tx, sim_request_rx) = mpsc::channel();
     let (mgm_sim_reply_tx, mgm_sim_reply_rx) = mpsc::channel();
+    let (pcdu_sim_reply_tx, pcdu_sim_reply_rx) = mpsc::channel();
     let mut opt_sim_client = create_sim_client(sim_request_rx);
 
     let (mgm_handler_composite_tx, mgm_handler_composite_rx) =
         mpsc::channel::<GenericMessage<CompositeRequest>>();
+    let (pcdu_handler_composite_tx, pcdu_handler_composite_rx) =
+        mpsc::channel::<GenericMessage<CompositeRequest>>();
+
     let (mgm_handler_mode_tx, mgm_handler_mode_rx) = mpsc::channel::<GenericMessage<ModeRequest>>();
+    let (pcdu_handler_mode_tx, pcdu_handler_mode_rx) =
+        mpsc::channel::<GenericMessage<ModeRequest>>();
 
     // Some request are targetable. This map is used to retrieve sender handles based on a target ID.
     let mut request_map = GenericRequestRouter::default();
@@ -82,6 +91,12 @@ fn static_tmtc_pool_main() {
     request_map
         .mode_router_map
         .insert(MGM_HANDLER_0.id(), mgm_handler_mode_tx);
+    request_map
+        .composite_router_map
+        .insert(PCDU_HANDLER.id(), pcdu_handler_composite_tx);
+    request_map
+        .mode_router_map
+        .insert(PCDU_HANDLER.id(), pcdu_handler_mode_tx);
 
     // This helper structure is used by all telecommand providers which need to send telecommands
     // to the TC source.
@@ -207,10 +222,11 @@ fn static_tmtc_pool_main() {
     let (mgm_handler_mode_reply_to_parent_tx, _mgm_handler_mode_reply_to_parent_rx) =
         mpsc::channel();
 
+    let shared_switch_set = Arc::default();
     let shared_mgm_set = Arc::default();
-    let mode_leaf_interface = MpscModeLeafInterface {
+    let mgm_mode_leaf_interface = MpscModeLeafInterface {
         request_rx: mgm_handler_mode_rx,
-        reply_to_pus_tx: pus_mode_reply_tx,
+        reply_to_pus_tx: pus_mode_reply_tx.clone(),
         reply_to_parent_tx: mgm_handler_mode_reply_to_parent_tx,
     };
 
@@ -226,12 +242,39 @@ fn static_tmtc_pool_main() {
     let mut mgm_handler = MgmHandlerLis3Mdl::new(
         MGM_HANDLER_0,
         "MGM_0",
-        mode_leaf_interface,
+        mgm_mode_leaf_interface,
         mgm_handler_composite_rx,
-        pus_hk_reply_tx,
-        tm_sink_tx,
+        pus_hk_reply_tx.clone(),
+        tm_sink_tx.clone(),
         mgm_spi_interface,
         shared_mgm_set,
+    );
+
+    let (pcdu_handler_mode_reply_to_parent_tx, _pcdu_handler_mode_reply_to_parent_rx) =
+        mpsc::channel();
+    let pcdu_mode_leaf_interface = MpscModeLeafInterface {
+        request_rx: pcdu_handler_mode_rx,
+        reply_to_pus_tx: pus_mode_reply_tx,
+        reply_to_parent_tx: pcdu_handler_mode_reply_to_parent_tx,
+    };
+    let pcdu_serial_interface = if let Some(sim_client) = opt_sim_client.as_mut() {
+        sim_client.add_reply_recipient(satrs_minisim::SimComponent::Pcdu, pcdu_sim_reply_tx);
+        SerialSimInterfaceWrapper::Sim(SerialInterfaceToSim::new(
+            sim_request_tx.clone(),
+            pcdu_sim_reply_rx,
+        ))
+    } else {
+        SerialSimInterfaceWrapper::Dummy(SerialInterfaceDummy::default())
+    };
+    let mut pcdu_handler = PcduHandler::new(
+        PCDU_HANDLER,
+        "PCDU",
+        pcdu_mode_leaf_interface,
+        pcdu_handler_composite_rx,
+        pus_hk_reply_tx,
+        tm_sink_tx,
+        pcdu_serial_interface,
+        shared_switch_set,
     );
 
     info!("Starting TMTC and UDP task");
@@ -290,6 +333,21 @@ fn static_tmtc_pool_main() {
         })
         .unwrap();
 
+    info!("Starting EPS thread");
+    let jh_eps = thread::Builder::new()
+        .name("sat-rs eps".to_string())
+        .spawn(move || loop {
+            // TODO: We should introduce something like a fixed timeslot helper to allow a more
+            // declarative API. It would also be very useful for the AOCS task.
+            pcdu_handler.periodic_operation(eps::pcdu::OpCode::RegularOp);
+            thread::sleep(Duration::from_millis(50));
+            pcdu_handler.periodic_operation(eps::pcdu::OpCode::PollAndRecvReplies);
+            thread::sleep(Duration::from_millis(50));
+            pcdu_handler.periodic_operation(eps::pcdu::OpCode::PollAndRecvReplies);
+            thread::sleep(Duration::from_millis(300));
+        })
+        .unwrap();
+
     info!("Starting PUS handler thread");
     let jh_pus_handler = thread::Builder::new()
         .name("sat-rs pus".to_string())
@@ -315,6 +373,7 @@ fn static_tmtc_pool_main() {
             .expect("Joining SIM client thread failed");
     }
     jh_aocs.join().expect("Joining AOCS thread failed");
+    jh_eps.join().expect("Joining EPS thread failed");
     jh_pus_handler
         .join()
         .expect("Joining PUS handler thread failed");
@@ -328,6 +387,7 @@ fn dyn_tmtc_pool_main() {
 
     let (sim_request_tx, sim_request_rx) = mpsc::channel();
     let (mgm_sim_reply_tx, mgm_sim_reply_rx) = mpsc::channel();
+    // let (pcdu_sim_reply_tx, pcdu_sim_reply_rx) = mpsc::channel();
     let mut opt_sim_client = create_sim_client(sim_request_rx);
 
     // Some request are targetable. This map is used to retrieve sender handles based on a target ID.

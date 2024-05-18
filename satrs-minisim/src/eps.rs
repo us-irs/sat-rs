@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::mpsc, time::Duration};
+use std::{sync::mpsc, time::Duration};
 
 use asynchronix::{
     model::{Model, Output},
@@ -6,14 +6,14 @@ use asynchronix::{
 };
 use satrs::power::SwitchStateBinary;
 use satrs_minisim::{
-    eps::{PcduReply, PcduSwitch, SwitchMap},
+    eps::{PcduReply, PcduSwitch, SwitchMapBinaryWrapper},
     SimReply,
 };
 
 pub const SWITCH_INFO_DELAY_MS: u64 = 10;
 
 pub struct PcduModel {
-    pub switcher_map: SwitchMap,
+    pub switcher_map: SwitchMapBinaryWrapper,
     pub mgm_switch: Output<SwitchStateBinary>,
     pub mgt_switch: Output<SwitchStateBinary>,
     pub reply_sender: mpsc::Sender<SimReply>,
@@ -21,12 +21,8 @@ pub struct PcduModel {
 
 impl PcduModel {
     pub fn new(reply_sender: mpsc::Sender<SimReply>) -> Self {
-        let mut switcher_map = HashMap::new();
-        switcher_map.insert(PcduSwitch::Mgm, SwitchStateBinary::Off);
-        switcher_map.insert(PcduSwitch::Mgt, SwitchStateBinary::Off);
-
         Self {
-            switcher_map,
+            switcher_map: Default::default(),
             mgm_switch: Output::new(),
             mgt_switch: Output::new(),
             reply_sender,
@@ -44,7 +40,7 @@ impl PcduModel {
     }
 
     pub fn send_switch_info(&mut self) {
-        let reply = SimReply::new(&PcduReply::SwitchInfo(self.switcher_map.clone()));
+        let reply = SimReply::new(&PcduReply::SwitchInfo(self.switcher_map.0.clone()));
         self.reply_sender.send(reply).unwrap();
     }
 
@@ -54,6 +50,7 @@ impl PcduModel {
     ) {
         let val = self
             .switcher_map
+            .0
             .get_mut(&switch_and_target_state.0)
             .unwrap_or_else(|| panic!("switch {:?} not found", switch_and_target_state.0));
         *val = switch_and_target_state.1;
@@ -76,7 +73,8 @@ pub(crate) mod tests {
     use std::time::Duration;
 
     use satrs_minisim::{
-        eps::PcduRequest, SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimRequest,
+        eps::{PcduRequest, SwitchMapBinary},
+        SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimRequest,
     };
 
     use crate::test_helpers::SimTestbench;
@@ -105,14 +103,11 @@ pub(crate) mod tests {
         switch_device(sim_testbench, switch, SwitchStateBinary::On);
     }
 
-    pub(crate) fn get_all_off_switch_map() -> SwitchMap {
-        let mut switcher_map = SwitchMap::new();
-        switcher_map.insert(super::PcduSwitch::Mgm, super::SwitchStateBinary::Off);
-        switcher_map.insert(super::PcduSwitch::Mgt, super::SwitchStateBinary::Off);
-        switcher_map
+    pub(crate) fn get_all_off_switch_map() -> SwitchMapBinary {
+        SwitchMapBinary::default()
     }
 
-    fn check_switch_state(sim_testbench: &mut SimTestbench, expected_switch_map: &SwitchMap) {
+    fn check_switch_state(sim_testbench: &mut SimTestbench, expected_switch_map: &SwitchMapBinary) {
         let request = SimRequest::new_with_epoch_time(PcduRequest::RequestSwitchInfo);
         sim_testbench
             .send_request(request)

@@ -1,5 +1,6 @@
 use std::{
-    collections::HashMap,
+    cell::RefCell,
+    collections::VecDeque,
     sync::{mpsc, Arc, Mutex},
 };
 
@@ -7,13 +8,16 @@ use derive_new::new;
 use satrs::{
     hk::{HkRequest, HkRequestVariant},
     mode::{ModeAndSubmode, ModeError, ModeProvider, ModeReply, ModeRequestHandler},
-    power::SwitchState,
+    power::{SwitchState, SwitchStateBinary},
     pus::EcssTmSender,
     queue::{GenericSendError, GenericTargetedMessagingError},
     request::{GenericMessage, MessageMetadata, UniqueApidTargetId},
 };
 use satrs_example::{config::components::PUS_MODE_SERVICE, DeviceMode, TimestampHelper};
-use satrs_minisim::{SimReply, SimRequest};
+use satrs_minisim::{
+    eps::{PcduReply, PcduRequest, SwitchMap, SwitchMapWrapper},
+    SerializableSimMsgPayload, SimReply, SimRequest,
+};
 
 use crate::{acs::mgm::MpscModeLeafInterface, pus::hk::HkReply, requests::CompositeRequest};
 
@@ -29,12 +33,13 @@ pub trait SerialInterface {
     ) -> Result<(), Self::Error>;
 }
 
-pub struct SimSerialInterface {
+#[derive(new)]
+pub struct SerialInterfaceToSim {
     pub sim_request_tx: mpsc::Sender<SimRequest>,
     pub sim_reply_rx: mpsc::Receiver<SimReply>,
 }
 
-impl SerialInterface for SimSerialInterface {
+impl SerialInterface for SerialInterfaceToSim {
     type Error = ();
 
     fn send(&self, data: &[u8]) -> Result<(), Self::Error> {
@@ -68,26 +73,111 @@ impl SerialInterface for SimSerialInterface {
     }
 }
 
+#[derive(Default)]
+pub struct SerialInterfaceDummy {
+    // Need interior mutability here for both fields.
+    pub switch_map: RefCell<SwitchMapWrapper>,
+    pub reply_deque: RefCell<VecDeque<SimReply>>,
+}
+
+impl SerialInterface for SerialInterfaceDummy {
+    type Error = ();
+
+    fn send(&self, data: &[u8]) -> Result<(), Self::Error> {
+        let sim_req: SimRequest = serde_json::from_slice(data).unwrap();
+        let pcdu_req =
+            PcduRequest::from_sim_message(&sim_req).expect("PCDU request creation failed");
+        let switch_map_mut = &mut self.switch_map.borrow_mut().0;
+        match pcdu_req {
+            PcduRequest::SwitchDevice { switch, state } => {
+                match switch_map_mut.entry(switch) {
+                    std::collections::hash_map::Entry::Occupied(mut val) => {
+                        match state {
+                            SwitchStateBinary::Off => {
+                                *val.get_mut() = SwitchState::Off;
+                            }
+                            SwitchStateBinary::On => {
+                                *val.get_mut() = SwitchState::On;
+                            }
+                        };
+                    }
+                    std::collections::hash_map::Entry::Vacant(vacant) => {
+                        match state {
+                            SwitchStateBinary::Off => vacant.insert(SwitchState::Off),
+                            SwitchStateBinary::On => vacant.insert(SwitchState::On),
+                        };
+                    }
+                };
+            }
+            PcduRequest::RequestSwitchInfo => {
+                let mut reply_deque_mut = self.reply_deque.borrow_mut();
+                reply_deque_mut.push_back(SimReply::new(&PcduReply::SwitchInfo(
+                    self.switch_map.borrow().0.clone(),
+                )));
+            }
+        };
+        Ok(())
+    }
+
+    fn try_recv_replies<ReplyHandler: FnMut(&[u8])>(
+        &self,
+        mut f: ReplyHandler,
+    ) -> Result<(), Self::Error> {
+        if self.reply_deque.borrow().is_empty() {
+            return Ok(());
+        }
+        loop {
+            let mut reply_deque_mut = self.reply_deque.borrow_mut();
+            let next_reply = reply_deque_mut.pop_front().unwrap();
+            let reply = serde_json::to_string(&next_reply).unwrap();
+            f(reply.as_bytes());
+            if reply_deque_mut.is_empty() {
+                break;
+            }
+        }
+        Ok(())
+    }
+}
+
+pub enum SerialSimInterfaceWrapper {
+    Dummy(SerialInterfaceDummy),
+    Sim(SerialInterfaceToSim),
+}
+
+impl SerialInterface for SerialSimInterfaceWrapper {
+    type Error = ();
+
+    fn send(&self, data: &[u8]) -> Result<(), Self::Error> {
+        match self {
+            SerialSimInterfaceWrapper::Dummy(dummy) => dummy.send(data),
+            SerialSimInterfaceWrapper::Sim(sim) => sim.send(data),
+        }
+    }
+
+    fn try_recv_replies<ReplyHandler: FnMut(&[u8])>(
+        &self,
+        f: ReplyHandler,
+    ) -> Result<(), Self::Error> {
+        match self {
+            SerialSimInterfaceWrapper::Dummy(dummy) => dummy.try_recv_replies(f),
+            SerialSimInterfaceWrapper::Sim(sim) => sim.try_recv_replies(f),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum OpCode {
     RegularOp = 0,
     PollAndRecvReplies = 1,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-#[repr(u32)]
-pub enum SwitchId {
-    Mgm0 = 0,
-    Mgt = 1,
-}
-
-pub type SwitchMap = HashMap<SwitchId, SwitchState>;
-
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct SwitchSet {
     pub valid: bool,
     pub switch_map: SwitchMap,
 }
+
+pub type SharedSwitchSet = Arc<Mutex<SwitchSet>>;
 
 /// Example PCDU device handler.
 #[derive(new)]

@@ -160,16 +160,60 @@ impl From<SimRequestError> for SimCtrlReply {
 
 pub mod eps {
     use super::*;
+    use satrs::power::{SwitchState, SwitchStateBinary};
     use std::collections::HashMap;
+    use strum::{EnumIter, IntoEnumIterator};
 
-    use satrs::power::SwitchStateBinary;
+    pub type SwitchMap = HashMap<PcduSwitch, SwitchState>;
+    pub type SwitchMapBinary = HashMap<PcduSwitch, SwitchStateBinary>;
 
-    pub type SwitchMap = HashMap<PcduSwitch, SwitchStateBinary>;
+    pub struct SwitchMapWrapper(pub SwitchMap);
+    pub struct SwitchMapBinaryWrapper(pub SwitchMapBinary);
 
-    #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+    #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Hash, EnumIter)]
     pub enum PcduSwitch {
         Mgm = 0,
         Mgt = 1,
+    }
+
+    impl Default for SwitchMapBinaryWrapper {
+        fn default() -> Self {
+            let mut switch_map = SwitchMapBinary::default();
+            for entry in PcduSwitch::iter() {
+                switch_map.insert(entry, SwitchStateBinary::Off);
+            }
+            Self(switch_map)
+        }
+    }
+
+    impl Default for SwitchMapWrapper {
+        fn default() -> Self {
+            let mut switch_map = SwitchMap::default();
+            for entry in PcduSwitch::iter() {
+                switch_map.insert(entry, SwitchState::Unknown);
+            }
+            Self(switch_map)
+        }
+    }
+
+    impl SwitchMapWrapper {
+        pub fn new_with_init_switches_off() -> Self {
+            let mut switch_map = SwitchMap::default();
+            for entry in PcduSwitch::iter() {
+                switch_map.insert(entry, SwitchState::Off);
+            }
+            Self(switch_map)
+        }
+    }
+
+    impl From<SwitchMapBinaryWrapper> for SwitchMapWrapper {
+        fn from(value: SwitchMapBinaryWrapper) -> Self {
+            value
+                .0
+                .iter()
+                .map(|(key, value)| (*key, SwitchState::from(value.into())))
+                .collect()
+        }
     }
 
     #[derive(Debug, Copy, Clone)]
@@ -188,31 +232,14 @@ pub mod eps {
         RequestSwitchInfo,
     }
 
-    /*
-    impl PcduRequest {
-        /// The sole purpose of this method
-        pub fn write_to_be_bytes(&self, buf: &mut [u8]) {
-            match self {
-                PcduRequest::SwitchDevice { switch, state } => {
-                    buf[0] = PcduRequestId::SwitchDevice as u8;
-                    buf[1..3].copy_from_slice(&(*switch as u16).to_be_bytes());
-                    buf[4] = *state as u8;
-                }
-                PcduRequest::RequestSwitchInfo => {
-                    buf[0] = PcduRequestId::RequestSwitchInfo as u8;
-                }
-            }
-        }
-    }
-    */
-
     impl SerializableSimMsgPayload<SimRequest> for PcduRequest {
         const TARGET: SimComponent = SimComponent::Pcdu;
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
     pub enum PcduReply {
-        SwitchInfo(SwitchMap),
+        // Ack,
+        SwitchInfo(SwitchMapBinary),
     }
 
     impl SerializableSimMsgPayload<SimReply> for PcduReply {
