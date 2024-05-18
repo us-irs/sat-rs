@@ -8,13 +8,14 @@ use derive_new::new;
 use satrs::{
     hk::{HkRequest, HkRequestVariant},
     mode::{ModeAndSubmode, ModeError, ModeProvider, ModeReply, ModeRequestHandler},
+    power::{SwitchRequest, SwitchStateBinary},
     pus::EcssTmSender,
     queue::{GenericSendError, GenericTargetedMessagingError},
     request::{GenericMessage, MessageMetadata, UniqueApidTargetId},
 };
 use satrs_example::{config::components::PUS_MODE_SERVICE, DeviceMode, TimestampHelper};
 use satrs_minisim::{
-    eps::{PcduReply, PcduRequest, SwitchMap, SwitchMapBinaryWrapper},
+    eps::{PcduReply, PcduRequest, PcduSwitch, SwitchMap, SwitchMapBinary, SwitchMapBinaryWrapper},
     SerializableSimMsgPayload, SimReply, SimRequest,
 };
 
@@ -177,6 +178,7 @@ pub struct PcduHandler<ComInterface: SerialInterface, TmSender: EcssTmSender> {
     mode_interface: MpscModeLeafInterface,
     composite_request_rx: mpsc::Receiver<GenericMessage<CompositeRequest>>,
     hk_reply_tx: mpsc::Sender<GenericMessage<HkReply>>,
+    switch_request_rx: mpsc::Receiver<GenericMessage<SwitchRequest>>,
     tm_sender: TmSender,
     pub com_interface: ComInterface,
     shared_switch_map: Arc<Mutex<SwitchSet>>,
@@ -194,8 +196,12 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> PcduHandler<ComInter
                 // Handle requests.
                 self.handle_composite_requests();
                 self.handle_mode_requests();
-                // Poll the switch states and telemetry regularly here.
-                if self.mode() == DeviceMode::Normal as u32 {}
+                self.handle_switch_requests();
+                // Poll the switch states and/or telemetry regularly here.
+                if self.mode() == DeviceMode::Normal as u32 || self.mode() == DeviceMode::On as u32
+                {
+                    self.handle_periodic_commands();
+                }
             }
             OpCode::PollAndRecvReplies => {
                 self.poll_and_handle_replies();
@@ -239,6 +245,14 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> PcduHandler<ComInter
         }
     }
 
+    pub fn handle_periodic_commands(&self) {
+        let pcdu_req = PcduRequest::RequestSwitchInfo;
+        let pcdu_req_ser = serde_json::to_string(&pcdu_req).unwrap();
+        if let Err(_e) = self.com_interface.send(pcdu_req_ser.as_bytes()) {
+            log::warn!("polling PCDU switch info failed");
+        }
+    }
+
     pub fn handle_mode_requests(&mut self) {
         loop {
             // TODO: Only allow one set mode request per cycle?
@@ -262,6 +276,28 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> PcduHandler<ComInter
                     }
                 }
             }
+        }
+    }
+
+    pub fn handle_switch_requests(&mut self) {
+        loop {
+            match self.switch_request_rx.try_recv() {
+                Ok(switch_req) => match PcduSwitch::try_from(switch_req.message.switch_id()) {
+                    Ok(pcdu_switch) => {
+                        let pcdu_req = PcduRequest::SwitchDevice {
+                            switch: pcdu_switch,
+                            state: switch_req.message.target_state(),
+                        };
+                        let pcdu_req_ser = serde_json::to_string(&pcdu_req).unwrap();
+                        self.com_interface.send(pcdu_req_ser.as_bytes())
+                    }
+                    Err(e) => todo!("failed to convert switch ID {:?} to typed PCDU switch", e),
+                },
+                Err(e) => match e {
+                    mpsc::TryRecvError::Empty => todo!(),
+                    mpsc::TryRecvError::Disconnected => todo!(),
+                },
+            };
         }
     }
 

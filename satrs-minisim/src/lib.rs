@@ -1,4 +1,5 @@
 use asynchronix::time::MonotonicTime;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -170,7 +171,20 @@ pub mod eps {
     pub struct SwitchMapWrapper(pub SwitchMap);
     pub struct SwitchMapBinaryWrapper(pub SwitchMapBinary);
 
-    #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Hash, EnumIter)]
+    #[derive(
+        Debug,
+        Copy,
+        Clone,
+        PartialEq,
+        Eq,
+        Serialize,
+        Deserialize,
+        Hash,
+        EnumIter,
+        IntoPrimitive,
+        TryFromPrimitive,
+    )]
+    #[repr(u16)]
     pub enum PcduSwitch {
         Mgm = 0,
         Mgt = 1,

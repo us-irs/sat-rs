@@ -223,6 +223,8 @@ fn static_tmtc_pool_main() {
         mpsc::channel();
 
     let shared_switch_set = Arc::default();
+    let (switch_request_tx, switch_request_rx) = mpsc::sync_channel(20);
+
     let shared_mgm_set = Arc::default();
     let mgm_mode_leaf_interface = MpscModeLeafInterface {
         request_rx: mgm_handler_mode_rx,
@@ -272,6 +274,7 @@ fn static_tmtc_pool_main() {
         pcdu_mode_leaf_interface,
         pcdu_handler_composite_rx,
         pus_hk_reply_tx,
+        switch_request_rx,
         tm_sink_tx,
         pcdu_serial_interface,
         shared_switch_set,
