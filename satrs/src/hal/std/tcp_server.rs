@@ -66,8 +66,8 @@ impl ServerConfig {
             inner_loop_delay,
             tm_buffer_size,
             tc_buffer_size,
-            reuse_addr: false,
-            reuse_port: false,
+            reuse_addr: true,
+            reuse_port: true,
         }
     }
 }
