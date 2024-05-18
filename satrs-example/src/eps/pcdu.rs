@@ -8,14 +8,13 @@ use derive_new::new;
 use satrs::{
     hk::{HkRequest, HkRequestVariant},
     mode::{ModeAndSubmode, ModeError, ModeProvider, ModeReply, ModeRequestHandler},
-    power::{SwitchState, SwitchStateBinary},
     pus::EcssTmSender,
     queue::{GenericSendError, GenericTargetedMessagingError},
     request::{GenericMessage, MessageMetadata, UniqueApidTargetId},
 };
 use satrs_example::{config::components::PUS_MODE_SERVICE, DeviceMode, TimestampHelper};
 use satrs_minisim::{
-    eps::{PcduReply, PcduRequest, SwitchMap, SwitchMapWrapper},
+    eps::{PcduReply, PcduRequest, SwitchMap, SwitchMapBinaryWrapper},
     SerializableSimMsgPayload, SimReply, SimRequest,
 };
 
@@ -76,7 +75,7 @@ impl SerialInterface for SerialInterfaceToSim {
 #[derive(Default)]
 pub struct SerialInterfaceDummy {
     // Need interior mutability here for both fields.
-    pub switch_map: RefCell<SwitchMapWrapper>,
+    pub switch_map: RefCell<SwitchMapBinaryWrapper>,
     pub reply_deque: RefCell<VecDeque<SimReply>>,
 }
 
@@ -92,20 +91,10 @@ impl SerialInterface for SerialInterfaceDummy {
             PcduRequest::SwitchDevice { switch, state } => {
                 match switch_map_mut.entry(switch) {
                     std::collections::hash_map::Entry::Occupied(mut val) => {
-                        match state {
-                            SwitchStateBinary::Off => {
-                                *val.get_mut() = SwitchState::Off;
-                            }
-                            SwitchStateBinary::On => {
-                                *val.get_mut() = SwitchState::On;
-                            }
-                        };
+                        *val.get_mut() = state;
                     }
                     std::collections::hash_map::Entry::Vacant(vacant) => {
-                        match state {
-                            SwitchStateBinary::Off => vacant.insert(SwitchState::Off),
-                            SwitchStateBinary::On => vacant.insert(SwitchState::On),
-                        };
+                        vacant.insert(state);
                     }
                 };
             }
@@ -205,6 +194,8 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> PcduHandler<ComInter
                 // Handle requests.
                 self.handle_composite_requests();
                 self.handle_mode_requests();
+                // Poll the switch states and telemetry regularly here.
+                if self.mode() == DeviceMode::Normal as u32 {}
             }
             OpCode::PollAndRecvReplies => {
                 self.poll_and_handle_replies();

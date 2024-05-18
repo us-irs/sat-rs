@@ -204,15 +204,14 @@ pub mod eps {
             }
             Self(switch_map)
         }
-    }
 
-    impl From<SwitchMapBinaryWrapper> for SwitchMapWrapper {
-        fn from(value: SwitchMapBinaryWrapper) -> Self {
-            value
-                .0
-                .iter()
-                .map(|(key, value)| (*key, SwitchState::from(value.into())))
-                .collect()
+        pub fn from_binary_switch_map_ref(switch_map: &SwitchMapBinary) -> Self {
+            Self(
+                switch_map
+                    .iter()
+                    .map(|(key, value)| (*key, SwitchState::from(*value)))
+                    .collect(),
+            )
         }
     }
 
