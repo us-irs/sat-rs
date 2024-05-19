@@ -8,14 +8,14 @@ use derive_new::new;
 use satrs::{
     hk::{HkRequest, HkRequestVariant},
     mode::{ModeAndSubmode, ModeError, ModeProvider, ModeReply, ModeRequestHandler},
-    power::{SwitchRequest, SwitchStateBinary},
+    power::SwitchRequest,
     pus::EcssTmSender,
     queue::{GenericSendError, GenericTargetedMessagingError},
     request::{GenericMessage, MessageMetadata, UniqueApidTargetId},
 };
 use satrs_example::{config::components::PUS_MODE_SERVICE, DeviceMode, TimestampHelper};
 use satrs_minisim::{
-    eps::{PcduReply, PcduRequest, PcduSwitch, SwitchMap, SwitchMapBinary, SwitchMapBinaryWrapper},
+    eps::{PcduReply, PcduRequest, PcduSwitch, SwitchMap, SwitchMapBinaryWrapper},
     SerializableSimMsgPayload, SimReply, SimRequest,
 };
 

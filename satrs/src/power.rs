@@ -1,3 +1,5 @@
+use core::time::Duration;
+
 use derive_new::new;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -57,28 +59,28 @@ impl From<SwitchStateBinary> for SwitchState {
 pub type SwitchId = u16;
 
 /// Generic trait for a device capable of turning on and off switches.
-pub trait PowerSwitcherCommandSender {
+pub trait PowerSwitcherCommandSender<SwitchType: Into<u16>> {
     type Error;
 
     fn send_switch_on_cmd(
         &self,
         requestor_info: MessageMetadata,
-        switch_id: SwitchId,
+        switch_id: SwitchType,
     ) -> Result<(), Self::Error>;
     fn send_switch_off_cmd(
         &self,
         requestor_info: MessageMetadata,
-        switch_id: SwitchId,
+        switch_id: SwitchType,
     ) -> Result<(), Self::Error>;
 }
 
-pub trait PowerSwitchInfo {
+pub trait PowerSwitchInfo<SwitchType> {
     type Error;
 
     /// Retrieve the switch state
-    fn switch_state(&self, switch_id: SwitchId) -> Result<SwitchState, Self::Error>;
+    fn switch_state(&self, switch_id: SwitchType) -> Result<SwitchState, Self::Error>;
 
-    fn is_switch_on(&self, switch_id: SwitchId) -> Result<bool, Self::Error> {
+    fn is_switch_on(&self, switch_id: SwitchType) -> Result<bool, Self::Error> {
         Ok(self.switch_state(switch_id)? == SwitchState::On)
     }
 
@@ -86,7 +88,7 @@ pub trait PowerSwitchInfo {
     ///
     /// This may take into account the time to send a command, wait for it to be executed, and
     /// see the switch changed.
-    fn switch_delay_ms(&self) -> u32;
+    fn switch_delay_ms(&self) -> Duration;
 }
 
 #[derive(new)]
@@ -119,17 +121,17 @@ pub mod std_mod {
     pub type MpscSwitchCmdSender = mpsc::Sender<GenericMessage<SwitchRequest>>;
     pub type MpscSwitchCmdSenderBounded = mpsc::SyncSender<GenericMessage<SwitchRequest>>;
 
-    impl PowerSwitcherCommandSender for MpscSwitchCmdSender {
+    impl<SwitchType: Into<u16>> PowerSwitcherCommandSender<SwitchType> for MpscSwitchCmdSender {
         type Error = GenericSendError;
 
         fn send_switch_on_cmd(
             &self,
             requestor_info: MessageMetadata,
-            switch_id: SwitchId,
+            switch_id: SwitchType,
         ) -> Result<(), Self::Error> {
             self.send(GenericMessage::new(
                 requestor_info,
-                SwitchRequest::new(switch_id, SwitchStateBinary::On),
+                SwitchRequest::new(switch_id.into(), SwitchStateBinary::On),
             ))
             .map_err(|_| GenericSendError::RxDisconnected)
         }
@@ -137,27 +139,27 @@ pub mod std_mod {
         fn send_switch_off_cmd(
             &self,
             requestor_info: MessageMetadata,
-            switch_id: SwitchId,
+            switch_id: SwitchType,
         ) -> Result<(), Self::Error> {
             self.send(GenericMessage::new(
                 requestor_info,
-                SwitchRequest::new(switch_id, SwitchStateBinary::Off),
+                SwitchRequest::new(switch_id.into(), SwitchStateBinary::Off),
             ))
             .map_err(|_| GenericSendError::RxDisconnected)
         }
     }
 
-    impl PowerSwitcherCommandSender for MpscSwitchCmdSenderBounded {
+    impl<SwitchType: Into<u16>> PowerSwitcherCommandSender<SwitchType> for MpscSwitchCmdSenderBounded {
         type Error = GenericSendError;
 
         fn send_switch_on_cmd(
             &self,
             requestor_info: MessageMetadata,
-            switch_id: SwitchId,
+            switch_id: SwitchType,
         ) -> Result<(), Self::Error> {
             self.try_send(GenericMessage::new(
                 requestor_info,
-                SwitchRequest::new(switch_id, SwitchStateBinary::On),
+                SwitchRequest::new(switch_id.into(), SwitchStateBinary::On),
             ))
             .map_err(|e| match e {
                 mpsc::TrySendError::Full(_) => GenericSendError::QueueFull(None),
@@ -168,11 +170,11 @@ pub mod std_mod {
         fn send_switch_off_cmd(
             &self,
             requestor_info: MessageMetadata,
-            switch_id: SwitchId,
+            switch_id: SwitchType,
         ) -> Result<(), Self::Error> {
             self.try_send(GenericMessage::new(
                 requestor_info,
-                SwitchRequest::new(switch_id, SwitchStateBinary::Off),
+                SwitchRequest::new(switch_id.into(), SwitchStateBinary::Off),
             ))
             .map_err(|e| match e {
                 mpsc::TrySendError::Full(_) => GenericSendError::QueueFull(None),

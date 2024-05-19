@@ -11,6 +11,7 @@ mod tmtc;
 use crate::eps::pcdu::{
     PcduHandler, SerialInterfaceDummy, SerialInterfaceToSim, SerialSimInterfaceWrapper,
 };
+use crate::eps::PowerSwitchHelper;
 use crate::events::EventHandler;
 use crate::interface::udp::DynamicUdpTmHandler;
 use crate::pus::stack::PusStack;
@@ -50,7 +51,7 @@ use satrs::pus::event_man::EventRequestWithToken;
 use satrs::spacepackets::{time::cds::CdsTime, time::TimeWriter};
 use satrs_example::config::components::{MGM_HANDLER_0, PCDU_HANDLER, TCP_SERVER, UDP_SERVER};
 use std::net::{IpAddr, SocketAddr};
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -222,8 +223,9 @@ fn static_tmtc_pool_main() {
     let (mgm_handler_mode_reply_to_parent_tx, _mgm_handler_mode_reply_to_parent_rx) =
         mpsc::channel();
 
-    let shared_switch_set = Arc::default();
+    let shared_switch_set = Arc::new(Mutex::default());
     let (switch_request_tx, switch_request_rx) = mpsc::sync_channel(20);
+    let switch_helper = PowerSwitchHelper::new(switch_request_tx, shared_switch_set.clone());
 
     let shared_mgm_set = Arc::default();
     let mgm_mode_leaf_interface = MpscModeLeafInterface {
@@ -247,6 +249,7 @@ fn static_tmtc_pool_main() {
         mgm_mode_leaf_interface,
         mgm_handler_composite_rx,
         pus_hk_reply_tx.clone(),
+        switch_helper.clone(),
         tm_sink_tx.clone(),
         mgm_spi_interface,
         shared_mgm_set,
@@ -507,6 +510,10 @@ fn dyn_tmtc_pool_main() {
 
     let mut tm_funnel = TmSinkDynamic::new(sync_tm_tcp_source, tm_funnel_rx, tm_server_tx);
 
+    let shared_switch_set = Arc::new(Mutex::default());
+    let (switch_request_tx, switch_request_rx) = mpsc::sync_channel(20);
+    let switch_helper = PowerSwitchHelper::new(switch_request_tx, shared_switch_set.clone());
+
     let (mgm_handler_mode_reply_to_parent_tx, _mgm_handler_mode_reply_to_parent_rx) =
         mpsc::channel();
     let shared_mgm_set = Arc::default();
@@ -531,6 +538,7 @@ fn dyn_tmtc_pool_main() {
         mode_leaf_interface,
         mgm_handler_composite_rx,
         pus_hk_reply_tx,
+        switch_helper.clone(),
         tm_funnel_tx,
         mgm_spi_interface,
         shared_mgm_set,

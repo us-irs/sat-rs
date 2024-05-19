@@ -1,5 +1,6 @@
 use derive_new::new;
 use satrs::hk::{HkRequest, HkRequestVariant};
+use satrs::power::{PowerSwitchInfo, PowerSwitcherCommandSender};
 use satrs::queue::{GenericSendError, GenericTargetedMessagingError};
 use satrs::spacepackets::ecss::hk;
 use satrs::spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
@@ -9,6 +10,7 @@ use satrs_minisim::acs::lis3mdl::{
     MgmLis3MdlReply, MgmLis3RawValues, FIELD_LSB_PER_GAUSS_4_SENS, GAUSS_TO_MICROTESLA_FACTOR,
 };
 use satrs_minisim::acs::MgmRequestLis3Mdl;
+use satrs_minisim::eps::PcduSwitch;
 use satrs_minisim::{SerializableSimMsgPayload, SimReply, SimRequest};
 use std::fmt::Debug;
 use std::sync::mpsc::{self};
@@ -127,31 +129,44 @@ pub struct MpscModeLeafInterface {
     pub reply_to_parent_tx: mpsc::Sender<GenericMessage<ModeReply>>,
 }
 
+#[derive(Default)]
+pub struct BufWrapper {
+    tx_buf: [u8; 32],
+    rx_buf: [u8; 32],
+    tm_buf: [u8; 32],
+}
+
 /// Example MGM device handler strongly based on the LIS3MDL MEMS device.
 #[derive(new)]
 #[allow(clippy::too_many_arguments)]
-pub struct MgmHandlerLis3Mdl<ComInterface: SpiInterface, TmSender: EcssTmSender> {
+pub struct MgmHandlerLis3Mdl<
+    ComInterface: SpiInterface,
+    TmSender: EcssTmSender,
+    SwitchHelper: PowerSwitchInfo<PcduSwitch> + PowerSwitcherCommandSender<PcduSwitch>,
+> {
     id: UniqueApidTargetId,
     dev_str: &'static str,
     mode_interface: MpscModeLeafInterface,
     composite_request_rx: mpsc::Receiver<GenericMessage<CompositeRequest>>,
     hk_reply_tx: mpsc::Sender<GenericMessage<HkReply>>,
+    switch_helper: SwitchHelper,
     tm_sender: TmSender,
     pub com_interface: ComInterface,
     shared_mgm_set: Arc<Mutex<MgmData>>,
     #[new(value = "ModeAndSubmode::new(satrs_example::DeviceMode::Off as u32, 0)")]
     mode_and_submode: ModeAndSubmode,
     #[new(default)]
-    tx_buf: [u8; 32],
-    #[new(default)]
-    rx_buf: [u8; 32],
-    #[new(default)]
-    tm_buf: [u8; 32],
+    bufs: BufWrapper,
     #[new(default)]
     stamp_helper: TimestampHelper,
 }
 
-impl<ComInterface: SpiInterface, TmSender: EcssTmSender> MgmHandlerLis3Mdl<ComInterface, TmSender> {
+impl<
+        ComInterface: SpiInterface,
+        TmSender: EcssTmSender,
+        SwitchHelper: PowerSwitchInfo<PcduSwitch> + PowerSwitcherCommandSender<PcduSwitch>,
+    > MgmHandlerLis3Mdl<ComInterface, TmSender, SwitchHelper>
+{
     pub fn periodic_operation(&mut self) {
         self.stamp_helper.update_from_now();
         // Handle requests.
@@ -210,17 +225,17 @@ impl<ComInterface: SpiInterface, TmSender: EcssTmSender> MgmHandlerLis3Mdl<ComIn
                     self.stamp_helper.stamp(),
                 );
                 let mgm_snapshot = *self.shared_mgm_set.lock().unwrap();
-                self.tm_buf[0..4].copy_from_slice(&self.id.unique_id.to_be_bytes());
-                self.tm_buf[4..8].copy_from_slice(&(SetId::SensorData as u32).to_be_bytes());
+                self.bufs.tm_buf[0..4].copy_from_slice(&self.id.unique_id.to_be_bytes());
+                self.bufs.tm_buf[4..8].copy_from_slice(&(SetId::SensorData as u32).to_be_bytes());
                 // Use binary serialization here. We want the data to be tightly packed.
-                self.tm_buf[8] = mgm_snapshot.valid as u8;
-                self.tm_buf[9..13].copy_from_slice(&mgm_snapshot.x.to_be_bytes());
-                self.tm_buf[13..17].copy_from_slice(&mgm_snapshot.y.to_be_bytes());
-                self.tm_buf[17..21].copy_from_slice(&mgm_snapshot.z.to_be_bytes());
+                self.bufs.tm_buf[8] = mgm_snapshot.valid as u8;
+                self.bufs.tm_buf[9..13].copy_from_slice(&mgm_snapshot.x.to_be_bytes());
+                self.bufs.tm_buf[13..17].copy_from_slice(&mgm_snapshot.y.to_be_bytes());
+                self.bufs.tm_buf[17..21].copy_from_slice(&mgm_snapshot.z.to_be_bytes());
                 let hk_tm = PusTmCreator::new(
                     SpHeader::new_from_apid(self.id.apid),
                     sec_header,
-                    &self.tm_buf[0..21],
+                    &self.bufs.tm_buf[0..21],
                     true,
                 );
                 self.tm_sender
@@ -264,22 +279,22 @@ impl<ComInterface: SpiInterface, TmSender: EcssTmSender> MgmHandlerLis3Mdl<ComIn
         // SPI interface.
         self.com_interface
             .transfer(
-                &self.tx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
-                &mut self.rx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
+                &self.bufs.tx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
+                &mut self.bufs.rx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
             )
             .expect("failed to transfer data");
         let x_raw = i16::from_le_bytes(
-            self.rx_buf[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2]
+            self.bufs.rx_buf[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2]
                 .try_into()
                 .unwrap(),
         );
         let y_raw = i16::from_le_bytes(
-            self.rx_buf[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2]
+            self.bufs.rx_buf[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2]
                 .try_into()
                 .unwrap(),
         );
         let z_raw = i16::from_le_bytes(
-            self.rx_buf[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2]
+            self.bufs.rx_buf[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2]
                 .try_into()
                 .unwrap(),
         );
@@ -293,16 +308,22 @@ impl<ComInterface: SpiInterface, TmSender: EcssTmSender> MgmHandlerLis3Mdl<ComIn
     }
 }
 
-impl<ComInterface: SpiInterface, TmSender: EcssTmSender> ModeProvider
-    for MgmHandlerLis3Mdl<ComInterface, TmSender>
+impl<
+        ComInterface: SpiInterface,
+        TmSender: EcssTmSender,
+        SwitchHelper: PowerSwitchInfo<PcduSwitch> + PowerSwitcherCommandSender<PcduSwitch>,
+    > ModeProvider for MgmHandlerLis3Mdl<ComInterface, TmSender, SwitchHelper>
 {
     fn mode_and_submode(&self) -> ModeAndSubmode {
         self.mode_and_submode
     }
 }
 
-impl<ComInterface: SpiInterface, TmSender: EcssTmSender> ModeRequestHandler
-    for MgmHandlerLis3Mdl<ComInterface, TmSender>
+impl<
+        ComInterface: SpiInterface,
+        TmSender: EcssTmSender,
+        SwitchHelper: PowerSwitchInfo<PcduSwitch> + PowerSwitcherCommandSender<PcduSwitch>,
+    > ModeRequestHandler for MgmHandlerLis3Mdl<ComInterface, TmSender, SwitchHelper>
 {
     type Error = ModeError;
     fn start_transition(
@@ -388,17 +409,17 @@ mod tests {
     use satrs_example::config::components::Apid;
     use satrs_minisim::acs::lis3mdl::MgmLis3RawValues;
 
-    use crate::{pus::hk::HkReply, requests::CompositeRequest};
+    use crate::{eps::TestSwitchHelper, pus::hk::HkReply, requests::CompositeRequest};
 
     use super::*;
 
     #[derive(Default)]
-    pub struct TestInterface {
+    pub struct TestSpiInterface {
         pub call_count: u32,
         pub next_mgm_data: MgmLis3RawValues,
     }
 
-    impl SpiInterface for TestInterface {
+    impl SpiInterface for TestSpiInterface {
         type Error = ();
 
         fn transfer(&mut self, _tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error> {
@@ -420,7 +441,8 @@ mod tests {
         pub composite_request_tx: mpsc::Sender<GenericMessage<CompositeRequest>>,
         pub hk_reply_rx: mpsc::Receiver<GenericMessage<HkReply>>,
         pub tm_rx: mpsc::Receiver<PacketAsVec>,
-        pub handler: MgmHandlerLis3Mdl<TestInterface, mpsc::Sender<PacketAsVec>>,
+        pub handler:
+            MgmHandlerLis3Mdl<TestSpiInterface, mpsc::Sender<PacketAsVec>, TestSwitchHelper>,
     }
 
     impl MgmTestbench {
@@ -450,8 +472,9 @@ mod tests {
                     mode_interface,
                     composite_request_rx,
                     hk_reply_tx,
+                    TestSwitchHelper::default(),
                     tm_tx,
-                    TestInterface::default(),
+                    TestSpiInterface::default(),
                     shared_mgm_set,
                 ),
             }
