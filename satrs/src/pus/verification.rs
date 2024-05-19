@@ -1248,7 +1248,7 @@ pub fn handle_completion_failure_with_generic_params<TcState: WasAtLeastAccepted
     Ok(error_params_propagated)
 }
 
-/// This function is similar to [handle_completion_failure_with_error_as_params] but handles the
+/// This function is similar to [handle_completion_failure_with_generic_params] but handles the
 /// step failure case.
 pub fn handle_step_failure_with_generic_params(
     tm_sender: &(impl EcssTmSender + ?Sized),
