@@ -8,10 +8,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.2.1] 2024-05-19
+
 ## Changed
 
 - The HAL TCP server `ServerConfig::new` method now sets the `reuse_port` and `reuse_addr`
   fields to `true`.
+
+## Fixed
+
+- Possibly subtly broken v0.2.0 build artifact.
 
 # [v0.2.0] 2024-05-02
 
