@@ -388,7 +388,7 @@ pub mod heapless_mod {
             static mut $pool_name: core::mem::MaybeUninit<[u8; $num_blocks * $block_size]> =
                 core::mem::MaybeUninit::new([0; $num_blocks * $block_size]);
             static mut $sizes_list_name: core::mem::MaybeUninit<[usize; $num_blocks]> =
-                core::mem::MaybeUninit::new([satrs::pool::STORE_FREE; $num_blocks]);
+                core::mem::MaybeUninit::new([$crate::pool::STORE_FREE; $num_blocks]);
         };
     }
 
@@ -1573,6 +1573,7 @@ mod tests {
     #[cfg(feature = "heapless")]
     mod heapless_tests {
         use super::*;
+        use crate::static_subpool;
         use core::mem::MaybeUninit;
 
         const SUBPOOL_1_BLOCK_SIZE: usize = 4;
