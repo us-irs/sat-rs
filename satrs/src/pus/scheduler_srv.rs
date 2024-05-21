@@ -286,7 +286,10 @@ mod tests {
     impl Pus11HandlerWithStoreTester {
         pub fn new() -> Self {
             let test_scheduler = TestScheduler::default();
-            let pool_cfg = StaticPoolConfig::new(alloc::vec![(16, 16), (8, 32), (4, 64)], false);
+            let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(
+                alloc::vec![(16, 16), (8, 32), (4, 64)],
+                false,
+            );
             let sched_tc_pool = StaticMemoryPool::new(pool_cfg.clone());
             let (common, srv_handler) = PusServiceHandlerWithSharedStoreCommon::new(0);
             Self {

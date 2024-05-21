@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+## Changed
+
+- Renamed `StaticPoolConfig::new` to `StaticPoolConfig::new_from_subpool_cfg_tuples`. The new
+  `new` implementation expects a type struct instead of tuples.
+
+## Added
+
+- `StaticHeaplessMemoryPool` which can be grown with user-provided static buffers.
+
 # [v0.2.1] 2024-05-19
 
 ## Changed
