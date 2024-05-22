@@ -341,7 +341,7 @@ mod tests {
             let (tm_funnel_tx, tm_funnel_rx) = mpsc::channel();
             let (pus_action_tx, pus_action_rx) = mpsc::channel();
             let (action_reply_tx, action_reply_rx) = mpsc::channel();
-            let (action_req_tx, action_req_rx) = mpsc::channel();
+            let (action_req_tx, action_req_rx) = mpsc::sync_channel(10);
             let verif_reporter = TestVerificationReporter::new(owner_id);
             let mut generic_req_router = GenericRequestRouter::default();
             generic_req_router

@@ -519,7 +519,7 @@ mod tests {
         pub fn new() -> Self {
             let (request_tx, request_rx) = mpsc::channel();
             let (reply_tx_to_pus, reply_rx_to_pus) = mpsc::channel();
-            let (reply_tx_to_parent, reply_rx_to_parent) = mpsc::channel();
+            let (reply_tx_to_parent, reply_rx_to_parent) = mpsc::sync_channel(5);
             let mode_interface = MpscModeLeafInterface {
                 request_rx,
                 reply_to_pus_tx: reply_tx_to_pus,
