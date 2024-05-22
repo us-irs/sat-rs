@@ -38,7 +38,8 @@ the example application.
 There is an active and continuous effort to get early flight heritage for the sat-rs library.
 Currently this library has the following flight heritage:
 
-- Submission as an [OPS-SAT experiment](https://blogs.esa.int/rocketscience/2024/05/21/ops-sat-reentry-tomorrow-final-experiments-continue/)
-  which has also flown on the satellite. The application is strongly based on the sat-rs example
-  application. You can find the repository of the experiment
-  [here](https://egit.irs.uni-stuttgart.de/rust/ops-sat-rs).
+- Submission as an [OPS-SAT experiment](https://www.esa.int/Enabling_Support/Operations/OPS-SAT)
+  which has also
+  [flown on the satellite](https://blogs.esa.int/rocketscience/2024/05/21/ops-sat-reentry-tomorrow-final-experiments-continue/).
+  The application is strongly based on the sat-rs example application. You can find the repository
+  of the experiment [here](https://egit.irs.uni-stuttgart.de/rust/ops-sat-rs).
