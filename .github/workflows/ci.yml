@@ -22,7 +22,7 @@ jobs:
       - name: Install nextest
         uses: taiki-e/install-action@nextest
       - run: cargo nextest run --all-features
-      - run: cargo test --doc
+      - run: cargo test --doc --all-features
 
   cross-check:
     name: Check Cross-Compilation

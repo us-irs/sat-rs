@@ -31,7 +31,9 @@
 //! const TEST_APID: u16 = 0x02;
 //! const TEST_COMPONENT_ID: UniqueApidTargetId = UniqueApidTargetId::new(TEST_APID, 0x05);
 //!
-//! let pool_cfg = StaticPoolConfig::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)], false);
+//! let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(
+//!     vec![(10, 32), (10, 64), (10, 128), (10, 1024)], false
+//! );
 //! let tm_pool = StaticMemoryPool::new(pool_cfg.clone());
 //! let shared_tm_pool = SharedStaticMemoryPool::new(RwLock::new(tm_pool));
 //! let (verif_tx, verif_rx) = mpsc::sync_channel(10);
@@ -2069,7 +2071,10 @@ pub mod tests {
 
     #[test]
     fn test_mpsc_verif_send() {
-        let pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(8, 8)], false));
+        let pool = StaticMemoryPool::new(StaticPoolConfig::new_from_subpool_cfg_tuples(
+            vec![(8, 8)],
+            false,
+        ));
         let shared_tm_store =
             SharedPacketPool::new(&SharedStaticMemoryPool::new(RwLock::new(pool)));
         let (tx, _) = mpsc::sync_channel(10);

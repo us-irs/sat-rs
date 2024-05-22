@@ -486,7 +486,9 @@ pub(crate) mod tests {
 
     use std::sync::RwLock;
 
-    use crate::pool::{PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
+    use crate::pool::{
+        PoolProviderWithGuards, SharedStaticMemoryPool, StaticMemoryPool, StaticPoolConfig,
+    };
 
     use super::*;
     use std::sync::mpsc;
@@ -554,7 +556,7 @@ pub(crate) mod tests {
     #[test]
     fn test_basic_shared_store_sender_unbounded_sender() {
         let (tc_tx, tc_rx) = mpsc::channel();
-        let pool_cfg = StaticPoolConfig::new(vec![(2, 8)], true);
+        let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(vec![(2, 8)], true);
         let shared_pool = SharedPacketPool::new(&SharedStaticMemoryPool::new(RwLock::new(
             StaticMemoryPool::new(pool_cfg),
         )));
@@ -571,7 +573,7 @@ pub(crate) mod tests {
     #[test]
     fn test_basic_shared_store_sender() {
         let (tc_tx, tc_rx) = mpsc::sync_channel(10);
-        let pool_cfg = StaticPoolConfig::new(vec![(2, 8)], true);
+        let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(vec![(2, 8)], true);
         let shared_pool = SharedPacketPool::new(&SharedStaticMemoryPool::new(RwLock::new(
             StaticMemoryPool::new(pool_cfg),
         )));
@@ -588,7 +590,7 @@ pub(crate) mod tests {
     #[test]
     fn test_basic_shared_store_sender_rx_dropped() {
         let (tc_tx, tc_rx) = mpsc::sync_channel(10);
-        let pool_cfg = StaticPoolConfig::new(vec![(2, 8)], true);
+        let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(vec![(2, 8)], true);
         let shared_pool = SharedPacketPool::new(&SharedStaticMemoryPool::new(RwLock::new(
             StaticMemoryPool::new(pool_cfg),
         )));
@@ -606,7 +608,7 @@ pub(crate) mod tests {
     #[test]
     fn test_basic_shared_store_sender_queue_full() {
         let (tc_tx, tc_rx) = mpsc::sync_channel(1);
-        let pool_cfg = StaticPoolConfig::new(vec![(2, 8)], true);
+        let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(vec![(2, 8)], true);
         let shared_pool = SharedPacketPool::new(&SharedStaticMemoryPool::new(RwLock::new(
             StaticMemoryPool::new(pool_cfg),
         )));
@@ -629,7 +631,7 @@ pub(crate) mod tests {
     #[test]
     fn test_basic_shared_store_store_error() {
         let (tc_tx, tc_rx) = mpsc::sync_channel(1);
-        let pool_cfg = StaticPoolConfig::new(vec![(1, 8)], true);
+        let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(vec![(1, 8)], true);
         let shared_pool = SharedPacketPool::new(&SharedStaticMemoryPool::new(RwLock::new(
             StaticMemoryPool::new(pool_cfg),
         )));
