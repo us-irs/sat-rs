@@ -123,7 +123,7 @@ impl Default for TestSwitchHelper {
             switch_delay_request_count: Default::default(),
             next_switch_delay: Duration::from_millis(1000),
             switch_map: Default::default(),
-            switch_map_valid: Default::default(),
+            switch_map_valid: true,
         }
     }
 }

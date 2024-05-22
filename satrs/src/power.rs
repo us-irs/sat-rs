@@ -60,7 +60,7 @@ pub type SwitchId = u16;
 
 /// Generic trait for a device capable of turning on and off switches.
 pub trait PowerSwitcherCommandSender<SwitchType: Into<u16>> {
-    type Error;
+    type Error: core::fmt::Debug;
 
     fn send_switch_on_cmd(
         &self,
@@ -75,7 +75,7 @@ pub trait PowerSwitcherCommandSender<SwitchType: Into<u16>> {
 }
 
 pub trait PowerSwitchInfo<SwitchType> {
-    type Error;
+    type Error: core::fmt::Debug;
 
     /// Retrieve the switch state
     fn switch_state(&self, switch_id: SwitchType) -> Result<SwitchState, Self::Error>;

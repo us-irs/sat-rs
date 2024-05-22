@@ -42,6 +42,14 @@ pub enum SetId {
     SensorData = 0,
 }
 
+#[derive(Default, Debug, PartialEq, Eq)]
+pub enum TransitionState {
+    #[default]
+    Idle,
+    PowerSwitching,
+    Done,
+}
+
 pub trait SpiInterface {
     type Error: Debug;
     fn transfer(&mut self, tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error>;
@@ -136,6 +144,24 @@ pub struct BufWrapper {
     tm_buf: [u8; 32],
 }
 
+pub struct ModeHelpers {
+    current: ModeAndSubmode,
+    target: Option<ModeAndSubmode>,
+    requestor_info: Option<MessageMetadata>,
+    transition_state: TransitionState,
+}
+
+impl Default for ModeHelpers {
+    fn default() -> Self {
+        Self {
+            current: ModeAndSubmode::new(DeviceMode::Off as u32, 0),
+            target: Default::default(),
+            requestor_info: Default::default(),
+            transition_state: Default::default(),
+        }
+    }
+}
+
 /// Example MGM device handler strongly based on the LIS3MDL MEMS device.
 #[derive(new)]
 #[allow(clippy::too_many_arguments)]
@@ -153,8 +179,8 @@ pub struct MgmHandlerLis3Mdl<
     tm_sender: TmSender,
     pub com_interface: ComInterface,
     shared_mgm_set: Arc<Mutex<MgmData>>,
-    #[new(value = "ModeAndSubmode::new(satrs_example::DeviceMode::Off as u32, 0)")]
-    mode_and_submode: ModeAndSubmode,
+    #[new(default)]
+    mode_helpers: ModeHelpers,
     #[new(default)]
     bufs: BufWrapper,
     #[new(default)]
@@ -172,6 +198,9 @@ impl<
         // Handle requests.
         self.handle_composite_requests();
         self.handle_mode_requests();
+        if let Some(target_mode_submode) = self.mode_helpers.target {
+            self.handle_mode_transition(target_mode_submode);
+        }
         if self.mode() == DeviceMode::Normal as u32 {
             log::trace!("polling LIS3MDL sensor {}", self.dev_str);
             self.poll_sensor();
@@ -306,6 +335,37 @@ impl<
         mgm_guard.valid = true;
         drop(mgm_guard);
     }
+
+    pub fn handle_mode_transition(&mut self, target_mode_submode: ModeAndSubmode) {
+        if target_mode_submode.mode() == DeviceMode::On as u32
+            || target_mode_submode.mode() == DeviceMode::Normal as u32
+        {
+            if self.mode_helpers.transition_state == TransitionState::Idle {
+                let result = self
+                    .switch_helper
+                    .send_switch_on_cmd(MessageMetadata::new(0, self.id.id()), PcduSwitch::Mgm);
+                if result.is_err() {
+                    // Could not send switch command.. still continue with transition.
+                    log::error!("failed to send switch on command");
+                }
+                self.mode_helpers.transition_state = TransitionState::PowerSwitching;
+            }
+            if self.mode_helpers.transition_state == TransitionState::PowerSwitching
+                && self
+                    .switch_helper
+                    .is_switch_on(PcduSwitch::Mgm)
+                    .expect("switch info error")
+            {
+                self.mode_helpers.transition_state = TransitionState::Done;
+            }
+            if self.mode_helpers.transition_state == TransitionState::Done {
+                self.mode_helpers.current = self.mode_helpers.target.unwrap();
+                self.handle_mode_reached(self.mode_helpers.requestor_info)
+                    .expect("failed to handle mode reached");
+                self.mode_helpers.transition_state = TransitionState::Idle;
+            }
+        }
+    }
 }
 
 impl<
@@ -315,7 +375,7 @@ impl<
     > ModeProvider for MgmHandlerLis3Mdl<ComInterface, TmSender, SwitchHelper>
 {
     fn mode_and_submode(&self) -> ModeAndSubmode {
-        self.mode_and_submode
+        self.mode_helpers.current
     }
 }
 
@@ -326,6 +386,7 @@ impl<
     > ModeRequestHandler for MgmHandlerLis3Mdl<ComInterface, TmSender, SwitchHelper>
 {
     type Error = ModeError;
+
     fn start_transition(
         &mut self,
         requestor: MessageMetadata,
@@ -336,11 +397,18 @@ impl<
             self.dev_str,
             mode_and_submode
         );
-        self.mode_and_submode = mode_and_submode;
+        self.mode_helpers.current = mode_and_submode;
         if mode_and_submode.mode() == DeviceMode::Off as u32 {
             self.shared_mgm_set.lock().unwrap().valid = false;
+            self.handle_mode_reached(Some(requestor))?;
+        } else if mode_and_submode.mode() == DeviceMode::Normal as u32
+            || mode_and_submode.mode() == DeviceMode::On as u32
+        {
+            // TODO: Write helper method for the struct? Might help for other handlers as well..
+            self.mode_helpers.transition_state = TransitionState::Idle;
+            self.mode_helpers.requestor_info = Some(requestor);
+            self.mode_helpers.target = Some(mode_and_submode);
         }
-        self.handle_mode_reached(Some(requestor))?;
         Ok(())
     }
 
@@ -348,7 +416,7 @@ impl<
         log::info!(
             "{} announcing mode: {:?}",
             self.dev_str,
-            self.mode_and_submode
+            self.mode_and_submode()
         );
     }
 
@@ -356,6 +424,7 @@ impl<
         &mut self,
         requestor: Option<MessageMetadata>,
     ) -> Result<(), Self::Error> {
+        self.mode_helpers.target = None;
         self.announce_mode(requestor, false);
         if let Some(requestor) = requestor {
             if requestor.sender_id() != PUS_MODE_SERVICE.id() {
@@ -403,6 +472,7 @@ mod tests {
 
     use satrs::{
         mode::{ModeReply, ModeRequest},
+        power::SwitchStateBinary,
         request::{GenericMessage, UniqueApidTargetId},
         tmtc::PacketAsVec,
     };
@@ -516,6 +586,22 @@ mod tests {
             DeviceMode::Normal as u32
         );
         assert_eq!(testbench.handler.mode_and_submode().submode(), 0);
+
+        // Verify power switch handling.
+        let mut switch_requests = testbench.handler.switch_helper.switch_requests.borrow_mut();
+        assert_eq!(switch_requests.len(), 1);
+        let switch_req = switch_requests.pop_front().expect("no switch request");
+        assert_eq!(switch_req.target_state, SwitchStateBinary::On);
+        assert_eq!(switch_req.switch_id, PcduSwitch::Mgm);
+        let mut switch_info_requests = testbench
+            .handler
+            .switch_helper
+            .switch_info_requests
+            .borrow_mut();
+        assert_eq!(switch_info_requests.len(), 1);
+        let switch_info_req = switch_info_requests.pop_front().expect("no switch request");
+        assert_eq!(switch_info_req, PcduSwitch::Mgm);
+
         let mode_reply = testbench
             .mode_reply_rx_to_pus
             .try_recv()
