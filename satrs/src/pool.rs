@@ -133,6 +133,7 @@ impl Display for StaticPoolAddr {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum StoreIdError {
     InvalidSubpool(u16),
     InvalidPacketIdx(u16),
@@ -156,6 +157,7 @@ impl Error for StoreIdError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum PoolError {
     /// Requested data block is too large
     DataTooLarge(usize),
@@ -387,6 +389,14 @@ pub mod heapless_mod {
         ($pool_name: ident, $sizes_list_name: ident, $num_blocks: expr, $block_size: expr) => {
             static mut $pool_name: core::mem::MaybeUninit<[u8; $num_blocks * $block_size]> =
                 core::mem::MaybeUninit::new([0; $num_blocks * $block_size]);
+            static mut $sizes_list_name: core::mem::MaybeUninit<[usize; $num_blocks]> =
+                core::mem::MaybeUninit::new([$crate::pool::STORE_FREE; $num_blocks]);
+        };
+        ($pool_name: ident, $sizes_list_name: ident, $num_blocks: expr, $block_size: expr, $meta_data: meta) => {
+            #[$meta_data]
+            static mut $pool_name: core::mem::MaybeUninit<[u8; $num_blocks * $block_size]> =
+                core::mem::MaybeUninit::new([0; $num_blocks * $block_size]);
+            #[$meta_data]
             static mut $sizes_list_name: core::mem::MaybeUninit<[usize; $num_blocks]> =
                 core::mem::MaybeUninit::new([$crate::pool::STORE_FREE; $num_blocks]);
         };
