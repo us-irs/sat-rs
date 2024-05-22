@@ -54,6 +54,17 @@ Each project has its own `CHANGELOG.md`.
    [`satrs`](https://egit.irs.uni-stuttgart.de/rust/satrs/src/branch/main/satrs)
    crate.
 
+# Flight Heritage
+
+There is an active and continuous effort to get early flight heritage for the sat-rs library.
+Currently this library has the following flight heritage:
+
+- Submission as an [OPS-SAT experiment](https://www.esa.int/Enabling_Support/Operations/OPS-SAT)
+  which has also
+  [flown on the satellite](https://blogs.esa.int/rocketscience/2024/05/21/ops-sat-reentry-tomorrow-final-experiments-continue/).
+  The application is strongly based on the sat-rs example application. You can find the repository
+  of the experiment [here](https://egit.irs.uni-stuttgart.de/rust/ops-sat-rs).
+
 # Coverage
 
 Coverage was generated using [`grcov`](https://github.com/mozilla/grcov). If you have not done so
@@ -64,5 +75,5 @@ rustup component add llvm-tools-preview
 cargo install grcov --locked
 ```
 
-After that, you can simply run `coverage.py` to test the `satrs-core` crate with coverage. You can
+After that, you can simply run `coverage.py` to test the `satrs` crate with coverage. You can
 optionally supply the `--open` flag to open the coverage report in your webbrowser.
