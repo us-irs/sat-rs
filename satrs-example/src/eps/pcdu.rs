@@ -22,7 +22,8 @@ use satrs_minisim::{
 use crate::{acs::mgm::MpscModeLeafInterface, pus::hk::HkReply, requests::CompositeRequest};
 
 pub trait SerialInterface {
-    type Error;
+    type Error: core::fmt::Debug;
+
     /// Send some data via the serial interface.
     fn send(&self, data: &[u8]) -> Result<(), Self::Error>;
     /// Receive all replies received on the serial interface so far. This function takes a closure
@@ -289,13 +290,18 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> PcduHandler<ComInter
                             state: switch_req.message.target_state(),
                         };
                         let pcdu_req_ser = serde_json::to_string(&pcdu_req).unwrap();
-                        self.com_interface.send(pcdu_req_ser.as_bytes())
+                        self.com_interface
+                            .send(pcdu_req_ser.as_bytes())
+                            .expect("failed to send switch request to PCDU");
                     }
                     Err(e) => todo!("failed to convert switch ID {:?} to typed PCDU switch", e),
                 },
                 Err(e) => match e {
-                    mpsc::TryRecvError::Empty => todo!(),
-                    mpsc::TryRecvError::Disconnected => todo!(),
+                    mpsc::TryRecvError::Empty => break,
+                    mpsc::TryRecvError::Disconnected => {
+                        log::warn!("switch request receiver has disconnected");
+                        break;
+                    }
                 },
             };
         }

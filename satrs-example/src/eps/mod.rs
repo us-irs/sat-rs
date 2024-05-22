@@ -1,16 +1,9 @@
 use derive_new::new;
-use std::{
-    borrow::BorrowMut,
-    cell::RefCell,
-    collections::VecDeque,
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, collections::VecDeque, sync::mpsc, time::Duration};
 
 use satrs::{
     power::{
-        PowerSwitchInfo, PowerSwitcherCommandSender, SwitchId, SwitchRequest, SwitchState,
-        SwitchStateBinary,
+        PowerSwitchInfo, PowerSwitcherCommandSender, SwitchRequest, SwitchState, SwitchStateBinary,
     },
     queue::GenericSendError,
     request::{GenericMessage, MessageMetadata},
@@ -26,17 +19,14 @@ pub mod pcdu;
 pub struct PowerSwitchHelper {
     switcher_tx: mpsc::SyncSender<GenericMessage<SwitchRequest>>,
     shared_switch_set: SharedSwitchSet,
-    #[new(default)]
-    switch_cmd_sent_instant: Option<Instant>,
 }
 
 #[derive(Debug, Error, Copy, Clone, PartialEq, Eq)]
 pub enum SwitchCommandingError {
-    #[error("invalid switch id")]
-    InvalidSwitchId(SwitchId),
     #[error("send error: {0}")]
     Send(#[from] GenericSendError),
 }
+
 #[derive(Debug, Error, Copy, Clone, PartialEq, Eq)]
 pub enum SwitchInfoError {
     /// This is a configuration error which should not occur.
@@ -196,6 +186,7 @@ impl PowerSwitcherCommandSender<PcduSwitch> for TestSwitchHelper {
     }
 }
 
+#[allow(dead_code)]
 impl TestSwitchHelper {
     // Helper function which can be used to force a switch to another state for test purposes.
     pub fn set_switch_state(&mut self, switch: PcduSwitch, state: SwitchState) {
