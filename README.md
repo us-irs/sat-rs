@@ -61,7 +61,8 @@ Currently this library has the following flight heritage:
 
 - Submission as an [OPS-SAT experiment](https://blogs.esa.int/rocketscience/2024/05/21/ops-sat-reentry-tomorrow-final-experiments-continue/)
   which has also flown on the satellite. The application is strongly based on the sat-rs example
-  application. You can find the repository [here](https://egit.irs.uni-stuttgart.de/rust/ops-sat-rs).
+  application. You can find the repository of the experiment
+  [here](https://egit.irs.uni-stuttgart.de/rust/ops-sat-rs).
 
 # Coverage
 
