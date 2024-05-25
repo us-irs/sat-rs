@@ -1,97 +1,16 @@
+#![allow(unused_imports)]
 use rmp_serde::{Deserializer, Serializer};
-use satrs_minisim::eps::SwitchMap;
+use satrs_minisim::eps::{SwitchMap, SwitchMapWrapper};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     net::{SocketAddr, UdpSocket},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
-pub enum Color {
-    Red = 0,
-    Green = 1,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-struct Human {
-    age: u16,
-    name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-struct HumanAdvanced {
-    id: u32,
-    age: u16,
-    name: String,
-    fav_color: Color,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-struct HumanGroup {
-    humans: Vec<HumanAdvanced>,
-    bank: HashMap<u32, usize>,
-}
-
-#[allow(dead_code)]
-fn random_testing() {
-    let mut buf = Vec::new();
-    let john = HumanAdvanced {
-        id: 0,
-        age: 42,
-        name: "John".into(),
-        fav_color: Color::Green,
-    };
-
-    john.serialize(&mut Serializer::new(&mut buf)).unwrap();
-
-    println!("{:?}", buf);
-    let new_val: HumanAdvanced = rmp_serde::from_slice(&buf).expect("deserialization failed");
-    let rmpv_val: rmpv::Value = rmp_serde::from_slice(&buf).expect("serialization into val failed");
-    println!("RMPV value: {:?}", rmpv_val);
-    let json_str = serde_json::to_string(&rmpv_val).expect("creating json failed");
-    assert_eq!(john, new_val);
-    println!("JSON str: {}", json_str);
-    let val_test: HumanAdvanced = serde_json::from_str(&json_str).expect("wild");
-    println!("val test: {:?}", val_test);
-
-    let nadine = HumanAdvanced {
-        id: 1,
-        age: 24,
-        name: "Nadine".into(),
-        fav_color: Color::Red,
-    };
-    let mut bank = HashMap::default();
-    bank.insert(john.id, 1000000);
-    bank.insert(nadine.id, 1);
-
-    let human_group = HumanGroup {
-        humans: vec![john, nadine.clone()],
-        bank,
-    };
-    let json_str = serde_json::to_string(&nadine).unwrap();
-    println!("Nadine as JSON: {}", json_str);
-
-    let nadine_is_back: HumanAdvanced = serde_json::from_str(&json_str).unwrap();
-    println!("nadine deserialized: {:?}", nadine_is_back);
-
-    let human_group_json = serde_json::to_string(&human_group).unwrap();
-    println!("human group: {}", human_group_json);
-    println!("human group json size: {}", human_group_json.len());
-
-    let human_group_rmp_vec = rmp_serde::to_vec_named(&human_group_json).unwrap();
-    println!("human group msg pack size: {:?}", human_group_rmp_vec.len());
-}
-
-#[allow(dead_code)]
-fn send_back_weird_stuff(buf: &[u8], received: usize, socket: &UdpSocket, src: SocketAddr) {
-    let human_from_python: rmpv::Value = rmp_serde::from_slice(&buf[..received]).expect("blablah");
-    let human_attempt_2: Human = rmp_serde::from_slice(&buf[..received]).expect("blhfwhfw");
-    println!("human from python: {}", human_from_python);
-    println!("human 2 from python: {:?}", human_attempt_2);
-    let send_back_human = rmp_serde::to_vec_named(&human_attempt_2).expect("k32k323k2");
-    socket
-        .send_to(&send_back_human, src)
-        .expect("sending back failed");
+#[derive(Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct SwitchSet {
+    pub valid: bool,
+    pub switch_map: SwitchMap,
 }
 
 pub struct UdpServer {
@@ -129,9 +48,13 @@ fn main() {
             .expect("receive call failed");
         udp_server.last_sender = Some(src);
         println!("received {} bytes from {:?}", received, src);
-        let switch_map_off = SwitchMap::default();
+        let switch_map_off = SwitchMapWrapper::default();
+        let switch_set = SwitchSet {
+            valid: true,
+            switch_map: switch_map_off.0.clone(),
+        };
         let switch_map_off_json =
-            serde_json::to_string(&switch_map_off).expect("json serialization failed");
+            serde_json::to_string(&switch_set).expect("json serialization failed");
         println!("sending back reply: {}", switch_map_off_json);
         udp_server.send_back_reply(switch_map_off_json.as_bytes());
     }
