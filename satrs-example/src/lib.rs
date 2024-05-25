@@ -9,12 +9,12 @@ pub enum DeviceMode {
     Normal = 2,
 }
 
-pub struct TimeStampHelper {
+pub struct TimestampHelper {
     stamper: CdsTime,
     time_stamp: [u8; 7],
 }
 
-impl TimeStampHelper {
+impl TimestampHelper {
     pub fn stamp(&self) -> &[u8] {
         &self.time_stamp
     }
@@ -29,7 +29,7 @@ impl TimeStampHelper {
     }
 }
 
-impl Default for TimeStampHelper {
+impl Default for TimestampHelper {
     fn default() -> Self {
         Self {
             stamper: CdsTime::now_with_u16_days().expect("creating time stamper failed"),

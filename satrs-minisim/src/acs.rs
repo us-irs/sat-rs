@@ -6,14 +6,17 @@ use asynchronix::{
 };
 use satrs::power::SwitchStateBinary;
 use satrs_minisim::{
-    acs::{MgmReply, MgmSensorValues, MgtDipole, MgtHkSet, MgtReply, MGT_GEN_MAGNETIC_FIELD},
+    acs::{
+        lis3mdl::MgmLis3MdlReply, MgmReplyCommon, MgmReplyProvider, MgmSensorValuesMicroTesla,
+        MgtDipole, MgtHkSet, MgtReply, MGT_GEN_MAGNETIC_FIELD,
+    },
     SimReply,
 };
 
 use crate::time::current_millis;
 
-// Earth magnetic field varies between -30 uT and 30 uT
-const AMPLITUDE_MGM: f32 = 0.03;
+// Earth magnetic field varies between roughly -30 uT and 30 uT
+const AMPLITUDE_MGM_UT: f32 = 30.0;
 // Lets start with a simple frequency here.
 const FREQUENCY_MGM: f32 = 1.0;
 const PHASE_X: f32 = 0.0;
@@ -23,38 +26,37 @@ const PHASE_Z: f32 = 0.2;
 
 /// Simple model for a magnetometer where the measure magnetic fields are modeled with sine waves.
 ///
-/// Please note that that a more realistic MGM model wouold include the following components
-/// which are not included here to simplify the model:
-///
-/// 1. It would probably generate signed [i16] values which need to be converted to SI units
-///    because it is a digital sensor
-/// 2. It would sample the magnetic field at a high fixed rate. This might not be possible for
-///    a general purpose OS, but self self-sampling at a relatively high rate (20-40 ms) might
-///    stil lbe possible.
-pub struct MagnetometerModel {
+/// An ideal sensor would sample the magnetic field at a high fixed rate. This might not be
+/// possible for a general purpose OS, but self self-sampling at a relatively high rate (20-40 ms)
+/// might still be possible and is probably sufficient for many OBSW needs.
+pub struct MagnetometerModel<ReplyProvider: MgmReplyProvider> {
     pub switch_state: SwitchStateBinary,
     pub periodicity: Duration,
-    pub external_mag_field: Option<MgmSensorValues>,
+    pub external_mag_field: Option<MgmSensorValuesMicroTesla>,
     pub reply_sender: mpsc::Sender<SimReply>,
+    pub phatom: std::marker::PhantomData<ReplyProvider>,
 }
 
-impl MagnetometerModel {
-    pub fn new(periodicity: Duration, reply_sender: mpsc::Sender<SimReply>) -> Self {
+impl MagnetometerModel<MgmLis3MdlReply> {
+    pub fn new_for_lis3mdl(periodicity: Duration, reply_sender: mpsc::Sender<SimReply>) -> Self {
         Self {
             switch_state: SwitchStateBinary::Off,
             periodicity,
             external_mag_field: None,
             reply_sender,
+            phatom: std::marker::PhantomData,
         }
     }
+}
 
+impl<ReplyProvider: MgmReplyProvider> MagnetometerModel<ReplyProvider> {
     pub async fn switch_device(&mut self, switch_state: SwitchStateBinary) {
         self.switch_state = switch_state;
     }
 
     pub async fn send_sensor_values(&mut self, _: (), scheduler: &Scheduler<Self>) {
         self.reply_sender
-            .send(SimReply::new(MgmReply {
+            .send(ReplyProvider::create_mgm_reply(MgmReplyCommon {
                 switch_state: self.switch_state,
                 sensor_values: self.calculate_current_mgm_tuple(current_millis(scheduler.time())),
             }))
@@ -63,23 +65,23 @@ impl MagnetometerModel {
 
     // Devices like magnetorquers generate a strong magnetic field which overrides the default
     // model for the measured magnetic field.
-    pub async fn apply_external_magnetic_field(&mut self, field: MgmSensorValues) {
+    pub async fn apply_external_magnetic_field(&mut self, field: MgmSensorValuesMicroTesla) {
         self.external_mag_field = Some(field);
     }
 
-    fn calculate_current_mgm_tuple(&self, time_ms: u64) -> MgmSensorValues {
+    fn calculate_current_mgm_tuple(&self, time_ms: u64) -> MgmSensorValuesMicroTesla {
         if SwitchStateBinary::On == self.switch_state {
             if let Some(ext_field) = self.external_mag_field {
                 return ext_field;
             }
             let base_sin_val = 2.0 * PI * FREQUENCY_MGM * (time_ms as f32 / 1000.0);
-            return MgmSensorValues {
-                x: AMPLITUDE_MGM * (base_sin_val + PHASE_X).sin(),
-                y: AMPLITUDE_MGM * (base_sin_val + PHASE_Y).sin(),
-                z: AMPLITUDE_MGM * (base_sin_val + PHASE_Z).sin(),
+            return MgmSensorValuesMicroTesla {
+                x: AMPLITUDE_MGM_UT * (base_sin_val + PHASE_X).sin(),
+                y: AMPLITUDE_MGM_UT * (base_sin_val + PHASE_Y).sin(),
+                z: AMPLITUDE_MGM_UT * (base_sin_val + PHASE_Z).sin(),
             };
         }
-        MgmSensorValues {
+        MgmSensorValuesMicroTesla {
             x: 0.0,
             y: 0.0,
             z: 0.0,
@@ -87,13 +89,13 @@ impl MagnetometerModel {
     }
 }
 
-impl Model for MagnetometerModel {}
+impl<ReplyProvider: MgmReplyProvider> Model for MagnetometerModel<ReplyProvider> {}
 
 pub struct MagnetorquerModel {
     switch_state: SwitchStateBinary,
     torquing: bool,
     torque_dipole: MgtDipole,
-    pub gen_magnetic_field: Output<MgmSensorValues>,
+    pub gen_magnetic_field: Output<MgmSensorValuesMicroTesla>,
     reply_sender: mpsc::Sender<SimReply>,
 }
 
@@ -146,14 +148,14 @@ impl MagnetorquerModel {
 
     pub fn send_housekeeping_data(&mut self) {
         self.reply_sender
-            .send(SimReply::new(MgtReply::Hk(MgtHkSet {
+            .send(SimReply::new(&MgtReply::Hk(MgtHkSet {
                 dipole: self.torque_dipole,
                 torquing: self.torquing,
             })))
             .unwrap();
     }
 
-    fn calc_magnetic_field(&self, _: MgtDipole) -> MgmSensorValues {
+    fn calc_magnetic_field(&self, _: MgtDipole) -> MgmSensorValuesMicroTesla {
         // Simplified model: Just returns some fixed magnetic field for now.
         // Later, we could make this more fancy by incorporating the commanded dipole.
         MGT_GEN_MAGNETIC_FIELD
@@ -179,9 +181,12 @@ pub mod tests {
 
     use satrs::power::SwitchStateBinary;
     use satrs_minisim::{
-        acs::{MgmReply, MgmRequest, MgtDipole, MgtHkSet, MgtReply, MgtRequest},
+        acs::{
+            lis3mdl::{self, MgmLis3MdlReply},
+            MgmRequestLis3Mdl, MgtDipole, MgtHkSet, MgtReply, MgtRequest,
+        },
         eps::PcduSwitch,
-        SerializableSimMsgPayload, SimMessageProvider, SimRequest, SimTarget,
+        SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimRequest,
     };
 
     use crate::{eps::tests::switch_device_on, test_helpers::SimTestbench};
@@ -189,7 +194,7 @@ pub mod tests {
     #[test]
     fn test_basic_mgm_request() {
         let mut sim_testbench = SimTestbench::new();
-        let request = SimRequest::new_with_epoch_time(MgmRequest::RequestSensorData);
+        let request = SimRequest::new_with_epoch_time(MgmRequestLis3Mdl::RequestSensorData);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
@@ -198,13 +203,13 @@ pub mod tests {
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());
         let sim_reply = sim_reply.unwrap();
-        assert_eq!(sim_reply.target(), SimTarget::Mgm);
-        let reply = MgmReply::from_sim_message(&sim_reply)
+        assert_eq!(sim_reply.component(), SimComponent::MgmLis3Mdl);
+        let reply = MgmLis3MdlReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
-        assert_eq!(reply.switch_state, SwitchStateBinary::Off);
-        assert_eq!(reply.sensor_values.x, 0.0);
-        assert_eq!(reply.sensor_values.y, 0.0);
-        assert_eq!(reply.sensor_values.z, 0.0);
+        assert_eq!(reply.common.switch_state, SwitchStateBinary::Off);
+        assert_eq!(reply.common.sensor_values.x, 0.0);
+        assert_eq!(reply.common.sensor_values.y, 0.0);
+        assert_eq!(reply.common.sensor_values.z, 0.0);
     }
 
     #[test]
@@ -212,7 +217,7 @@ pub mod tests {
         let mut sim_testbench = SimTestbench::new();
         switch_device_on(&mut sim_testbench, PcduSwitch::Mgm);
 
-        let mut request = SimRequest::new_with_epoch_time(MgmRequest::RequestSensorData);
+        let mut request = SimRequest::new_with_epoch_time(MgmRequestLis3Mdl::RequestSensorData);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
@@ -221,12 +226,12 @@ pub mod tests {
         let mut sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_some());
         let mut sim_reply = sim_reply_res.unwrap();
-        assert_eq!(sim_reply.target(), SimTarget::Mgm);
-        let first_reply = MgmReply::from_sim_message(&sim_reply)
+        assert_eq!(sim_reply.component(), SimComponent::MgmLis3Mdl);
+        let first_reply = MgmLis3MdlReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
         sim_testbench.step_by(Duration::from_millis(50));
 
-        request = SimRequest::new_with_epoch_time(MgmRequest::RequestSensorData);
+        request = SimRequest::new_with_epoch_time(MgmRequestLis3Mdl::RequestSensorData);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
@@ -236,8 +241,24 @@ pub mod tests {
         assert!(sim_reply_res.is_some());
         sim_reply = sim_reply_res.unwrap();
 
-        let second_reply = MgmReply::from_sim_message(&sim_reply)
+        let second_reply = MgmLis3MdlReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
+        let x_conv_back = second_reply.raw.x as f32
+            * lis3mdl::FIELD_LSB_PER_GAUSS_4_SENS
+            * lis3mdl::GAUSS_TO_MICROTESLA_FACTOR as f32;
+        let y_conv_back = second_reply.raw.y as f32
+            * lis3mdl::FIELD_LSB_PER_GAUSS_4_SENS
+            * lis3mdl::GAUSS_TO_MICROTESLA_FACTOR as f32;
+        let z_conv_back = second_reply.raw.z as f32
+            * lis3mdl::FIELD_LSB_PER_GAUSS_4_SENS
+            * lis3mdl::GAUSS_TO_MICROTESLA_FACTOR as f32;
+        let diff_x = (second_reply.common.sensor_values.x - x_conv_back).abs();
+        assert!(diff_x < 0.01, "diff x too large: {}", diff_x);
+        let diff_y = (second_reply.common.sensor_values.y - y_conv_back).abs();
+        assert!(diff_y < 0.01, "diff y too large: {}", diff_y);
+        let diff_z = (second_reply.common.sensor_values.z - z_conv_back).abs();
+        assert!(diff_z < 0.01, "diff z too large: {}", diff_z);
+        // assert_eq!(second_reply.raw_reply, SwitchStateBinary::On);
         // Check that the values are changing.
         assert!(first_reply != second_reply);
     }

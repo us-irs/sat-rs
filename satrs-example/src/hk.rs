@@ -1,7 +1,9 @@
 use derive_new::new;
 use satrs::hk::UniqueId;
 use satrs::request::UniqueApidTargetId;
-use satrs::spacepackets::ByteConversionError;
+use satrs::spacepackets::ecss::hk;
+use satrs::spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
+use satrs::spacepackets::{ByteConversionError, SpHeader};
 
 #[derive(Debug, new, Copy, Clone)]
 pub struct HkUniqueId {
@@ -31,5 +33,37 @@ impl HkUniqueId {
         buf[4..8].copy_from_slice(&self.set_id.to_be_bytes());
 
         Ok(8)
+    }
+}
+
+#[derive(new)]
+pub struct PusHkHelper {
+    component_id: UniqueApidTargetId,
+}
+
+impl PusHkHelper {
+    pub fn generate_hk_report_packet<
+        'a,
+        'b,
+        HkWriter: FnMut(&mut [u8]) -> Result<usize, ByteConversionError>,
+    >(
+        &self,
+        timestamp: &'a [u8],
+        set_id: u32,
+        hk_data_writer: &mut HkWriter,
+        buf: &'b mut [u8],
+    ) -> Result<PusTmCreator<'a, 'b>, ByteConversionError> {
+        let sec_header =
+            PusTmSecondaryHeader::new(3, hk::Subservice::TmHkPacket as u8, 0, 0, timestamp);
+        buf[0..4].copy_from_slice(&self.component_id.unique_id.to_be_bytes());
+        buf[4..8].copy_from_slice(&set_id.to_be_bytes());
+        let (_, second_half) = buf.split_at_mut(8);
+        let hk_data_len = hk_data_writer(second_half)?;
+        Ok(PusTmCreator::new(
+            SpHeader::new_from_apid(self.component_id.apid),
+            sec_header,
+            &buf[0..8 + hk_data_len],
+            true,
+        ))
     }
 }

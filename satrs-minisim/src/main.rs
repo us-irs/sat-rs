@@ -3,7 +3,8 @@ use asynchronix::simulation::{Mailbox, SimInit};
 use asynchronix::time::{MonotonicTime, SystemClock};
 use controller::SimController;
 use eps::PcduModel;
-use satrs_minisim::{SimReply, SimRequest, SIM_CTRL_UDP_PORT};
+use satrs_minisim::udp::SIM_CTRL_PORT;
+use satrs_minisim::{SimReply, SimRequest};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime};
@@ -30,7 +31,8 @@ fn create_sim_controller(
     request_receiver: mpsc::Receiver<SimRequest>,
 ) -> SimController {
     // Instantiate models and their mailboxes.
-    let mgm_model = MagnetometerModel::new(Duration::from_millis(50), reply_sender.clone());
+    let mgm_model =
+        MagnetometerModel::new_for_lis3mdl(Duration::from_millis(50), reply_sender.clone());
 
     let mgm_mailbox = Mailbox::new();
     let mgm_addr = mgm_mailbox.address();
@@ -112,9 +114,9 @@ fn main() {
     });
 
     let mut udp_server =
-        SimUdpServer::new(SIM_CTRL_UDP_PORT, request_sender, reply_receiver, 200, None)
+        SimUdpServer::new(SIM_CTRL_PORT, request_sender, reply_receiver, 200, None)
             .expect("could not create UDP request server");
-    log::info!("starting UDP server on port {}", SIM_CTRL_UDP_PORT);
+    log::info!("starting UDP server on port {}", SIM_CTRL_PORT);
     // This thread manages the simulator UDP server.
     let udp_tc_thread = thread::spawn(move || {
         udp_server.run();

@@ -1,19 +1,18 @@
 use asynchronix::time::MonotonicTime;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-pub const SIM_CTRL_UDP_PORT: u16 = 7303;
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SimTarget {
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub enum SimComponent {
     SimCtrl,
-    Mgm,
+    MgmLis3Mdl,
     Mgt,
     Pcdu,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SimMessage {
-    pub target: SimTarget,
+    pub target: SimComponent,
     pub payload: String,
 }
 
@@ -37,10 +36,10 @@ pub enum SimMessageType {
 pub trait SerializableSimMsgPayload<P: SimMessageProvider>:
     Serialize + DeserializeOwned + Sized
 {
-    const TARGET: SimTarget;
+    const TARGET: SimComponent;
 
     fn from_sim_message(sim_message: &P) -> Result<Self, SimMessageError<P>> {
-        if sim_message.target() == Self::TARGET {
+        if sim_message.component() == Self::TARGET {
             return Ok(serde_json::from_str(sim_message.payload())?);
         }
         Err(SimMessageError::TargetRequestMissmatch(sim_message.clone()))
@@ -49,7 +48,7 @@ pub trait SerializableSimMsgPayload<P: SimMessageProvider>:
 
 pub trait SimMessageProvider: Serialize + DeserializeOwned + Clone + Sized {
     fn msg_type(&self) -> SimMessageType;
-    fn target(&self) -> SimTarget;
+    fn component(&self) -> SimComponent;
     fn payload(&self) -> &String;
     fn from_raw_data(data: &[u8]) -> serde_json::Result<Self> {
         serde_json::from_slice(data)
@@ -78,7 +77,7 @@ impl SimRequest {
 }
 
 impl SimMessageProvider for SimRequest {
-    fn target(&self) -> SimTarget {
+    fn component(&self) -> SimComponent {
         self.inner.target
     }
     fn payload(&self) -> &String {
@@ -91,25 +90,25 @@ impl SimMessageProvider for SimRequest {
 }
 
 /// A generic simulation reply type. Right now, the payload data is expected to be
-/// JSON, which might be changed inthe future.
+/// JSON, which might be changed in the future.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SimReply {
     inner: SimMessage,
 }
 
 impl SimReply {
-    pub fn new<T: SerializableSimMsgPayload<SimReply>>(serializable_reply: T) -> Self {
+    pub fn new<T: SerializableSimMsgPayload<SimReply>>(serializable_reply: &T) -> Self {
         Self {
             inner: SimMessage {
                 target: T::TARGET,
-                payload: serde_json::to_string(&serializable_reply).unwrap(),
+                payload: serde_json::to_string(serializable_reply).unwrap(),
             },
         }
     }
 }
 
 impl SimMessageProvider for SimReply {
-    fn target(&self) -> SimTarget {
+    fn component(&self) -> SimComponent {
         self.inner.target
     }
     fn payload(&self) -> &String {
@@ -126,7 +125,7 @@ pub enum SimCtrlRequest {
 }
 
 impl SerializableSimMsgPayload<SimRequest> for SimCtrlRequest {
-    const TARGET: SimTarget = SimTarget::SimCtrl;
+    const TARGET: SimComponent = SimComponent::SimCtrl;
 }
 
 pub type SimReplyError = SimMessageError<SimReply>;
@@ -151,7 +150,7 @@ pub enum SimCtrlReply {
 }
 
 impl SerializableSimMsgPayload<SimReply> for SimCtrlReply {
-    const TARGET: SimTarget = SimTarget::SimCtrl;
+    const TARGET: SimComponent = SimComponent::SimCtrl;
 }
 
 impl From<SimRequestError> for SimCtrlReply {
@@ -162,16 +161,79 @@ impl From<SimRequestError> for SimCtrlReply {
 
 pub mod eps {
     use super::*;
+    use satrs::power::{SwitchState, SwitchStateBinary};
     use std::collections::HashMap;
+    use strum::{EnumIter, IntoEnumIterator};
 
-    use satrs::power::SwitchStateBinary;
+    pub type SwitchMap = HashMap<PcduSwitch, SwitchState>;
+    pub type SwitchMapBinary = HashMap<PcduSwitch, SwitchStateBinary>;
 
-    pub type SwitchMap = HashMap<PcduSwitch, SwitchStateBinary>;
+    pub struct SwitchMapWrapper(pub SwitchMap);
+    pub struct SwitchMapBinaryWrapper(pub SwitchMapBinary);
 
-    #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+    #[derive(
+        Debug,
+        Copy,
+        Clone,
+        PartialEq,
+        Eq,
+        Serialize,
+        Deserialize,
+        Hash,
+        EnumIter,
+        IntoPrimitive,
+        TryFromPrimitive,
+    )]
+    #[repr(u16)]
     pub enum PcduSwitch {
         Mgm = 0,
         Mgt = 1,
+    }
+
+    impl Default for SwitchMapBinaryWrapper {
+        fn default() -> Self {
+            let mut switch_map = SwitchMapBinary::default();
+            for entry in PcduSwitch::iter() {
+                switch_map.insert(entry, SwitchStateBinary::Off);
+            }
+            Self(switch_map)
+        }
+    }
+
+    impl Default for SwitchMapWrapper {
+        fn default() -> Self {
+            let mut switch_map = SwitchMap::default();
+            for entry in PcduSwitch::iter() {
+                switch_map.insert(entry, SwitchState::Unknown);
+            }
+            Self(switch_map)
+        }
+    }
+
+    impl SwitchMapWrapper {
+        pub fn new_with_init_switches_off() -> Self {
+            let mut switch_map = SwitchMap::default();
+            for entry in PcduSwitch::iter() {
+                switch_map.insert(entry, SwitchState::Off);
+            }
+            Self(switch_map)
+        }
+
+        pub fn from_binary_switch_map_ref(switch_map: &SwitchMapBinary) -> Self {
+            Self(
+                switch_map
+                    .iter()
+                    .map(|(key, value)| (*key, SwitchState::from(*value)))
+                    .collect(),
+            )
+        }
+    }
+
+    #[derive(Debug, Copy, Clone)]
+    #[repr(u8)]
+    pub enum PcduRequestId {
+        SwitchDevice = 0,
+        RequestSwitchInfo = 1,
     }
 
     #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -184,16 +246,17 @@ pub mod eps {
     }
 
     impl SerializableSimMsgPayload<SimRequest> for PcduRequest {
-        const TARGET: SimTarget = SimTarget::Pcdu;
+        const TARGET: SimComponent = SimComponent::Pcdu;
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
     pub enum PcduReply {
-        SwitchInfo(SwitchMap),
+        // Ack,
+        SwitchInfo(SwitchMapBinary),
     }
 
     impl SerializableSimMsgPayload<SimReply> for PcduReply {
-        const TARGET: SimTarget = SimTarget::Pcdu;
+        const TARGET: SimComponent = SimComponent::Pcdu;
     }
 }
 
@@ -204,40 +267,116 @@ pub mod acs {
 
     use super::*;
 
+    pub trait MgmReplyProvider: Send + 'static {
+        fn create_mgm_reply(common: MgmReplyCommon) -> SimReply;
+    }
+
     #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-    pub enum MgmRequest {
+    pub enum MgmRequestLis3Mdl {
         RequestSensorData,
     }
 
-    impl SerializableSimMsgPayload<SimRequest> for MgmRequest {
-        const TARGET: SimTarget = SimTarget::Mgm;
+    impl SerializableSimMsgPayload<SimRequest> for MgmRequestLis3Mdl {
+        const TARGET: SimComponent = SimComponent::MgmLis3Mdl;
     }
 
     // Normally, small magnetometers generate their output as a signed 16 bit raw format or something
     // similar which needs to be converted to a signed float value with physical units. We will
-    // simplify this now and generate the signed float values directly.
+    // simplify this now and generate the signed float values directly. The unit is micro tesla.
     #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
-    pub struct MgmSensorValues {
+    pub struct MgmSensorValuesMicroTesla {
         pub x: f32,
         pub y: f32,
         pub z: f32,
     }
 
     #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
-    pub struct MgmReply {
+    pub struct MgmReplyCommon {
         pub switch_state: SwitchStateBinary,
-        pub sensor_values: MgmSensorValues,
+        pub sensor_values: MgmSensorValuesMicroTesla,
     }
 
-    impl SerializableSimMsgPayload<SimReply> for MgmReply {
-        const TARGET: SimTarget = SimTarget::Mgm;
-    }
-
-    pub const MGT_GEN_MAGNETIC_FIELD: MgmSensorValues = MgmSensorValues {
-        x: 0.03,
-        y: -0.03,
-        z: 0.03,
+    pub const MGT_GEN_MAGNETIC_FIELD: MgmSensorValuesMicroTesla = MgmSensorValuesMicroTesla {
+        x: 30.0,
+        y: -30.0,
+        z: 30.0,
     };
+    pub const ALL_ONES_SENSOR_VAL: i16 = 0xffff_u16 as i16;
+
+    pub mod lis3mdl {
+        use super::*;
+
+        // Field data register scaling
+        pub const GAUSS_TO_MICROTESLA_FACTOR: u32 = 100;
+        pub const FIELD_LSB_PER_GAUSS_4_SENS: f32 = 1.0 / 6842.0;
+        pub const FIELD_LSB_PER_GAUSS_8_SENS: f32 = 1.0 / 3421.0;
+        pub const FIELD_LSB_PER_GAUSS_12_SENS: f32 = 1.0 / 2281.0;
+        pub const FIELD_LSB_PER_GAUSS_16_SENS: f32 = 1.0 / 1711.0;
+
+        #[derive(Default, Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+        pub struct MgmLis3RawValues {
+            pub x: i16,
+            pub y: i16,
+            pub z: i16,
+        }
+
+        #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+        pub struct MgmLis3MdlReply {
+            pub common: MgmReplyCommon,
+            // Raw sensor values which are transmitted by the LIS3 device in little-endian
+            // order.
+            pub raw: MgmLis3RawValues,
+        }
+
+        impl MgmLis3MdlReply {
+            pub fn new(common: MgmReplyCommon) -> Self {
+                match common.switch_state {
+                    SwitchStateBinary::Off => Self {
+                        common,
+                        raw: MgmLis3RawValues {
+                            x: ALL_ONES_SENSOR_VAL,
+                            y: ALL_ONES_SENSOR_VAL,
+                            z: ALL_ONES_SENSOR_VAL,
+                        },
+                    },
+                    SwitchStateBinary::On => {
+                        let mut raw_reply: [u8; 7] = [0; 7];
+                        let raw_x: i16 = (common.sensor_values.x
+                            / (GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS))
+                            .round() as i16;
+                        let raw_y: i16 = (common.sensor_values.y
+                            / (GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS))
+                            .round() as i16;
+                        let raw_z: i16 = (common.sensor_values.z
+                            / (GAUSS_TO_MICROTESLA_FACTOR as f32 * FIELD_LSB_PER_GAUSS_4_SENS))
+                            .round() as i16;
+                        // The first byte is a dummy byte.
+                        raw_reply[1..3].copy_from_slice(&raw_x.to_be_bytes());
+                        raw_reply[3..5].copy_from_slice(&raw_y.to_be_bytes());
+                        raw_reply[5..7].copy_from_slice(&raw_z.to_be_bytes());
+                        Self {
+                            common,
+                            raw: MgmLis3RawValues {
+                                x: raw_x,
+                                y: raw_y,
+                                z: raw_z,
+                            },
+                        }
+                    }
+                }
+            }
+        }
+
+        impl SerializableSimMsgPayload<SimReply> for MgmLis3MdlReply {
+            const TARGET: SimComponent = SimComponent::MgmLis3Mdl;
+        }
+
+        impl MgmReplyProvider for MgmLis3MdlReply {
+            fn create_mgm_reply(common: MgmReplyCommon) -> SimReply {
+                SimReply::new(&Self::new(common))
+            }
+        }
+    }
 
     // Simple model using i16 values.
     #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -262,7 +401,7 @@ pub mod acs {
     }
 
     impl SerializableSimMsgPayload<SimRequest> for MgtRequest {
-        const TARGET: SimTarget = SimTarget::Mgt;
+        const TARGET: SimComponent = SimComponent::Mgt;
     }
 
     #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -279,78 +418,12 @@ pub mod acs {
     }
 
     impl SerializableSimMsgPayload<SimReply> for MgtReply {
-        const TARGET: SimTarget = SimTarget::Mgm;
+        const TARGET: SimComponent = SimComponent::MgmLis3Mdl;
     }
 }
 
 pub mod udp {
-    use std::{
-        net::{SocketAddr, UdpSocket},
-        time::Duration,
-    };
-
-    use thiserror::Error;
-
-    use crate::{SimReply, SimRequest};
-
-    #[derive(Error, Debug)]
-    pub enum ReceptionError {
-        #[error("IO error: {0}")]
-        Io(#[from] std::io::Error),
-        #[error("Serde JSON error: {0}")]
-        SerdeJson(#[from] serde_json::Error),
-    }
-
-    pub struct SimUdpClient {
-        socket: UdpSocket,
-        pub reply_buf: [u8; 4096],
-    }
-
-    impl SimUdpClient {
-        pub fn new(
-            server_addr: &SocketAddr,
-            non_blocking: bool,
-            read_timeot_ms: Option<u64>,
-        ) -> std::io::Result<Self> {
-            let socket = UdpSocket::bind("127.0.0.1:0")?;
-            socket.set_nonblocking(non_blocking)?;
-            socket
-                .connect(server_addr)
-                .expect("could not connect to server addr");
-            if let Some(read_timeout) = read_timeot_ms {
-                // Set a read timeout so the test does not hang on failures.
-                socket.set_read_timeout(Some(Duration::from_millis(read_timeout)))?;
-            }
-            Ok(Self {
-                socket,
-                reply_buf: [0; 4096],
-            })
-        }
-
-        pub fn set_nonblocking(&self, non_blocking: bool) -> std::io::Result<()> {
-            self.socket.set_nonblocking(non_blocking)
-        }
-
-        pub fn set_read_timeout(&self, read_timeout_ms: u64) -> std::io::Result<()> {
-            self.socket
-                .set_read_timeout(Some(Duration::from_millis(read_timeout_ms)))
-        }
-
-        pub fn send_request(&self, sim_request: &SimRequest) -> std::io::Result<usize> {
-            self.socket.send(
-                &serde_json::to_vec(sim_request).expect("conversion of request to vector failed"),
-            )
-        }
-
-        pub fn recv_raw(&mut self) -> std::io::Result<usize> {
-            self.socket.recv(&mut self.reply_buf)
-        }
-
-        pub fn recv_sim_reply(&mut self) -> Result<SimReply, ReceptionError> {
-            let read_len = self.recv_raw()?;
-            Ok(serde_json::from_slice(&self.reply_buf[0..read_len])?)
-        }
-    }
+    pub const SIM_CTRL_PORT: u16 = 7303;
 }
 
 #[cfg(test)]
@@ -363,7 +436,7 @@ pub mod tests {
     }
 
     impl SerializableSimMsgPayload<SimRequest> for DummyRequest {
-        const TARGET: SimTarget = SimTarget::SimCtrl;
+        const TARGET: SimComponent = SimComponent::SimCtrl;
     }
 
     #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -372,13 +445,13 @@ pub mod tests {
     }
 
     impl SerializableSimMsgPayload<SimReply> for DummyReply {
-        const TARGET: SimTarget = SimTarget::SimCtrl;
+        const TARGET: SimComponent = SimComponent::SimCtrl;
     }
 
     #[test]
     fn test_basic_request() {
         let sim_request = SimRequest::new_with_epoch_time(DummyRequest::Ping);
-        assert_eq!(sim_request.target(), SimTarget::SimCtrl);
+        assert_eq!(sim_request.component(), SimComponent::SimCtrl);
         assert_eq!(sim_request.msg_type(), SimMessageType::Request);
         let dummy_request =
             DummyRequest::from_sim_message(&sim_request).expect("deserialization failed");
@@ -387,8 +460,8 @@ pub mod tests {
 
     #[test]
     fn test_basic_reply() {
-        let sim_reply = SimReply::new(DummyReply::Pong);
-        assert_eq!(sim_reply.target(), SimTarget::SimCtrl);
+        let sim_reply = SimReply::new(&DummyReply::Pong);
+        assert_eq!(sim_reply.component(), SimComponent::SimCtrl);
         assert_eq!(sim_reply.msg_type(), SimMessageType::Reply);
         let dummy_request =
             DummyReply::from_sim_message(&sim_reply).expect("deserialization failed");
