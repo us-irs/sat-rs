@@ -43,7 +43,7 @@ This project currently contains following crates:
    Example of a simple example using low-level sat-rs components on a bare-metal system
    with constrained resources. This example uses the [RTIC](https://github.com/rtic-rs/rtic)
    framework on the STM32F3-Discovery device.
-* [`satrs-stm32h743zit-rtic`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/embedded-examples/satrs-stm32h743zit-rtic):
+* [`satrs-stm32h-nucleo-rtic`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/embedded-examples/satrs-stm32h7-nucleo-rtic):
    Example of a simple example using sat-rs components on a bare-metal system
    with constrained resources. This example uses the [RTIC](https://github.com/rtic-rs/rtic)
    framework on the STM32H743ZIT device.
