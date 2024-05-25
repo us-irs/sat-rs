@@ -396,6 +396,9 @@ pub mod alloc_mod {
     #[derive(Debug)]
     pub struct PusScheduler {
         // TODO: Use MonotonicTime from tai-time crate instead of UnixTime and cache leap seconds.
+        // TODO: Introduce optional limit of commands stored in the TC map. If a limit is set,
+        // there will be a check for each insertion whether the map is full, making the memory
+        // usage of the scheduler more deterministic.
         tc_map: BTreeMap<UnixTime, Vec<TcInfo>>,
         pub(crate) current_time: UnixTime,
         time_margin: Duration,

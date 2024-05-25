@@ -1,4 +1,0 @@
-{
-    "com_if": "serial_cobs",
-    "serial_baudrate": 115200
-}

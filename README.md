@@ -39,14 +39,19 @@ This project currently contains following crates:
    on a host computer or on any system with a standard runtime like a Raspberry Pi.
 * [`satrs-mib`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-mib):
    Components to build a mission information base from the on-board software directly.
-* [`satrs-example-stm32f3-disco`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example-stm32f3-disco):
+* [`satrs-stm32f3-disco-rtic`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/embedded-examples/satrs-stm32f3-disco-rtic):
    Example of a simple example using low-level sat-rs components on a bare-metal system
-   with constrained resources.
+   with constrained resources. This example uses the [RTIC](https://github.com/rtic-rs/rtic)
+   framework on the STM32F3-Discovery device.
+* [`satrs-stm32h-nucleo-rtic`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/embedded-examples/satrs-stm32h7-nucleo-rtic):
+   Example of a simple example using sat-rs components on a bare-metal system
+   with constrained resources. This example uses the [RTIC](https://github.com/rtic-rs/rtic)
+   framework on the STM32H743ZIT device.
 
 Each project has its own `CHANGELOG.md`.
 
 # Related projects
- 
+
  In addition to the crates in this repository, the sat-rs project also maintains other libraries.
 
  * [`spacepackets`](https://egit.irs.uni-stuttgart.de/rust/spacepackets): Basic ECSS and CCSDS
