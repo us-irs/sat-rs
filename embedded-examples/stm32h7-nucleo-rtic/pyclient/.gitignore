@@ -1,0 +1,8 @@
+/venv
+/.tmtc-history.txt
+/log
+/.idea/*
+!/.idea/runConfigurations
+
+/seqcnt.txt
+/tmtc_conf.json

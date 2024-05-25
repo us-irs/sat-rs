@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "preLaunchTask": "${defaultBuildTask}",
+      "type": "probe-rs-debug",
+      "request": "launch",
+      "name": "probe-rs Debugging ",
+      "flashingConfig": {
+        "flashingEnabled": true
+      },
+      "chip": "STM32H743ZITx",
+      "coreConfigs": [
+        {
+          "programBinary": "${workspaceFolder}/target/thumbv7em-none-eabihf/debug/satrs-stm32h7-nucleo-rtic",
+          "rttEnabled": true,
+          "svdFile": "STM32H743.svd"
+        }
+      ]
+    }
+  ]
+}
