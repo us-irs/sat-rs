@@ -458,7 +458,7 @@ fn dyn_tmtc_pool_main() {
 
     info!("Starting TM funnel task");
     let jh_tm_funnel = thread::Builder::new()
-        .name("sat-rs tm-funnel".to_string())
+        .name("sat-rs tm-sink".to_string())
         .spawn(move || loop {
             tm_funnel.operation();
         })

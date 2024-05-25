@@ -21,11 +21,11 @@
 //! use satrs::events::{EventU16, EventU32, EventU32TypedSev, Severity, SeverityHigh, SeverityInfo};
 //!
 //! const MSG_RECVD: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::new(1, 0);
-//! const MSG_FAILED: EventU32 = EventU32::new(Severity::LOW, 1, 1);
+//! const MSG_FAILED: EventU32 = EventU32::new(Severity::Low, 1, 1);
 //!
 //! const TEMPERATURE_HIGH: EventU32TypedSev<SeverityHigh> = EventU32TypedSev::new(2, 0);
 //!
-//! let small_event = EventU16::new(Severity::INFO, 3, 0);
+//! let small_event = EventU16::new(Severity::Info, 3, 0);
 //! ```
 use core::fmt::Debug;
 use core::hash::Hash;

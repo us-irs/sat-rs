@@ -1,19 +1,20 @@
 use std::sync::mpsc;
 
 use crate::pus::create_verification_reporter;
-use log::{error, warn};
 use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::event_man::EventRequestWithToken;
 use satrs::pus::event_srv::PusEventServiceHandler;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
-    EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
-    EcssTmSender, MpscTcReceiver, MpscTmAsVecSender, PusPacketHandlerResult, PusServiceHelper,
+    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcInMemConverter,
+    EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTmSender, MpscTcReceiver,
+    MpscTmAsVecSender, PartialPusHandlingError, PusServiceHelper,
 };
+use satrs::spacepackets::ecss::PusServiceId;
 use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use satrs_example::config::components::PUS_EVENT_MANAGEMENT;
 
-use super::HandlingStatus;
+use super::{DirectPusService, HandlingStatus};
 
 pub fn create_event_service_static(
     tm_sender: PacketSenderWithSharedPool,
@@ -61,26 +62,52 @@ pub struct EventServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcI
         PusEventServiceHandler<MpscTcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
 }
 
-impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
-    EventServiceWrapper<TmSender, TcInMemConverter>
+impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> DirectPusService
+    for EventServiceWrapper<TmSender, TcInMemConverter>
 {
-    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        match self.handler.poll_and_handle_next_tc(time_stamp) {
-            Ok(result) => match result {
-                PusPacketHandlerResult::RequestHandled => {}
-                PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {
-                    warn!("PUS 5 partial packet handling success: {e:?}")
-                }
-                PusPacketHandlerResult::CustomSubservice(invalid, _) => {
-                    warn!("PUS 5 invalid subservice {invalid}");
-                }
-                PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
-                    warn!("PUS 5 subservice {subservice} not implemented");
-                }
-                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
-            },
-            Err(error) => {
-                error!("PUS packet handling error: {error:?}")
+    const SERVICE_ID: u8 = PusServiceId::Event as u8;
+
+    const SERVICE_STR: &'static str = "events";
+
+    fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
+        let error_handler = |partial_error: &PartialPusHandlingError| {
+            log::warn!(
+                "PUS {}({}) partial error: {:?}",
+                Self::SERVICE_ID,
+                Self::SERVICE_STR,
+                partial_error
+            );
+        };
+        let result = self
+            .handler
+            .poll_and_handle_next_tc(error_handler, time_stamp);
+        if let Err(e) = result {
+            log::warn!(
+                "PUS {}({}) error: {:?}",
+                Self::SERVICE_ID,
+                Self::SERVICE_STR,
+                e
+            );
+            // To avoid permanent loops on continuous errors.
+            return HandlingStatus::Empty;
+        }
+        match result.unwrap() {
+            DirectPusPacketHandlerResult::Handled(handling_status) => return handling_status,
+            DirectPusPacketHandlerResult::CustomSubservice(subservice, _) => {
+                log::warn!(
+                    "PUS {}({}) subservice {} not implemented",
+                    Self::SERVICE_ID,
+                    Self::SERVICE_STR,
+                    subservice
+                );
+            }
+            DirectPusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
+                log::warn!(
+                    "PUS {}({}) subservice {} not implemented",
+                    Self::SERVICE_ID,
+                    Self::SERVICE_STR,
+                    subservice
+                );
             }
         }
         HandlingStatus::HandledOne

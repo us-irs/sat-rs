@@ -1,5 +1,4 @@
 use derive_new::new;
-use log::{error, warn};
 use satrs::hk::{CollectionIntervalFactor, HkRequest, HkRequestVariant, UniqueId};
 use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::verification::{
@@ -10,11 +9,11 @@ use satrs::pus::{
     ActivePusRequestStd, ActiveRequestProvider, DefaultActiveRequestMap, EcssTcAndToken,
     EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTmSender,
     EcssTmtcError, GenericConversionError, MpscTcReceiver, MpscTmAsVecSender,
-    PusPacketHandlerResult, PusReplyHandler, PusServiceHelper, PusTcToRequestConverter,
+    PusPacketHandlingError, PusReplyHandler, PusServiceHelper, PusTcToRequestConverter,
 };
 use satrs::request::{GenericMessage, UniqueApidTargetId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
-use satrs::spacepackets::ecss::{hk, PusPacket};
+use satrs::spacepackets::ecss::{hk, PusPacket, PusServiceId};
 use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use satrs_example::config::components::PUS_HK_SERVICE;
 use satrs_example::config::{hk_err, tmtc_err};
@@ -24,7 +23,7 @@ use std::time::Duration;
 use crate::pus::{create_verification_reporter, generic_pus_request_timeout_handler};
 use crate::requests::GenericRequestRouter;
 
-use super::{HandlingStatus, PusTargetedRequestService};
+use super::{HandlingStatus, PusTargetedRequestService, TargetedPusService};
 
 #[derive(Clone, PartialEq, Debug, new)]
 pub struct HkReply {
@@ -297,45 +296,26 @@ pub struct HkServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMe
     >,
 }
 
-impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
-    HkServiceWrapper<TmSender, TcInMemConverter>
+impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
+    for HkServiceWrapper<TmSender, TcInMemConverter>
 {
-    pub fn poll_and_handle_next_tc(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        match self.service.poll_and_handle_next_tc(time_stamp) {
-            Ok(result) => match result {
-                PusPacketHandlerResult::RequestHandled => {}
-                PusPacketHandlerResult::RequestHandledPartialSuccess(e) => {
-                    warn!("PUS 3 partial packet handling success: {e:?}")
-                }
-                PusPacketHandlerResult::CustomSubservice(invalid, _) => {
-                    warn!("PUS 3 invalid subservice {invalid}");
-                }
-                PusPacketHandlerResult::SubserviceNotImplemented(subservice, _) => {
-                    warn!("PUS 3 subservice {subservice} not implemented");
-                }
-                PusPacketHandlerResult::Empty => return HandlingStatus::Empty,
-            },
-            Err(error) => {
-                error!("PUS packet handling error: {error:?}");
-                // To avoid permanent loops on error cases.
-                return HandlingStatus::Empty;
-            }
+    const SERVICE_ID: u8 = PusServiceId::Housekeeping as u8;
+    const SERVICE_STR: &'static str = "housekeeping";
+
+    delegate::delegate! {
+        to self.service {
+            fn poll_and_handle_next_tc(
+                &mut self,
+                time_stamp: &[u8],
+            ) -> Result<HandlingStatus, PusPacketHandlingError>;
+
+            fn poll_and_handle_next_reply(
+                &mut self,
+                time_stamp: &[u8],
+            ) -> Result<HandlingStatus, EcssTmtcError>;
+
+            fn check_for_request_timeouts(&mut self);
         }
-        HandlingStatus::HandledOne
-    }
-
-    pub fn poll_and_handle_next_reply(&mut self, time_stamp: &[u8]) -> HandlingStatus {
-        // This only fails if all senders disconnected. Treat it like an empty queue.
-        self.service
-            .poll_and_check_next_reply(time_stamp)
-            .unwrap_or_else(|e| {
-                warn!("PUS 3: Handling reply failed with error {e:?}");
-                HandlingStatus::Empty
-            })
-    }
-
-    pub fn check_for_request_timeouts(&mut self) {
-        self.service.check_for_request_timeouts();
     }
 }
 

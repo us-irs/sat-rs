@@ -45,6 +45,15 @@ pub use std_mod::*;
 
 use self::verification::VerificationReportingProvider;
 
+/// Generic handling status for an object which is able to continuosly handle a queue to handle
+/// request or replies until the queue is empty.
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum HandlingStatus {
+    HandledOne,
+    Empty,
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PusTmVariant<'time, 'src_data> {
     InStore(PoolAddr),
@@ -649,14 +658,11 @@ pub mod alloc_mod {
 
 #[cfg(feature = "std")]
 pub mod std_mod {
+    use super::*;
     use crate::pool::{
         PoolAddr, PoolError, PoolProvider, PoolProviderWithGuards, SharedStaticMemoryPool,
     };
     use crate::pus::verification::{TcStateAccepted, VerificationToken};
-    use crate::pus::{
-        EcssTcAndToken, EcssTcReceiver, EcssTmSender, EcssTmtcError, GenericReceiveError,
-        GenericSendError, PusTmVariant, TryRecvTmtcError,
-    };
     use crate::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
     use crate::ComponentId;
     use alloc::vec::Vec;
@@ -920,26 +926,24 @@ pub mod std_mod {
         #[error("generic timestamp generation error")]
         Time(#[from] StdTimestampError),
         #[error("error sending telemetry: {0}")]
-        TmSend(#[from] EcssTmtcError),
+        TmSend(EcssTmtcError),
         #[error("error sending verification message")]
-        Verification,
+        Verification(EcssTmtcError),
         #[error("invalid verification token")]
         NoVerificationToken,
     }
 
     /// Generic result type for handlers which can process PUS packets.
     #[derive(Debug, Clone)]
-    pub enum PusPacketHandlerResult {
-        RequestHandled,
-        RequestHandledPartialSuccess(PartialPusHandlingError),
+    pub enum DirectPusPacketHandlerResult {
+        Handled(HandlingStatus),
         SubserviceNotImplemented(u8, VerificationToken<TcStateAccepted>),
         CustomSubservice(u8, VerificationToken<TcStateAccepted>),
-        Empty,
     }
 
-    impl From<PartialPusHandlingError> for PusPacketHandlerResult {
-        fn from(value: PartialPusHandlingError) -> Self {
-            Self::RequestHandledPartialSuccess(value)
+    impl From<HandlingStatus> for DirectPusPacketHandlerResult {
+        fn from(value: HandlingStatus) -> Self {
+            Self::Handled(value)
         }
     }
 
@@ -1222,7 +1226,7 @@ pub mod test_util {
 
     use super::{
         verification::{self, TcStateAccepted, VerificationToken},
-        PusPacketHandlerResult, PusPacketHandlingError,
+        DirectPusPacketHandlerResult, PusPacketHandlingError,
     };
 
     pub const TEST_APID: u16 = 0x101;
@@ -1246,7 +1250,8 @@ pub mod test_util {
     }
 
     pub trait SimplePusPacketHandler {
-        fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError>;
+        fn handle_one_tc(&mut self)
+            -> Result<DirectPusPacketHandlerResult, PusPacketHandlingError>;
     }
 }
 
@@ -1284,36 +1289,46 @@ pub mod tests {
         pub seq_count: u16,
         pub msg_counter: u16,
         pub dest_id: u16,
-        pub time_stamp: [u8; 7],
+        pub timestamp: Vec<u8>,
     }
 
     impl CommonTmInfo {
-        pub fn new_zero_seq_count(
+        pub fn new(
             subservice: u8,
             apid: u16,
+            seq_count: u16,
+            msg_counter: u16,
             dest_id: u16,
-            time_stamp: [u8; 7],
+            timestamp: &[u8],
         ) -> Self {
             Self {
                 subservice,
                 apid,
-                seq_count: 0,
-                msg_counter: 0,
+                seq_count,
+                msg_counter,
                 dest_id,
-                time_stamp,
+                timestamp: timestamp.to_vec(),
             }
+        }
+        pub fn new_zero_seq_count(
+            subservice: u8,
+            apid: u16,
+            dest_id: u16,
+            timestamp: &[u8],
+        ) -> Self {
+            Self::new(subservice, apid, 0, 0, dest_id, timestamp)
         }
 
         pub fn new_from_tm(tm: &PusTmCreator) -> Self {
-            let mut time_stamp = [0; 7];
-            time_stamp.clone_from_slice(&tm.timestamp()[0..7]);
+            let mut timestamp = [0; 7];
+            timestamp.clone_from_slice(&tm.timestamp()[0..7]);
             Self {
                 subservice: PusPacket::subservice(tm),
                 apid: tm.apid(),
                 seq_count: tm.seq_count(),
                 msg_counter: tm.msg_counter(),
                 dest_id: tm.dest_id(),
-                time_stamp,
+                timestamp: timestamp.to_vec(),
             }
         }
     }
@@ -1341,7 +1356,10 @@ pub mod tests {
         ///
         /// The PUS service handler is instantiated with a [EcssTcInStoreConverter].
         pub fn new(id: ComponentId) -> (Self, PusServiceHelperStatic) {
-            let pool_cfg = StaticPoolConfig::new(alloc::vec![(16, 16), (8, 32), (4, 64)], false);
+            let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(
+                alloc::vec![(16, 16), (8, 32), (4, 64)],
+                false,
+            );
             let tc_pool = StaticMemoryPool::new(pool_cfg.clone());
             let tm_pool = StaticMemoryPool::new(pool_cfg);
             let shared_tc_pool = SharedStaticMemoryPool::new(RwLock::new(tc_pool));

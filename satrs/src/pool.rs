@@ -4,8 +4,11 @@
 //! machanism for variable sized data like Telemetry and Telecommand (TMTC) packets. The core
 //! abstraction for this is the [PoolProvider] trait.
 //!
-//! It also contains the [StaticMemoryPool] as a concrete implementation which can be used to avoid
-//! dynamic run-time allocations for the storage of TMTC packets.
+//! Currently, two concrete [PoolProvider] implementations are provided:
+//!
+//!  - The [StaticMemoryPool] required [alloc] support but pre-allocated all required memory
+//!    and does not perform dynamic run-time allocations for the storage of TMTC packets.
+//!  - The [StaticHeaplessMemoryPool] which can be grown by user provided static storage.
 //!
 //! # Example for the [StaticMemoryPool]
 //!
@@ -13,28 +16,28 @@
 //! use satrs::pool::{PoolProvider, StaticMemoryPool, StaticPoolConfig};
 //!
 //! // 4 buckets of 4 bytes, 2 of 8 bytes and 1 of 16 bytes
-//! let pool_cfg = StaticPoolConfig::new(vec![(4, 4), (2, 8), (1, 16)], false);
-//! let mut local_pool = StaticMemoryPool::new(pool_cfg);
+//! let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(vec![(4, 4), (2, 8), (1, 16)], false);
+//! let mut mem_pool = StaticMemoryPool::new(pool_cfg);
 //! let mut read_buf: [u8; 16] = [0; 16];
 //! let mut addr;
 //! {
 //!     // Add new data to the pool
 //!     let mut example_data = [0; 4];
 //!     example_data[0] = 42;
-//!     let res = local_pool.add(&example_data);
+//!     let res = mem_pool.add(&example_data);
 //!     assert!(res.is_ok());
 //!     addr = res.unwrap();
 //! }
 //!
 //! {
 //!     // Read the store data back
-//!     let res = local_pool.read(&addr, &mut read_buf);
+//!     let res = mem_pool.read(&addr, &mut read_buf);
 //!     assert!(res.is_ok());
 //!     let read_bytes = res.unwrap();
 //!     assert_eq!(read_bytes, 4);
 //!     assert_eq!(read_buf[0], 42);
 //!     // Modify the stored data
-//!     let res = local_pool.modify(&addr, |buf| {
+//!     let res = mem_pool.modify(&addr, |buf| {
 //!         buf[0] = 12;
 //!     });
 //!     assert!(res.is_ok());
@@ -42,7 +45,7 @@
 //!
 //! {
 //!     // Read the modified data back
-//!     let res = local_pool.read(&addr, &mut read_buf);
+//!     let res = mem_pool.read(&addr, &mut read_buf);
 //!     assert!(res.is_ok());
 //!     let read_bytes = res.unwrap();
 //!     assert_eq!(read_bytes, 4);
@@ -50,11 +53,11 @@
 //! }
 //!
 //! // Delete the stored data
-//! local_pool.delete(addr);
+//! mem_pool.delete(addr);
 //!
 //! // Get a free element in the pool with an appropriate size
 //! {
-//!     let res = local_pool.free_element(12, |buf| {
+//!     let res = mem_pool.free_element(12, |buf| {
 //!         buf[0] = 7;
 //!     });
 //!     assert!(res.is_ok());
@@ -64,7 +67,7 @@
 //! // Read back the data
 //! {
 //!     // Read the store data back
-//!     let res = local_pool.read(&addr, &mut read_buf);
+//!     let res = mem_pool.read(&addr, &mut read_buf);
 //!     assert!(res.is_ok());
 //!     let read_bytes = res.unwrap();
 //!     assert_eq!(read_bytes, 12);
@@ -75,6 +78,9 @@
 pub use alloc_mod::*;
 use core::fmt::{Display, Formatter};
 use delegate::delegate;
+use derive_new::new;
+#[cfg(feature = "heapless")]
+pub use heapless_mod::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use spacepackets::ByteConversionError;
@@ -127,6 +133,7 @@ impl Display for StaticPoolAddr {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum StoreIdError {
     InvalidSubpool(u16),
     InvalidPacketIdx(u16),
@@ -150,11 +157,14 @@ impl Error for StoreIdError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum PoolError {
     /// Requested data block is too large
     DataTooLarge(usize),
     /// The store is full. Contains the index of the full subpool
     StoreFull(u16),
+    /// The store can not hold any data.
+    NoCapacity,
     /// Store ID is invalid. This also includes partial errors where only the subpool is invalid
     InvalidStoreId(StoreIdError, Option<PoolAddr>),
     /// Valid subpool and packet index, but no data is stored at the given address
@@ -170,6 +180,9 @@ impl Display for PoolError {
         match self {
             PoolError::DataTooLarge(size) => {
                 write!(f, "data to store with size {size} is too large")
+            }
+            PoolError::NoCapacity => {
+                write!(f, "store does not have any capacity")
             }
             PoolError::StoreFull(u16) => {
                 write!(f, "store is too full. index for full subpool: {u16}")
@@ -351,10 +364,396 @@ impl<'a, MemProvider: PoolProvider> PoolRwGuard<'a, MemProvider> {
     );
 }
 
+type UsedBlockSize = usize;
+pub const STORE_FREE: UsedBlockSize = UsedBlockSize::MAX;
+pub const MAX_BLOCK_SIZE: UsedBlockSize = STORE_FREE - 1;
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, new)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct SubpoolConfig {
+    num_blocks: NumBlocks,
+    block_size: usize,
+}
+
+#[cfg(feature = "heapless")]
+pub mod heapless_mod {
+    use super::*;
+
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+    pub struct PoolIsFull;
+
+    /// Helper macro to generate static buffers for the [crate::pool::StaticHeaplessMemoryPool].
+    #[macro_export]
+    macro_rules! static_subpool {
+        ($pool_name: ident, $sizes_list_name: ident, $num_blocks: expr, $block_size: expr) => {
+            static mut $pool_name: core::mem::MaybeUninit<[u8; $num_blocks * $block_size]> =
+                core::mem::MaybeUninit::new([0; $num_blocks * $block_size]);
+            static mut $sizes_list_name: core::mem::MaybeUninit<[usize; $num_blocks]> =
+                core::mem::MaybeUninit::new([$crate::pool::STORE_FREE; $num_blocks]);
+        };
+        ($pool_name: ident, $sizes_list_name: ident, $num_blocks: expr, $block_size: expr, $meta_data: meta) => {
+            #[$meta_data]
+            static mut $pool_name: core::mem::MaybeUninit<[u8; $num_blocks * $block_size]> =
+                core::mem::MaybeUninit::new([0; $num_blocks * $block_size]);
+            #[$meta_data]
+            static mut $sizes_list_name: core::mem::MaybeUninit<[usize; $num_blocks]> =
+                core::mem::MaybeUninit::new([$crate::pool::STORE_FREE; $num_blocks]);
+        };
+    }
+
+    /// A static memory pool similar to [super::StaticMemoryPool] which does not reply on
+    /// heap allocations.
+    ///
+    /// This implementation is empty after constructions and must be grown with user-provided
+    /// static mutable memory using the [Self::grow] method. The (maximum) number of subpools
+    /// has to specified via a generic parameter.
+    ///
+    /// The [crate::static_subpool] macro can be used to avoid some boilerplate code for
+    /// specifying the static memory blocks for the pool.
+    ///
+    /// ```
+    /// use satrs::pool::{PoolProvider, StaticHeaplessMemoryPool};
+    /// use satrs::static_subpool;
+    ///
+    /// const SUBPOOL_SMALL_NUM_BLOCKS: u16 = 16;
+    /// const SUBPOOL_SMALL_BLOCK_SIZE: usize = 32;
+    /// static_subpool!(
+    ///     SUBPOOL_SMALL,
+    ///     SUBPOOL_SMALL_SIZES,
+    ///     SUBPOOL_SMALL_NUM_BLOCKS as usize,
+    ///     SUBPOOL_SMALL_BLOCK_SIZE
+    /// );
+    /// const SUBPOOL_LARGE_NUM_BLOCKS: u16 = 8;
+    /// const SUBPOOL_LARGE_BLOCK_SIZE: usize = 64;
+    /// static_subpool!(
+    ///     SUBPOOL_LARGE,
+    ///     SUBPOOL_LARGE_SIZES,
+    ///     SUBPOOL_LARGE_NUM_BLOCKS as usize,
+    ///     SUBPOOL_LARGE_BLOCK_SIZE
+    /// );
+    ///
+    /// let mut mem_pool: StaticHeaplessMemoryPool<2> = StaticHeaplessMemoryPool::new(true);
+    /// mem_pool.grow(
+    ///     unsafe { SUBPOOL_SMALL.assume_init_mut() },
+    ///     unsafe { SUBPOOL_SMALL_SIZES.assume_init_mut() },
+    ///     SUBPOOL_SMALL_NUM_BLOCKS,
+    ///     false
+    /// );
+    /// mem_pool.grow(
+    ///     unsafe { SUBPOOL_LARGE.assume_init_mut() },
+    ///     unsafe { SUBPOOL_LARGE_SIZES.assume_init_mut() },
+    ///     SUBPOOL_LARGE_NUM_BLOCKS,
+    ///     false
+    /// );
+    ///
+    /// let mut read_buf: [u8; 16] = [0; 16];
+    /// let mut addr;
+    /// {
+    ///     // Add new data to the pool
+    ///     let mut example_data = [0; 4];
+    ///     example_data[0] = 42;
+    ///     let res = mem_pool.add(&example_data);
+    ///     assert!(res.is_ok());
+    ///     addr = res.unwrap();
+    /// }
+    ///
+    /// {
+    ///     // Read the store data back
+    ///     let res = mem_pool.read(&addr, &mut read_buf);
+    ///     assert!(res.is_ok());
+    ///     let read_bytes = res.unwrap();
+    ///     assert_eq!(read_bytes, 4);
+    ///     assert_eq!(read_buf[0], 42);
+    ///     // Modify the stored data
+    ///     let res = mem_pool.modify(&addr, |buf| {
+    ///         buf[0] = 12;
+    ///     });
+    ///     assert!(res.is_ok());
+    /// }
+    ///
+    /// {
+    ///     // Read the modified data back
+    ///     let res = mem_pool.read(&addr, &mut read_buf);
+    ///     assert!(res.is_ok());
+    ///     let read_bytes = res.unwrap();
+    ///     assert_eq!(read_bytes, 4);
+    ///     assert_eq!(read_buf[0], 12);
+    /// }
+    ///
+    /// // Delete the stored data
+    /// mem_pool.delete(addr);
+    /// ```
+    pub struct StaticHeaplessMemoryPool<const MAX_NUM_SUBPOOLS: usize> {
+        pool: heapless::Vec<(SubpoolConfig, &'static mut [u8]), MAX_NUM_SUBPOOLS>,
+        sizes_lists: heapless::Vec<&'static mut [UsedBlockSize], MAX_NUM_SUBPOOLS>,
+        spill_to_higher_subpools: bool,
+    }
+
+    impl<const MAX_NUM_SUBPOOLS: usize> StaticHeaplessMemoryPool<MAX_NUM_SUBPOOLS> {
+        pub fn new(spill_to_higher_subpools: bool) -> Self {
+            Self {
+                pool: heapless::Vec::new(),
+                sizes_lists: heapless::Vec::new(),
+                spill_to_higher_subpools,
+            }
+        }
+
+        /// Grow the memory pool using statically allocated memory.
+        ///
+        /// Please note that this API assumes the static memory was initialized properly by the
+        /// user. The sizes list in particular must be set to the [super::STORE_FREE] value
+        /// by the user for the data structure to work properly. This method will take care of
+        /// setting all the values inside the sizes list depending on the passed parameters.
+        ///
+        /// # Parameters
+        ///
+        /// * `subpool_memory` - Static memory for a particular subpool to store the actual data.
+        /// * `sizes_list` - Static sizes list structure to store the size of the data which is
+        ///    actually stored.
+        /// * `num_blocks ` - The number of memory blocks inside the subpool.
+        /// * `set_sizes_list_to_all_free` - If this is set to true, the method will take care
+        ///    of setting all values in the sizes list to [super::STORE_FREE]. This does not have
+        ///    to be done if the user initializes the sizes list to that value themselves.
+        pub fn grow(
+            &mut self,
+            subpool_memory: &'static mut [u8],
+            sizes_list: &'static mut [UsedBlockSize],
+            num_blocks: NumBlocks,
+            set_sizes_list_to_all_free: bool,
+        ) -> Result<(), PoolIsFull> {
+            assert!(
+                (subpool_memory.len() % num_blocks as usize) == 0,
+                "pool slice length must be multiple of number of blocks"
+            );
+            assert!(
+                num_blocks as usize == sizes_list.len(),
+                "used block size list slice must be of same length as number of blocks"
+            );
+            let subpool_config = SubpoolConfig {
+                num_blocks,
+                block_size: subpool_memory.len() / num_blocks as usize,
+            };
+            self.pool
+                .push((subpool_config, subpool_memory))
+                .map_err(|_| PoolIsFull)?;
+            if set_sizes_list_to_all_free {
+                sizes_list.fill(STORE_FREE);
+            }
+            self.sizes_lists.push(sizes_list).map_err(|_| PoolIsFull)?;
+            Ok(())
+        }
+
+        fn reserve(&mut self, data_len: usize) -> Result<StaticPoolAddr, PoolError> {
+            if self.pool.is_empty() {
+                return Err(PoolError::NoCapacity);
+            }
+            let mut subpool_idx = self.find_subpool(data_len, 0)?;
+
+            if self.spill_to_higher_subpools {
+                while let Err(PoolError::StoreFull(_)) = self.find_empty(subpool_idx) {
+                    if (subpool_idx + 1) as usize == self.sizes_lists.len() {
+                        return Err(PoolError::StoreFull(subpool_idx));
+                    }
+                    subpool_idx += 1;
+                }
+            }
+
+            let (slot, size_slot_ref) = self.find_empty(subpool_idx)?;
+            *size_slot_ref = data_len;
+            Ok(StaticPoolAddr {
+                pool_idx: subpool_idx,
+                packet_idx: slot,
+            })
+        }
+
+        fn addr_check(&self, addr: &StaticPoolAddr) -> Result<usize, PoolError> {
+            self.validate_addr(addr)?;
+            let pool_idx = addr.pool_idx as usize;
+            let size_list = self.sizes_lists.get(pool_idx).unwrap();
+            let curr_size = size_list[addr.packet_idx as usize];
+            if curr_size == STORE_FREE {
+                return Err(PoolError::DataDoesNotExist(PoolAddr::from(*addr)));
+            }
+            Ok(curr_size)
+        }
+
+        fn validate_addr(&self, addr: &StaticPoolAddr) -> Result<(), PoolError> {
+            let pool_idx = addr.pool_idx as usize;
+            if pool_idx >= self.pool.len() {
+                return Err(PoolError::InvalidStoreId(
+                    StoreIdError::InvalidSubpool(addr.pool_idx),
+                    Some(PoolAddr::from(*addr)),
+                ));
+            }
+            if addr.packet_idx >= self.pool[addr.pool_idx as usize].0.num_blocks {
+                return Err(PoolError::InvalidStoreId(
+                    StoreIdError::InvalidPacketIdx(addr.packet_idx),
+                    Some(PoolAddr::from(*addr)),
+                ));
+            }
+            Ok(())
+        }
+
+        fn find_subpool(&self, req_size: usize, start_at_subpool: u16) -> Result<u16, PoolError> {
+            for (i, &(pool_cfg, _)) in self.pool.iter().enumerate() {
+                if i < start_at_subpool as usize {
+                    continue;
+                }
+                if pool_cfg.block_size as usize >= req_size {
+                    return Ok(i as u16);
+                }
+            }
+            Err(PoolError::DataTooLarge(req_size))
+        }
+
+        fn write(&mut self, addr: &StaticPoolAddr, data: &[u8]) -> Result<(), PoolError> {
+            let packet_pos = self.raw_pos(addr).ok_or(PoolError::InternalError(0))?;
+            let (_elem_size, subpool) = self
+                .pool
+                .get_mut(addr.pool_idx as usize)
+                .ok_or(PoolError::InternalError(1))?;
+            let pool_slice = &mut subpool[packet_pos..packet_pos + data.len()];
+            pool_slice.copy_from_slice(data);
+            Ok(())
+        }
+
+        fn find_empty(&mut self, subpool: u16) -> Result<(u16, &mut usize), PoolError> {
+            if let Some(size_list) = self.sizes_lists.get_mut(subpool as usize) {
+                for (i, elem_size) in size_list.iter_mut().enumerate() {
+                    if *elem_size == STORE_FREE {
+                        return Ok((i as u16, elem_size));
+                    }
+                }
+            } else {
+                return Err(PoolError::InvalidStoreId(
+                    StoreIdError::InvalidSubpool(subpool),
+                    None,
+                ));
+            }
+            Err(PoolError::StoreFull(subpool))
+        }
+
+        fn raw_pos(&self, addr: &StaticPoolAddr) -> Option<usize> {
+            let (pool_cfg, _) = self.pool.get(addr.pool_idx as usize)?;
+            Some(addr.packet_idx as usize * pool_cfg.block_size as usize)
+        }
+    }
+
+    impl<const MAX_NUM_SUBPOOLS: usize> PoolProvider for StaticHeaplessMemoryPool<MAX_NUM_SUBPOOLS> {
+        fn add(&mut self, data: &[u8]) -> Result<PoolAddr, PoolError> {
+            let data_len = data.len();
+            if data_len > MAX_BLOCK_SIZE {
+                return Err(PoolError::DataTooLarge(data_len));
+            }
+            let addr = self.reserve(data_len)?;
+            self.write(&addr, data)?;
+            Ok(addr.into())
+        }
+
+        fn free_element<W: FnMut(&mut [u8])>(
+            &mut self,
+            len: usize,
+            mut writer: W,
+        ) -> Result<PoolAddr, PoolError> {
+            if len > MAX_BLOCK_SIZE {
+                return Err(PoolError::DataTooLarge(len));
+            }
+            let addr = self.reserve(len)?;
+            let raw_pos = self.raw_pos(&addr).unwrap();
+            let block =
+                &mut self.pool.get_mut(addr.pool_idx as usize).unwrap().1[raw_pos..raw_pos + len];
+            writer(block);
+            Ok(addr.into())
+        }
+
+        fn modify<U: FnMut(&mut [u8])>(
+            &mut self,
+            addr: &PoolAddr,
+            mut updater: U,
+        ) -> Result<(), PoolError> {
+            let addr = StaticPoolAddr::from(*addr);
+            let curr_size = self.addr_check(&addr)?;
+            let raw_pos = self.raw_pos(&addr).unwrap();
+            let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap().1
+                [raw_pos..raw_pos + curr_size];
+            updater(block);
+            Ok(())
+        }
+
+        fn read(&self, addr: &PoolAddr, buf: &mut [u8]) -> Result<usize, PoolError> {
+            let addr = StaticPoolAddr::from(*addr);
+            let curr_size = self.addr_check(&addr)?;
+            if buf.len() < curr_size {
+                return Err(ByteConversionError::ToSliceTooSmall {
+                    found: buf.len(),
+                    expected: curr_size,
+                }
+                .into());
+            }
+            let raw_pos = self.raw_pos(&addr).unwrap();
+            let block =
+                &self.pool.get(addr.pool_idx as usize).unwrap().1[raw_pos..raw_pos + curr_size];
+            //block.copy_from_slice(&src);
+            buf[..curr_size].copy_from_slice(block);
+            Ok(curr_size)
+        }
+
+        fn delete(&mut self, addr: PoolAddr) -> Result<(), PoolError> {
+            let addr = StaticPoolAddr::from(addr);
+            self.addr_check(&addr)?;
+            let subpool_cfg = self.pool.get(addr.pool_idx as usize).unwrap().0;
+            let raw_pos = self.raw_pos(&addr).unwrap();
+            let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap().1
+                [raw_pos..raw_pos + subpool_cfg.block_size as usize];
+            let size_list = self.sizes_lists.get_mut(addr.pool_idx as usize).unwrap();
+            size_list[addr.packet_idx as usize] = STORE_FREE;
+            block.fill(0);
+            Ok(())
+        }
+
+        fn has_element_at(&self, addr: &PoolAddr) -> Result<bool, PoolError> {
+            let addr = StaticPoolAddr::from(*addr);
+            self.validate_addr(&addr)?;
+            let pool_idx = addr.pool_idx as usize;
+            let size_list = self.sizes_lists.get(pool_idx).unwrap();
+            let curr_size = size_list[addr.packet_idx as usize];
+            if curr_size == STORE_FREE {
+                return Ok(false);
+            }
+            Ok(true)
+        }
+
+        fn len_of_data(&self, addr: &PoolAddr) -> Result<usize, PoolError> {
+            let addr = StaticPoolAddr::from(*addr);
+            self.validate_addr(&addr)?;
+            let pool_idx = addr.pool_idx as usize;
+            let size_list = self.sizes_lists.get(pool_idx).unwrap();
+            let size = size_list[addr.packet_idx as usize];
+            Ok(match size {
+                STORE_FREE => 0,
+                _ => size,
+            })
+        }
+    }
+
+    impl<const MAX_NUM_SUBPOOLS: usize> PoolProviderWithGuards
+        for StaticHeaplessMemoryPool<MAX_NUM_SUBPOOLS>
+    {
+        fn modify_with_guard(&mut self, addr: PoolAddr) -> PoolRwGuard<Self> {
+            PoolRwGuard::new(self, addr)
+        }
+
+        fn read_with_guard(&mut self, addr: PoolAddr) -> PoolGuard<Self> {
+            PoolGuard::new(self, addr)
+        }
+    }
+}
+
 #[cfg(feature = "alloc")]
 mod alloc_mod {
-    use super::{PoolGuard, PoolProvider, PoolProviderWithGuards, PoolRwGuard, StaticPoolAddr};
-    use crate::pool::{NumBlocks, PoolAddr, PoolError, StoreIdError};
+    use super::*;
+    use crate::pool::{PoolAddr, PoolError, StoreIdError};
     use alloc::vec;
     use alloc::vec::Vec;
     use spacepackets::ByteConversionError;
@@ -363,10 +762,6 @@ mod alloc_mod {
 
     #[cfg(feature = "std")]
     pub type SharedStaticMemoryPool = Arc<RwLock<StaticMemoryPool>>;
-
-    type PoolSize = usize;
-    const STORE_FREE: PoolSize = PoolSize::MAX;
-    pub const POOL_MAX_SIZE: PoolSize = STORE_FREE - 1;
 
     /// Configuration structure of the [static memory pool][StaticMemoryPool]
     ///
@@ -380,27 +775,42 @@ mod alloc_mod {
     ///     the chocking of larger subpools by underdimensioned smaller subpools.
     #[derive(Clone)]
     pub struct StaticPoolConfig {
-        cfg: Vec<(NumBlocks, usize)>,
+        cfg: Vec<SubpoolConfig>,
         spill_to_higher_subpools: bool,
     }
 
     impl StaticPoolConfig {
-        pub fn new(cfg: Vec<(NumBlocks, usize)>, spill_to_higher_subpools: bool) -> Self {
+        pub fn new(cfg: Vec<SubpoolConfig>, spill_to_higher_subpools: bool) -> Self {
             StaticPoolConfig {
                 cfg,
                 spill_to_higher_subpools,
             }
         }
 
-        pub fn cfg(&self) -> &Vec<(NumBlocks, usize)> {
+        pub fn new_from_subpool_cfg_tuples(
+            cfg: Vec<(NumBlocks, usize)>,
+            spill_to_higher_subpools: bool,
+        ) -> Self {
+            StaticPoolConfig {
+                cfg: cfg
+                    .iter()
+                    .map(|(num_blocks, block_size)| SubpoolConfig::new(*num_blocks, *block_size))
+                    .collect(),
+                spill_to_higher_subpools,
+            }
+        }
+
+        pub fn subpool_cfg(&self) -> &Vec<SubpoolConfig> {
             &self.cfg
         }
 
         pub fn sanitize(&mut self) -> usize {
-            self.cfg
-                .retain(|&(bucket_num, size)| bucket_num > 0 && size < POOL_MAX_SIZE);
-            self.cfg
-                .sort_unstable_by(|(_, sz0), (_, sz1)| sz0.partial_cmp(sz1).unwrap());
+            self.cfg.retain(|&subpool_cfg| {
+                subpool_cfg.num_blocks > 0 && subpool_cfg.block_size < MAX_BLOCK_SIZE
+            });
+            self.cfg.sort_unstable_by(|&cfg0, &cfg1| {
+                cfg0.block_size.partial_cmp(&cfg1.block_size).unwrap()
+            });
             self.cfg.len()
         }
     }
@@ -425,7 +835,7 @@ mod alloc_mod {
     pub struct StaticMemoryPool {
         pool_cfg: StaticPoolConfig,
         pool: Vec<Vec<u8>>,
-        sizes_lists: Vec<Vec<PoolSize>>,
+        sizes_lists: Vec<Vec<UsedBlockSize>>,
     }
 
     impl StaticMemoryPool {
@@ -438,10 +848,10 @@ mod alloc_mod {
                 pool: Vec::with_capacity(subpools_num),
                 sizes_lists: Vec::with_capacity(subpools_num),
             };
-            for &(num_elems, elem_size) in local_pool.pool_cfg.cfg.iter() {
-                let next_pool_len = elem_size * num_elems as usize;
+            for &subpool_cfg in local_pool.pool_cfg.cfg.iter() {
+                let next_pool_len = subpool_cfg.num_blocks as usize * subpool_cfg.block_size;
                 local_pool.pool.push(vec![0; next_pool_len]);
-                let next_sizes_list_len = num_elems as usize;
+                let next_sizes_list_len = subpool_cfg.num_blocks as usize;
                 local_pool
                     .sizes_lists
                     .push(vec![STORE_FREE; next_sizes_list_len]);
@@ -468,7 +878,7 @@ mod alloc_mod {
                     Some(PoolAddr::from(*addr)),
                 ));
             }
-            if addr.packet_idx >= self.pool_cfg.cfg[addr.pool_idx as usize].0 {
+            if addr.packet_idx >= self.pool_cfg.cfg[addr.pool_idx as usize].num_blocks {
                 return Err(PoolError::InvalidStoreId(
                     StoreIdError::InvalidPacketIdx(addr.packet_idx),
                     Some(PoolAddr::from(*addr)),
@@ -498,11 +908,11 @@ mod alloc_mod {
         }
 
         fn find_subpool(&self, req_size: usize, start_at_subpool: u16) -> Result<u16, PoolError> {
-            for (i, &(_, elem_size)) in self.pool_cfg.cfg.iter().enumerate() {
+            for (i, &config) in self.pool_cfg.cfg.iter().enumerate() {
                 if i < start_at_subpool as usize {
                     continue;
                 }
-                if elem_size >= req_size {
+                if config.block_size >= req_size {
                     return Ok(i as u16);
                 }
             }
@@ -537,15 +947,15 @@ mod alloc_mod {
         }
 
         fn raw_pos(&self, addr: &StaticPoolAddr) -> Option<usize> {
-            let (_, size) = self.pool_cfg.cfg.get(addr.pool_idx as usize)?;
-            Some(addr.packet_idx as usize * size)
+            let cfg = self.pool_cfg.cfg.get(addr.pool_idx as usize)?;
+            Some(addr.packet_idx as usize * cfg.block_size)
         }
     }
 
     impl PoolProvider for StaticMemoryPool {
         fn add(&mut self, data: &[u8]) -> Result<PoolAddr, PoolError> {
             let data_len = data.len();
-            if data_len > POOL_MAX_SIZE {
+            if data_len > MAX_BLOCK_SIZE {
                 return Err(PoolError::DataTooLarge(data_len));
             }
             let addr = self.reserve(data_len)?;
@@ -558,7 +968,7 @@ mod alloc_mod {
             len: usize,
             mut writer: W,
         ) -> Result<PoolAddr, PoolError> {
-            if len > POOL_MAX_SIZE {
+            if len > MAX_BLOCK_SIZE {
                 return Err(PoolError::DataTooLarge(len));
             }
             let addr = self.reserve(len)?;
@@ -604,7 +1014,12 @@ mod alloc_mod {
         fn delete(&mut self, addr: PoolAddr) -> Result<(), PoolError> {
             let addr = StaticPoolAddr::from(addr);
             self.addr_check(&addr)?;
-            let block_size = self.pool_cfg.cfg.get(addr.pool_idx as usize).unwrap().1;
+            let block_size = self
+                .pool_cfg
+                .cfg
+                .get(addr.pool_idx as usize)
+                .unwrap()
+                .block_size;
             let raw_pos = self.raw_pos(&addr).unwrap();
             let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap()
                 [raw_pos..raw_pos + block_size];
@@ -652,80 +1067,99 @@ mod alloc_mod {
 
 #[cfg(test)]
 mod tests {
-    use crate::pool::{
-        PoolError, PoolGuard, PoolProvider, PoolProviderWithGuards, PoolRwGuard, StaticMemoryPool,
-        StaticPoolAddr, StaticPoolConfig, StoreIdError, POOL_MAX_SIZE,
-    };
+    use super::*;
     use std::vec;
 
     fn basic_small_pool() -> StaticMemoryPool {
         // 4 buckets of 4 bytes, 2 of 8 bytes and 1 of 16 bytes
-        let pool_cfg = StaticPoolConfig::new(vec![(4, 4), (2, 8), (1, 16)], false);
+        let pool_cfg =
+            StaticPoolConfig::new_from_subpool_cfg_tuples(vec![(4, 4), (2, 8), (1, 16)], false);
         StaticMemoryPool::new(pool_cfg)
     }
 
     #[test]
     fn test_cfg() {
         // Values where number of buckets is 0 or size is too large should be removed
-        let mut pool_cfg = StaticPoolConfig::new(vec![(0, 0), (1, 0), (2, POOL_MAX_SIZE)], false);
+        let mut pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(
+            vec![(0, 0), (1, 0), (2, MAX_BLOCK_SIZE)],
+            false,
+        );
         pool_cfg.sanitize();
-        assert_eq!(*pool_cfg.cfg(), vec![(1, 0)]);
+        assert_eq!(*pool_cfg.subpool_cfg(), vec![SubpoolConfig::new(1, 0)]);
+
         // Entries should be ordered according to bucket size
-        pool_cfg = StaticPoolConfig::new(vec![(16, 6), (32, 3), (8, 12)], false);
+        pool_cfg =
+            StaticPoolConfig::new_from_subpool_cfg_tuples(vec![(16, 6), (32, 3), (8, 12)], false);
         pool_cfg.sanitize();
-        assert_eq!(*pool_cfg.cfg(), vec![(32, 3), (16, 6), (8, 12)]);
+        assert_eq!(
+            *pool_cfg.subpool_cfg(),
+            vec![
+                SubpoolConfig::new(32, 3),
+                SubpoolConfig::new(16, 6),
+                SubpoolConfig::new(8, 12)
+            ]
+        );
+
         // Unstable sort is used, so order of entries with same block length should not matter
-        pool_cfg = StaticPoolConfig::new(vec![(12, 12), (14, 16), (10, 12)], false);
+        pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(
+            vec![(12, 12), (14, 16), (10, 12)],
+            false,
+        );
         pool_cfg.sanitize();
         assert!(
-            *pool_cfg.cfg() == vec![(12, 12), (10, 12), (14, 16)]
-                || *pool_cfg.cfg() == vec![(10, 12), (12, 12), (14, 16)]
+            *pool_cfg.subpool_cfg()
+                == vec![
+                    SubpoolConfig::new(12, 12),
+                    SubpoolConfig::new(10, 12),
+                    SubpoolConfig::new(14, 16)
+                ]
+                || *pool_cfg.subpool_cfg()
+                    == vec![
+                        SubpoolConfig::new(10, 12),
+                        SubpoolConfig::new(12, 12),
+                        SubpoolConfig::new(14, 16)
+                    ]
         );
     }
 
-    #[test]
-    fn test_add_and_read() {
-        let mut local_pool = basic_small_pool();
-        let mut test_buf: [u8; 16] = [0; 16];
+    fn generic_test_add_and_read<const BUF_SIZE: usize>(pool_provider: &mut impl PoolProvider) {
+        let mut test_buf: [u8; BUF_SIZE] = [0; BUF_SIZE];
         for (i, val) in test_buf.iter_mut().enumerate() {
             *val = i as u8;
         }
-        let mut other_buf: [u8; 16] = [0; 16];
-        let addr = local_pool.add(&test_buf).expect("Adding data failed");
+        let mut other_buf: [u8; BUF_SIZE] = [0; BUF_SIZE];
+        let addr = pool_provider.add(&test_buf).expect("adding data failed");
         // Read back data and verify correctness
-        let res = local_pool.read(&addr, &mut other_buf);
+        let res = pool_provider.read(&addr, &mut other_buf);
         assert!(res.is_ok());
         let read_len = res.unwrap();
-        assert_eq!(read_len, 16);
+        assert_eq!(read_len, BUF_SIZE);
         for (i, &val) in other_buf.iter().enumerate() {
             assert_eq!(val, i as u8);
         }
     }
 
-    #[test]
-    fn test_add_smaller_than_full_slot() {
-        let mut local_pool = basic_small_pool();
+    fn generic_test_add_smaller_than_full_slot(pool_provider: &mut impl PoolProvider) {
         let test_buf: [u8; 12] = [0; 12];
-        let addr = local_pool.add(&test_buf).expect("Adding data failed");
-        let res = local_pool
+        let addr = pool_provider.add(&test_buf).expect("adding data failed");
+        let res = pool_provider
             .read(&addr, &mut [0; 12])
             .expect("Read back failed");
         assert_eq!(res, 12);
     }
 
-    #[test]
-    fn test_delete() {
-        let mut local_pool = basic_small_pool();
+    fn generic_test_delete(pool_provider: &mut impl PoolProvider) {
+        // let mut local_pool = basic_small_pool();
         let test_buf: [u8; 16] = [0; 16];
-        let addr = local_pool.add(&test_buf).expect("Adding data failed");
+        let addr = pool_provider.add(&test_buf).expect("Adding data failed");
         // Delete the data
-        let res = local_pool.delete(addr);
+        let res = pool_provider.delete(addr);
         assert!(res.is_ok());
         let mut writer = |buf: &mut [u8]| {
             assert_eq!(buf.len(), 12);
         };
         // Verify that the slot is free by trying to get a reference to it
-        let res = local_pool.free_element(12, &mut writer);
+        let res = pool_provider.free_element(12, &mut writer);
         assert!(res.is_ok());
         let addr = res.unwrap();
         assert_eq!(
@@ -737,18 +1171,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_modify() {
-        let mut local_pool = basic_small_pool();
+    fn generic_test_modify(pool_provider: &mut impl PoolProvider) {
         let mut test_buf: [u8; 16] = [0; 16];
         for (i, val) in test_buf.iter_mut().enumerate() {
             *val = i as u8;
         }
-        let addr = local_pool.add(&test_buf).expect("Adding data failed");
+        let addr = pool_provider.add(&test_buf).expect("Adding data failed");
 
         {
             // Verify that the slot is free by trying to get a reference to it
-            local_pool
+            pool_provider
                 .modify(&addr, &mut |buf: &mut [u8]| {
                     buf[0] = 0;
                     buf[1] = 0x42;
@@ -756,7 +1188,7 @@ mod tests {
                 .expect("Modifying data failed");
         }
 
-        local_pool
+        pool_provider
             .read(&addr, &mut test_buf)
             .expect("Reading back data failed");
         assert_eq!(test_buf[0], 0);
@@ -765,31 +1197,27 @@ mod tests {
         assert_eq!(test_buf[3], 3);
     }
 
-    #[test]
-    fn test_consecutive_reservation() {
-        let mut local_pool = basic_small_pool();
+    fn generic_test_consecutive_reservation(pool_provider: &mut impl PoolProvider) {
         // Reserve two smaller blocks consecutively and verify that the third reservation fails
-        let res = local_pool.free_element(8, |_| {});
+        let res = pool_provider.free_element(8, |_| {});
         assert!(res.is_ok());
         let addr0 = res.unwrap();
-        let res = local_pool.free_element(8, |_| {});
+        let res = pool_provider.free_element(8, |_| {});
         assert!(res.is_ok());
         let addr1 = res.unwrap();
-        let res = local_pool.free_element(8, |_| {});
+        let res = pool_provider.free_element(8, |_| {});
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert_eq!(err, PoolError::StoreFull(1));
 
         // Verify that the two deletions are successful
-        assert!(local_pool.delete(addr0).is_ok());
-        assert!(local_pool.delete(addr1).is_ok());
+        assert!(pool_provider.delete(addr0).is_ok());
+        assert!(pool_provider.delete(addr1).is_ok());
     }
 
-    #[test]
-    fn test_read_does_not_exist() {
-        let local_pool = basic_small_pool();
+    fn generic_test_read_does_not_exist(pool_provider: &mut impl PoolProvider) {
         // Try to access data which does not exist
-        let res = local_pool.read(
+        let res = pool_provider.read(
             &StaticPoolAddr {
                 packet_idx: 0,
                 pool_idx: 0,
@@ -804,13 +1232,11 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_store_full() {
-        let mut local_pool = basic_small_pool();
+    fn generic_test_store_full(pool_provider: &mut impl PoolProvider) {
         let test_buf: [u8; 16] = [0; 16];
-        assert!(local_pool.add(&test_buf).is_ok());
+        assert!(pool_provider.add(&test_buf).is_ok());
         // The subpool is now full and the call should fail accordingly
-        let res = local_pool.add(&test_buf);
+        let res = pool_provider.add(&test_buf);
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert!(matches!(err, PoolError::StoreFull { .. }));
@@ -819,15 +1245,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_invalid_pool_idx() {
-        let local_pool = basic_small_pool();
+    fn generic_test_invalid_pool_idx(pool_provider: &mut impl PoolProvider) {
         let addr = StaticPoolAddr {
             pool_idx: 3,
             packet_idx: 0,
         }
         .into();
-        let res = local_pool.read(&addr, &mut []);
+        let res = pool_provider.read(&addr, &mut []);
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert!(matches!(
@@ -836,15 +1260,13 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_invalid_packet_idx() {
-        let local_pool = basic_small_pool();
+    fn generic_test_invalid_packet_idx(pool_provider: &mut impl PoolProvider) {
         let addr = StaticPoolAddr {
             pool_idx: 2,
             packet_idx: 1,
         };
         assert_eq!(addr.raw(), 0x00020001);
-        let res = local_pool.read(&addr.into(), &mut []);
+        let res = pool_provider.read(&addr.into(), &mut []);
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert!(matches!(
@@ -853,148 +1275,139 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_add_too_large() {
-        let mut local_pool = basic_small_pool();
+    fn generic_test_add_too_large(pool_provider: &mut impl PoolProvider) {
         let data_too_large = [0; 20];
-        let res = local_pool.add(&data_too_large);
+        let res = pool_provider.add(&data_too_large);
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert_eq!(err, PoolError::DataTooLarge(20));
     }
 
-    #[test]
-    fn test_data_too_large_1() {
-        let mut local_pool = basic_small_pool();
-        let res = local_pool.free_element(POOL_MAX_SIZE + 1, |_| {});
+    fn generic_test_data_too_large_1(pool_provider: &mut impl PoolProvider) {
+        let res = pool_provider.free_element(MAX_BLOCK_SIZE + 1, |_| {});
         assert!(res.is_err());
-        assert_eq!(res.unwrap_err(), PoolError::DataTooLarge(POOL_MAX_SIZE + 1));
+        assert_eq!(
+            res.unwrap_err(),
+            PoolError::DataTooLarge(MAX_BLOCK_SIZE + 1)
+        );
     }
 
-    #[test]
-    fn test_free_element_too_large() {
-        let mut local_pool = basic_small_pool();
+    fn generic_test_free_element_too_large(pool_provider: &mut impl PoolProvider) {
         // Try to request a slot which is too large
-        let res = local_pool.free_element(20, |_| {});
+        let res = pool_provider.free_element(20, |_| {});
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), PoolError::DataTooLarge(20));
     }
 
-    #[test]
-    fn test_pool_guard_deletion_man_creation() {
-        let mut local_pool = basic_small_pool();
+    fn generic_test_pool_guard_deletion_man_creation(pool_provider: &mut impl PoolProvider) {
         let test_buf: [u8; 16] = [0; 16];
-        let addr = local_pool.add(&test_buf).expect("Adding data failed");
-        let read_guard = PoolGuard::new(&mut local_pool, addr);
+        let addr = pool_provider.add(&test_buf).expect("Adding data failed");
+        let read_guard = PoolGuard::new(pool_provider, addr);
         drop(read_guard);
-        assert!(!local_pool.has_element_at(&addr).expect("Invalid address"));
+        assert!(!pool_provider
+            .has_element_at(&addr)
+            .expect("Invalid address"));
     }
 
-    #[test]
-    fn test_pool_guard_deletion() {
-        let mut local_pool = basic_small_pool();
+    fn generic_test_pool_guard_deletion(pool_provider: &mut impl PoolProviderWithGuards) {
         let test_buf: [u8; 16] = [0; 16];
-        let addr = local_pool.add(&test_buf).expect("Adding data failed");
-        let read_guard = local_pool.read_with_guard(addr);
+        let addr = pool_provider.add(&test_buf).expect("Adding data failed");
+        let read_guard = pool_provider.read_with_guard(addr);
         drop(read_guard);
-        assert!(!local_pool.has_element_at(&addr).expect("Invalid address"));
+        assert!(!pool_provider
+            .has_element_at(&addr)
+            .expect("Invalid address"));
     }
 
-    #[test]
-    fn test_pool_guard_with_release() {
-        let mut local_pool = basic_small_pool();
+    fn generic_test_pool_guard_with_release(pool_provider: &mut impl PoolProviderWithGuards) {
         let test_buf: [u8; 16] = [0; 16];
-        let addr = local_pool.add(&test_buf).expect("Adding data failed");
-        let mut read_guard = PoolGuard::new(&mut local_pool, addr);
+        let addr = pool_provider.add(&test_buf).expect("Adding data failed");
+        let mut read_guard = PoolGuard::new(pool_provider, addr);
         read_guard.release();
         drop(read_guard);
-        assert!(local_pool.has_element_at(&addr).expect("Invalid address"));
+        assert!(pool_provider
+            .has_element_at(&addr)
+            .expect("Invalid address"));
     }
 
-    #[test]
-    fn test_pool_modify_guard_man_creation() {
-        let mut local_pool = basic_small_pool();
+    fn generic_test_pool_modify_guard_man_creation(
+        pool_provider: &mut impl PoolProviderWithGuards,
+    ) {
         let test_buf: [u8; 16] = [0; 16];
-        let addr = local_pool.add(&test_buf).expect("Adding data failed");
-        let mut rw_guard = PoolRwGuard::new(&mut local_pool, addr);
+        let addr = pool_provider.add(&test_buf).expect("Adding data failed");
+        let mut rw_guard = PoolRwGuard::new(pool_provider, addr);
         rw_guard.update(&mut |_| {}).expect("modify failed");
         drop(rw_guard);
-        assert!(!local_pool.has_element_at(&addr).expect("Invalid address"));
+        assert!(!pool_provider
+            .has_element_at(&addr)
+            .expect("Invalid address"));
     }
 
-    #[test]
-    fn test_pool_modify_guard() {
-        let mut local_pool = basic_small_pool();
+    fn generic_test_pool_modify_guard(pool_provider: &mut impl PoolProviderWithGuards) {
         let test_buf: [u8; 16] = [0; 16];
-        let addr = local_pool.add(&test_buf).expect("Adding data failed");
-        let mut rw_guard = local_pool.modify_with_guard(addr);
+        let addr = pool_provider.add(&test_buf).expect("Adding data failed");
+        let mut rw_guard = pool_provider.modify_with_guard(addr);
         rw_guard.update(&mut |_| {}).expect("modify failed");
         drop(rw_guard);
-        assert!(!local_pool.has_element_at(&addr).expect("Invalid address"));
+        assert!(!pool_provider
+            .has_element_at(&addr)
+            .expect("Invalid address"));
     }
 
-    #[test]
-    fn modify_pool_index_above_0() {
-        let mut local_pool = basic_small_pool();
+    fn generic_modify_pool_index_above_0(pool_provider: &mut impl PoolProvider) {
         let test_buf_0: [u8; 4] = [1; 4];
         let test_buf_1: [u8; 4] = [2; 4];
         let test_buf_2: [u8; 4] = [3; 4];
         let test_buf_3: [u8; 4] = [4; 4];
-        let addr0 = local_pool.add(&test_buf_0).expect("Adding data failed");
-        let addr1 = local_pool.add(&test_buf_1).expect("Adding data failed");
-        let addr2 = local_pool.add(&test_buf_2).expect("Adding data failed");
-        let addr3 = local_pool.add(&test_buf_3).expect("Adding data failed");
-        local_pool
+        let addr0 = pool_provider.add(&test_buf_0).expect("Adding data failed");
+        let addr1 = pool_provider.add(&test_buf_1).expect("Adding data failed");
+        let addr2 = pool_provider.add(&test_buf_2).expect("Adding data failed");
+        let addr3 = pool_provider.add(&test_buf_3).expect("Adding data failed");
+        pool_provider
             .modify(&addr0, |buf| {
                 assert_eq!(buf, test_buf_0);
             })
             .expect("Modifying data failed");
-        local_pool
+        pool_provider
             .modify(&addr1, |buf| {
                 assert_eq!(buf, test_buf_1);
             })
             .expect("Modifying data failed");
-        local_pool
+        pool_provider
             .modify(&addr2, |buf| {
                 assert_eq!(buf, test_buf_2);
             })
             .expect("Modifying data failed");
-        local_pool
+        pool_provider
             .modify(&addr3, |buf| {
                 assert_eq!(buf, test_buf_3);
             })
             .expect("Modifying data failed");
     }
 
-    #[test]
-    fn test_spills_to_higher_subpools() {
-        let pool_cfg = StaticPoolConfig::new(vec![(2, 8), (2, 16)], true);
-        let mut local_pool = StaticMemoryPool::new(pool_cfg);
-        local_pool.free_element(8, |_| {}).unwrap();
-        local_pool.free_element(8, |_| {}).unwrap();
-        let mut in_larger_subpool_now = local_pool.free_element(8, |_| {});
+    fn generic_test_spills_to_higher_subpools(pool_provider: &mut impl PoolProvider) {
+        pool_provider.free_element(8, |_| {}).unwrap();
+        pool_provider.free_element(8, |_| {}).unwrap();
+        let mut in_larger_subpool_now = pool_provider.free_element(8, |_| {});
         assert!(in_larger_subpool_now.is_ok());
         let generic_addr = in_larger_subpool_now.unwrap();
         let pool_addr = StaticPoolAddr::from(generic_addr);
         assert_eq!(pool_addr.pool_idx, 1);
         assert_eq!(pool_addr.packet_idx, 0);
-        assert!(local_pool.has_element_at(&generic_addr).unwrap());
-        in_larger_subpool_now = local_pool.free_element(8, |_| {});
+        assert!(pool_provider.has_element_at(&generic_addr).unwrap());
+        in_larger_subpool_now = pool_provider.free_element(8, |_| {});
         assert!(in_larger_subpool_now.is_ok());
         let generic_addr = in_larger_subpool_now.unwrap();
         let pool_addr = StaticPoolAddr::from(generic_addr);
         assert_eq!(pool_addr.pool_idx, 1);
         assert_eq!(pool_addr.packet_idx, 1);
-        assert!(local_pool.has_element_at(&generic_addr).unwrap());
+        assert!(pool_provider.has_element_at(&generic_addr).unwrap());
     }
 
-    #[test]
-    fn test_spillage_fails_as_well() {
-        let pool_cfg = StaticPoolConfig::new(vec![(1, 8), (1, 16)], true);
-        let mut local_pool = StaticMemoryPool::new(pool_cfg);
-        local_pool.free_element(8, |_| {}).unwrap();
-        local_pool.free_element(8, |_| {}).unwrap();
-        let should_fail = local_pool.free_element(8, |_| {});
+    fn generic_test_spillage_fails_as_well(pool_provider: &mut impl PoolProvider) {
+        pool_provider.free_element(8, |_| {}).unwrap();
+        pool_provider.free_element(8, |_| {}).unwrap();
+        let should_fail = pool_provider.free_element(8, |_| {});
         assert!(should_fail.is_err());
         if let Err(err) = should_fail {
             assert_eq!(err, PoolError::StoreFull(1));
@@ -1003,34 +1416,472 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_spillage_works_across_multiple_subpools() {
-        let pool_cfg = StaticPoolConfig::new(vec![(1, 8), (1, 12), (1, 16)], true);
-        let mut local_pool = StaticMemoryPool::new(pool_cfg);
-        local_pool.free_element(8, |_| {}).unwrap();
-        local_pool.free_element(12, |_| {}).unwrap();
-        let in_larger_subpool_now = local_pool.free_element(8, |_| {});
+    fn generic_test_spillage_works_across_multiple_subpools(pool_provider: &mut impl PoolProvider) {
+        pool_provider.free_element(8, |_| {}).unwrap();
+        pool_provider.free_element(12, |_| {}).unwrap();
+        let in_larger_subpool_now = pool_provider.free_element(8, |_| {});
         assert!(in_larger_subpool_now.is_ok());
         let generic_addr = in_larger_subpool_now.unwrap();
         let pool_addr = StaticPoolAddr::from(generic_addr);
         assert_eq!(pool_addr.pool_idx, 2);
         assert_eq!(pool_addr.packet_idx, 0);
-        assert!(local_pool.has_element_at(&generic_addr).unwrap());
+        assert!(pool_provider.has_element_at(&generic_addr).unwrap());
     }
 
-    #[test]
-    fn test_spillage_fails_across_multiple_subpools() {
-        let pool_cfg = StaticPoolConfig::new(vec![(1, 8), (1, 12), (1, 16)], true);
-        let mut local_pool = StaticMemoryPool::new(pool_cfg);
-        local_pool.free_element(8, |_| {}).unwrap();
-        local_pool.free_element(12, |_| {}).unwrap();
-        local_pool.free_element(16, |_| {}).unwrap();
-        let should_fail = local_pool.free_element(8, |_| {});
+    fn generic_test_spillage_fails_across_multiple_subpools(pool_provider: &mut impl PoolProvider) {
+        pool_provider.free_element(8, |_| {}).unwrap();
+        pool_provider.free_element(12, |_| {}).unwrap();
+        pool_provider.free_element(16, |_| {}).unwrap();
+        let should_fail = pool_provider.free_element(8, |_| {});
         assert!(should_fail.is_err());
         if let Err(err) = should_fail {
             assert_eq!(err, PoolError::StoreFull(2));
         } else {
             panic!("unexpected store address");
+        }
+    }
+
+    #[test]
+    fn test_add_and_read() {
+        let mut local_pool = basic_small_pool();
+        generic_test_add_and_read::<16>(&mut local_pool);
+    }
+
+    #[test]
+    fn test_add_smaller_than_full_slot() {
+        let mut local_pool = basic_small_pool();
+        generic_test_add_smaller_than_full_slot(&mut local_pool);
+    }
+
+    #[test]
+    fn test_delete() {
+        let mut local_pool = basic_small_pool();
+        generic_test_delete(&mut local_pool);
+    }
+
+    #[test]
+    fn test_modify() {
+        let mut local_pool = basic_small_pool();
+        generic_test_modify(&mut local_pool);
+    }
+
+    #[test]
+    fn test_consecutive_reservation() {
+        let mut local_pool = basic_small_pool();
+        generic_test_consecutive_reservation(&mut local_pool);
+    }
+
+    #[test]
+    fn test_read_does_not_exist() {
+        let mut local_pool = basic_small_pool();
+        generic_test_read_does_not_exist(&mut local_pool);
+    }
+
+    #[test]
+    fn test_store_full() {
+        let mut local_pool = basic_small_pool();
+        generic_test_store_full(&mut local_pool);
+    }
+
+    #[test]
+    fn test_invalid_pool_idx() {
+        let mut local_pool = basic_small_pool();
+        generic_test_invalid_pool_idx(&mut local_pool);
+    }
+
+    #[test]
+    fn test_invalid_packet_idx() {
+        let mut local_pool = basic_small_pool();
+        generic_test_invalid_packet_idx(&mut local_pool);
+    }
+
+    #[test]
+    fn test_add_too_large() {
+        let mut local_pool = basic_small_pool();
+        generic_test_add_too_large(&mut local_pool);
+    }
+
+    #[test]
+    fn test_data_too_large_1() {
+        let mut local_pool = basic_small_pool();
+        generic_test_data_too_large_1(&mut local_pool);
+    }
+
+    #[test]
+    fn test_free_element_too_large() {
+        let mut local_pool = basic_small_pool();
+        generic_test_free_element_too_large(&mut local_pool);
+    }
+
+    #[test]
+    fn test_pool_guard_deletion_man_creation() {
+        let mut local_pool = basic_small_pool();
+        generic_test_pool_guard_deletion_man_creation(&mut local_pool);
+    }
+
+    #[test]
+    fn test_pool_guard_deletion() {
+        let mut local_pool = basic_small_pool();
+        generic_test_pool_guard_deletion(&mut local_pool);
+    }
+
+    #[test]
+    fn test_pool_guard_with_release() {
+        let mut local_pool = basic_small_pool();
+        generic_test_pool_guard_with_release(&mut local_pool);
+    }
+
+    #[test]
+    fn test_pool_modify_guard_man_creation() {
+        let mut local_pool = basic_small_pool();
+        generic_test_pool_modify_guard_man_creation(&mut local_pool);
+    }
+
+    #[test]
+    fn test_pool_modify_guard() {
+        let mut local_pool = basic_small_pool();
+        generic_test_pool_modify_guard(&mut local_pool);
+    }
+
+    #[test]
+    fn modify_pool_index_above_0() {
+        let mut local_pool = basic_small_pool();
+        generic_modify_pool_index_above_0(&mut local_pool);
+    }
+
+    #[test]
+    fn test_spills_to_higher_subpools() {
+        let subpool_config_vec = vec![SubpoolConfig::new(2, 8), SubpoolConfig::new(2, 16)];
+        let pool_cfg = StaticPoolConfig::new(subpool_config_vec, true);
+        let mut local_pool = StaticMemoryPool::new(pool_cfg);
+        generic_test_spills_to_higher_subpools(&mut local_pool);
+    }
+
+    #[test]
+    fn test_spillage_fails_as_well() {
+        let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(vec![(1, 8), (1, 16)], true);
+        let mut local_pool = StaticMemoryPool::new(pool_cfg);
+        generic_test_spillage_fails_as_well(&mut local_pool);
+    }
+
+    #[test]
+    fn test_spillage_works_across_multiple_subpools() {
+        let pool_cfg =
+            StaticPoolConfig::new_from_subpool_cfg_tuples(vec![(1, 8), (1, 12), (1, 16)], true);
+        let mut local_pool = StaticMemoryPool::new(pool_cfg);
+        generic_test_spillage_works_across_multiple_subpools(&mut local_pool);
+    }
+
+    #[test]
+    fn test_spillage_fails_across_multiple_subpools() {
+        let pool_cfg =
+            StaticPoolConfig::new_from_subpool_cfg_tuples(vec![(1, 8), (1, 12), (1, 16)], true);
+        let mut local_pool = StaticMemoryPool::new(pool_cfg);
+        generic_test_spillage_fails_across_multiple_subpools(&mut local_pool);
+    }
+
+    #[cfg(feature = "heapless")]
+    mod heapless_tests {
+        use super::*;
+        use crate::static_subpool;
+        use core::mem::MaybeUninit;
+
+        const SUBPOOL_1_BLOCK_SIZE: usize = 4;
+        const SUBPOOL_1_NUM_ELEMENTS: u16 = 4;
+        static mut SUBPOOL_1: MaybeUninit<
+            [u8; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE],
+        > = MaybeUninit::new([0; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE]);
+        static mut SUBPOOL_1_SIZES: MaybeUninit<[usize; SUBPOOL_1_NUM_ELEMENTS as usize]> =
+            MaybeUninit::new([STORE_FREE; SUBPOOL_1_NUM_ELEMENTS as usize]);
+
+        const SUBPOOL_2_NUM_ELEMENTS: u16 = 2;
+        const SUBPOOL_2_BLOCK_SIZE: usize = 8;
+        static mut SUBPOOL_2: MaybeUninit<
+            [u8; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE],
+        > = MaybeUninit::new([0; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE]);
+        static mut SUBPOOL_2_SIZES: MaybeUninit<[usize; SUBPOOL_2_NUM_ELEMENTS as usize]> =
+            MaybeUninit::new([STORE_FREE; SUBPOOL_2_NUM_ELEMENTS as usize]);
+
+        const SUBPOOL_3_NUM_ELEMENTS: u16 = 1;
+        const SUBPOOL_3_BLOCK_SIZE: usize = 16;
+        static_subpool!(
+            SUBPOOL_3,
+            SUBPOOL_3_SIZES,
+            SUBPOOL_3_NUM_ELEMENTS as usize,
+            SUBPOOL_3_BLOCK_SIZE
+        );
+
+        const SUBPOOL_4_NUM_ELEMENTS: u16 = 2;
+        const SUBPOOL_4_BLOCK_SIZE: usize = 16;
+        static_subpool!(
+            SUBPOOL_4,
+            SUBPOOL_4_SIZES,
+            SUBPOOL_4_NUM_ELEMENTS as usize,
+            SUBPOOL_4_BLOCK_SIZE
+        );
+
+        const SUBPOOL_5_NUM_ELEMENTS: u16 = 1;
+        const SUBPOOL_5_BLOCK_SIZE: usize = 8;
+        static_subpool!(
+            SUBPOOL_5,
+            SUBPOOL_5_SIZES,
+            SUBPOOL_5_NUM_ELEMENTS as usize,
+            SUBPOOL_5_BLOCK_SIZE
+        );
+
+        const SUBPOOL_6_NUM_ELEMENTS: u16 = 1;
+        const SUBPOOL_6_BLOCK_SIZE: usize = 12;
+        static_subpool!(
+            SUBPOOL_6,
+            SUBPOOL_6_SIZES,
+            SUBPOOL_6_NUM_ELEMENTS as usize,
+            SUBPOOL_6_BLOCK_SIZE
+        );
+
+        fn small_heapless_pool() -> StaticHeaplessMemoryPool<3> {
+            let mut heapless_pool: StaticHeaplessMemoryPool<3> =
+                StaticHeaplessMemoryPool::new(false);
+            assert!(heapless_pool
+                .grow(
+                    unsafe { SUBPOOL_1.assume_init_mut() },
+                    unsafe { SUBPOOL_1_SIZES.assume_init_mut() },
+                    SUBPOOL_1_NUM_ELEMENTS,
+                    false
+                )
+                .is_ok());
+            assert!(heapless_pool
+                .grow(
+                    unsafe { SUBPOOL_2.assume_init_mut() },
+                    unsafe { SUBPOOL_2_SIZES.assume_init_mut() },
+                    SUBPOOL_2_NUM_ELEMENTS,
+                    false
+                )
+                .is_ok());
+            assert!(heapless_pool
+                .grow(
+                    unsafe { SUBPOOL_3.assume_init_mut() },
+                    unsafe { SUBPOOL_3_SIZES.assume_init_mut() },
+                    SUBPOOL_3_NUM_ELEMENTS,
+                    false
+                )
+                .is_ok());
+            heapless_pool
+        }
+
+        #[test]
+        fn test_heapless_add_and_read() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_add_and_read::<16>(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_add_smaller_than_full_slot() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_add_smaller_than_full_slot(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_delete() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_delete(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_modify() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_modify(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_consecutive_reservation() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_consecutive_reservation(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_read_does_not_exist() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_read_does_not_exist(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_store_full() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_store_full(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_invalid_pool_idx() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_invalid_pool_idx(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_invalid_packet_idx() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_invalid_packet_idx(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_add_too_large() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_add_too_large(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_data_too_large_1() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_data_too_large_1(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_free_element_too_large() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_free_element_too_large(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_pool_guard_deletion_man_creation() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_pool_guard_deletion_man_creation(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_pool_guard_deletion() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_pool_guard_deletion(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_pool_guard_with_release() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_pool_guard_with_release(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_pool_modify_guard_man_creation() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_pool_modify_guard_man_creation(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_pool_modify_guard() {
+            let mut pool_provider = small_heapless_pool();
+            generic_test_pool_modify_guard(&mut pool_provider);
+        }
+
+        #[test]
+        fn modify_pool_index_above_0() {
+            let mut pool_provider = small_heapless_pool();
+            generic_modify_pool_index_above_0(&mut pool_provider);
+        }
+
+        #[test]
+        fn test_spills_to_higher_subpools() {
+            let mut heapless_pool: StaticHeaplessMemoryPool<2> =
+                StaticHeaplessMemoryPool::new(true);
+            assert!(heapless_pool
+                .grow(
+                    unsafe { SUBPOOL_2.assume_init_mut() },
+                    unsafe { SUBPOOL_2_SIZES.assume_init_mut() },
+                    SUBPOOL_2_NUM_ELEMENTS,
+                    false
+                )
+                .is_ok());
+            assert!(heapless_pool
+                .grow(
+                    unsafe { SUBPOOL_4.assume_init_mut() },
+                    unsafe { SUBPOOL_4_SIZES.assume_init_mut() },
+                    SUBPOOL_4_NUM_ELEMENTS,
+                    false
+                )
+                .is_ok());
+            generic_test_spills_to_higher_subpools(&mut heapless_pool);
+        }
+
+        #[test]
+        fn test_spillage_fails_as_well() {
+            let mut heapless_pool: StaticHeaplessMemoryPool<2> =
+                StaticHeaplessMemoryPool::new(true);
+            assert!(heapless_pool
+                .grow(
+                    unsafe { SUBPOOL_5.assume_init_mut() },
+                    unsafe { SUBPOOL_5_SIZES.assume_init_mut() },
+                    SUBPOOL_5_NUM_ELEMENTS,
+                    false
+                )
+                .is_ok());
+            assert!(heapless_pool
+                .grow(
+                    unsafe { SUBPOOL_3.assume_init_mut() },
+                    unsafe { SUBPOOL_3_SIZES.assume_init_mut() },
+                    SUBPOOL_3_NUM_ELEMENTS,
+                    false
+                )
+                .is_ok());
+            generic_test_spillage_fails_as_well(&mut heapless_pool);
+        }
+
+        #[test]
+        fn test_spillage_works_across_multiple_subpools() {
+            let mut heapless_pool: StaticHeaplessMemoryPool<3> =
+                StaticHeaplessMemoryPool::new(true);
+            assert!(heapless_pool
+                .grow(
+                    unsafe { SUBPOOL_5.assume_init_mut() },
+                    unsafe { SUBPOOL_5_SIZES.assume_init_mut() },
+                    SUBPOOL_5_NUM_ELEMENTS,
+                    false
+                )
+                .is_ok());
+            assert!(heapless_pool
+                .grow(
+                    unsafe { SUBPOOL_6.assume_init_mut() },
+                    unsafe { SUBPOOL_6_SIZES.assume_init_mut() },
+                    SUBPOOL_6_NUM_ELEMENTS,
+                    false
+                )
+                .is_ok());
+            assert!(heapless_pool
+                .grow(
+                    unsafe { SUBPOOL_3.assume_init_mut() },
+                    unsafe { SUBPOOL_3_SIZES.assume_init_mut() },
+                    SUBPOOL_3_NUM_ELEMENTS,
+                    false
+                )
+                .is_ok());
+            generic_test_spillage_works_across_multiple_subpools(&mut heapless_pool);
+        }
+
+        #[test]
+        fn test_spillage_fails_across_multiple_subpools() {
+            let mut heapless_pool: StaticHeaplessMemoryPool<3> =
+                StaticHeaplessMemoryPool::new(true);
+            assert!(heapless_pool
+                .grow(
+                    unsafe { SUBPOOL_5.assume_init_mut() },
+                    unsafe { SUBPOOL_5_SIZES.assume_init_mut() },
+                    SUBPOOL_5_NUM_ELEMENTS,
+                    false
+                )
+                .is_ok());
+            assert!(heapless_pool
+                .grow(
+                    unsafe { SUBPOOL_6.assume_init_mut() },
+                    unsafe { SUBPOOL_6_SIZES.assume_init_mut() },
+                    SUBPOOL_6_NUM_ELEMENTS,
+                    false
+                )
+                .is_ok());
+            assert!(heapless_pool
+                .grow(
+                    unsafe { SUBPOOL_3.assume_init_mut() },
+                    unsafe { SUBPOOL_3_SIZES.assume_init_mut() },
+                    SUBPOOL_3_NUM_ELEMENTS,
+                    false
+                )
+                .is_ok());
+            generic_test_spillage_fails_across_multiple_subpools(&mut heapless_pool);
         }
     }
 }

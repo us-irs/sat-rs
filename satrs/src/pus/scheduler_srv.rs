@@ -1,11 +1,12 @@
 use super::scheduler::PusSchedulerProvider;
 use super::verification::{VerificationReporter, VerificationReportingProvider};
 use super::{
-    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiver,
-    EcssTmSender, MpscTcReceiver, PusServiceHelper,
+    DirectPusPacketHandlerResult, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
+    EcssTcInVecConverter, EcssTcReceiver, EcssTmSender, HandlingStatus, MpscTcReceiver,
+    PartialPusHandlingError, PusServiceHelper,
 };
 use crate::pool::PoolProvider;
-use crate::pus::{PusPacketHandlerResult, PusPacketHandlingError};
+use crate::pus::PusPacketHandlingError;
 use crate::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use alloc::string::ToString;
 use spacepackets::ecss::{scheduling, PusPacket};
@@ -64,14 +65,15 @@ impl<
         &self.scheduler
     }
 
-    pub fn poll_and_handle_next_tc(
+    pub fn poll_and_handle_next_tc<ErrorCb: FnMut(&PartialPusHandlingError)>(
         &mut self,
+        mut error_callback: ErrorCb,
         time_stamp: &[u8],
         sched_tc_pool: &mut (impl PoolProvider + ?Sized),
-    ) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+    ) -> Result<DirectPusPacketHandlerResult, PusPacketHandlingError> {
         let possible_packet = self.service_helper.retrieve_and_accept_next_packet()?;
         if possible_packet.is_none() {
-            return Ok(PusPacketHandlerResult::Empty);
+            return Ok(HandlingStatus::Empty.into());
         }
         let ecss_tc_and_token = possible_packet.unwrap();
         self.service_helper
@@ -81,34 +83,34 @@ impl<
         let subservice = PusPacket::subservice(&tc);
         let standard_subservice = scheduling::Subservice::try_from(subservice);
         if standard_subservice.is_err() {
-            return Ok(PusPacketHandlerResult::CustomSubservice(
+            return Ok(DirectPusPacketHandlerResult::CustomSubservice(
                 subservice,
                 ecss_tc_and_token.token,
             ));
         }
-        let partial_error = None;
         match standard_subservice.unwrap() {
             scheduling::Subservice::TcEnableScheduling => {
-                let start_token = self
-                    .service_helper
-                    .verif_reporter()
-                    .start_success(
-                        &self.service_helper.common.tm_sender,
-                        ecss_tc_and_token.token,
-                        time_stamp,
-                    )
-                    .expect("Error sending start success");
-
+                let opt_started_token = match self.service_helper.verif_reporter().start_success(
+                    &self.service_helper.common.tm_sender,
+                    ecss_tc_and_token.token,
+                    time_stamp,
+                ) {
+                    Ok(started_token) => Some(started_token),
+                    Err(e) => {
+                        error_callback(&PartialPusHandlingError::Verification(e));
+                        None
+                    }
+                };
                 self.scheduler.enable();
-                if self.scheduler.is_enabled() {
-                    self.service_helper
-                        .verif_reporter()
-                        .completion_success(
-                            &self.service_helper.common.tm_sender,
-                            start_token,
-                            time_stamp,
-                        )
-                        .expect("Error sending completion success");
+
+                if self.scheduler.is_enabled() && opt_started_token.is_some() {
+                    if let Err(e) = self.service_helper.verif_reporter().completion_success(
+                        &self.service_helper.common.tm_sender,
+                        opt_started_token.unwrap(),
+                        time_stamp,
+                    ) {
+                        error_callback(&PartialPusHandlingError::Verification(e));
+                    }
                 } else {
                     return Err(PusPacketHandlingError::Other(
                         "failed to enabled scheduler".to_string(),
@@ -116,26 +118,27 @@ impl<
                 }
             }
             scheduling::Subservice::TcDisableScheduling => {
-                let start_token = self
-                    .service_helper
-                    .verif_reporter()
-                    .start_success(
-                        &self.service_helper.common.tm_sender,
-                        ecss_tc_and_token.token,
-                        time_stamp,
-                    )
-                    .expect("Error sending start success");
+                let opt_started_token = match self.service_helper.verif_reporter().start_success(
+                    &self.service_helper.common.tm_sender,
+                    ecss_tc_and_token.token,
+                    time_stamp,
+                ) {
+                    Ok(started_token) => Some(started_token),
+                    Err(e) => {
+                        error_callback(&PartialPusHandlingError::Verification(e));
+                        None
+                    }
+                };
 
                 self.scheduler.disable();
-                if !self.scheduler.is_enabled() {
-                    self.service_helper
-                        .verif_reporter()
-                        .completion_success(
-                            &self.service_helper.common.tm_sender,
-                            start_token,
-                            time_stamp,
-                        )
-                        .expect("Error sending completion success");
+                if !self.scheduler.is_enabled() && opt_started_token.is_some() {
+                    if let Err(e) = self.service_helper.verif_reporter().completion_success(
+                        &self.service_helper.common.tm_sender,
+                        opt_started_token.unwrap(),
+                        time_stamp,
+                    ) {
+                        error_callback(&PartialPusHandlingError::Verification(e));
+                    }
                 } else {
                     return Err(PusPacketHandlingError::Other(
                         "failed to disable scheduler".to_string(),
@@ -194,18 +197,13 @@ impl<
             }
             _ => {
                 // Treat unhandled standard subservices as custom subservices for now.
-                return Ok(PusPacketHandlerResult::CustomSubservice(
+                return Ok(DirectPusPacketHandlerResult::CustomSubservice(
                     subservice,
                     ecss_tc_and_token.token,
                 ));
             }
         }
-        if let Some(partial_error) = partial_error {
-            return Ok(PusPacketHandlerResult::RequestHandledPartialSuccess(
-                partial_error,
-            ));
-        }
-        Ok(PusPacketHandlerResult::RequestHandled)
+        Ok(HandlingStatus::HandledOne.into())
     }
 }
 /// Helper type definition for a PUS 11 handler with a dynamic TMTC memory backend and regular
@@ -257,7 +255,7 @@ mod tests {
         verification::{RequestId, TcStateAccepted, VerificationToken},
         EcssTcInSharedStoreConverter,
     };
-    use crate::pus::{MpscTcReceiver, PusPacketHandlerResult, PusPacketHandlingError};
+    use crate::pus::{DirectPusPacketHandlerResult, MpscTcReceiver, PusPacketHandlingError};
     use crate::tmtc::PacketSenderWithSharedPool;
     use alloc::collections::VecDeque;
     use delegate::delegate;
@@ -288,7 +286,10 @@ mod tests {
     impl Pus11HandlerWithStoreTester {
         pub fn new() -> Self {
             let test_scheduler = TestScheduler::default();
-            let pool_cfg = StaticPoolConfig::new(alloc::vec![(16, 16), (8, 32), (4, 64)], false);
+            let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(
+                alloc::vec![(16, 16), (8, 32), (4, 64)],
+                false,
+            );
             let sched_tc_pool = StaticMemoryPool::new(pool_cfg.clone());
             let (common, srv_handler) = PusServiceHandlerWithSharedStoreCommon::new(0);
             Self {
@@ -298,10 +299,12 @@ mod tests {
             }
         }
 
-        pub fn handle_one_tc(&mut self) -> Result<PusPacketHandlerResult, PusPacketHandlingError> {
+        pub fn handle_one_tc(
+            &mut self,
+        ) -> Result<DirectPusPacketHandlerResult, PusPacketHandlingError> {
             let time_stamp = cds::CdsTime::new_with_u16_days(0, 0).to_vec().unwrap();
             self.handler
-                .poll_and_handle_next_tc(&time_stamp, &mut self.sched_tc_pool)
+                .poll_and_handle_next_tc(|_| {}, &time_stamp, &mut self.sched_tc_pool)
         }
     }
 
@@ -387,7 +390,7 @@ mod tests {
         let time_stamp = cds::CdsTime::new_with_u16_days(0, 0).to_vec().unwrap();
         test_harness
             .handler
-            .poll_and_handle_next_tc(&time_stamp, &mut test_harness.sched_tc_pool)
+            .poll_and_handle_next_tc(|_| {}, &time_stamp, &mut test_harness.sched_tc_pool)
             .unwrap();
         test_harness.check_next_verification_tm(1, request_id);
         test_harness.check_next_verification_tm(3, request_id);

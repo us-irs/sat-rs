@@ -270,7 +270,7 @@ mod tests {
             UdpTestbench::new(true, Some(SERVER_WAIT_TIME_MS), 10)
                 .expect("could not create testbench");
         let server_thread = std::thread::spawn(move || udp_server.run());
-        let sim_request = SimRequest::new(PcduRequest::RequestSwitchInfo);
+        let sim_request = SimRequest::new_with_epoch_time(PcduRequest::RequestSwitchInfo);
         udp_testbench
             .send_request(&sim_request)
             .expect("sending request failed");
@@ -292,7 +292,7 @@ mod tests {
                 .expect("could not create testbench");
         let server_thread = std::thread::spawn(move || udp_server.run());
         udp_testbench
-            .send_request(&SimRequest::new(SimCtrlRequest::Ping))
+            .send_request(&SimRequest::new_with_epoch_time(SimCtrlRequest::Ping))
             .expect("sending request failed");
 
         let sim_reply = SimReply::new(PcduReply::SwitchInfo(get_all_off_switch_map()));
@@ -316,7 +316,7 @@ mod tests {
         // Send a ping so that the server knows the address of the client.
         // Do not check that the request arrives on the receiver side, is done by other test.
         udp_testbench
-            .send_request(&SimRequest::new(SimCtrlRequest::Ping))
+            .send_request(&SimRequest::new_with_epoch_time(SimCtrlRequest::Ping))
             .expect("sending request failed");
 
         // Send a reply to the server, ensure it gets forwarded to the client.
@@ -347,7 +347,7 @@ mod tests {
 
         // Connect by sending a ping.
         udp_testbench
-            .send_request(&SimRequest::new(SimCtrlRequest::Ping))
+            .send_request(&SimRequest::new_with_epoch_time(SimCtrlRequest::Ping))
             .expect("sending request failed");
         std::thread::sleep(Duration::from_millis(SERVER_WAIT_TIME_MS));
 
@@ -376,7 +376,7 @@ mod tests {
 
         // Connect by sending a ping.
         udp_testbench
-            .send_request(&SimRequest::new(SimCtrlRequest::Ping))
+            .send_request(&SimRequest::new_with_epoch_time(SimCtrlRequest::Ping))
             .expect("sending request failed");
         std::thread::sleep(Duration::from_millis(SERVER_WAIT_TIME_MS));
 

@@ -26,10 +26,13 @@ impl SimTestbench {
             request_sender,
         }
     }
+    pub fn handle_sim_requests_time_agnostic(&mut self) {
+        self.handle_sim_requests(MonotonicTime::EPOCH);
+    }
 
     delegate! {
         to self.sim_controller {
-            pub fn handle_sim_requests(&mut self);
+            pub fn handle_sim_requests(&mut self, old_timestamp: MonotonicTime);
         }
         to self.sim_controller.simulation {
             pub fn step(&mut self);

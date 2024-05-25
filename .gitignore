@@ -2,6 +2,7 @@ target/
 
 output.log
 /Cargo.lock
+output.log
 
 output.log
 

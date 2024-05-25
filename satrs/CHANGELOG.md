@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+## Changed
+
+- Renamed `StaticPoolConfig::new` to `StaticPoolConfig::new_from_subpool_cfg_tuples`. The new
+  `new` implementation expects a type struct instead of tuples.
+
+## Added
+
+- `StaticHeaplessMemoryPool` which can be grown with user-provided static buffers.
+
+# [v0.2.1] 2024-05-19
+
+## Changed
+
+- The HAL TCP server `ServerConfig::new` method now sets the `reuse_port` and `reuse_addr`
+  fields to `true`.
+
+## Fixed
+
+- Possibly subtly broken v0.2.0 build artifact.
+
+# [v0.2.0] 2024-05-02
+
+## Changed
+
+- Various improvements for the PUS stack components.
+
+## Added
+
+- Added `HandlingStatus` enumeration.
+
 # [v0.2.0-rc.5] 2024-04-24
 
 ## Added

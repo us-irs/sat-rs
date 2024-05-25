@@ -31,7 +31,9 @@
 //! const TEST_APID: u16 = 0x02;
 //! const TEST_COMPONENT_ID: UniqueApidTargetId = UniqueApidTargetId::new(TEST_APID, 0x05);
 //!
-//! let pool_cfg = StaticPoolConfig::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)], false);
+//! let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(
+//!     vec![(10, 32), (10, 64), (10, 128), (10, 1024)], false
+//! );
 //! let tm_pool = StaticMemoryPool::new(pool_cfg.clone());
 //! let shared_tm_pool = SharedStaticMemoryPool::new(RwLock::new(tm_pool));
 //! let (verif_tx, verif_rx) = mpsc::sync_channel(10);
@@ -79,6 +81,7 @@
 //! The [integration test](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-core/tests/verification_test.rs)
 //! for the verification module contains examples how this module could be used in a more complex
 //! context involving multiple threads
+use crate::params::{Params, WritableToBeBytes};
 use crate::pus::{source_buffer_large_enough, EcssTmSender, EcssTmtcError};
 use core::fmt::{Debug, Display, Formatter};
 use core::hash::{Hash, Hasher};
@@ -353,7 +356,7 @@ pub struct FailParams<'stamp, 'fargs> {
 impl<'stamp, 'fargs> FailParams<'stamp, 'fargs> {
     pub fn new(
         time_stamp: &'stamp [u8],
-        failure_code: &'fargs impl EcssEnumeration,
+        failure_code: &'fargs dyn EcssEnumeration,
         failure_data: &'fargs [u8],
     ) -> Self {
         Self {
@@ -381,7 +384,7 @@ impl<'stamp, 'fargs> FailParamsWithStep<'stamp, 'fargs> {
     pub fn new(
         time_stamp: &'stamp [u8],
         step: &'fargs impl EcssEnumeration,
-        failure_code: &'fargs impl EcssEnumeration,
+        failure_code: &'fargs dyn EcssEnumeration,
         failure_data: &'fargs [u8],
     ) -> Self {
         Self {
@@ -1171,26 +1174,143 @@ pub mod alloc_mod {
     }
 }
 
-/*
-#[cfg(feature = "std")]
-pub mod std_mod {
-    use std::sync::mpsc;
-
-    use crate::pool::StoreAddr;
-    use crate::pus::verification::VerificationReporterWithSender;
-
-    use super::alloc_mod::VerificationReporterWithSharedPoolSender;
-
-    pub type VerificationReporterWithSharedPoolMpscSender =
-        VerificationReporterWithSharedPoolSender<mpsc::Sender<StoreAddr>>;
-    pub type VerificationReporterWithSharedPoolMpscBoundedSender =
-        VerificationReporterWithSharedPoolSender<mpsc::SyncSender<StoreAddr>>;
-    pub type VerificationReporterWithVecMpscSender =
-        VerificationReporterWithSender<mpsc::Sender<alloc::vec::Vec<u8>>>;
-    pub type VerificationReporterWithVecMpscBoundedSender =
-        VerificationReporterWithSender<mpsc::SyncSender<alloc::vec::Vec<u8>>>;
+pub struct FailParamHelper<'stamp, 'fargs, 'buf, 'params> {
+    pub timestamp: &'stamp [u8],
+    pub error_code: &'fargs dyn EcssEnumeration,
+    pub small_data_buf: &'buf mut [u8],
+    pub params: Option<&'params Params>,
 }
- */
+
+/// This helper function simplifies generating completion failures where the error data has
+/// the generic [Params] type.
+///
+/// A small data buffer needs to be supplied for the [Params::Heapless] type because all data
+/// suplied as error data must be held in a slice. Passing a static buffer avoids dynamic memory
+/// allocation for this case.
+///
+/// Please note that this specific function can not propagate the [Params::Store] variant.
+/// This function also might not be able to propagate other error variants which are added in
+/// the future. The returned boolean on success denotes whether the error parameters were
+/// propagated properly.
+pub fn handle_completion_failure_with_generic_params<TcState: WasAtLeastAccepted + Copy>(
+    tm_sender: &(impl EcssTmSender + ?Sized),
+    verif_token: VerificationToken<TcState>,
+    verif_reporter: &impl VerificationReportingProvider,
+    helper: FailParamHelper,
+) -> Result<bool, EcssTmtcError> {
+    let mut error_params_propagated = true;
+    if helper.params.is_none() {
+        verif_reporter.completion_failure(
+            tm_sender,
+            verif_token,
+            FailParams::new(helper.timestamp, helper.error_code, &[]),
+        )?;
+        return Ok(true);
+    }
+    let error_params = helper.params.unwrap();
+    match error_params {
+        Params::Heapless(heapless_param) => {
+            heapless_param
+                .write_to_be_bytes(&mut helper.small_data_buf[..heapless_param.written_len()])?;
+            verif_reporter.completion_failure(
+                tm_sender,
+                verif_token,
+                FailParams::new(
+                    helper.timestamp,
+                    helper.error_code,
+                    &helper.small_data_buf[..heapless_param.written_len()],
+                ),
+            )?;
+        }
+        #[cfg(feature = "alloc")]
+        Params::Vec(vec) => {
+            verif_reporter.completion_failure(
+                tm_sender,
+                verif_token,
+                FailParams::new(helper.timestamp, helper.error_code, vec),
+            )?;
+        }
+        #[cfg(feature = "alloc")]
+        Params::String(str) => {
+            verif_reporter.completion_failure(
+                tm_sender,
+                verif_token,
+                FailParams::new(helper.timestamp, helper.error_code, str.as_bytes()),
+            )?;
+        }
+        _ => {
+            verif_reporter.completion_failure(
+                tm_sender,
+                verif_token,
+                FailParams::new(helper.timestamp, helper.error_code, &[]),
+            )?;
+            error_params_propagated = false;
+        }
+    }
+    Ok(error_params_propagated)
+}
+
+/// This function is similar to [handle_completion_failure_with_generic_params] but handles the
+/// step failure case.
+pub fn handle_step_failure_with_generic_params(
+    tm_sender: &(impl EcssTmSender + ?Sized),
+    verif_token: VerificationToken<TcStateStarted>,
+    verif_reporter: &impl VerificationReportingProvider,
+    helper: FailParamHelper,
+    step: &impl EcssEnumeration,
+) -> Result<bool, EcssTmtcError> {
+    if helper.params.is_none() {
+        verif_reporter.step_failure(
+            tm_sender,
+            verif_token,
+            FailParamsWithStep::new(helper.timestamp, step, helper.error_code, &[]),
+        )?;
+        return Ok(true);
+    }
+    let error_params = helper.params.unwrap();
+    let mut error_params_propagated = true;
+    match error_params {
+        Params::Heapless(heapless_param) => {
+            heapless_param
+                .write_to_be_bytes(&mut helper.small_data_buf[..heapless_param.written_len()])?;
+            verif_reporter.step_failure(
+                tm_sender,
+                verif_token,
+                FailParamsWithStep::new(
+                    helper.timestamp,
+                    step,
+                    helper.error_code,
+                    &helper.small_data_buf[..heapless_param.written_len()],
+                ),
+            )?;
+        }
+        #[cfg(feature = "alloc")]
+        Params::Vec(vec) => {
+            verif_reporter.step_failure(
+                tm_sender,
+                verif_token,
+                FailParamsWithStep::new(helper.timestamp, step, helper.error_code, vec),
+            )?;
+        }
+        #[cfg(feature = "alloc")]
+        Params::String(str) => {
+            verif_reporter.step_failure(
+                tm_sender,
+                verif_token,
+                FailParamsWithStep::new(helper.timestamp, step, helper.error_code, str.as_bytes()),
+            )?;
+        }
+        _ => {
+            verif_reporter.step_failure(
+                tm_sender,
+                verif_token,
+                FailParamsWithStep::new(helper.timestamp, step, helper.error_code, &[]),
+            )?;
+            error_params_propagated = false;
+        }
+    }
+    Ok(error_params_propagated)
+}
 
 #[cfg(any(feature = "test_util", test))]
 pub mod test_util {
@@ -1566,73 +1686,19 @@ pub mod test_util {
                 .pop_front()
                 .expect("report queue is empty")
         }
-        /*
-        pub fn verification_info(&self, req_id: &RequestId) -> Option<VerificationStatus> {
-            let verif_map = self.verification_map.lock().unwrap();
-            let value = verif_map.borrow().get(req_id).cloned();
-            value
-        }
-
-
-        pub fn check_started(&self, req_id: &RequestId) -> bool {
-            let verif_map = self.verification_map.lock().unwrap();
-            if let Some(entry) = verif_map.borrow().get(req_id) {
-                return entry.started.unwrap_or(false);
-            }
-            false
-        }
-
-        fn generic_completion_checks(
-            entry: &VerificationStatus,
-            step: Option<u16>,
-            completion_success: bool,
-        ) {
-            assert!(entry.accepted.unwrap());
-            assert!(entry.started.unwrap());
-            if let Some(step) = step {
-                assert!(entry.step_status.unwrap());
-                assert_eq!(entry.step, step);
-            } else {
-                assert!(entry.step_status.is_none());
-            }
-            assert_eq!(entry.completed.unwrap(), completion_success);
-        }
-
-
-        pub fn assert_completion_failure(
-            &self,
-            req_id: &RequestId,
-            step: Option<u16>,
-            error_code: u64,
-        ) {
-            let verif_map = self.verification_map.lock().unwrap();
-            if let Some(entry) = verif_map.borrow().get(req_id) {
-                Self::generic_completion_checks(entry, step, false);
-                assert_eq!(entry.fail_enum.unwrap(), error_code);
-                return;
-            }
-            panic!("request not in verification map");
-        }
-
-        pub fn completion_status(&self, req_id: &RequestId) -> Option<bool> {
-            let verif_map = self.verification_map.lock().unwrap();
-            if let Some(entry) = verif_map.borrow().get(req_id) {
-                return entry.completed;
-            }
-            panic!("request not in verification map");
-        }
-         */
     }
 }
 
 #[cfg(test)]
 pub mod tests {
+    use crate::params::Params;
     use crate::pool::{SharedStaticMemoryPool, StaticMemoryPool, StaticPoolConfig};
     use crate::pus::test_util::{TEST_APID, TEST_COMPONENT_ID_0};
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
-        EcssTmSender, EcssTmtcError, FailParams, FailParamsWithStep, RequestId, TcStateNone,
-        VerificationReporter, VerificationReporterCfg, VerificationToken,
+        handle_step_failure_with_generic_params, EcssTmSender, EcssTmtcError, FailParams,
+        FailParamsWithStep, RequestId, TcStateNone, VerificationReporter, VerificationReporterCfg,
+        VerificationToken,
     };
     use crate::pus::{ChannelWithId, PusTmVariant};
     use crate::request::MessageMetadata;
@@ -1640,6 +1706,7 @@ pub mod tests {
     use crate::tmtc::{PacketSenderWithSharedPool, SharedPacketPool};
     use crate::ComponentId;
     use alloc::format;
+    use alloc::string::ToString;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::{
         EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration, PusError, PusPacket,
@@ -1654,8 +1721,9 @@ pub mod tests {
     use std::vec::Vec;
 
     use super::{
-        DummyVerificationHook, SeqCountProviderSimple, TcStateAccepted, TcStateStarted,
-        VerificationHookProvider, VerificationReportingProvider, WasAtLeastAccepted,
+        handle_completion_failure_with_generic_params, DummyVerificationHook, FailParamHelper,
+        SeqCountProviderSimple, TcStateAccepted, TcStateStarted, VerificationHookProvider,
+        VerificationReportingProvider, WasAtLeastAccepted,
     };
 
     fn is_send<T: Send>(_: &T) {}
@@ -1663,6 +1731,7 @@ pub mod tests {
     fn is_sync<T: Sync>(_: &T) {}
 
     const EMPTY_STAMP: [u8; 7] = [0; 7];
+    const DUMMY_STAMP: &[u8] = &[0, 1, 0, 1, 0, 1, 0];
 
     #[derive(Debug, Eq, PartialEq, Clone)]
     struct TmInfo {
@@ -1740,8 +1809,8 @@ pub mod tests {
         tc: Vec<u8>,
     }
 
-    fn base_reporter(id: ComponentId) -> VerificationReporter {
-        let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
+    fn base_reporter(id: ComponentId, max_fail_data_len: usize) -> VerificationReporter {
+        let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, max_fail_data_len).unwrap();
         VerificationReporter::new(id, &cfg)
     }
 
@@ -1844,66 +1913,57 @@ pub mod tests {
                 .completion_failure(&self.sender, token, params)
         }
 
-        fn completion_success_check(&mut self, incrementing_couters: bool) {
-            assert_eq!(self.sender.service_queue.borrow().len(), 3);
-            let mut current_seq_count = 0;
+        fn check_acceptance_success(&self, timestamp: &[u8; 7]) {
             let cmp_info = TmInfo {
                 requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo {
-                    subservice: 1,
-                    apid: TEST_APID,
-                    seq_count: current_seq_count,
-                    msg_counter: current_seq_count,
-                    dest_id: self.reporter.dest_id(),
-                    time_stamp: EMPTY_STAMP,
-                },
+                common: CommonTmInfo::new(1, TEST_APID, 0, 0, self.reporter.dest_id(), timestamp),
                 additional_data: None,
             };
-            let mut info = self.sender.service_queue.borrow_mut().pop_front().unwrap();
+            let mut service_queue = self.sender.service_queue.borrow_mut();
+            assert!(service_queue.len() >= 1);
+            let info = service_queue.pop_front().unwrap();
             assert_eq!(info, cmp_info);
+        }
 
-            if incrementing_couters {
-                current_seq_count += 1;
-            }
-
+        fn check_start_success(&mut self, seq_count: u16, msg_counter: u16, timestamp: &[u8]) {
+            let mut srv_queue = self.sender.service_queue.borrow_mut();
             let cmp_info = TmInfo {
                 requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo {
-                    subservice: 3,
-                    apid: TEST_APID,
-                    msg_counter: current_seq_count,
-                    seq_count: current_seq_count,
-                    dest_id: self.reporter.dest_id(),
-                    time_stamp: [0, 1, 0, 1, 0, 1, 0],
-                },
+                common: CommonTmInfo::new(
+                    3,
+                    TEST_APID,
+                    seq_count,
+                    msg_counter,
+                    self.reporter.dest_id(),
+                    timestamp,
+                ),
                 additional_data: None,
             };
-            info = self.sender.service_queue.borrow_mut().pop_front().unwrap();
+            let info = srv_queue.pop_front().unwrap();
             assert_eq!(info, cmp_info);
+        }
 
-            if incrementing_couters {
-                current_seq_count += 1;
-            }
+        fn check_completion_success(&mut self, seq_count: u16, msg_counter: u16) {
             let cmp_info = TmInfo {
                 requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo {
-                    subservice: 7,
-                    apid: TEST_APID,
-                    msg_counter: current_seq_count,
-                    seq_count: current_seq_count,
-                    dest_id: self.reporter.dest_id(),
-                    time_stamp: EMPTY_STAMP,
-                },
+                common: CommonTmInfo::new(
+                    7,
+                    TEST_APID,
+                    seq_count,
+                    msg_counter,
+                    self.reporter.dest_id(),
+                    &EMPTY_STAMP,
+                ),
                 additional_data: None,
             };
-            info = self.sender.service_queue.borrow_mut().pop_front().unwrap();
+            let info = self.sender.service_queue.borrow_mut().pop_front().unwrap();
             assert_eq!(info, cmp_info);
         }
     }
 
     impl VerificationReporterTestbench<DummyVerificationHook> {
-        fn new(id: ComponentId, tc: PusTcCreator) -> Self {
-            let reporter = base_reporter(id);
+        fn new(id: ComponentId, tc: PusTcCreator, max_fail_data_len: usize) -> Self {
+            let reporter = base_reporter(id, max_fail_data_len);
             Self {
                 id,
                 sender: TestSender::default(),
@@ -1913,36 +1973,10 @@ pub mod tests {
             }
         }
 
-        fn acceptance_check(&self, time_stamp: &[u8; 7]) {
+        fn check_acceptance_failure(&mut self, timestamp: &[u8; 7]) {
             let cmp_info = TmInfo {
                 requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo {
-                    subservice: 1,
-                    apid: TEST_APID,
-                    seq_count: 0,
-                    msg_counter: 0,
-                    dest_id: self.reporter.dest_id(),
-                    time_stamp: *time_stamp,
-                },
-                additional_data: None,
-            };
-            let mut service_queue = self.sender.service_queue.borrow_mut();
-            assert_eq!(service_queue.len(), 1);
-            let info = service_queue.pop_front().unwrap();
-            assert_eq!(info, cmp_info);
-        }
-
-        fn acceptance_fail_check(&mut self, stamp_buf: [u8; 7]) {
-            let cmp_info = TmInfo {
-                requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo {
-                    subservice: 2,
-                    seq_count: 0,
-                    apid: TEST_APID,
-                    msg_counter: 0,
-                    dest_id: self.reporter.dest_id(),
-                    time_stamp: stamp_buf,
-                },
+                common: CommonTmInfo::new(2, TEST_APID, 0, 0, self.reporter.dest_id(), timestamp),
                 additional_data: Some([0, 2].to_vec()),
             };
             let service_queue = self.sender.service_queue.get_mut();
@@ -1951,12 +1985,12 @@ pub mod tests {
             assert_eq!(info, cmp_info);
         }
 
-        fn start_fail_check(&mut self, fail_data_raw: [u8; 4]) {
+        fn check_start_failure(&mut self, fail_data_raw: [u8; 4]) {
             let mut srv_queue = self.sender.service_queue.borrow_mut();
             assert_eq!(srv_queue.len(), 2);
             let mut cmp_info = TmInfo {
                 requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo::new_zero_seq_count(1, TEST_APID, 0, EMPTY_STAMP),
+                common: CommonTmInfo::new_zero_seq_count(1, TEST_APID, 0, &EMPTY_STAMP),
                 additional_data: None,
             };
             let mut info = srv_queue.pop_front().unwrap();
@@ -1964,148 +1998,67 @@ pub mod tests {
 
             cmp_info = TmInfo {
                 requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo::new_zero_seq_count(4, TEST_APID, 0, EMPTY_STAMP),
+                common: CommonTmInfo::new_zero_seq_count(4, TEST_APID, 0, &EMPTY_STAMP),
                 additional_data: Some([&[22], fail_data_raw.as_slice()].concat().to_vec()),
             };
             info = srv_queue.pop_front().unwrap();
             assert_eq!(info, cmp_info);
         }
 
-        fn step_success_check(&mut self, time_stamp: &[u8; 7]) {
-            let mut cmp_info = TmInfo {
+        fn check_step_success(&mut self, step: u8, timestamp: &[u8; 7]) {
+            let cmp_info = TmInfo {
                 requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo::new_zero_seq_count(1, TEST_APID, 0, *time_stamp),
-                additional_data: None,
+                common: CommonTmInfo::new_zero_seq_count(5, TEST_APID, 0, timestamp),
+                additional_data: Some([step].to_vec()),
             };
             let mut srv_queue = self.sender.service_queue.borrow_mut();
-            let mut info = srv_queue.pop_front().unwrap();
-            assert_eq!(info, cmp_info);
-            cmp_info = TmInfo {
-                requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo::new_zero_seq_count(3, TEST_APID, 0, *time_stamp),
-                additional_data: None,
-            };
-            info = srv_queue.pop_front().unwrap();
-            assert_eq!(info, cmp_info);
-            cmp_info = TmInfo {
-                requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo::new_zero_seq_count(5, TEST_APID, 0, *time_stamp),
-                additional_data: Some([0].to_vec()),
-            };
-            info = srv_queue.pop_front().unwrap();
-            assert_eq!(info, cmp_info);
-            cmp_info = TmInfo {
-                requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo::new_zero_seq_count(5, TEST_APID, 0, *time_stamp),
-                additional_data: Some([1].to_vec()),
-            };
-            info = srv_queue.pop_front().unwrap();
+            let info = srv_queue.pop_front().unwrap();
             assert_eq!(info, cmp_info);
         }
 
-        fn check_step_failure(&mut self, fail_data_raw: [u8; 4]) {
-            assert_eq!(self.sender.service_queue.borrow().len(), 4);
-            let mut cmp_info = TmInfo {
-                requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo::new_zero_seq_count(
-                    1,
-                    TEST_APID,
-                    self.reporter.dest_id(),
-                    EMPTY_STAMP,
-                ),
-                additional_data: None,
-            };
-            let mut info = self.sender.service_queue.borrow_mut().pop_front().unwrap();
-            assert_eq!(info, cmp_info);
-
-            cmp_info = TmInfo {
-                requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo::new_zero_seq_count(
-                    3,
-                    TEST_APID,
-                    self.reporter.dest_id(),
-                    [0, 1, 0, 1, 0, 1, 0],
-                ),
-                additional_data: None,
-            };
-            info = self.sender.service_queue.borrow_mut().pop_front().unwrap();
-            assert_eq!(info, cmp_info);
-
-            cmp_info = TmInfo {
-                requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo::new_zero_seq_count(
-                    5,
-                    TEST_APID,
-                    self.reporter.dest_id(),
-                    EMPTY_STAMP,
-                ),
-                additional_data: Some([0].to_vec()),
-            };
-            info = self.sender.service_queue.get_mut().pop_front().unwrap();
-            assert_eq!(info, cmp_info);
-
-            cmp_info = TmInfo {
+        fn check_step_failure(
+            &mut self,
+            step: &impl EcssEnumeration,
+            error_code: &impl EcssEnumeration,
+            fail_data: &[u8],
+        ) {
+            let mut additional_data = Vec::new();
+            additional_data.extend(step.to_vec());
+            additional_data.extend(error_code.to_vec());
+            additional_data.extend(fail_data);
+            let cmp_info = TmInfo {
                 requestor: MessageMetadata::new(self.request_id.into(), self.id),
                 common: CommonTmInfo::new_zero_seq_count(
                     6,
                     TEST_APID,
                     self.reporter.dest_id(),
-                    EMPTY_STAMP,
+                    &EMPTY_STAMP,
                 ),
-                additional_data: Some(
-                    [
-                        [1].as_slice(),
-                        &[0, 0, 0x10, 0x20],
-                        fail_data_raw.as_slice(),
-                    ]
-                    .concat()
-                    .to_vec(),
-                ),
+                additional_data: Some(additional_data),
             };
-            info = self.sender.service_queue.get_mut().pop_front().unwrap();
+            let info = self.sender.service_queue.get_mut().pop_front().unwrap();
             assert_eq!(info, cmp_info);
         }
 
-        fn completion_fail_check(&mut self) {
-            assert_eq!(self.sender.service_queue.borrow().len(), 3);
-
-            let mut cmp_info = TmInfo {
-                requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo::new_zero_seq_count(
-                    1,
-                    TEST_APID,
-                    self.reporter.dest_id(),
-                    EMPTY_STAMP,
-                ),
-                additional_data: None,
-            };
-            let mut info = self.sender.service_queue.get_mut().pop_front().unwrap();
-            assert_eq!(info, cmp_info);
-
-            cmp_info = TmInfo {
-                requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo::new_zero_seq_count(
-                    3,
-                    TEST_APID,
-                    self.reporter.dest_id(),
-                    [0, 1, 0, 1, 0, 1, 0],
-                ),
-                additional_data: None,
-            };
-            info = self.sender.service_queue.get_mut().pop_front().unwrap();
-            assert_eq!(info, cmp_info);
-
-            cmp_info = TmInfo {
+        fn check_completion_failure(
+            &mut self,
+            error_code: &impl EcssEnumeration,
+            fail_data: &[u8],
+        ) {
+            let mut additional_data = Vec::new();
+            additional_data.extend(error_code.to_vec());
+            additional_data.extend(fail_data);
+            let cmp_info = TmInfo {
                 requestor: MessageMetadata::new(self.request_id.into(), self.id),
                 common: CommonTmInfo::new_zero_seq_count(
                     8,
                     TEST_APID,
                     self.reporter.dest_id(),
-                    EMPTY_STAMP,
+                    &EMPTY_STAMP,
                 ),
-                additional_data: Some([0, 0, 0x10, 0x20].to_vec()),
+                additional_data: Some(additional_data),
             };
-            info = self.sender.service_queue.get_mut().pop_front().unwrap();
+            let info = self.sender.service_queue.get_mut().pop_front().unwrap();
             assert_eq!(info, cmp_info);
         }
     }
@@ -2118,7 +2071,10 @@ pub mod tests {
 
     #[test]
     fn test_mpsc_verif_send() {
-        let pool = StaticMemoryPool::new(StaticPoolConfig::new(vec![(8, 8)], false));
+        let pool = StaticMemoryPool::new(StaticPoolConfig::new_from_subpool_cfg_tuples(
+            vec![(8, 8)],
+            false,
+        ));
         let shared_tm_store =
             SharedPacketPool::new(&SharedStaticMemoryPool::new(RwLock::new(pool)));
         let (tx, _) = mpsc::sync_channel(10);
@@ -2128,7 +2084,7 @@ pub mod tests {
 
     #[test]
     fn test_state() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping());
+        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
         assert_eq!(testbench.reporter.apid(), TEST_APID);
         testbench.reporter.set_apid(TEST_APID + 1);
         assert_eq!(testbench.reporter.apid(), TEST_APID + 1);
@@ -2136,43 +2092,43 @@ pub mod tests {
 
     #[test]
     fn test_basic_acceptance_success() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping());
+        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
         let token = testbench.init();
         testbench
             .acceptance_success(token, &EMPTY_STAMP)
             .expect("sending acceptance success failed");
-        testbench.acceptance_check(&EMPTY_STAMP);
+        testbench.check_acceptance_success(&EMPTY_STAMP);
     }
 
     #[test]
     fn test_basic_acceptance_failure() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping());
+        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
         let init_token = testbench.init();
-        let stamp_buf = [1, 2, 3, 4, 5, 6, 7];
+        let timestamp = [1, 2, 3, 4, 5, 6, 7];
         let fail_code = EcssEnumU16::new(2);
-        let fail_params = FailParams::new_no_fail_data(stamp_buf.as_slice(), &fail_code);
+        let fail_params = FailParams::new_no_fail_data(timestamp.as_slice(), &fail_code);
         testbench
             .acceptance_failure(init_token, fail_params)
             .expect("sending acceptance failure failed");
-        testbench.acceptance_fail_check(stamp_buf);
+        testbench.check_acceptance_failure(&timestamp);
     }
 
     #[test]
     fn test_basic_acceptance_failure_with_helper() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping());
+        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
         let init_token = testbench.init();
-        let stamp_buf = [1, 2, 3, 4, 5, 6, 7];
+        let timestamp = [1, 2, 3, 4, 5, 6, 7];
         let fail_code = EcssEnumU16::new(2);
-        let fail_params = FailParams::new_no_fail_data(stamp_buf.as_slice(), &fail_code);
+        let fail_params = FailParams::new_no_fail_data(timestamp.as_slice(), &fail_code);
         testbench
             .acceptance_failure(init_token, fail_params)
             .expect("sending acceptance failure failed");
-        testbench.acceptance_fail_check(stamp_buf);
+        testbench.check_acceptance_failure(&timestamp);
     }
 
     #[test]
     fn test_acceptance_fail_data_too_large() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping());
+        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 8);
         let init_token = testbench.init();
         let stamp_buf = [1, 2, 3, 4, 5, 6, 7];
         let fail_code = EcssEnumU16::new(2);
@@ -2204,7 +2160,7 @@ pub mod tests {
 
     #[test]
     fn test_basic_acceptance_failure_with_fail_data() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping());
+        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
         let fail_code = EcssEnumU8::new(10);
         let fail_data = EcssEnumU32::new(12);
         let mut fail_data_raw = [0; 4];
@@ -2216,7 +2172,7 @@ pub mod tests {
             .expect("sending acceptance failure failed");
         let cmp_info = TmInfo {
             requestor: MessageMetadata::new(testbench.request_id.into(), testbench.id),
-            common: CommonTmInfo::new_zero_seq_count(2, TEST_APID, 0, EMPTY_STAMP),
+            common: CommonTmInfo::new_zero_seq_count(2, TEST_APID, 0, &EMPTY_STAMP),
             additional_data: Some([10, 0, 0, 0, 12].to_vec()),
         };
         let mut service_queue = testbench.sender.service_queue.borrow_mut();
@@ -2227,7 +2183,7 @@ pub mod tests {
 
     #[test]
     fn test_start_failure() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping());
+        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
         let init_token = testbench.init();
         let fail_code = EcssEnumU8::new(22);
         let fail_data: i32 = -12;
@@ -2241,12 +2197,12 @@ pub mod tests {
         testbench
             .start_failure(accepted_token, fail_params)
             .expect("Start failure failure");
-        testbench.start_fail_check(fail_data_raw);
+        testbench.check_start_failure(fail_data_raw);
     }
 
     #[test]
     fn test_start_failure_with_helper() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping());
+        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
         let token = testbench.init();
         let fail_code = EcssEnumU8::new(22);
         let fail_data: i32 = -12;
@@ -2260,12 +2216,12 @@ pub mod tests {
         testbench
             .start_failure(accepted_token, fail_params)
             .expect("start failure failed");
-        testbench.start_fail_check(fail_data_raw);
+        testbench.check_start_failure(fail_data_raw);
     }
 
     #[test]
     fn test_steps_success() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping());
+        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
         let token = testbench.init();
         let accepted_token = testbench
             .acceptance_success(token, &EMPTY_STAMP)
@@ -2280,12 +2236,15 @@ pub mod tests {
             .step_success(&started_token, &EMPTY_STAMP, EcssEnumU8::new(1))
             .expect("step 1 failed");
         assert_eq!(testbench.sender.service_queue.borrow().len(), 4);
-        testbench.step_success_check(&EMPTY_STAMP);
+        testbench.check_acceptance_success(&EMPTY_STAMP);
+        testbench.check_start_success(0, 0, &EMPTY_STAMP);
+        testbench.check_step_success(0, &EMPTY_STAMP);
+        testbench.check_step_success(1, &EMPTY_STAMP);
     }
 
     #[test]
     fn test_step_failure() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping());
+        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
         let token = testbench.init();
         let fail_code = EcssEnumU32::new(0x1020);
         let fail_data: f32 = -22.3232;
@@ -2303,7 +2262,7 @@ pub mod tests {
             .acceptance_success(token, &EMPTY_STAMP)
             .expect("Sending acceptance success failed");
         let started_token = testbench
-            .start_success(accepted_token, &[0, 1, 0, 1, 0, 1, 0])
+            .start_success(accepted_token, DUMMY_STAMP)
             .expect("Sending start success failed");
         testbench
             .step_success(&started_token, &EMPTY_STAMP, EcssEnumU8::new(0))
@@ -2311,12 +2270,15 @@ pub mod tests {
         testbench
             .step_failure(started_token, fail_params)
             .expect("Step failure failed");
-        testbench.check_step_failure(fail_data_raw);
+        testbench.check_acceptance_success(&EMPTY_STAMP);
+        testbench.check_start_success(0, 0, DUMMY_STAMP);
+        testbench.check_step_success(0, &EMPTY_STAMP);
+        testbench.check_step_failure(&fail_step, &fail_code, &fail_data_raw);
     }
 
     #[test]
     fn test_completion_failure() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping());
+        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
         let token = testbench.init();
         let fail_code = EcssEnumU32::new(0x1020);
         let fail_params = FailParams::new_no_fail_data(&EMPTY_STAMP, &fail_code);
@@ -2325,29 +2287,34 @@ pub mod tests {
             .acceptance_success(token, &EMPTY_STAMP)
             .expect("Sending acceptance success failed");
         let started_token = testbench
-            .start_success(accepted_token, &[0, 1, 0, 1, 0, 1, 0])
+            .start_success(accepted_token, DUMMY_STAMP)
             .expect("Sending start success failed");
         testbench
             .completion_failure(started_token, fail_params)
             .expect("Completion failure");
-        testbench.completion_fail_check();
+        testbench.check_acceptance_success(&EMPTY_STAMP);
+        testbench.check_start_success(0, 0, DUMMY_STAMP);
+
+        testbench.check_completion_failure(&fail_code, &[]);
     }
 
     #[test]
     fn test_complete_success_sequence() {
         let mut testbench =
-            VerificationReporterTestbench::new(TEST_COMPONENT_ID_0.id(), create_generic_ping());
+            VerificationReporterTestbench::new(TEST_COMPONENT_ID_0.id(), create_generic_ping(), 16);
         let token = testbench.init();
         let accepted_token = testbench
             .acceptance_success(token, &EMPTY_STAMP)
             .expect("Sending acceptance success failed");
         let started_token = testbench
-            .start_success(accepted_token, &[0, 1, 0, 1, 0, 1, 0])
+            .start_success(accepted_token, DUMMY_STAMP)
             .expect("Sending start success failed");
         testbench
             .completion_success(started_token, &EMPTY_STAMP)
             .expect("Sending completion success failed");
-        testbench.completion_success_check(false);
+        testbench.check_acceptance_success(&EMPTY_STAMP);
+        testbench.check_start_success(0, 0, DUMMY_STAMP);
+        testbench.check_completion_success(0, 0);
     }
 
     #[test]
@@ -2367,6 +2334,83 @@ pub mod tests {
         testbench
             .completion_success(started_token, &EMPTY_STAMP)
             .expect("Sending completion success failed");
-        testbench.completion_success_check(true);
+        testbench.check_acceptance_success(&EMPTY_STAMP);
+        testbench.check_start_success(1, 1, DUMMY_STAMP);
+        testbench.check_completion_success(2, 2);
+    }
+
+    #[test]
+    fn test_completion_failure_helper_string_param() {
+        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 32);
+        let token = testbench.init();
+        let accepted_token = testbench
+            .acceptance_success(token, &EMPTY_STAMP)
+            .expect("Sending acceptance success failed");
+        let mut small_data_buf: [u8; 16] = [0; 16];
+        let fail_code = EcssEnumU8::new(1);
+        let fail_data = "error 404 oh no".to_string();
+        let fail_params = Params::String(fail_data.clone());
+        let result = handle_completion_failure_with_generic_params(
+            &testbench.sender,
+            accepted_token,
+            &testbench.reporter,
+            FailParamHelper {
+                timestamp: &EMPTY_STAMP,
+                error_code: &fail_code,
+                small_data_buf: &mut small_data_buf,
+                params: Some(&fail_params),
+            },
+        );
+        assert!(result.unwrap());
+        testbench.check_acceptance_success(&EMPTY_STAMP);
+        testbench.check_completion_failure(&fail_code, fail_data.as_bytes());
+    }
+
+    #[test]
+    fn test_step_failure_helper_string_param() {
+        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 32);
+        let token = testbench.init();
+        let accepted_token = testbench
+            .acceptance_success(token, &EMPTY_STAMP)
+            .expect("Sending acceptance success failed");
+        let started_token = testbench
+            .start_success(accepted_token, &EMPTY_STAMP)
+            .expect("Sending start success failed");
+        let mut small_data_buf: [u8; 16] = [0; 16];
+        let step = EcssEnumU8::new(2);
+        let fail_code = EcssEnumU8::new(1);
+        let fail_data = "AAAAAAAAAAAHHHHHH".to_string();
+        let fail_params = Params::String(fail_data.clone());
+        let result = handle_step_failure_with_generic_params(
+            &testbench.sender,
+            started_token,
+            &testbench.reporter,
+            FailParamHelper {
+                timestamp: &EMPTY_STAMP,
+                error_code: &fail_code,
+                small_data_buf: &mut small_data_buf,
+                params: Some(&fail_params),
+            },
+            &step,
+        );
+        assert!(result.unwrap());
+        testbench.check_acceptance_success(&EMPTY_STAMP);
+        testbench.check_start_success(0, 0, &EMPTY_STAMP);
+        testbench.check_step_failure(&step, &fail_code, fail_data.as_bytes());
+    }
+
+    #[test]
+    fn test_completion_failure_helper_vec_param() {
+        // TODO: Test this.
+    }
+
+    #[test]
+    fn test_completion_failure_helper_raw_param() {
+        // TODO: Test this.
+    }
+
+    #[test]
+    fn test_completion_failure_helper_store_param_ignored() {
+        // TODO: Test this.
     }
 }

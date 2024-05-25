@@ -17,3 +17,8 @@ The following images shows how the flow of events could look like in a system wh
 can generate events, and where other system components might be interested in those events:
 
 ![Event flow](images/events/event_man_arch.png)
+
+For the concrete implementation of your own event management and/or event routing system, you
+can have a look at the event management documentation inside the
+[API documentation](https://docs.rs/satrs/latest/satrs/event_man/index.html) where you can also
+find references to all examples.

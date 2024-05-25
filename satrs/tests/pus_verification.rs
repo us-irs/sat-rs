@@ -33,8 +33,10 @@ pub mod crossbeam_test {
         // each reporter have an own sequence count provider.
         let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
         // Shared pool object to store the verification PUS telemetry
-        let pool_cfg =
-            StaticPoolConfig::new(vec![(10, 32), (10, 64), (10, 128), (10, 1024)], false);
+        let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(
+            vec![(10, 32), (10, 64), (10, 128), (10, 1024)],
+            false,
+        );
         let shared_tm_pool =
             SharedStaticMemoryPool::new(RwLock::new(StaticMemoryPool::new(pool_cfg.clone())));
         let shared_tc_pool =
