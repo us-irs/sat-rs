@@ -13,23 +13,20 @@ use satrs::{
     pus::{EcssTmSender, PusTmVariant},
     queue::{GenericSendError, GenericTargetedMessagingError},
     request::{GenericMessage, MessageMetadata, UniqueApidTargetId},
-    spacepackets::{
-        ecss::{
-            hk,
-            tm::{PusTmCreator, PusTmSecondaryHeader},
-        },
-        SpHeader,
-    },
+    spacepackets::ByteConversionError,
 };
 use satrs_example::{config::components::PUS_MODE_SERVICE, DeviceMode, TimestampHelper};
 use satrs_minisim::{
-    eps::{PcduReply, PcduRequest, PcduSwitch, SwitchMap, SwitchMapBinaryWrapper},
+    eps::{
+        PcduReply, PcduRequest, PcduSwitch, SwitchMap, SwitchMapBinaryWrapper, SwitchMapWrapper,
+    },
     SerializableSimMsgPayload, SimReply, SimRequest,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
     acs::mgm::MpscModeLeafInterface,
+    hk::PusHkHelper,
     pus::hk::{HkReply, HkReplyVariant},
     requests::CompositeRequest,
 };
@@ -202,6 +199,8 @@ pub struct PcduHandler<ComInterface: SerialInterface, TmSender: EcssTmSender> {
     tm_sender: TmSender,
     pub com_interface: ComInterface,
     shared_switch_map: Arc<Mutex<SwitchSet>>,
+    #[new(value = "PusHkHelper::new(id)")]
+    hk_helper: PusHkHelper,
     #[new(value = "ModeAndSubmode::new(satrs_example::DeviceMode::Off as u32, 0)")]
     mode_and_submode: ModeAndSubmode,
     #[new(default)]
@@ -262,44 +261,39 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> PcduHandler<ComInter
         match hk_request.variant {
             HkRequestVariant::OneShot => {
                 if hk_request.unique_id == SetId::SwitcherSet as u32 {
-                    self.hk_reply_tx
-                        .send(GenericMessage::new(
-                            *requestor_info,
-                            HkReply::new(hk_request.unique_id, HkReplyVariant::Ack),
-                        ))
-                        .expect("failed to send HK reply");
-                    let sec_header = PusTmSecondaryHeader::new(
-                        3,
-                        hk::Subservice::TmHkPacket as u8,
-                        0,
-                        0,
+                    if let Ok(hk_tm) = self.hk_helper.generate_hk_report_packet(
                         self.stamp_helper.stamp(),
-                    );
-                    // Send TM down as JSON.
-                    let switch_map_snapshot = self
-                        .shared_switch_map
-                        .lock()
-                        .expect("failed to lock switch map")
-                        .clone();
-                    let switch_map_json = serde_json::to_string(&switch_map_snapshot)
-                        .expect("failed to serialize switch map");
-                    if switch_map_json.len() > self.tm_buf.len() {
-                        log::error!("switch map JSON too large for telemetry buffer");
-                        return;
+                        SetId::SwitcherSet as u32,
+                        &mut |hk_buf| {
+                            // Send TM down as JSON.
+                            let switch_map_snapshot = self
+                                .shared_switch_map
+                                .lock()
+                                .expect("failed to lock switch map")
+                                .clone();
+                            let switch_map_json = serde_json::to_string(&switch_map_snapshot)
+                                .expect("failed to serialize switch map");
+                            if switch_map_json.len() > hk_buf.len() {
+                                log::error!("switch map JSON too large for HK buffer");
+                                return Err(ByteConversionError::ToSliceTooSmall {
+                                    found: hk_buf.len(),
+                                    expected: switch_map_json.len(),
+                                });
+                            }
+                            Ok(switch_map_json.len())
+                        },
+                        &mut self.tm_buf,
+                    ) {
+                        self.tm_sender
+                            .send_tm(self.id.id(), PusTmVariant::Direct(hk_tm))
+                            .expect("failed to send HK TM");
+                        self.hk_reply_tx
+                            .send(GenericMessage::new(
+                                *requestor_info,
+                                HkReply::new(hk_request.unique_id, HkReplyVariant::Ack),
+                            ))
+                            .expect("failed to send HK reply");
                     }
-                    self.tm_buf[0..4].copy_from_slice(&self.id.unique_id.to_be_bytes());
-                    self.tm_buf[4..8].copy_from_slice(&(SetId::SwitcherSet as u32).to_be_bytes());
-                    self.tm_buf[8..8 + switch_map_json.len()]
-                        .copy_from_slice(switch_map_json.as_bytes());
-                    let hk_tm = PusTmCreator::new(
-                        SpHeader::new_from_apid(self.id.apid),
-                        sec_header,
-                        &self.tm_buf[0..8 + switch_map_json.len()],
-                        true,
-                    );
-                    self.tm_sender
-                        .send_tm(self.id.id(), PusTmVariant::Direct(hk_tm))
-                        .expect("failed to send HK TM");
                 }
             }
             HkRequestVariant::EnablePeriodic => todo!(),
@@ -369,7 +363,24 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> PcduHandler<ComInter
         }
     }
 
-    pub fn poll_and_handle_replies(&mut self) {}
+    pub fn poll_and_handle_replies(&mut self) {
+        if let Err(e) = self.com_interface.try_recv_replies(|reply| {
+            let sim_reply: SimReply = serde_json::from_slice(reply).expect("invalid reply format");
+            let pcdu_reply = PcduReply::from_sim_message(&sim_reply).expect("invalid reply format");
+            match pcdu_reply {
+                PcduReply::SwitchInfo(switch_info) => {
+                    let switch_map_wrapper =
+                        SwitchMapWrapper::from_binary_switch_map_ref(&switch_info);
+                    self.shared_switch_map
+                        .lock()
+                        .expect("failed to lock switch map")
+                        .switch_map = switch_map_wrapper.0;
+                }
+            }
+        }) {
+            log::warn!("receiving PCDU replies failed: {:?}", e);
+        }
+    }
 }
 
 impl<ComInterface: SerialInterface, TmSender: EcssTmSender> ModeProvider

@@ -2,9 +2,6 @@ use derive_new::new;
 use satrs::hk::{HkRequest, HkRequestVariant};
 use satrs::power::{PowerSwitchInfo, PowerSwitcherCommandSender};
 use satrs::queue::{GenericSendError, GenericTargetedMessagingError};
-use satrs::spacepackets::ecss::hk;
-use satrs::spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
-use satrs::spacepackets::SpHeader;
 use satrs_example::{DeviceMode, TimestampHelper};
 use satrs_minisim::acs::lis3mdl::{
     MgmLis3MdlReply, MgmLis3RawValues, FIELD_LSB_PER_GAUSS_4_SENS, GAUSS_TO_MICROTESLA_FACTOR,
@@ -24,6 +21,7 @@ use satrs::pus::{EcssTmSender, PusTmVariant};
 use satrs::request::{GenericMessage, MessageMetadata, UniqueApidTargetId};
 use satrs_example::config::components::PUS_MODE_SERVICE;
 
+use crate::hk::PusHkHelper;
 use crate::pus::hk::{HkReply, HkReplyVariant};
 use crate::requests::CompositeRequest;
 
@@ -179,6 +177,8 @@ pub struct MgmHandlerLis3Mdl<
     tm_sender: TmSender,
     pub com_interface: ComInterface,
     shared_mgm_set: Arc<Mutex<MgmData>>,
+    #[new(value = "PusHkHelper::new(id)")]
+    hk_helper: PusHkHelper,
     #[new(default)]
     mode_helpers: ModeHelpers,
     #[new(default)]
@@ -237,39 +237,33 @@ impl<
     pub fn handle_hk_request(&mut self, requestor_info: &MessageMetadata, hk_request: &HkRequest) {
         match hk_request.variant {
             HkRequestVariant::OneShot => {
-                // TODO: We should provide a helper class for generating some of the boilerplate.
-                // This includes the APID, subservice, unique ID and set ID handling. The user
-                // should be able to simply specify the HK data as a slice.
-                self.hk_reply_tx
-                    .send(GenericMessage::new(
-                        *requestor_info,
-                        HkReply::new(hk_request.unique_id, HkReplyVariant::Ack),
-                    ))
-                    .expect("failed to send HK reply");
-                let sec_header = PusTmSecondaryHeader::new(
-                    3,
-                    hk::Subservice::TmHkPacket as u8,
-                    0,
-                    0,
-                    self.stamp_helper.stamp(),
-                );
                 let mgm_snapshot = *self.shared_mgm_set.lock().unwrap();
-                self.bufs.tm_buf[0..4].copy_from_slice(&self.id.unique_id.to_be_bytes());
-                self.bufs.tm_buf[4..8].copy_from_slice(&(SetId::SensorData as u32).to_be_bytes());
-                // Use binary serialization here. We want the data to be tightly packed.
-                self.bufs.tm_buf[8] = mgm_snapshot.valid as u8;
-                self.bufs.tm_buf[9..13].copy_from_slice(&mgm_snapshot.x.to_be_bytes());
-                self.bufs.tm_buf[13..17].copy_from_slice(&mgm_snapshot.y.to_be_bytes());
-                self.bufs.tm_buf[17..21].copy_from_slice(&mgm_snapshot.z.to_be_bytes());
-                let hk_tm = PusTmCreator::new(
-                    SpHeader::new_from_apid(self.id.apid),
-                    sec_header,
-                    &self.bufs.tm_buf[0..21],
-                    true,
-                );
-                self.tm_sender
-                    .send_tm(self.id.id(), PusTmVariant::Direct(hk_tm))
-                    .expect("failed to send HK TM");
+                if let Ok(hk_tm) = self.hk_helper.generate_hk_report_packet(
+                    self.stamp_helper.stamp(),
+                    SetId::SensorData as u32,
+                    &mut |hk_buf| {
+                        hk_buf[0] = mgm_snapshot.valid as u8;
+                        hk_buf[1..5].copy_from_slice(&mgm_snapshot.x.to_be_bytes());
+                        hk_buf[5..9].copy_from_slice(&mgm_snapshot.y.to_be_bytes());
+                        hk_buf[9..13].copy_from_slice(&mgm_snapshot.z.to_be_bytes());
+                        Ok(13)
+                    },
+                    &mut self.bufs.tm_buf,
+                ) {
+                    // TODO: If sending the TM fails, we should also send a failure reply.
+                    self.tm_sender
+                        .send_tm(self.id.id(), PusTmVariant::Direct(hk_tm))
+                        .expect("failed to send HK TM");
+                    self.hk_reply_tx
+                        .send(GenericMessage::new(
+                            *requestor_info,
+                            HkReply::new(hk_request.unique_id, HkReplyVariant::Ack),
+                        ))
+                        .expect("failed to send HK reply");
+                } else {
+                    // TODO: Send back failure reply. Need result code for this.
+                    log::error!("TM buffer too small to generate HK data");
+                }
             }
             HkRequestVariant::EnablePeriodic => todo!(),
             HkRequestVariant::DisablePeriodic => todo!(),
