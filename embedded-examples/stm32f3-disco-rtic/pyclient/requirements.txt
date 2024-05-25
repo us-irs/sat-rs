@@ -1,0 +1,2 @@
+tmtccmd == 8.0.1
+# -e git+https://github.com/robamu-org/tmtccmd.git@main#egg=tmtccmd
