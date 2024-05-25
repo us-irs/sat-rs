@@ -1,6 +1,10 @@
 use rmp_serde::{Deserializer, Serializer};
+use satrs_minisim::eps::SwitchMap;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::UdpSocket};
+use std::{
+    collections::HashMap,
+    net::{SocketAddr, UdpSocket},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum Color {
@@ -12,7 +16,6 @@ pub enum Color {
 struct Human {
     age: u16,
     name: String,
-
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -29,7 +32,8 @@ struct HumanGroup {
     bank: HashMap<u32, usize>,
 }
 
-fn wild_testing() {
+#[allow(dead_code)]
+fn random_testing() {
     let mut buf = Vec::new();
     let john = HumanAdvanced {
         id: 0,
@@ -74,21 +78,61 @@ fn wild_testing() {
     println!("human group: {}", human_group_json);
     println!("human group json size: {}", human_group_json.len());
 
-    let human_group_rmp_vec = rmp_serde::to_vec(&human_group_json).unwrap();
+    let human_group_rmp_vec = rmp_serde::to_vec_named(&human_group_json).unwrap();
     println!("human group msg pack size: {:?}", human_group_rmp_vec.len());
 }
 
-fn main() {
-    let socket = UdpSocket::bind("127.0.0.1:7301").expect("binding UDP socket failed");
-
-    // Receives a single datagram message on the socket. If `buf` is too small to hold
-    // the message, it will be cut off.
-    let mut buf = [0; 4096];
-    let (received, src) = socket.recv_from(&mut buf).expect("receive call failed");
+#[allow(dead_code)]
+fn send_back_weird_stuff(buf: &[u8], received: usize, socket: &UdpSocket, src: SocketAddr) {
     let human_from_python: rmpv::Value = rmp_serde::from_slice(&buf[..received]).expect("blablah");
     let human_attempt_2: Human = rmp_serde::from_slice(&buf[..received]).expect("blhfwhfw");
     println!("human from python: {}", human_from_python);
     println!("human 2 from python: {:?}", human_attempt_2);
-    let send_back_human = rmp_serde::to_vec(&human_attempt_2).expect("k32k323k2");
-    socket.send_to(&send_back_human, src).expect("sending back failed");
+    let send_back_human = rmp_serde::to_vec_named(&human_attempt_2).expect("k32k323k2");
+    socket
+        .send_to(&send_back_human, src)
+        .expect("sending back failed");
+}
+
+pub struct UdpServer {
+    socket: UdpSocket,
+    last_sender: Option<SocketAddr>,
+}
+
+impl Default for UdpServer {
+    fn default() -> Self {
+        UdpServer {
+            socket: UdpSocket::bind("127.0.0.1:7301").expect("binding UDP socket failed"),
+            last_sender: Default::default(),
+        }
+    }
+}
+
+impl UdpServer {
+    pub fn send_back_reply(&self, reply: &[u8]) {
+        self.socket
+            .send_to(reply, self.last_sender.expect("last sender not set"))
+            .expect("sending back failed");
+    }
+}
+
+fn main() {
+    let mut udp_server = UdpServer::default();
+
+    loop {
+        // Receives a single datagram message on the socket. If `buf` is too small to hold
+        // the message, it will be cut off.
+        let mut buf = [0; 4096];
+        let (received, src) = udp_server
+            .socket
+            .recv_from(&mut buf)
+            .expect("receive call failed");
+        udp_server.last_sender = Some(src);
+        println!("received {} bytes from {:?}", received, src);
+        let switch_map_off = SwitchMap::default();
+        let switch_map_off_json =
+            serde_json::to_string(&switch_map_off).expect("json serialization failed");
+        println!("sending back reply: {}", switch_map_off_json);
+        udp_server.send_back_reply(switch_map_off_json.as_bytes());
+    }
 }

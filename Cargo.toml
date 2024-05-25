@@ -10,5 +10,6 @@ members = [
 
 exclude = [
     "satrs-example-stm32f3-disco",
+    "serialization-prototyping",
 ]
 
