@@ -69,6 +69,7 @@ Currently this library has the following flight heritage:
   [flown on the satellite](https://blogs.esa.int/rocketscience/2024/05/21/ops-sat-reentry-tomorrow-final-experiments-continue/).
   The application is strongly based on the sat-rs example application. You can find the repository
   of the experiment [here](https://egit.irs.uni-stuttgart.de/rust/ops-sat-rs).
+- Development and use of a sat-rs-based [Demonstration Onboard Software](https://egit.irs.uni-stuttgart.de/rust/eurosim-obsw) alongside a Flight System Simulator in the context of a [Bachelors Thesis](https://www.researchgate.net/publication/380785984_Design_and_Development_of_a_Hardware-in-the-Loop_EuroSim_Demonstrator) at [Airbus Netherlands](https://www.airbusdefenceandspacenetherlands.nl/).
 
 # Coverage
 
