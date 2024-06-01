@@ -14,9 +14,9 @@ fern = "0.5"
 humantime = "2"
 
 [dependencies.asynchronix]
-version = "0.2.1"
-git = "https://github.com/asynchronics/asynchronix.git"
-branch = "main"
+version = "0.2.2"
+# git = "https://github.com/asynchronics/asynchronix.git"
+# branch = "main"
 features = ["serde"]
 
 [dependencies.satrs]
