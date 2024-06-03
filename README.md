@@ -37,13 +37,16 @@ This project currently contains following crates:
 * [`satrs-example`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example):
    Example of a simple example on-board software using various sat-rs components which can be run
    on a host computer or on any system with a standard runtime like a Raspberry Pi.
+* [`satrs-minisim`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-minisim):
+   Mini-Simulator based on [asynchronix](https://github.com/asynchronics/asynchronix) which
+   simulates some physical devices for the `satrs-example` application device handlers.
 * [`satrs-mib`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-mib):
    Components to build a mission information base from the on-board software directly.
-* [`satrs-stm32f3-disco-rtic`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/embedded-examples/satrs-stm32f3-disco-rtic):
+* [`satrs-stm32f3-disco-rtic`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/embedded-examples/stm32f3-disco-rtic):
    Example of a simple example using low-level sat-rs components on a bare-metal system
    with constrained resources. This example uses the [RTIC](https://github.com/rtic-rs/rtic)
    framework on the STM32F3-Discovery device.
-* [`satrs-stm32h-nucleo-rtic`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/embedded-examples/satrs-stm32h7-nucleo-rtic):
+* [`satrs-stm32h-nucleo-rtic`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/embedded-examples/stm32h7-nucleo-rtic):
    Example of a simple example using sat-rs components on a bare-metal system
    with constrained resources. This example uses the [RTIC](https://github.com/rtic-rs/rtic)
    framework on the STM32H743ZIT device.
@@ -69,7 +72,10 @@ Currently this library has the following flight heritage:
   [flown on the satellite](https://blogs.esa.int/rocketscience/2024/05/21/ops-sat-reentry-tomorrow-final-experiments-continue/).
   The application is strongly based on the sat-rs example application. You can find the repository
   of the experiment [here](https://egit.irs.uni-stuttgart.de/rust/ops-sat-rs).
-- Development and use of a sat-rs-based [Demonstration Onboard Software](https://egit.irs.uni-stuttgart.de/rust/eurosim-obsw) alongside a Flight System Simulator in the context of a [Bachelors Thesis](https://www.researchgate.net/publication/380785984_Design_and_Development_of_a_Hardware-in-the-Loop_EuroSim_Demonstrator) at [Airbus Netherlands](https://www.airbusdefenceandspacenetherlands.nl/).
+- Development and use of a sat-rs-based [demonstration on-board software](https://egit.irs.uni-stuttgart.de/rust/eurosim-obsw)
+  alongside a Flight System Simulator in the context of a
+  [Bachelors Thesis](https://www.researchgate.net/publication/380785984_Design_and_Development_of_a_Hardware-in-the-Loop_EuroSim_Demonstrator)
+  at [Airbus Netherlands](https://www.airbusdefenceandspacenetherlands.nl/).
 
 # Coverage
 
