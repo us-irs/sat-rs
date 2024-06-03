@@ -5,10 +5,8 @@ This book is the primary information resource for the [sat-rs library](https://e
 in addition to the regular API documentation. It contains the following resources:
 
 1. Architecture informations and consideration which would exceeds the scope of the regular API.
-2. General information on how to build On-Board Software and how `sat-rs` can help to fulfill
+2. General information on how to build on-board Software and how `sat-rs` can help to fulfill
    the unique requirements of writing software for remote systems.
-2. A Getting-Started workshop where a small On-Board Software is built from scratch using
-   sat-rs components.
 
 # Introduction
 
@@ -31,7 +29,9 @@ and [EIVE](https://www.irs.uni-stuttgart.de/en/research/satellitetechnology-and-
 The [`satrs-example`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example)
 provides various practical usage examples of the `sat-rs` framework. If you are more interested in
 the practical application of `sat-rs` inside an application, it is recommended to have a look at
-the example application.
+the example application. The [`satrs-minisim`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-minisim)
+applicatin complements the example application and can be used to simulate some physical devices
+for the `satrs-example` device handlers.
 
 # Flight Heritage
 
@@ -43,3 +43,7 @@ Currently this library has the following flight heritage:
   [flown on the satellite](https://blogs.esa.int/rocketscience/2024/05/21/ops-sat-reentry-tomorrow-final-experiments-continue/).
   The application is strongly based on the sat-rs example application. You can find the repository
   of the experiment [here](https://egit.irs.uni-stuttgart.de/rust/ops-sat-rs).
+- Development and use of a sat-rs-based [demonstration on-board software](https://egit.irs.uni-stuttgart.de/rust/eurosim-obsw)
+  alongside a Flight System Simulator in the context of a
+  [Bachelors Thesis](https://www.researchgate.net/publication/380785984_Design_and_Development_of_a_Hardware-in-the-Loop_EuroSim_Demonstrator)
+  at [Airbus Netherlands](https://www.airbusdefenceandspacenetherlands.nl/).
