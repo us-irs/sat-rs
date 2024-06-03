@@ -1,4 +1,4 @@
-//! # sat-rs: A framework to build on-board software for remote systems
+//! # sat-rs: A library to build on-board software for remote systems
 //!
 //! You can find more information about the sat-rs framework on the
 //! [homepage](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/).
