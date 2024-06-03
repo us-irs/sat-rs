@@ -1,4 +1,4 @@
-sat-rs example for the STM32F3-Discovery board
+sat-rs example for the STM32H73ZI-Nucleo board
 =======
 
 This example application shows how the [sat-rs library](https://egit.irs.uni-stuttgart.de/rust/sat-rs)
