@@ -5,10 +5,10 @@ use asynchronix::{
     time::{Clock, MonotonicTime, SystemClock},
 };
 use satrs_minisim::{
-    acs::{MgmRequest, MgtRequest},
+    acs::{lis3mdl::MgmLis3MdlReply, MgmRequestLis3Mdl, MgtRequest},
     eps::PcduRequest,
-    SerializableSimMsgPayload, SimCtrlReply, SimCtrlRequest, SimMessageProvider, SimReply,
-    SimRequest, SimRequestError, SimTarget,
+    SerializableSimMsgPayload, SimComponent, SimCtrlReply, SimCtrlRequest, SimMessageProvider,
+    SimReply, SimRequest, SimRequestError,
 };
 
 use crate::{
@@ -16,13 +16,20 @@ use crate::{
     eps::PcduModel,
 };
 
+const WARNING_FOR_STALE_DATA: bool = false;
+
+const SIM_CTRL_REQ_WIRETAPPING: bool = false;
+const MGM_REQ_WIRETAPPING: bool = false;
+const PCDU_REQ_WIRETAPPING: bool = false;
+const MGT_REQ_WIRETAPPING: bool = false;
+
 // The simulation controller processes requests and drives the simulation.
 pub struct SimController {
     pub sys_clock: SystemClock,
     pub request_receiver: mpsc::Receiver<SimRequest>,
     pub reply_sender: mpsc::Sender<SimReply>,
     pub simulation: Simulation,
-    pub mgm_addr: Address<MagnetometerModel>,
+    pub mgm_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
     pub pcdu_addr: Address<PcduModel>,
     pub mgt_addr: Address<MagnetorquerModel>,
 }
@@ -33,7 +40,7 @@ impl SimController {
         request_receiver: mpsc::Receiver<SimRequest>,
         reply_sender: mpsc::Sender<SimReply>,
         simulation: Simulation,
-        mgm_addr: Address<MagnetometerModel>,
+        mgm_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
         pcdu_addr: Address<PcduModel>,
         mgt_addr: Address<MagnetorquerModel>,
     ) -> Self {
@@ -67,14 +74,14 @@ impl SimController {
         loop {
             match self.request_receiver.try_recv() {
                 Ok(request) => {
-                    if request.timestamp < old_timestamp {
+                    if request.timestamp < old_timestamp && WARNING_FOR_STALE_DATA {
                         log::warn!("stale data with timestamp {:?} received", request.timestamp);
                     }
-                    if let Err(e) = match request.target() {
-                        SimTarget::SimCtrl => self.handle_ctrl_request(&request),
-                        SimTarget::Mgm => self.handle_mgm_request(&request),
-                        SimTarget::Mgt => self.handle_mgt_request(&request),
-                        SimTarget::Pcdu => self.handle_pcdu_request(&request),
+                    if let Err(e) = match request.component() {
+                        SimComponent::SimCtrl => self.handle_ctrl_request(&request),
+                        SimComponent::MgmLis3Mdl => self.handle_mgm_request(&request),
+                        SimComponent::Mgt => self.handle_mgt_request(&request),
+                        SimComponent::Pcdu => self.handle_pcdu_request(&request),
                     } {
                         self.handle_invalid_request_with_valid_target(e, &request)
                     }
@@ -91,19 +98,26 @@ impl SimController {
 
     fn handle_ctrl_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
         let sim_ctrl_request = SimCtrlRequest::from_sim_message(request)?;
+        if SIM_CTRL_REQ_WIRETAPPING {
+            log::info!("received sim ctrl request: {:?}", sim_ctrl_request);
+        }
         match sim_ctrl_request {
             SimCtrlRequest::Ping => {
                 self.reply_sender
-                    .send(SimReply::new(SimCtrlReply::Pong))
+                    .send(SimReply::new(&SimCtrlReply::Pong))
                     .expect("sending reply from sim controller failed");
             }
         }
         Ok(())
     }
+
     fn handle_mgm_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
-        let mgm_request = MgmRequest::from_sim_message(request)?;
+        let mgm_request = MgmRequestLis3Mdl::from_sim_message(request)?;
+        if MGM_REQ_WIRETAPPING {
+            log::info!("received MGM request: {:?}", mgm_request);
+        }
         match mgm_request {
-            MgmRequest::RequestSensorData => {
+            MgmRequestLis3Mdl::RequestSensorData => {
                 self.simulation.send_event(
                     MagnetometerModel::send_sensor_values,
                     (),
@@ -116,6 +130,9 @@ impl SimController {
 
     fn handle_pcdu_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
         let pcdu_request = PcduRequest::from_sim_message(request)?;
+        if PCDU_REQ_WIRETAPPING {
+            log::info!("received PCDU request: {:?}", pcdu_request);
+        }
         match pcdu_request {
             PcduRequest::RequestSwitchInfo => {
                 self.simulation
@@ -134,6 +151,9 @@ impl SimController {
 
     fn handle_mgt_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
         let mgt_request = MgtRequest::from_sim_message(request)?;
+        if MGT_REQ_WIRETAPPING {
+            log::info!("received MGT request: {:?}", mgt_request);
+        }
         match mgt_request {
             MgtRequest::ApplyTorque { duration, dipole } => self.simulation.send_event(
                 MagnetorquerModel::apply_torque,
@@ -156,11 +176,11 @@ impl SimController {
     ) {
         log::warn!(
             "received invalid {:?} request: {:?}",
-            request.target(),
+            request.component(),
             error
         );
         self.reply_sender
-            .send(SimReply::new(SimCtrlReply::from(error)))
+            .send(SimReply::new(&SimCtrlReply::from(error)))
             .expect("sending reply from sim controller failed");
     }
 }
@@ -183,7 +203,7 @@ mod tests {
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());
         let sim_reply = sim_reply.unwrap();
-        assert_eq!(sim_reply.target(), SimTarget::SimCtrl);
+        assert_eq!(sim_reply.component(), SimComponent::SimCtrl);
         let reply = SimCtrlReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
         assert_eq!(reply, SimCtrlReply::Pong);

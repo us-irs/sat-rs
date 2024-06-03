@@ -11,6 +11,8 @@ serde_json = "1"
 log = "0.4"
 thiserror = "1"
 fern = "0.5"
+strum = { version = "0.26", features = ["derive"] }
+num_enum = "0.7"
 humantime = "2"
 
 [dependencies.asynchronix]

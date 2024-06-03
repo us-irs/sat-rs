@@ -122,7 +122,7 @@ pub mod mode_err {
 }
 
 pub mod components {
-    use satrs::request::UniqueApidTargetId;
+    use satrs::{request::UniqueApidTargetId, ComponentId};
     use strum::EnumIter;
 
     #[derive(Copy, Clone, PartialEq, Eq, EnumIter)]
@@ -132,6 +132,7 @@ pub mod components {
         Acs = 3,
         Cfdp = 4,
         Tmtc = 5,
+        Eps = 6,
     }
 
     // Component IDs for components with the PUS APID.
@@ -148,6 +149,11 @@ pub mod components {
     #[derive(Copy, Clone, PartialEq, Eq)]
     pub enum AcsId {
         Mgm0 = 0,
+    }
+
+    #[derive(Copy, Clone, PartialEq, Eq)]
+    pub enum EpsId {
+        Pcdu = 0,
     }
 
     #[derive(Copy, Clone, PartialEq, Eq)]
@@ -172,10 +178,13 @@ pub mod components {
         UniqueApidTargetId::new(Apid::Sched as u16, 0);
     pub const MGM_HANDLER_0: UniqueApidTargetId =
         UniqueApidTargetId::new(Apid::Acs as u16, AcsId::Mgm0 as u32);
+    pub const PCDU_HANDLER: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::Eps as u16, EpsId::Pcdu as u32);
     pub const UDP_SERVER: UniqueApidTargetId =
         UniqueApidTargetId::new(Apid::Tmtc as u16, TmtcId::UdpServer as u32);
     pub const TCP_SERVER: UniqueApidTargetId =
         UniqueApidTargetId::new(Apid::Tmtc as u16, TmtcId::TcpServer as u32);
+    pub const NO_SENDER: ComponentId = ComponentId::MAX;
 }
 
 pub mod pool {
@@ -224,7 +233,7 @@ pub mod pool {
 
 pub mod tasks {
     pub const FREQ_MS_UDP_TMTC: u64 = 200;
-    pub const FREQ_MS_EVENT_HANDLING: u64 = 400;
     pub const FREQ_MS_AOCS: u64 = 500;
     pub const FREQ_MS_PUS_STACK: u64 = 200;
+    pub const SIM_CLIENT_IDLE_DELAY_MS: u64 = 5;
 }

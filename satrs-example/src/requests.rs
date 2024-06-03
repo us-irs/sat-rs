@@ -28,8 +28,9 @@ pub enum CompositeRequest {
 pub struct GenericRequestRouter {
     pub id: ComponentId,
     // All messages which do not have a dedicated queue.
-    pub composite_router_map: HashMap<ComponentId, mpsc::Sender<GenericMessage<CompositeRequest>>>,
-    pub mode_router_map: HashMap<ComponentId, mpsc::Sender<GenericMessage<ModeRequest>>>,
+    pub composite_router_map:
+        HashMap<ComponentId, mpsc::SyncSender<GenericMessage<CompositeRequest>>>,
+    pub mode_router_map: HashMap<ComponentId, mpsc::SyncSender<GenericMessage<ModeRequest>>>,
 }
 
 impl Default for GenericRequestRouter {
