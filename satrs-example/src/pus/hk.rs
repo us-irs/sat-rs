@@ -12,6 +12,7 @@ use satrs::pus::{
     PusPacketHandlingError, PusReplyHandler, PusServiceHelper, PusTcToRequestConverter,
 };
 use satrs::request::{GenericMessage, UniqueApidTargetId};
+use satrs::res_code::ResultU16;
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{hk, PusPacket, PusServiceId};
 use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
@@ -32,8 +33,10 @@ pub struct HkReply {
 }
 
 #[derive(Clone, PartialEq, Debug)]
+#[allow(dead_code)]
 pub enum HkReplyVariant {
     Ack,
+    Failed(ResultU16),
 }
 
 #[derive(Default)]
@@ -67,6 +70,15 @@ impl PusReplyHandler<ActivePusRequestStd, HkReply> for HkReplyHandler {
             HkReplyVariant::Ack => {
                 verification_handler
                     .completion_success(tm_sender, started_token, time_stamp)
+                    .expect("sending completion success verification failed");
+            }
+            HkReplyVariant::Failed(failure_code) => {
+                verification_handler
+                    .completion_failure(
+                        tm_sender,
+                        started_token,
+                        FailParams::new(time_stamp, &failure_code, &[]),
+                    )
                     .expect("sending completion success verification failed");
             }
         };

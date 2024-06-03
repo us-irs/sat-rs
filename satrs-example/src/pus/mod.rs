@@ -19,7 +19,7 @@ use satrs::tmtc::{PacketAsVec, PacketInPool};
 use satrs::ComponentId;
 use satrs_example::config::components::PUS_ROUTING_SERVICE;
 use satrs_example::config::{tmtc_err, CustomPusServiceId};
-use satrs_example::TimeStampHelper;
+use satrs_example::TimestampHelper;
 use std::fmt::Debug;
 use std::sync::mpsc::{self, Sender};
 
@@ -53,7 +53,7 @@ pub struct PusTcDistributor<TmSender: EcssTmSender> {
     pub tm_sender: TmSender,
     pub verif_reporter: VerificationReporter,
     pub pus_router: PusTcMpscRouter,
-    stamp_helper: TimeStampHelper,
+    stamp_helper: TimestampHelper,
 }
 
 impl<TmSender: EcssTmSender> PusTcDistributor<TmSender> {
@@ -66,7 +66,7 @@ impl<TmSender: EcssTmSender> PusTcDistributor<TmSender> {
                 PUS_ROUTING_SERVICE.apid,
             ),
             pus_router,
-            stamp_helper: TimeStampHelper::default(),
+            stamp_helper: TimestampHelper::default(),
         }
     }
 

@@ -48,16 +48,17 @@ It is recommended to use a virtual environment to do this. To set up one in the 
 you can use `python3 -m venv venv` on Unix systems or `py -m venv venv` on Windows systems.
 After doing this, you can check the [venv tutorial](https://docs.python.org/3/tutorial/venv.html)
 on how to activate the environment and then use the following command to install the required
-dependency:
+dependency interactively:
 
 ```sh
-pip install -r requirements.txt
+pip install -e .
 ```
 
 Alternatively, if you would like to use the GUI functionality provided by `tmtccmd`, you can also
 install it manually with
 
 ```sh
+pip install -e .
 pip install tmtccmd[gui]
 ```
 
@@ -72,3 +73,22 @@ the `simpleclient`:
 ```
 
 You can also simply call the script without any arguments to view the command tree.
+
+## Adding the mini simulator application
+
+This example application features a few device handlers. The
+[`satrs-minisim`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-minisim)
+can be used to simulate the physical devices managed by these device handlers.
+
+The example application will attempt communication with the mini simulator on UDP port 7303.
+If this works, the device handlers will use communication interfaces dedicated to the communication
+with the mini simulator. Otherwise, they will be replaced by dummy interfaces which either
+return constant values or behave like ideal devices.
+
+In summary, you can use the following command command to run the mini-simulator first:
+
+```sh
+cargo run -p satrs-minisim
+```
+
+and then start the example using `cargo run -p satrs-example`.

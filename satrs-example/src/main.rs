@@ -1,4 +1,5 @@
 mod acs;
+mod eps;
 mod events;
 mod hk;
 mod interface;
@@ -7,6 +8,10 @@ mod pus;
 mod requests;
 mod tmtc;
 
+use crate::eps::pcdu::{
+    PcduHandler, SerialInterfaceDummy, SerialInterfaceToSim, SerialSimInterfaceWrapper,
+};
+use crate::eps::PowerSwitchHelper;
 use crate::events::EventHandler;
 use crate::interface::udp::DynamicUdpTmHandler;
 use crate::pus::stack::PusStack;
@@ -16,15 +21,21 @@ use log::info;
 use pus::test::create_test_service_dynamic;
 use satrs::hal::std::tcp_server::ServerConfig;
 use satrs::hal::std::udp_server::UdpTcServer;
-use satrs::request::GenericMessage;
+use satrs::pus::HandlingStatus;
+use satrs::request::{GenericMessage, MessageMetadata};
 use satrs::tmtc::{PacketSenderWithSharedPool, SharedPacketPool};
 use satrs_example::config::pool::{create_sched_tc_pool, create_static_pools};
 use satrs_example::config::tasks::{
-    FREQ_MS_AOCS, FREQ_MS_EVENT_HANDLING, FREQ_MS_PUS_STACK, FREQ_MS_UDP_TMTC,
+    FREQ_MS_AOCS, FREQ_MS_PUS_STACK, FREQ_MS_UDP_TMTC, SIM_CLIENT_IDLE_DELAY_MS,
 };
 use satrs_example::config::{OBSW_SERVER_ADDR, PACKET_ID_VALIDATOR, SERVER_PORT};
+use satrs_example::DeviceMode;
 
-use crate::acs::mgm::{MgmHandlerLis3Mdl, MpscModeLeafInterface, SpiDummyInterface};
+use crate::acs::mgm::{
+    MgmHandlerLis3Mdl, MpscModeLeafInterface, SpiDummyInterface, SpiSimInterface,
+    SpiSimInterfaceWrapper,
+};
+use crate::interface::sim_client_udp::create_sim_client;
 use crate::interface::tcp::{SyncTcpTmSource, TcpTask};
 use crate::interface::udp::{StaticUdpTmHandler, UdpTmtcServer};
 use crate::logger::setup_logger;
@@ -36,12 +47,14 @@ use crate::pus::scheduler::{create_scheduler_service_dynamic, create_scheduler_s
 use crate::pus::test::create_test_service_static;
 use crate::pus::{PusTcDistributor, PusTcMpscRouter};
 use crate::requests::{CompositeRequest, GenericRequestRouter};
-use satrs::mode::ModeRequest;
+use satrs::mode::{Mode, ModeAndSubmode, ModeRequest};
 use satrs::pus::event_man::EventRequestWithToken;
 use satrs::spacepackets::{time::cds::CdsTime, time::TimeWriter};
-use satrs_example::config::components::{MGM_HANDLER_0, TCP_SERVER, UDP_SERVER};
+use satrs_example::config::components::{
+    MGM_HANDLER_0, NO_SENDER, PCDU_HANDLER, TCP_SERVER, UDP_SERVER,
+};
 use std::net::{IpAddr, SocketAddr};
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -60,9 +73,20 @@ fn static_tmtc_pool_main() {
     let tm_sink_tx_sender =
         PacketSenderWithSharedPool::new(tm_sink_tx.clone(), shared_tm_pool_wrapper.clone());
 
+    let (sim_request_tx, sim_request_rx) = mpsc::channel();
+    let (mgm_sim_reply_tx, mgm_sim_reply_rx) = mpsc::channel();
+    let (pcdu_sim_reply_tx, pcdu_sim_reply_rx) = mpsc::channel();
+    let mut opt_sim_client = create_sim_client(sim_request_rx);
+
     let (mgm_handler_composite_tx, mgm_handler_composite_rx) =
-        mpsc::channel::<GenericMessage<CompositeRequest>>();
-    let (mgm_handler_mode_tx, mgm_handler_mode_rx) = mpsc::channel::<GenericMessage<ModeRequest>>();
+        mpsc::sync_channel::<GenericMessage<CompositeRequest>>(10);
+    let (pcdu_handler_composite_tx, pcdu_handler_composite_rx) =
+        mpsc::sync_channel::<GenericMessage<CompositeRequest>>(30);
+
+    let (mgm_handler_mode_tx, mgm_handler_mode_rx) =
+        mpsc::sync_channel::<GenericMessage<ModeRequest>>(5);
+    let (pcdu_handler_mode_tx, pcdu_handler_mode_rx) =
+        mpsc::sync_channel::<GenericMessage<ModeRequest>>(5);
 
     // Some request are targetable. This map is used to retrieve sender handles based on a target ID.
     let mut request_map = GenericRequestRouter::default();
@@ -72,6 +96,12 @@ fn static_tmtc_pool_main() {
     request_map
         .mode_router_map
         .insert(MGM_HANDLER_0.id(), mgm_handler_mode_tx);
+    request_map
+        .composite_router_map
+        .insert(PCDU_HANDLER.id(), pcdu_handler_composite_tx);
+    request_map
+        .mode_router_map
+        .insert(PCDU_HANDLER.id(), pcdu_handler_mode_tx.clone());
 
     // This helper structure is used by all telecommand providers which need to send telecommands
     // to the TC source.
@@ -195,25 +225,75 @@ fn static_tmtc_pool_main() {
     );
 
     let (mgm_handler_mode_reply_to_parent_tx, _mgm_handler_mode_reply_to_parent_rx) =
-        mpsc::channel();
+        mpsc::sync_channel(5);
 
-    let dummy_spi_interface = SpiDummyInterface::default();
+    let shared_switch_set = Arc::new(Mutex::default());
+    let (switch_request_tx, switch_request_rx) = mpsc::sync_channel(20);
+    let switch_helper = PowerSwitchHelper::new(switch_request_tx, shared_switch_set.clone());
+
     let shared_mgm_set = Arc::default();
-    let mode_leaf_interface = MpscModeLeafInterface {
+    let mgm_mode_leaf_interface = MpscModeLeafInterface {
         request_rx: mgm_handler_mode_rx,
-        reply_tx_to_pus: pus_mode_reply_tx,
-        reply_tx_to_parent: mgm_handler_mode_reply_to_parent_tx,
+        reply_to_pus_tx: pus_mode_reply_tx.clone(),
+        reply_to_parent_tx: mgm_handler_mode_reply_to_parent_tx,
+    };
+
+    let mgm_spi_interface = if let Some(sim_client) = opt_sim_client.as_mut() {
+        sim_client.add_reply_recipient(satrs_minisim::SimComponent::MgmLis3Mdl, mgm_sim_reply_tx);
+        SpiSimInterfaceWrapper::Sim(SpiSimInterface {
+            sim_request_tx: sim_request_tx.clone(),
+            sim_reply_rx: mgm_sim_reply_rx,
+        })
+    } else {
+        SpiSimInterfaceWrapper::Dummy(SpiDummyInterface::default())
     };
     let mut mgm_handler = MgmHandlerLis3Mdl::new(
         MGM_HANDLER_0,
         "MGM_0",
-        mode_leaf_interface,
+        mgm_mode_leaf_interface,
         mgm_handler_composite_rx,
-        pus_hk_reply_tx,
-        tm_sink_tx,
-        dummy_spi_interface,
+        pus_hk_reply_tx.clone(),
+        switch_helper.clone(),
+        tm_sink_tx.clone(),
+        mgm_spi_interface,
         shared_mgm_set,
     );
+
+    let (pcdu_handler_mode_reply_to_parent_tx, _pcdu_handler_mode_reply_to_parent_rx) =
+        mpsc::sync_channel(10);
+    let pcdu_mode_leaf_interface = MpscModeLeafInterface {
+        request_rx: pcdu_handler_mode_rx,
+        reply_to_pus_tx: pus_mode_reply_tx,
+        reply_to_parent_tx: pcdu_handler_mode_reply_to_parent_tx,
+    };
+    let pcdu_serial_interface = if let Some(sim_client) = opt_sim_client.as_mut() {
+        sim_client.add_reply_recipient(satrs_minisim::SimComponent::Pcdu, pcdu_sim_reply_tx);
+        SerialSimInterfaceWrapper::Sim(SerialInterfaceToSim::new(
+            sim_request_tx.clone(),
+            pcdu_sim_reply_rx,
+        ))
+    } else {
+        SerialSimInterfaceWrapper::Dummy(SerialInterfaceDummy::default())
+    };
+
+    let mut pcdu_handler = PcduHandler::new(
+        PCDU_HANDLER,
+        "PCDU",
+        pcdu_mode_leaf_interface,
+        pcdu_handler_composite_rx,
+        pus_hk_reply_tx,
+        switch_request_rx,
+        tm_sink_tx,
+        pcdu_serial_interface,
+        shared_switch_set,
+    );
+    // The PCDU is a critical component which should be in normal mode immediately.
+    pcdu_handler_mode_tx
+        .send(GenericMessage::new(
+            MessageMetadata::new(0, NO_SENDER),
+            ModeRequest::SetMode(ModeAndSubmode::new(DeviceMode::Normal as Mode, 0)),
+        ))
+        .expect("sending initial mode request failed");
 
     info!("Starting TMTC and UDP task");
     let jh_udp_tmtc = thread::Builder::new()
@@ -247,14 +327,20 @@ fn static_tmtc_pool_main() {
         })
         .unwrap();
 
-    info!("Starting event handling task");
-    let jh_event_handling = thread::Builder::new()
-        .name("sat-rs events".to_string())
-        .spawn(move || loop {
-            event_handler.periodic_operation();
-            thread::sleep(Duration::from_millis(FREQ_MS_EVENT_HANDLING));
-        })
-        .unwrap();
+    let mut opt_jh_sim_client = None;
+    if let Some(mut sim_client) = opt_sim_client {
+        info!("Starting UDP sim client task");
+        opt_jh_sim_client = Some(
+            thread::Builder::new()
+                .name("sat-rs sim adapter".to_string())
+                .spawn(move || loop {
+                    if sim_client.operation() == HandlingStatus::Empty {
+                        std::thread::sleep(Duration::from_millis(SIM_CLIENT_IDLE_DELAY_MS));
+                    }
+                })
+                .unwrap(),
+        );
+    }
 
     info!("Starting AOCS thread");
     let jh_aocs = thread::Builder::new()
@@ -265,10 +351,26 @@ fn static_tmtc_pool_main() {
         })
         .unwrap();
 
+    info!("Starting EPS thread");
+    let jh_eps = thread::Builder::new()
+        .name("sat-rs eps".to_string())
+        .spawn(move || loop {
+            // TODO: We should introduce something like a fixed timeslot helper to allow a more
+            // declarative API. It would also be very useful for the AOCS task.
+            pcdu_handler.periodic_operation(eps::pcdu::OpCode::RegularOp);
+            thread::sleep(Duration::from_millis(50));
+            pcdu_handler.periodic_operation(eps::pcdu::OpCode::PollAndRecvReplies);
+            thread::sleep(Duration::from_millis(50));
+            pcdu_handler.periodic_operation(eps::pcdu::OpCode::PollAndRecvReplies);
+            thread::sleep(Duration::from_millis(300));
+        })
+        .unwrap();
+
     info!("Starting PUS handler thread");
     let jh_pus_handler = thread::Builder::new()
         .name("sat-rs pus".to_string())
         .spawn(move || loop {
+            event_handler.periodic_operation();
             pus_stack.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_PUS_STACK));
         })
@@ -283,10 +385,13 @@ fn static_tmtc_pool_main() {
     jh_tm_funnel
         .join()
         .expect("Joining TM Funnel thread failed");
-    jh_event_handling
-        .join()
-        .expect("Joining Event Manager thread failed");
+    if let Some(jh_sim_client) = opt_jh_sim_client {
+        jh_sim_client
+            .join()
+            .expect("Joining SIM client thread failed");
+    }
     jh_aocs.join().expect("Joining AOCS thread failed");
+    jh_eps.join().expect("Joining EPS thread failed");
     jh_pus_handler
         .join()
         .expect("Joining PUS handler thread failed");
@@ -295,22 +400,38 @@ fn static_tmtc_pool_main() {
 #[allow(dead_code)]
 fn dyn_tmtc_pool_main() {
     let (tc_source_tx, tc_source_rx) = mpsc::channel();
-    let (tm_funnel_tx, tm_funnel_rx) = mpsc::channel();
+    let (tm_sink_tx, tm_sink_rx) = mpsc::channel();
     let (tm_server_tx, tm_server_rx) = mpsc::channel();
+
+    let (sim_request_tx, sim_request_rx) = mpsc::channel();
+    let (mgm_sim_reply_tx, mgm_sim_reply_rx) = mpsc::channel();
+    let (pcdu_sim_reply_tx, pcdu_sim_reply_rx) = mpsc::channel();
+    let mut opt_sim_client = create_sim_client(sim_request_rx);
 
     // Some request are targetable. This map is used to retrieve sender handles based on a target ID.
     let (mgm_handler_composite_tx, mgm_handler_composite_rx) =
-        mpsc::channel::<GenericMessage<CompositeRequest>>();
-    let (mgm_handler_mode_tx, mgm_handler_mode_rx) = mpsc::channel::<GenericMessage<ModeRequest>>();
+        mpsc::sync_channel::<GenericMessage<CompositeRequest>>(5);
+    let (pcdu_handler_composite_tx, pcdu_handler_composite_rx) =
+        mpsc::sync_channel::<GenericMessage<CompositeRequest>>(10);
+    let (mgm_handler_mode_tx, mgm_handler_mode_rx) =
+        mpsc::sync_channel::<GenericMessage<ModeRequest>>(5);
+    let (pcdu_handler_mode_tx, pcdu_handler_mode_rx) =
+        mpsc::sync_channel::<GenericMessage<ModeRequest>>(10);
 
     // Some request are targetable. This map is used to retrieve sender handles based on a target ID.
     let mut request_map = GenericRequestRouter::default();
     request_map
         .composite_router_map
-        .insert(MGM_HANDLER_0.raw(), mgm_handler_composite_tx);
+        .insert(MGM_HANDLER_0.id(), mgm_handler_composite_tx);
     request_map
         .mode_router_map
-        .insert(MGM_HANDLER_0.raw(), mgm_handler_mode_tx);
+        .insert(MGM_HANDLER_0.id(), mgm_handler_mode_tx);
+    request_map
+        .composite_router_map
+        .insert(PCDU_HANDLER.id(), pcdu_handler_composite_tx);
+    request_map
+        .mode_router_map
+        .insert(PCDU_HANDLER.id(), pcdu_handler_mode_tx.clone());
 
     // Create event handling components
     // These sender handles are used to send event requests, for example to enable or disable
@@ -319,7 +440,7 @@ fn dyn_tmtc_pool_main() {
     let (event_request_tx, event_request_rx) = mpsc::channel::<EventRequestWithToken>();
     // The event task is the core handler to perform the event routing and TM handling as specified
     // in the sat-rs documentation.
-    let mut event_handler = EventHandler::new(tm_funnel_tx.clone(), event_rx, event_request_rx);
+    let mut event_handler = EventHandler::new(tm_sink_tx.clone(), event_rx, event_request_rx);
 
     let (pus_test_tx, pus_test_rx) = mpsc::channel();
     let (pus_event_tx, pus_event_rx) = mpsc::channel();
@@ -342,30 +463,30 @@ fn dyn_tmtc_pool_main() {
     };
 
     let pus_test_service =
-        create_test_service_dynamic(tm_funnel_tx.clone(), event_tx.clone(), pus_test_rx);
+        create_test_service_dynamic(tm_sink_tx.clone(), event_tx.clone(), pus_test_rx);
     let pus_scheduler_service = create_scheduler_service_dynamic(
-        tm_funnel_tx.clone(),
+        tm_sink_tx.clone(),
         tc_source_tx.clone(),
         pus_sched_rx,
         create_sched_tc_pool(),
     );
 
     let pus_event_service =
-        create_event_service_dynamic(tm_funnel_tx.clone(), pus_event_rx, event_request_tx);
+        create_event_service_dynamic(tm_sink_tx.clone(), pus_event_rx, event_request_tx);
     let pus_action_service = create_action_service_dynamic(
-        tm_funnel_tx.clone(),
+        tm_sink_tx.clone(),
         pus_action_rx,
         request_map.clone(),
         pus_action_reply_rx,
     );
     let pus_hk_service = create_hk_service_dynamic(
-        tm_funnel_tx.clone(),
+        tm_sink_tx.clone(),
         pus_hk_rx,
         request_map.clone(),
         pus_hk_reply_rx,
     );
     let pus_mode_service = create_mode_service_dynamic(
-        tm_funnel_tx.clone(),
+        tm_sink_tx.clone(),
         pus_mode_rx,
         request_map,
         pus_mode_reply_rx,
@@ -381,7 +502,7 @@ fn dyn_tmtc_pool_main() {
 
     let mut tmtc_task = TcSourceTaskDynamic::new(
         tc_source_rx,
-        PusTcDistributor::new(tm_funnel_tx.clone(), pus_router),
+        PusTcDistributor::new(tm_sink_tx.clone(), pus_router),
     );
 
     let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
@@ -410,27 +531,76 @@ fn dyn_tmtc_pool_main() {
     )
     .expect("tcp server creation failed");
 
-    let mut tm_funnel = TmSinkDynamic::new(sync_tm_tcp_source, tm_funnel_rx, tm_server_tx);
+    let mut tm_funnel = TmSinkDynamic::new(sync_tm_tcp_source, tm_sink_rx, tm_server_tx);
+
+    let shared_switch_set = Arc::new(Mutex::default());
+    let (switch_request_tx, switch_request_rx) = mpsc::sync_channel(20);
+    let switch_helper = PowerSwitchHelper::new(switch_request_tx, shared_switch_set.clone());
 
     let (mgm_handler_mode_reply_to_parent_tx, _mgm_handler_mode_reply_to_parent_rx) =
-        mpsc::channel();
-    let dummy_spi_interface = SpiDummyInterface::default();
+        mpsc::sync_channel(5);
     let shared_mgm_set = Arc::default();
     let mode_leaf_interface = MpscModeLeafInterface {
         request_rx: mgm_handler_mode_rx,
-        reply_tx_to_pus: pus_mode_reply_tx,
-        reply_tx_to_parent: mgm_handler_mode_reply_to_parent_tx,
+        reply_to_pus_tx: pus_mode_reply_tx.clone(),
+        reply_to_parent_tx: mgm_handler_mode_reply_to_parent_tx,
+    };
+
+    let mgm_spi_interface = if let Some(sim_client) = opt_sim_client.as_mut() {
+        sim_client.add_reply_recipient(satrs_minisim::SimComponent::MgmLis3Mdl, mgm_sim_reply_tx);
+        SpiSimInterfaceWrapper::Sim(SpiSimInterface {
+            sim_request_tx: sim_request_tx.clone(),
+            sim_reply_rx: mgm_sim_reply_rx,
+        })
+    } else {
+        SpiSimInterfaceWrapper::Dummy(SpiDummyInterface::default())
     };
     let mut mgm_handler = MgmHandlerLis3Mdl::new(
         MGM_HANDLER_0,
         "MGM_0",
         mode_leaf_interface,
         mgm_handler_composite_rx,
-        pus_hk_reply_tx,
-        tm_funnel_tx,
-        dummy_spi_interface,
+        pus_hk_reply_tx.clone(),
+        switch_helper.clone(),
+        tm_sink_tx.clone(),
+        mgm_spi_interface,
         shared_mgm_set,
     );
+
+    let (pcdu_handler_mode_reply_to_parent_tx, _pcdu_handler_mode_reply_to_parent_rx) =
+        mpsc::sync_channel(10);
+    let pcdu_mode_leaf_interface = MpscModeLeafInterface {
+        request_rx: pcdu_handler_mode_rx,
+        reply_to_pus_tx: pus_mode_reply_tx,
+        reply_to_parent_tx: pcdu_handler_mode_reply_to_parent_tx,
+    };
+    let pcdu_serial_interface = if let Some(sim_client) = opt_sim_client.as_mut() {
+        sim_client.add_reply_recipient(satrs_minisim::SimComponent::Pcdu, pcdu_sim_reply_tx);
+        SerialSimInterfaceWrapper::Sim(SerialInterfaceToSim::new(
+            sim_request_tx.clone(),
+            pcdu_sim_reply_rx,
+        ))
+    } else {
+        SerialSimInterfaceWrapper::Dummy(SerialInterfaceDummy::default())
+    };
+    let mut pcdu_handler = PcduHandler::new(
+        PCDU_HANDLER,
+        "PCDU",
+        pcdu_mode_leaf_interface,
+        pcdu_handler_composite_rx,
+        pus_hk_reply_tx,
+        switch_request_rx,
+        tm_sink_tx,
+        pcdu_serial_interface,
+        shared_switch_set,
+    );
+    // The PCDU is a critical component which should be in normal mode immediately.
+    pcdu_handler_mode_tx
+        .send(GenericMessage::new(
+            MessageMetadata::new(0, NO_SENDER),
+            ModeRequest::SetMode(ModeAndSubmode::new(DeviceMode::Normal as Mode, 0)),
+        ))
+        .expect("sending initial mode request failed");
 
     info!("Starting TMTC and UDP task");
     let jh_udp_tmtc = thread::Builder::new()
@@ -464,14 +634,20 @@ fn dyn_tmtc_pool_main() {
         })
         .unwrap();
 
-    info!("Starting event handling task");
-    let jh_event_handling = thread::Builder::new()
-        .name("sat-rs events".to_string())
-        .spawn(move || loop {
-            event_handler.periodic_operation();
-            thread::sleep(Duration::from_millis(FREQ_MS_EVENT_HANDLING));
-        })
-        .unwrap();
+    let mut opt_jh_sim_client = None;
+    if let Some(mut sim_client) = opt_sim_client {
+        info!("Starting UDP sim client task");
+        opt_jh_sim_client = Some(
+            thread::Builder::new()
+                .name("sat-rs sim adapter".to_string())
+                .spawn(move || loop {
+                    if sim_client.operation() == HandlingStatus::Empty {
+                        std::thread::sleep(Duration::from_millis(SIM_CLIENT_IDLE_DELAY_MS));
+                    }
+                })
+                .unwrap(),
+        );
+    }
 
     info!("Starting AOCS thread");
     let jh_aocs = thread::Builder::new()
@@ -482,11 +658,27 @@ fn dyn_tmtc_pool_main() {
         })
         .unwrap();
 
+    info!("Starting EPS thread");
+    let jh_eps = thread::Builder::new()
+        .name("sat-rs eps".to_string())
+        .spawn(move || loop {
+            // TODO: We should introduce something like a fixed timeslot helper to allow a more
+            // declarative API. It would also be very useful for the AOCS task.
+            pcdu_handler.periodic_operation(eps::pcdu::OpCode::RegularOp);
+            thread::sleep(Duration::from_millis(50));
+            pcdu_handler.periodic_operation(eps::pcdu::OpCode::PollAndRecvReplies);
+            thread::sleep(Duration::from_millis(50));
+            pcdu_handler.periodic_operation(eps::pcdu::OpCode::PollAndRecvReplies);
+            thread::sleep(Duration::from_millis(300));
+        })
+        .unwrap();
+
     info!("Starting PUS handler thread");
     let jh_pus_handler = thread::Builder::new()
         .name("sat-rs pus".to_string())
         .spawn(move || loop {
             pus_stack.periodic_operation();
+            event_handler.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_PUS_STACK));
         })
         .unwrap();
@@ -500,10 +692,13 @@ fn dyn_tmtc_pool_main() {
     jh_tm_funnel
         .join()
         .expect("Joining TM Funnel thread failed");
-    jh_event_handling
-        .join()
-        .expect("Joining Event Manager thread failed");
+    if let Some(jh_sim_client) = opt_jh_sim_client {
+        jh_sim_client
+            .join()
+            .expect("Joining SIM client thread failed");
+    }
     jh_aocs.join().expect("Joining AOCS thread failed");
+    jh_eps.join().expect("Joining EPS thread failed");
     jh_pus_handler
         .join()
         .expect("Joining PUS handler thread failed");
