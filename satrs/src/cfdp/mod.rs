@@ -1,6 +1,6 @@
 //! This module contains the implementation of the CFDP high level classes as specified in the
 //! CCSDS 727.0-B-5.
-use core::{cell::RefCell, fmt::Debug, hash::Hash};
+use core::{cell::RefCell, fmt::Debug, hash::Hash, time::Duration};
 
 use crc::{Crc, CRC_32_CKSUM};
 use hashbrown::HashMap;
@@ -26,6 +26,9 @@ pub mod filestore;
 #[cfg(feature = "std")]
 pub mod source;
 pub mod user;
+
+#[cfg(feature = "std")]
+pub use std_mod::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntityType {
@@ -84,42 +87,77 @@ pub enum TimerContext {
 /// The timer will be used to perform the Positive Acknowledgement Procedures as  specified in
 /// 4.7. 1of the CFDP standard. The expiration period will be provided by the Positive ACK timer
 /// interval of the remote entity configuration.
-#[cfg(feature = "alloc")]
-pub trait CheckTimerCreator {
-    fn get_check_timer_provider(&self, timer_context: TimerContext) -> Box<dyn CountdownProvider>;
-}
+pub trait CheckTimerProviderCreator {
+    type CheckTimer: CountdownProvider;
 
-/// Simple implementation of the [CheckTimerCreator] trait assuming a standard runtime.
-/// It also assumes that a second accuracy of the check timer period is sufficient.
-#[cfg(feature = "std")]
-#[derive(Debug)]
-pub struct StdCheckTimer {
-    expiry_time_seconds: u64,
-    start_time: std::time::Instant,
+    fn create_check_timer_provider(&self, timer_context: TimerContext) -> Self::CheckTimer;
 }
 
 #[cfg(feature = "std")]
-impl StdCheckTimer {
-    pub fn new(expiry_time_seconds: u64) -> Self {
-        Self {
-            expiry_time_seconds,
-            start_time: std::time::Instant::now(),
-        }
-    }
-}
+pub mod std_mod {
+    use super::*;
 
-#[cfg(feature = "std")]
-impl CountdownProvider for StdCheckTimer {
-    fn has_expired(&self) -> bool {
-        let elapsed_time = self.start_time.elapsed();
-        if elapsed_time.as_secs() > self.expiry_time_seconds {
-            return true;
-        }
-        false
+    /// Simple implementation of the [CheckTimerCreator] trait assuming a standard runtime.
+    /// It also assumes that a second accuracy of the check timer period is sufficient.
+    #[derive(Debug)]
+    pub struct StdCheckTimer {
+        expiry_time_seconds: u64,
+        start_time: std::time::Instant,
     }
 
-    fn reset(&mut self) {
-        self.start_time = std::time::Instant::now();
+    impl StdCheckTimer {
+        pub fn new(expiry_time_seconds: u64) -> Self {
+            Self {
+                expiry_time_seconds,
+                start_time: std::time::Instant::now(),
+            }
+        }
+    }
+
+    impl CountdownProvider for StdCheckTimer {
+        fn has_expired(&self) -> bool {
+            let elapsed_time = self.start_time.elapsed();
+            if elapsed_time.as_secs() > self.expiry_time_seconds {
+                return true;
+            }
+            false
+        }
+
+        fn reset(&mut self) {
+            self.start_time = std::time::Instant::now();
+        }
+    }
+
+    pub struct StdCheckTimerCreator {
+        pub check_limit_timeout_secs: u64,
+    }
+
+    impl Default for StdCheckTimerCreator {
+        fn default() -> Self {
+            Self {
+                check_limit_timeout_secs: 5,
+            }
+        }
+    }
+
+    impl CheckTimerProviderCreator for StdCheckTimerCreator {
+        type CheckTimer = StdCheckTimer;
+
+        fn create_check_timer_provider(&self, timer_context: TimerContext) -> Self::CheckTimer {
+            match timer_context {
+                TimerContext::CheckLimit {
+                    local_id: _,
+                    remote_id: _,
+                    entity_type: _,
+                } => StdCheckTimer::new(self.check_limit_timeout_secs),
+                TimerContext::NakActivity {
+                    expiry_time_seconds,
+                } => StdCheckTimer::new(Duration::from_secs_f32(expiry_time_seconds).as_secs()),
+                TimerContext::PositiveAck {
+                    expiry_time_seconds,
+                } => StdCheckTimer::new(Duration::from_secs_f32(expiry_time_seconds).as_secs()),
+            }
+        }
     }
 }
 

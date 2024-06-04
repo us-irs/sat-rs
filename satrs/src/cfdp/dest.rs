@@ -3,13 +3,13 @@ use core::str::{from_utf8, Utf8Error};
 use std::path::{Path, PathBuf};
 
 use super::{
-    filestore::{FilestoreError, VirtualFilestore},
+    filestore::{FilestoreError, NativeFilestore, VirtualFilestore},
     user::{CfdpUser, FileSegmentRecvdParams, MetadataReceivedParams},
-    CheckTimerCreator, CountdownProvider, EntityType, LocalEntityConfig, PacketInfo, PacketTarget,
-    RemoteEntityConfig, RemoteEntityConfigProvider, State, TimerContext, TransactionId,
+    CheckTimerProviderCreator, CountdownProvider, EntityType, LocalEntityConfig, PacketInfo,
+    PacketTarget, RemoteEntityConfig, RemoteEntityConfigProvider, State, StdCheckTimer,
+    StdCheckTimerCreator, StdRemoteEntityConfigProvider, TimerContext, TransactionId,
     TransactionStep,
 };
-use alloc::boxed::Box;
 use smallvec::SmallVec;
 use spacepackets::{
     cfdp::{
@@ -43,7 +43,7 @@ enum CompletionDisposition {
 }
 
 #[derive(Debug)]
-struct TransferState {
+struct TransferState<CheckTimer: CountdownProvider> {
     transaction_id: Option<TransactionId>,
     metadata_params: MetadataGenericParams,
     progress: u64,
@@ -54,10 +54,10 @@ struct TransferState {
     completion_disposition: CompletionDisposition,
     checksum: u32,
     current_check_count: u32,
-    current_check_timer: Option<Box<dyn CountdownProvider>>,
+    current_check_timer: Option<CheckTimer>,
 }
 
-impl Default for TransferState {
+impl<CheckTimer: CountdownProvider> Default for TransferState<CheckTimer> {
     fn default() -> Self {
         Self {
             transaction_id: None,
@@ -76,8 +76,8 @@ impl Default for TransferState {
 }
 
 #[derive(Debug)]
-struct TransactionParams {
-    tstate: TransferState,
+struct TransactionParams<CheckTimer: CountdownProvider> {
+    tstate: TransferState<CheckTimer>,
     pdu_conf: CommonPduConfig,
     file_properties: FileProperties,
     cksum_buf: [u8; 1024],
@@ -86,7 +86,7 @@ struct TransactionParams {
     remote_cfg: Option<RemoteEntityConfig>,
 }
 
-impl TransactionParams {
+impl<CheckTimer: CountdownProvider> TransactionParams<CheckTimer> {
     fn transmission_mode(&self) -> TransmissionMode {
         self.pdu_conf.trans_mode
     }
@@ -104,7 +104,7 @@ impl Default for FileProperties {
     }
 }
 
-impl TransactionParams {
+impl<CheckTimer: CountdownProvider> TransactionParams<CheckTimer> {
     fn file_size(&self) -> u64 {
         self.tstate.metadata_params.file_size
     }
@@ -114,7 +114,7 @@ impl TransactionParams {
     }
 }
 
-impl Default for TransactionParams {
+impl<CheckTimer: CountdownProvider> Default for TransactionParams<CheckTimer> {
     fn default() -> Self {
         Self {
             pdu_conf: Default::default(),
@@ -128,7 +128,7 @@ impl Default for TransactionParams {
     }
 }
 
-impl TransactionParams {
+impl<CheckTimer: CountdownProvider> TransactionParams<CheckTimer> {
     fn reset(&mut self) {
         self.tstate.condition_code = ConditionCode::NoError;
         self.tstate.delivery_code = DeliveryCode::Incomplete;
@@ -170,7 +170,7 @@ pub enum DestError {
 
 pub trait CfdpPacketSender: Send {
     fn send_pdu(
-        &mut self,
+        &self,
         pdu_type: PduType,
         file_directive_type: Option<FileDirectiveType>,
         raw_pdu: &[u8],
@@ -191,19 +191,41 @@ pub trait CfdpPacketSender: Send {
 /// All generated packets are sent via the [CfdpPacketSender] trait, which is implemented by the
 /// user and passed as a constructor parameter. The number of generated packets is returned
 /// by the state machine call.
-pub struct DestinationHandler {
+pub struct DestinationHandler<
+    PduSender: CfdpPacketSender,
+    Vfs: VirtualFilestore,
+    RemoteCfgTable: RemoteEntityConfigProvider,
+    CheckTimerCreator: CheckTimerProviderCreator<CheckTimer = CheckTimerProvider>,
+    CheckTimerProvider: CountdownProvider,
+> {
     local_cfg: LocalEntityConfig,
     step: TransactionStep,
     state: State,
-    tparams: TransactionParams,
+    tparams: TransactionParams<CheckTimerProvider>,
     packet_buf: alloc::vec::Vec<u8>,
-    packet_sender: Box<dyn CfdpPacketSender>,
-    vfs: Box<dyn VirtualFilestore>,
-    remote_cfg_table: Box<dyn RemoteEntityConfigProvider>,
-    check_timer_creator: Box<dyn CheckTimerCreator>,
+    pub pdu_sender: PduSender,
+    pub vfs: Vfs,
+    pub remote_cfg_table: RemoteCfgTable,
+    pub check_timer_creator: CheckTimerCreator,
 }
 
-impl DestinationHandler {
+#[cfg(feature = "std")]
+pub type StdDestinationHandler<PduSender> = DestinationHandler<
+    PduSender,
+    NativeFilestore,
+    StdRemoteEntityConfigProvider,
+    StdCheckTimerCreator,
+    StdCheckTimer,
+>;
+
+impl<
+        PduSender: CfdpPacketSender,
+        Vfs: VirtualFilestore,
+        RemoteCfgTable: RemoteEntityConfigProvider,
+        CheckTimerCreator: CheckTimerProviderCreator<CheckTimer = CheckTimerProvider>,
+        CheckTimerProvider: CountdownProvider,
+    > DestinationHandler<PduSender, Vfs, RemoteCfgTable, CheckTimerCreator, CheckTimerProvider>
+{
     /// Constructs a new destination handler.
     ///
     /// # Arguments
@@ -226,10 +248,10 @@ impl DestinationHandler {
     pub fn new(
         local_cfg: LocalEntityConfig,
         max_packet_len: usize,
-        packet_sender: Box<dyn CfdpPacketSender>,
-        vfs: Box<dyn VirtualFilestore>,
-        remote_cfg_table: Box<dyn RemoteEntityConfigProvider>,
-        check_timer_creator: Box<dyn CheckTimerCreator>,
+        packet_sender: PduSender,
+        vfs: Vfs,
+        remote_cfg_table: RemoteCfgTable,
+        check_timer_creator: CheckTimerCreator,
     ) -> Self {
         Self {
             local_cfg,
@@ -237,7 +259,7 @@ impl DestinationHandler {
             state: State::Idle,
             tparams: Default::default(),
             packet_buf: alloc::vec![0; max_packet_len],
-            packet_sender,
+            pdu_sender: packet_sender,
             vfs,
             remote_cfg_table,
             check_timer_creator,
@@ -524,7 +546,7 @@ impl DestinationHandler {
         self.step = TransactionStep::ReceivingFileDataPdusWithCheckLimitHandling;
         self.tparams.tstate.current_check_timer = Some(
             self.check_timer_creator
-                .get_check_timer_provider(TimerContext::CheckLimit {
+                .create_check_timer_provider(TimerContext::CheckLimit {
                     local_id: self.local_cfg.id,
                     remote_id: self.tparams.remote_cfg.unwrap().entity_id,
                     entity_type: EntityType::Receiving,
@@ -763,7 +785,7 @@ impl DestinationHandler {
             )
         };
         finished_pdu.write_to_bytes(&mut self.packet_buf)?;
-        self.packet_sender.send_pdu(
+        self.pdu_sender.send_pdu(
             finished_pdu.pdu_type(),
             finished_pdu.file_directive_type(),
             &self.packet_buf[0..finished_pdu.len_written()],
@@ -771,23 +793,26 @@ impl DestinationHandler {
         Ok(1)
     }
 
-    fn tstate(&self) -> &TransferState {
+    fn tstate(&self) -> &TransferState<CheckTimerProvider> {
         &self.tparams.tstate
     }
 
-    fn tstate_mut(&mut self) -> &mut TransferState {
+    fn tstate_mut(&mut self) -> &mut TransferState<CheckTimerProvider> {
         &mut self.tparams.tstate
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use core::{cell::Cell, sync::atomic::AtomicBool};
+    use core::{
+        cell::{Cell, RefCell},
+        sync::atomic::AtomicBool,
+    };
     #[allow(unused_imports)]
     use std::println;
     use std::{fs, sync::Mutex};
 
-    use alloc::{collections::VecDeque, string::String, sync::Arc, vec::Vec};
+    use alloc::{boxed::Box, collections::VecDeque, string::String, sync::Arc, vec::Vec};
     use rand::Rng;
     use spacepackets::{
         cfdp::{
@@ -799,7 +824,7 @@ mod tests {
     };
 
     use crate::cfdp::{
-        filestore::NativeFilestore, user::OwnedMetadataRecvdParams, CheckTimerCreator,
+        filestore::NativeFilestore, user::OwnedMetadataRecvdParams, CheckTimerProviderCreator,
         CountdownProvider, DefaultFaultHandler, IndicationConfig, RemoteEntityConfig,
         StdRemoteEntityConfigProvider, UserFaultHandler, CRC_32,
     };
@@ -820,20 +845,19 @@ mod tests {
         file_directive_type: Option<FileDirectiveType>,
         raw_pdu: Vec<u8>,
     }
-    type SharedPduPacketQueue = Arc<Mutex<VecDeque<SentPdu>>>;
-    #[derive(Default, Clone)]
+    #[derive(Default)]
     struct TestCfdpSender {
-        packet_queue: SharedPduPacketQueue,
+        packet_queue: RefCell<VecDeque<SentPdu>>,
     }
 
     impl CfdpPacketSender for TestCfdpSender {
         fn send_pdu(
-            &mut self,
+            &self,
             pdu_type: PduType,
             file_directive_type: Option<FileDirectiveType>,
             raw_pdu: &[u8],
         ) -> Result<(), PduError> {
-            self.packet_queue.lock().unwrap().push_back(SentPdu {
+            self.packet_queue.borrow_mut().push_back(SentPdu {
                 pdu_type,
                 file_directive_type,
                 raw_pdu: raw_pdu.to_vec(),
@@ -844,10 +868,10 @@ mod tests {
 
     impl TestCfdpSender {
         pub fn retrieve_next_pdu(&self) -> Option<SentPdu> {
-            self.packet_queue.lock().unwrap().pop_front()
+            self.packet_queue.borrow_mut().pop_front()
         }
         pub fn queue_empty(&self) -> bool {
-            self.packet_queue.lock().unwrap().is_empty()
+            self.packet_queue.borrow_mut().is_empty()
         }
     }
 
@@ -1087,14 +1111,13 @@ mod tests {
         }
     }
 
-    impl CheckTimerCreator for TestCheckTimerCreator {
-        fn get_check_timer_provider(
-            &self,
-            timer_context: TimerContext,
-        ) -> Box<dyn CountdownProvider> {
+    impl CheckTimerProviderCreator for TestCheckTimerCreator {
+        type CheckTimer = TestCheckTimer;
+
+        fn create_check_timer_provider(&self, timer_context: TimerContext) -> Self::CheckTimer {
             match timer_context {
                 TimerContext::CheckLimit { .. } => {
-                    Box::new(TestCheckTimer::new(self.check_limit_expired_flag.clone()))
+                    TestCheckTimer::new(self.check_limit_expired_flag.clone())
                 }
                 _ => {
                     panic!("invalid check timer creator, can only be used for check limit handling")
@@ -1103,10 +1126,17 @@ mod tests {
         }
     }
 
+    type TestDestHandler = DestinationHandler<
+        TestCfdpSender,
+        NativeFilestore,
+        StdRemoteEntityConfigProvider,
+        TestCheckTimerCreator,
+        TestCheckTimer,
+    >;
+
     struct DestHandlerTester {
         check_timer_expired: Arc<AtomicBool>,
-        pdu_sender: TestCfdpSender,
-        handler: DestinationHandler,
+        handler: TestDestHandler,
         src_path: PathBuf,
         dest_path: PathBuf,
         check_dest_file: bool,
@@ -1122,16 +1152,12 @@ mod tests {
         fn new(fault_handler: TestFaultHandler, closure_requested: bool) -> Self {
             let check_timer_expired = Arc::new(AtomicBool::new(false));
             let test_sender = TestCfdpSender::default();
-            let dest_handler = default_dest_handler(
-                fault_handler,
-                test_sender.clone(),
-                check_timer_expired.clone(),
-            );
+            let dest_handler =
+                default_dest_handler(fault_handler, test_sender, check_timer_expired.clone());
             let (src_path, dest_path) = init_full_filenames();
             assert!(!Path::exists(&dest_path));
             let handler = Self {
                 check_timer_expired,
-                pdu_sender: test_sender,
                 handler: dest_handler,
                 src_path,
                 closure_requested,
@@ -1288,7 +1314,13 @@ mod tests {
         test_fault_handler: TestFaultHandler,
         test_packet_sender: TestCfdpSender,
         check_timer_expired: Arc<AtomicBool>,
-    ) -> DestinationHandler {
+    ) -> DestinationHandler<
+        TestCfdpSender,
+        NativeFilestore,
+        StdRemoteEntityConfigProvider,
+        TestCheckTimerCreator,
+        TestCheckTimer,
+    > {
         let local_entity_cfg = LocalEntityConfig {
             id: REMOTE_ID.into(),
             indication_cfg: IndicationConfig::default(),
@@ -1297,10 +1329,10 @@ mod tests {
         DestinationHandler::new(
             local_entity_cfg,
             2048,
-            Box::new(test_packet_sender),
-            Box::<NativeFilestore>::default(),
-            Box::new(basic_remote_cfg_table()),
-            Box::new(TestCheckTimerCreator::new(check_timer_expired)),
+            test_packet_sender,
+            NativeFilestore::default(),
+            basic_remote_cfg_table(),
+            TestCheckTimerCreator::new(check_timer_expired),
         )
     }
 
@@ -1366,18 +1398,18 @@ mod tests {
     #[test]
     fn test_empty_file_transfer_not_acked_no_closure() {
         let fault_handler = TestFaultHandler::default();
-        let mut test_obj = DestHandlerTester::new(fault_handler.clone(), false);
-        let mut test_user = test_obj.test_user_from_cached_paths(0);
-        test_obj
+        let mut testbench = DestHandlerTester::new(fault_handler.clone(), false);
+        let mut test_user = testbench.test_user_from_cached_paths(0);
+        testbench
             .generic_transfer_init(&mut test_user, 0)
             .expect("transfer init failed");
-        test_obj.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
-        test_obj
+        testbench.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
+        testbench
             .generic_eof_no_error(&mut test_user, Vec::new())
             .expect("EOF no error insertion failed");
         assert!(fault_handler.all_queues_empty());
-        assert!(test_obj.pdu_sender.queue_empty());
-        test_obj.state_check(State::Idle, TransactionStep::Idle);
+        assert!(testbench.handler.pdu_sender.queue_empty());
+        testbench.state_check(State::Idle, TransactionStep::Idle);
     }
 
     #[test]
@@ -1387,21 +1419,21 @@ mod tests {
         let file_size = file_data.len() as u64;
         let fault_handler = TestFaultHandler::default();
 
-        let mut test_obj = DestHandlerTester::new(fault_handler.clone(), false);
-        let mut test_user = test_obj.test_user_from_cached_paths(file_size);
-        test_obj
+        let mut testbench = DestHandlerTester::new(fault_handler.clone(), false);
+        let mut test_user = testbench.test_user_from_cached_paths(file_size);
+        testbench
             .generic_transfer_init(&mut test_user, file_size)
             .expect("transfer init failed");
-        test_obj.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
-        test_obj
+        testbench.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
+        testbench
             .generic_file_data_insert(&mut test_user, 0, file_data)
             .expect("file data insertion failed");
-        test_obj
+        testbench
             .generic_eof_no_error(&mut test_user, file_data.to_vec())
             .expect("EOF no error insertion failed");
         assert!(fault_handler.all_queues_empty());
-        assert!(test_obj.pdu_sender.queue_empty());
-        test_obj.state_check(State::Idle, TransactionStep::Idle);
+        assert!(testbench.handler.pdu_sender.queue_empty());
+        testbench.state_check(State::Idle, TransactionStep::Idle);
     }
 
     #[test]
@@ -1413,28 +1445,28 @@ mod tests {
         let segment_len = 256;
         let fault_handler = TestFaultHandler::default();
 
-        let mut test_obj = DestHandlerTester::new(fault_handler.clone(), false);
-        let mut test_user = test_obj.test_user_from_cached_paths(file_size);
-        test_obj
+        let mut testbench = DestHandlerTester::new(fault_handler.clone(), false);
+        let mut test_user = testbench.test_user_from_cached_paths(file_size);
+        testbench
             .generic_transfer_init(&mut test_user, file_size)
             .expect("transfer init failed");
-        test_obj.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
-        test_obj
+        testbench.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
+        testbench
             .generic_file_data_insert(&mut test_user, 0, &random_data[0..segment_len])
             .expect("file data insertion failed");
-        test_obj
+        testbench
             .generic_file_data_insert(
                 &mut test_user,
                 segment_len as u64,
                 &random_data[segment_len..],
             )
             .expect("file data insertion failed");
-        test_obj
+        testbench
             .generic_eof_no_error(&mut test_user, random_data.to_vec())
             .expect("EOF no error insertion failed");
         assert!(fault_handler.all_queues_empty());
-        assert!(test_obj.pdu_sender.queue_empty());
-        test_obj.state_check(State::Idle, TransactionStep::Idle);
+        assert!(testbench.handler.pdu_sender.queue_empty());
+        testbench.state_check(State::Idle, TransactionStep::Idle);
     }
 
     #[test]
@@ -1446,32 +1478,32 @@ mod tests {
         let segment_len = 256;
         let fault_handler = TestFaultHandler::default();
 
-        let mut test_obj = DestHandlerTester::new(fault_handler.clone(), false);
-        let mut test_user = test_obj.test_user_from_cached_paths(file_size);
-        let transaction_id = test_obj
+        let mut testbench = DestHandlerTester::new(fault_handler.clone(), false);
+        let mut test_user = testbench.test_user_from_cached_paths(file_size);
+        let transaction_id = testbench
             .generic_transfer_init(&mut test_user, file_size)
             .expect("transfer init failed");
 
-        test_obj.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
-        test_obj
+        testbench.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
+        testbench
             .generic_file_data_insert(&mut test_user, 0, &random_data[0..segment_len])
             .expect("file data insertion 0 failed");
-        test_obj
+        testbench
             .generic_eof_no_error(&mut test_user, random_data.to_vec())
             .expect("EOF no error insertion failed");
-        test_obj.state_check(
+        testbench.state_check(
             State::Busy,
             TransactionStep::ReceivingFileDataPdusWithCheckLimitHandling,
         );
-        test_obj
+        testbench
             .generic_file_data_insert(
                 &mut test_user,
                 segment_len as u64,
                 &random_data[segment_len..],
             )
             .expect("file data insertion 1 failed");
-        test_obj.set_check_timer_expired();
-        test_obj
+        testbench.set_check_timer_expired();
+        testbench
             .handler
             .state_machine(&mut test_user, None)
             .expect("fsm failure");
@@ -1482,8 +1514,8 @@ mod tests {
         assert_eq!(cancelled.0, transaction_id);
         assert_eq!(cancelled.1, ConditionCode::FileChecksumFailure);
         assert_eq!(cancelled.2, segment_len as u64);
-        assert!(test_obj.pdu_sender.queue_empty());
-        test_obj.state_check(State::Idle, TransactionStep::Idle);
+        assert!(testbench.handler.pdu_sender.queue_empty());
+        testbench.state_check(State::Idle, TransactionStep::Idle);
     }
 
     #[test]
@@ -1495,38 +1527,38 @@ mod tests {
         let segment_len = 256;
 
         let fault_handler = TestFaultHandler::default();
-        let mut test_obj = DestHandlerTester::new(fault_handler.clone(), false);
-        let mut test_user = test_obj.test_user_from_cached_paths(file_size);
-        let transaction_id = test_obj
+        let mut testbench = DestHandlerTester::new(fault_handler.clone(), false);
+        let mut test_user = testbench.test_user_from_cached_paths(file_size);
+        let transaction_id = testbench
             .generic_transfer_init(&mut test_user, file_size)
             .expect("transfer init failed");
 
-        test_obj.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
-        test_obj
+        testbench.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
+        testbench
             .generic_file_data_insert(&mut test_user, 0, &random_data[0..segment_len])
             .expect("file data insertion 0 failed");
-        test_obj
+        testbench
             .generic_eof_no_error(&mut test_user, random_data.to_vec())
             .expect("EOF no error insertion failed");
-        test_obj.state_check(
+        testbench.state_check(
             State::Busy,
             TransactionStep::ReceivingFileDataPdusWithCheckLimitHandling,
         );
-        test_obj.set_check_timer_expired();
-        test_obj
+        testbench.set_check_timer_expired();
+        testbench
             .handler
             .state_machine(&mut test_user, None)
             .expect("fsm error");
-        test_obj.state_check(
+        testbench.state_check(
             State::Busy,
             TransactionStep::ReceivingFileDataPdusWithCheckLimitHandling,
         );
-        test_obj.set_check_timer_expired();
-        test_obj
+        testbench.set_check_timer_expired();
+        testbench
             .handler
             .state_machine(&mut test_user, None)
             .expect("fsm error");
-        test_obj.state_check(State::Idle, TransactionStep::Idle);
+        testbench.state_check(State::Idle, TransactionStep::Idle);
 
         assert!(fault_handler
             .notice_of_suspension_queue
@@ -1550,15 +1582,15 @@ mod tests {
 
         drop(cancelled_queue);
 
-        assert!(test_obj.pdu_sender.queue_empty());
+        assert!(testbench.handler.pdu_sender.queue_empty());
 
         // Check that the broken file exists.
-        test_obj.check_dest_file = false;
-        assert!(Path::exists(test_obj.dest_path()));
-        let read_content = fs::read(test_obj.dest_path()).expect("reading back string failed");
+        testbench.check_dest_file = false;
+        assert!(Path::exists(testbench.dest_path()));
+        let read_content = fs::read(testbench.dest_path()).expect("reading back string failed");
         assert_eq!(read_content.len(), segment_len);
         assert_eq!(read_content, &random_data[0..segment_len]);
-        assert!(fs::remove_file(test_obj.dest_path().as_path()).is_ok());
+        assert!(fs::remove_file(testbench.dest_path().as_path()).is_ok());
     }
 
     fn check_finished_pdu_success(sent_pdu: &SentPdu) {
@@ -1578,21 +1610,21 @@ mod tests {
     #[test]
     fn test_file_transfer_with_closure() {
         let fault_handler = TestFaultHandler::default();
-        let mut test_obj = DestHandlerTester::new(fault_handler.clone(), true);
-        let mut test_user = test_obj.test_user_from_cached_paths(0);
-        test_obj
+        let mut testbench = DestHandlerTester::new(fault_handler.clone(), true);
+        let mut test_user = testbench.test_user_from_cached_paths(0);
+        testbench
             .generic_transfer_init(&mut test_user, 0)
             .expect("transfer init failed");
-        test_obj.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
-        let sent_packets = test_obj
+        testbench.state_check(State::Busy, TransactionStep::ReceivingFileDataPdus);
+        let sent_packets = testbench
             .generic_eof_no_error(&mut test_user, Vec::new())
             .expect("EOF no error insertion failed");
         assert_eq!(sent_packets, 1);
         assert!(fault_handler.all_queues_empty());
         // The Finished PDU was sent, so the state machine is done.
-        test_obj.state_check(State::Idle, TransactionStep::Idle);
-        assert!(!test_obj.pdu_sender.queue_empty());
-        let sent_pdu = test_obj.pdu_sender.retrieve_next_pdu().unwrap();
+        testbench.state_check(State::Idle, TransactionStep::Idle);
+        assert!(!testbench.handler.pdu_sender.queue_empty());
+        let sent_pdu = testbench.handler.pdu_sender.retrieve_next_pdu().unwrap();
         check_finished_pdu_success(&sent_pdu);
     }
 
