@@ -12,8 +12,6 @@ use spacepackets::{
     util::{UnsignedByteField, UnsignedEnum},
 };
 
-#[cfg(feature = "alloc")]
-use alloc::boxed::Box;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -311,9 +309,9 @@ impl RemoteEntityConfigProvider for StdRemoteEntityConfigProvider {
 /// implement some CFDP features like fault handler logging, which would not be possible
 /// generically otherwise.
 ///
-/// For each error reported by the [DefaultFaultHandler], the appropriate fault handler callback
+/// For each error reported by the [FaultHandler], the appropriate fault handler callback
 /// will be called depending on the [FaultHandlerCode].
-pub trait UserFaultHandler {
+pub trait UserFaultHookProvider {
     fn notice_of_suspension_cb(
         &mut self,
         transaction_id: TransactionId,
@@ -331,6 +329,37 @@ pub trait UserFaultHandler {
     fn abandoned_cb(&mut self, transaction_id: TransactionId, cond: ConditionCode, progress: u64);
 
     fn ignore_cb(&mut self, transaction_id: TransactionId, cond: ConditionCode, progress: u64);
+}
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+struct DummyFaultHook {}
+
+impl UserFaultHookProvider for DummyFaultHook {
+    fn notice_of_suspension_cb(
+        &mut self,
+        _transaction_id: TransactionId,
+        _cond: ConditionCode,
+        _progress: u64,
+    ) {
+    }
+
+    fn notice_of_cancellation_cb(
+        &mut self,
+        _transaction_id: TransactionId,
+        _cond: ConditionCode,
+        _progress: u64,
+    ) {
+    }
+
+    fn abandoned_cb(
+        &mut self,
+        _transaction_id: TransactionId,
+        _cond: ConditionCode,
+        _progress: u64,
+    ) {
+    }
+
+    fn ignore_cb(&mut self, _transaction_id: TransactionId, _cond: ConditionCode, _progress: u64) {}
 }
 
 /// This structure is used to implement the fault handling as specified in chapter 4.8 of the CFDP
@@ -353,14 +382,14 @@ pub trait UserFaultHandler {
 /// These defaults can be overriden by using the [Self::set_fault_handler] method.
 /// Please note that in any case, fault handler overrides can be specified by the sending CFDP
 /// entity.
-pub struct DefaultFaultHandler {
+pub struct FaultHandler<UserHandler: UserFaultHookProvider> {
     handler_array: [FaultHandlerCode; 10],
     // Could also change the user fault handler trait to have non mutable methods, but that limits
     // flexbility on the user side..
-    user_fault_handler: RefCell<Box<dyn UserFaultHandler + Send>>,
+    pub user_hook: RefCell<UserHandler>,
 }
 
-impl DefaultFaultHandler {
+impl<UserHandler: UserFaultHookProvider> FaultHandler<UserHandler> {
     fn condition_code_to_array_index(conditon_code: ConditionCode) -> Option<usize> {
         Some(match conditon_code {
             ConditionCode::PositiveAckLimitReached => 0,
@@ -389,7 +418,7 @@ impl DefaultFaultHandler {
         self.handler_array[array_idx.unwrap()] = fault_handler;
     }
 
-    pub fn new(user_fault_handler: Box<dyn UserFaultHandler + Send>) -> Self {
+    pub fn new(user_fault_handler: UserHandler) -> Self {
         let mut init_array = [FaultHandlerCode::NoticeOfCancellation; 10];
         init_array
             [Self::condition_code_to_array_index(ConditionCode::FileChecksumFailure).unwrap()] =
@@ -398,7 +427,7 @@ impl DefaultFaultHandler {
             .unwrap()] = FaultHandlerCode::IgnoreError;
         Self {
             handler_array: init_array,
-            user_fault_handler: RefCell::new(user_fault_handler),
+            user_hook: RefCell::new(user_fault_handler),
         }
     }
 
@@ -421,7 +450,7 @@ impl DefaultFaultHandler {
             return FaultHandlerCode::IgnoreError;
         }
         let fh_code = self.handler_array[array_idx.unwrap()];
-        let mut handler_mut = self.user_fault_handler.borrow_mut();
+        let mut handler_mut = self.user_hook.borrow_mut();
         match fh_code {
             FaultHandlerCode::NoticeOfCancellation => {
                 handler_mut.notice_of_cancellation_cb(transaction_id, condition, progress);
@@ -462,10 +491,29 @@ impl Default for IndicationConfig {
     }
 }
 
-pub struct LocalEntityConfig {
+pub struct LocalEntityConfig<UserFaultHook: UserFaultHookProvider> {
     pub id: UnsignedByteField,
     pub indication_cfg: IndicationConfig,
-    pub default_fault_handler: DefaultFaultHandler,
+    pub fault_handler: FaultHandler<UserFaultHook>,
+}
+
+impl<UserFaultHook: UserFaultHookProvider> LocalEntityConfig<UserFaultHook> {
+    pub fn user_fault_hook_mut(&mut self) -> &mut RefCell<UserFaultHook> {
+        &mut self.fault_handler.user_hook
+    }
+
+    pub fn user_fault_hook(&self) -> &RefCell<UserFaultHook> {
+        &self.fault_handler.user_hook
+    }
+}
+
+pub trait PduSendProvider {
+    fn send_pdu(
+        &self,
+        pdu_type: PduType,
+        file_directive_type: Option<FileDirectiveType>,
+        raw_pdu: &[u8],
+    ) -> Result<(), PduError>;
 }
 
 /// The CFDP transaction ID of a CFDP transaction consists of the source entity ID and the sequence
@@ -503,18 +551,6 @@ impl PartialEq for TransactionId {
         self.source_id.value() == other.source_id.value()
             && self.seq_num.value() == other.seq_num.value()
     }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum TransactionStep {
-    Idle = 0,
-    TransactionStart = 1,
-    ReceivingFileDataPdus = 2,
-    ReceivingFileDataPdusWithCheckLimitHandling = 3,
-    SendingAckPdu = 4,
-    TransferCompletion = 5,
-    SendingFinishedPdu = 6,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -627,21 +663,147 @@ impl<'raw> PacketInfo<'raw> {
 }
 
 #[cfg(test)]
-mod tests {
-    use spacepackets::cfdp::{
-        lv::Lv,
-        pdu::{
-            eof::EofPdu,
-            file_data::FileDataPdu,
-            metadata::{MetadataGenericParams, MetadataPduCreator},
-            CommonPduConfig, FileDirectiveType, PduHeader, WritablePduPacket,
+pub(crate) mod tests {
+    use core::cell::RefCell;
+
+    use alloc::{collections::VecDeque, vec::Vec};
+    use spacepackets::{
+        cfdp::{
+            lv::Lv,
+            pdu::{
+                eof::EofPdu,
+                file_data::FileDataPdu,
+                metadata::{MetadataGenericParams, MetadataPduCreator},
+                CommonPduConfig, FileDirectiveType, PduError, PduHeader, WritablePduPacket,
+            },
+            ChecksumType, ConditionCode, PduType, TransmissionMode,
         },
-        PduType,
+        util::UnsignedByteFieldU16,
     };
 
     use crate::cfdp::PacketTarget;
 
-    use super::PacketInfo;
+    use super::{
+        PacketInfo, PduSendProvider, RemoteEntityConfig, RemoteEntityConfigProvider,
+        StdRemoteEntityConfigProvider, TransactionId, UserFaultHookProvider,
+    };
+
+    #[derive(Default)]
+    pub(crate) struct TestFaultHandler {
+        pub notice_of_suspension_queue: VecDeque<(TransactionId, ConditionCode, u64)>,
+        pub notice_of_cancellation_queue: VecDeque<(TransactionId, ConditionCode, u64)>,
+        pub abandoned_queue: VecDeque<(TransactionId, ConditionCode, u64)>,
+        pub ignored_queue: VecDeque<(TransactionId, ConditionCode, u64)>,
+    }
+
+    impl UserFaultHookProvider for TestFaultHandler {
+        fn notice_of_suspension_cb(
+            &mut self,
+            transaction_id: TransactionId,
+            cond: ConditionCode,
+            progress: u64,
+        ) {
+            self.notice_of_suspension_queue
+                .push_back((transaction_id, cond, progress))
+        }
+
+        fn notice_of_cancellation_cb(
+            &mut self,
+            transaction_id: TransactionId,
+            cond: ConditionCode,
+            progress: u64,
+        ) {
+            self.notice_of_cancellation_queue
+                .push_back((transaction_id, cond, progress))
+        }
+
+        fn abandoned_cb(
+            &mut self,
+            transaction_id: TransactionId,
+            cond: ConditionCode,
+            progress: u64,
+        ) {
+            self.abandoned_queue
+                .push_back((transaction_id, cond, progress))
+        }
+
+        fn ignore_cb(&mut self, transaction_id: TransactionId, cond: ConditionCode, progress: u64) {
+            self.ignored_queue
+                .push_back((transaction_id, cond, progress))
+        }
+    }
+
+    impl TestFaultHandler {
+        pub(crate) fn suspension_queue_empty(&self) -> bool {
+            self.notice_of_suspension_queue.is_empty()
+        }
+        pub(crate) fn cancellation_queue_empty(&self) -> bool {
+            self.notice_of_cancellation_queue.is_empty()
+        }
+        pub(crate) fn ignored_queue_empty(&self) -> bool {
+            self.ignored_queue.is_empty()
+        }
+        pub(crate) fn abandoned_queue_empty(&self) -> bool {
+            self.abandoned_queue.is_empty()
+        }
+        pub(crate) fn all_queues_empty(&self) -> bool {
+            self.suspension_queue_empty()
+                && self.cancellation_queue_empty()
+                && self.ignored_queue_empty()
+                && self.abandoned_queue_empty()
+        }
+    }
+
+    pub struct SentPdu {
+        pub pdu_type: PduType,
+        pub file_directive_type: Option<FileDirectiveType>,
+        pub raw_pdu: Vec<u8>,
+    }
+
+    #[derive(Default)]
+    pub struct TestCfdpSender {
+        pub packet_queue: RefCell<VecDeque<SentPdu>>,
+    }
+
+    impl PduSendProvider for TestCfdpSender {
+        fn send_pdu(
+            &self,
+            pdu_type: PduType,
+            file_directive_type: Option<FileDirectiveType>,
+            raw_pdu: &[u8],
+        ) -> Result<(), PduError> {
+            self.packet_queue.borrow_mut().push_back(SentPdu {
+                pdu_type,
+                file_directive_type,
+                raw_pdu: raw_pdu.to_vec(),
+            });
+            Ok(())
+        }
+    }
+
+    impl TestCfdpSender {
+        pub fn retrieve_next_pdu(&self) -> Option<SentPdu> {
+            self.packet_queue.borrow_mut().pop_front()
+        }
+        pub fn queue_empty(&self) -> bool {
+            self.packet_queue.borrow_mut().is_empty()
+        }
+    }
+
+    pub fn basic_remote_cfg_table() -> StdRemoteEntityConfigProvider {
+        let mut table = StdRemoteEntityConfigProvider::default();
+        let remote_entity_cfg = RemoteEntityConfig::new_with_default_values(
+            UnsignedByteFieldU16::new(1).into(),
+            1024,
+            1024,
+            true,
+            true,
+            TransmissionMode::Unacknowledged,
+            ChecksumType::Crc32,
+        );
+        table.add_config(&remote_entity_cfg);
+        table
+    }
 
     fn generic_pdu_header() -> PduHeader {
         let pdu_conf = CommonPduConfig::default();
