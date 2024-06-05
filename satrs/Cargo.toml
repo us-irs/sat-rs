@@ -21,14 +21,17 @@ crc = "3"
 
 [dependencies.satrs-shared]
 version = ">=0.1.3, <0.2"
+path = "../satrs-shared"
 
 [dependencies.num_enum]
 version = ">0.5, <=0.7"
 default-features = false
 
 [dependencies.spacepackets]
-version = "0.11"
+version = "0.12"
 default-features = false
+git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets"
+branch = "cfdp-tlv-owned-type"
 
 [dependencies.cobs]
 git = "https://github.com/robamu/cobs.rs.git"

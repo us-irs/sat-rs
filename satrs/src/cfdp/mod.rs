@@ -21,6 +21,7 @@ use crate::time::CountdownProvider;
 pub mod dest;
 #[cfg(feature = "alloc")]
 pub mod filestore;
+pub mod request;
 #[cfg(feature = "std")]
 pub mod source;
 pub mod user;
@@ -332,7 +333,7 @@ pub trait UserFaultHookProvider {
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
-struct DummyFaultHook {}
+pub struct DummyFaultHook {}
 
 impl UserFaultHookProvider for DummyFaultHook {
     fn notice_of_suspension_cb(

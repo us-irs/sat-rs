@@ -22,8 +22,10 @@ version = "0.3"
 optional = true
 
 [dependencies.spacepackets]
-version = ">0.9, <=0.11"
+version = ">0.9"
 default-features = false
+git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets"
+branch = "cfdp-tlv-owned-type"
 
 [features]
 serde = ["dep:serde", "spacepackets/serde"]

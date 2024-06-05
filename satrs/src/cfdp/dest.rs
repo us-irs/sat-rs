@@ -20,7 +20,7 @@ use spacepackets::{
             metadata::{MetadataGenericParams, MetadataPduReader},
             CfdpPdu, CommonPduConfig, FileDirectiveType, PduError, PduHeader, WritablePduPacket,
         },
-        tlv::{msg_to_user::MsgToUserTlv, EntityIdTlv, GenericTlv, TlvType},
+        tlv::{msg_to_user::MsgToUserTlv, EntityIdTlv, GenericTlv, ReadableTlv, TlvType},
         ChecksumType, ConditionCode, FaultHandlerCode, PduType, TransmissionMode,
     },
     util::{UnsignedByteField, UnsignedEnum},
@@ -94,6 +94,7 @@ struct TransactionParams<CheckTimer: CountdownProvider> {
     file_properties: FileProperties,
     cksum_buf: [u8; 1024],
     msgs_to_user_size: usize,
+    // TODO: Should we make this configurable?
     msgs_to_user_buf: [u8; 1024],
     remote_cfg: Option<RemoteEntityConfig>,
 }
