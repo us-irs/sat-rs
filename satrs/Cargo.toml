@@ -31,7 +31,7 @@ default-features = false
 version = "0.12"
 default-features = false
 git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets"
-branch = "cfdp-tlv-owned-type"
+branch = "all-cfdp-updates"
 
 [dependencies.cobs]
 git = "https://github.com/robamu/cobs.rs.git"

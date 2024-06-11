@@ -1,8 +1,8 @@
 use spacepackets::cfdp::{pdu::FileDirectiveType, PduType};
 
 use super::{
-    filestore::VirtualFilestore, user::CfdpUser, LocalEntityConfig, PacketInfo, PacketTarget,
-    PduSendProvider, RemoteEntityConfigProvider, UserFaultHookProvider,
+    filestore::VirtualFilestore, request::ReadablePutRequest, user::CfdpUser, LocalEntityConfig,
+    PacketInfo, PacketTarget, PduSendProvider, RemoteEntityConfigProvider, UserFaultHookProvider,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -152,6 +152,10 @@ impl<
                 });
             }
         }
+        Ok(())
+    }
+
+    fn put_request(&mut self, put_request: &impl ReadablePutRequest) -> Result<(), SourceError> {
         Ok(())
     }
 
