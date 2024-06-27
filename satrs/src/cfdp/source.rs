@@ -1,8 +1,17 @@
-use spacepackets::cfdp::{pdu::FileDirectiveType, PduType};
+use spacepackets::{
+    cfdp::{pdu::FileDirectiveType, PduType},
+    util::UnsignedByteField,
+    ByteConversionError,
+};
+
+use crate::seq_count::SequenceCountProvider;
 
 use super::{
-    filestore::VirtualFilestore, request::ReadablePutRequest, user::CfdpUser, LocalEntityConfig,
-    PacketInfo, PacketTarget, PduSendProvider, RemoteEntityConfigProvider, UserFaultHookProvider,
+    filestore::VirtualFilestore,
+    request::{ReadablePutRequest, StaticPutRequestCacher},
+    user::CfdpUser,
+    LocalEntityConfig, PacketInfo, PacketTarget, PduSendProvider, RemoteEntityConfig,
+    RemoteEntityConfigProvider, TransactionId, UserFaultHookProvider,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -12,7 +21,7 @@ pub enum TransactionStep {
     TransactionStart = 1,
     SendingMetadata = 3,
     SendingFileData = 4,
-    /// Re-transmitting missing packets in acknowledged mode6
+    /// Re-transmitting missing packets in acknowledged mode
     Retransmitting = 5,
     SendingEof = 6,
     WaitingForEofAck = 7,
@@ -36,6 +45,14 @@ pub struct StateHelper {
     num_packets_ready: u32,
 }
 
+#[derive(Debug, Copy, Clone, derive_new::new)]
+pub struct TransferState {
+    transaction_id: TransactionId,
+    remote_cfg: RemoteEntityConfig,
+    transmission_mode: super::TransmissionMode,
+    closure_requested: bool,
+}
+
 impl Default for StateHelper {
     fn default() -> Self {
         Self {
@@ -55,6 +72,18 @@ pub enum SourceError {
     },
     #[error("unexpected file data PDU")]
     UnexpectedFileDataPdu,
+    #[error("source handler is already busy with put request")]
+    PutRequestAlreadyActive,
+    #[error("error caching put request")]
+    PutRequestCaching(ByteConversionError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PutRequestError {
+    #[error("error caching put request: {0}")]
+    Storage(#[from] ByteConversionError),
+    #[error("already busy with put request")]
+    AlreadyBusy,
 }
 
 pub struct SourceHandler<
@@ -62,12 +91,16 @@ pub struct SourceHandler<
     UserFaultHook: UserFaultHookProvider,
     Vfs: VirtualFilestore,
     RemoteCfgTable: RemoteEntityConfigProvider,
+    SeqCountProvider: SequenceCountProvider,
 > {
     local_cfg: LocalEntityConfig<UserFaultHook>,
     pdu_sender: PduSender,
+    put_request_cacher: StaticPutRequestCacher,
     remote_cfg_table: RemoteCfgTable,
     vfs: Vfs,
     state_helper: StateHelper,
+    tstate: Option<TransferState>,
+    seq_count_provider: SeqCountProvider,
 }
 
 impl<
@@ -75,20 +108,26 @@ impl<
         UserFaultHook: UserFaultHookProvider,
         Vfs: VirtualFilestore,
         RemoteCfgTable: RemoteEntityConfigProvider,
-    > SourceHandler<PduSender, UserFaultHook, Vfs, RemoteCfgTable>
+        SeqCountProvider: SequenceCountProvider,
+    > SourceHandler<PduSender, UserFaultHook, Vfs, RemoteCfgTable, SeqCountProvider>
 {
     pub fn new(
         cfg: LocalEntityConfig<UserFaultHook>,
         pdu_sender: PduSender,
         vfs: Vfs,
+        put_request_cacher: StaticPutRequestCacher,
         remote_cfg_table: RemoteCfgTable,
+        seq_count_provider: SeqCountProvider,
     ) -> Self {
         Self {
             local_cfg: cfg,
             remote_cfg_table,
-            vfs,
             pdu_sender,
+            vfs,
+            put_request_cacher,
             state_helper: Default::default(),
+            tstate: Default::default(),
+            seq_count_provider,
         }
     }
 
@@ -155,9 +194,65 @@ impl<
         Ok(())
     }
 
-    fn put_request(&mut self, put_request: &impl ReadablePutRequest) -> Result<(), SourceError> {
+    pub fn put_request(
+        &mut self,
+        put_request: &impl ReadablePutRequest,
+    ) -> Result<(), PutRequestError> {
+        if self.state_helper.state != super::State::Idle {
+            return Err(PutRequestError::AlreadyBusy);
+        }
+        self.put_request_cacher.set(put_request)?;
+        self.state_helper.state = super::State::Busy;
+        let source_file = self.put_request_cacher.source_file().unwrap();
+        if !self.vfs.exists(source_file) {
+            // TODO: Specific error.
+        }
+        let remote_cfg = self.remote_cfg_table.get(
+            self.put_request_cacher
+                .static_fields
+                .destination_id
+                .value_const(),
+        );
+        if remote_cfg.is_none() {
+            // TODO: Specific error.
+        }
+        let remote_cfg = remote_cfg.unwrap();
+        self.state_helper.num_packets_ready = 0;
+        //self.tstate.remote_cfg = Some(*remote_cfg);
+        let transmission_mode = if self.put_request_cacher.static_fields.trans_mode.is_some() {
+            self.put_request_cacher.static_fields.trans_mode.unwrap()
+        } else {
+            remote_cfg.default_transmission_mode
+        };
+        let closure_requested = if self
+            .put_request_cacher
+            .static_fields
+            .closure_requested
+            .is_some()
+        {
+            self.put_request_cacher
+                .static_fields
+                .closure_requested
+                .unwrap()
+        } else {
+            remote_cfg.closure_requested_by_default
+        };
+        self.tstate = Some(TransferState::new(
+            TransactionId::new(
+                self.put_request_cacher.static_fields.destination_id,
+                UnsignedByteField::new(
+                    SeqCountProvider::MAX_BIT_WIDTH / 8,
+                    self.seq_count_provider.get_and_increment().into(),
+                ),
+            ),
+            *remote_cfg,
+            transmission_mode,
+            closure_requested,
+        ));
         Ok(())
     }
+
+    pub fn transmission_mode(&self) {}
 
     fn fsm_busy(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<u32, SourceError> {
         Ok(0)
@@ -172,14 +267,16 @@ impl<
 
 #[cfg(test)]
 mod tests {
-    use alloc::sync::Arc;
     use spacepackets::util::UnsignedByteFieldU16;
 
     use super::*;
-    use crate::cfdp::{
-        filestore::NativeFilestore,
-        tests::{basic_remote_cfg_table, TestCfdpSender, TestFaultHandler},
-        FaultHandler, IndicationConfig, StdRemoteEntityConfigProvider,
+    use crate::{
+        cfdp::{
+            filestore::NativeFilestore,
+            tests::{basic_remote_cfg_table, TestCfdpSender, TestFaultHandler},
+            FaultHandler, IndicationConfig, StdRemoteEntityConfigProvider,
+        },
+        seq_count::SeqCountProviderSimple,
     };
 
     const LOCAL_ID: UnsignedByteFieldU16 = UnsignedByteFieldU16::new(1);
@@ -190,6 +287,7 @@ mod tests {
         TestFaultHandler,
         NativeFilestore,
         StdRemoteEntityConfigProvider,
+        SeqCountProviderSimple<u16>,
     >;
 
     fn default_source_handler(
@@ -201,12 +299,14 @@ mod tests {
             indication_cfg: IndicationConfig::default(),
             fault_handler: FaultHandler::new(test_fault_handler),
         };
+        let static_put_request_cacher = StaticPutRequestCacher::new(1024);
         SourceHandler::new(
             local_entity_cfg,
             test_packet_sender,
             NativeFilestore::default(),
+            static_put_request_cacher,
             basic_remote_cfg_table(),
-            // TestCheckTimerCreator::new(check_timer_expired),
+            SeqCountProviderSimple::default(),
         )
     }
 

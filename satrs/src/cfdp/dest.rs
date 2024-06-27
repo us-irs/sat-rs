@@ -54,6 +54,7 @@ pub enum TransactionStep {
     SendingFinishedPdu = 6,
 }
 
+// This contains transfer state parameters for destination transaction.
 #[derive(Debug)]
 struct TransferState<CheckTimer: CountdownProvider> {
     transaction_id: Option<TransactionId>,
@@ -87,6 +88,7 @@ impl<CheckTimer: CountdownProvider> Default for TransferState<CheckTimer> {
     }
 }
 
+// This contains parameters for destination transaction.
 #[derive(Debug)]
 struct TransactionParams<CheckTimer: CountdownProvider> {
     tstate: TransferState<CheckTimer>,
@@ -380,9 +382,7 @@ impl<
         let metadata_pdu = MetadataPduReader::from_bytes(raw_packet)?;
         self.tparams.reset();
         self.tparams.tstate.metadata_params = *metadata_pdu.metadata_params();
-        let remote_cfg = self
-            .remote_cfg_table
-            .get_remote_config(metadata_pdu.source_id().value());
+        let remote_cfg = self.remote_cfg_table.get(metadata_pdu.source_id().value());
         if remote_cfg.is_none() {
             return Err(DestError::NoRemoteCfgFound(metadata_pdu.dest_id()));
         }
@@ -847,7 +847,7 @@ mod tests {
         tests::{basic_remote_cfg_table, SentPdu, TestCfdpSender, TestFaultHandler},
         user::OwnedMetadataRecvdParams,
         CheckTimerProviderCreator, CountdownProvider, FaultHandler, IndicationConfig,
-        RemoteEntityConfig, StdRemoteEntityConfigProvider, CRC_32,
+        StdRemoteEntityConfigProvider, CRC_32,
     };
 
     use super::*;

@@ -476,18 +476,11 @@ pub mod alloc_mod {
         pub fs_requests_len: usize,
     }
 
-    pub struct PutRequestCacheConfig {
-        pub max_msgs_to_user_storage: usize,
-        pub max_fault_handler_overrides_storage: usize,
-        pub max_flow_label_storage: usize,
-        pub max_fs_requests_storage: usize,
-    }
-
     impl StaticPutRequestCacher {
-        pub fn new(cfg: PutRequestCacheConfig) -> Self {
+        pub fn new(max_fs_requests_storage: usize) -> Self {
             Self {
                 static_fields: StaticPutRequestFields::default(),
-                fs_requests: alloc::vec![0; cfg.max_fs_requests_storage],
+                fs_requests: alloc::vec![0; max_fs_requests_storage],
                 fs_requests_len: 0,
             }
         }

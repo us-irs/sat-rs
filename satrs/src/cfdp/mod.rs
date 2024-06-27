@@ -268,8 +268,8 @@ impl RemoteEntityConfig {
 
 pub trait RemoteEntityConfigProvider {
     /// Retrieve the remote entity configuration for the given remote ID.
-    fn get_remote_config(&self, remote_id: u64) -> Option<&RemoteEntityConfig>;
-    fn get_remote_config_mut(&mut self, remote_id: u64) -> Option<&mut RemoteEntityConfig>;
+    fn get(&self, remote_id: u64) -> Option<&RemoteEntityConfig>;
+    fn get_mut(&mut self, remote_id: u64) -> Option<&mut RemoteEntityConfig>;
     /// Add a new remote configuration. Return [true] if the configuration was
     /// inserted successfully, and [false] if a configuration already exists.
     fn add_config(&mut self, cfg: &RemoteEntityConfig) -> bool;
@@ -286,10 +286,10 @@ pub struct StdRemoteEntityConfigProvider {
 
 #[cfg(feature = "std")]
 impl RemoteEntityConfigProvider for StdRemoteEntityConfigProvider {
-    fn get_remote_config(&self, remote_id: u64) -> Option<&RemoteEntityConfig> {
+    fn get(&self, remote_id: u64) -> Option<&RemoteEntityConfig> {
         self.remote_cfg_table.get(&remote_id)
     }
-    fn get_remote_config_mut(&mut self, remote_id: u64) -> Option<&mut RemoteEntityConfig> {
+    fn get_mut(&mut self, remote_id: u64) -> Option<&mut RemoteEntityConfig> {
         self.remote_cfg_table.get_mut(&remote_id)
     }
     fn add_config(&mut self, cfg: &RemoteEntityConfig) -> bool {

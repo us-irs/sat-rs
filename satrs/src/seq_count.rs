@@ -1,6 +1,4 @@
 use core::cell::Cell;
-#[cfg(feature = "alloc")]
-use dyn_clone::DynClone;
 use paste::paste;
 use spacepackets::MAX_SEQ_COUNT;
 #[cfg(feature = "std")]
@@ -11,26 +9,20 @@ pub use stdmod::*;
 /// The core functions are not mutable on purpose to allow easier usage with
 /// static structs when using the interior mutability pattern. This can be achieved by using
 /// [Cell], [core::cell::RefCell] or atomic types.
-pub trait SequenceCountProviderCore<Raw> {
-    fn get(&self) -> Raw;
+pub trait SequenceCountProvider {
+    type Raw: Into<u64>;
+    const MAX_BIT_WIDTH: usize;
+
+    fn get(&self) -> Self::Raw;
 
     fn increment(&self);
 
-    fn get_and_increment(&self) -> Raw {
+    fn get_and_increment(&self) -> Self::Raw {
         let val = self.get();
         self.increment();
         val
     }
 }
-
-/// Extension trait which allows cloning a sequence count provider after it was turned into
-/// a trait object.
-#[cfg(feature = "alloc")]
-pub trait SequenceCountProvider<Raw>: SequenceCountProviderCore<Raw> + DynClone {}
-#[cfg(feature = "alloc")]
-dyn_clone::clone_trait_object!(SequenceCountProvider<u16>);
-#[cfg(feature = "alloc")]
-impl<T, Raw> SequenceCountProvider<Raw> for T where T: SequenceCountProviderCore<Raw> + Clone {}
 
 #[derive(Clone)]
 pub struct SeqCountProviderSimple<T: Copy> {
@@ -63,8 +55,11 @@ macro_rules! impl_for_primitives {
                     }
                 }
 
-                impl SequenceCountProviderCore<$ty> for SeqCountProviderSimple<$ty> {
-                    fn get(&self) -> $ty {
+                impl SequenceCountProvider for SeqCountProviderSimple<$ty> {
+                    type Raw = $ty;
+                    const MAX_BIT_WIDTH: usize = core::mem::size_of::<Self::Raw>() * 8;
+
+                    fn get(&self) -> Self::Raw {
                         self.seq_count.get()
                     }
 
@@ -72,7 +67,7 @@ macro_rules! impl_for_primitives {
                         self.get_and_increment();
                     }
 
-                    fn get_and_increment(&self) -> $ty {
+                    fn get_and_increment(&self) -> Self::Raw {
                         let curr_count = self.seq_count.get();
 
                         if curr_count == self.max_val {
@@ -104,7 +99,9 @@ impl Default for CcsdsSimpleSeqCountProvider {
     }
 }
 
-impl SequenceCountProviderCore<u16> for CcsdsSimpleSeqCountProvider {
+impl SequenceCountProvider for CcsdsSimpleSeqCountProvider {
+    type Raw = u16;
+    const MAX_BIT_WIDTH: usize = core::mem::size_of::<Self::Raw>() * 8;
     delegate::delegate! {
         to self.provider {
             fn get(&self) -> u16;
@@ -144,7 +141,10 @@ pub mod stdmod {
                          }
                      }
                  }
-                 impl SequenceCountProviderCore<$ty> for [<SeqCountProviderSync $ty:upper>] {
+                 impl SequenceCountProvider for [<SeqCountProviderSync $ty:upper>] {
+                    type Raw = $ty;
+                    const MAX_BIT_WIDTH: usize = core::mem::size_of::<Self::Raw>() * 8;
+
                     fn get(&self) -> $ty {
                         match self.seq_count.lock() {
                             Ok(counter) => *counter,
@@ -181,7 +181,7 @@ pub mod stdmod {
 mod tests {
     use crate::seq_count::{
         CcsdsSimpleSeqCountProvider, SeqCountProviderSimple, SeqCountProviderSyncU8,
-        SequenceCountProviderCore,
+        SequenceCountProvider,
     };
     use spacepackets::MAX_SEQ_COUNT;
 
