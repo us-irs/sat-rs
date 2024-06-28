@@ -123,13 +123,15 @@ pub trait VirtualFilestore {
         path.file_name().and_then(|name| name.to_str())
     }
 
-    fn is_file(&self, path: &str) -> bool;
+    fn is_file(&self, path: &str) -> Result<bool, FilestoreError>;
 
-    fn is_dir(&self, path: &str) -> bool {
-        !self.is_file(path)
+    fn is_dir(&self, path: &str) -> Result<bool, FilestoreError> {
+        Ok(!self.is_file(path)?)
     }
 
-    fn exists(&self, path: &str) -> bool;
+    fn exists(&self, path: &str) -> Result<bool, FilestoreError>;
+
+    fn file_size(&self, path: &str) -> Result<u64, FilestoreError>;
 
     /// This special function is the CFDP specific abstraction to verify the checksum of a file.
     /// This allows to keep OS specific details like reading the whole file in the most efficient
@@ -160,7 +162,7 @@ pub mod std_mod {
 
     impl VirtualFilestore for NativeFilestore {
         fn create_file(&self, file_path: &str) -> Result<(), FilestoreError> {
-            if self.exists(file_path) {
+            if self.exists(file_path)? {
                 return Err(FilestoreError::FileAlreadyExists);
             }
             File::create(file_path)?;
@@ -168,10 +170,10 @@ pub mod std_mod {
         }
 
         fn remove_file(&self, file_path: &str) -> Result<(), FilestoreError> {
-            if !self.exists(file_path) {
+            if !self.exists(file_path)? {
                 return Err(FilestoreError::FileDoesNotExist);
             }
-            if !self.is_file(file_path) {
+            if !self.is_file(file_path)? {
                 return Err(FilestoreError::IsNotFile);
             }
             fs::remove_file(file_path)?;
@@ -179,10 +181,10 @@ pub mod std_mod {
         }
 
         fn truncate_file(&self, file_path: &str) -> Result<(), FilestoreError> {
-            if !self.exists(file_path) {
+            if !self.exists(file_path)? {
                 return Err(FilestoreError::FileDoesNotExist);
             }
-            if !self.is_file(file_path) {
+            if !self.is_file(file_path)? {
                 return Err(FilestoreError::IsNotFile);
             }
             OpenOptions::new()
@@ -201,10 +203,10 @@ pub mod std_mod {
         }
 
         fn remove_dir(&self, dir_path: &str, all: bool) -> Result<(), FilestoreError> {
-            if !self.exists(dir_path) {
+            if !self.exists(dir_path)? {
                 return Err(FilestoreError::DirDoesNotExist);
             }
-            if !self.is_dir(dir_path) {
+            if !self.is_dir(dir_path)? {
                 return Err(FilestoreError::IsNotDirectory);
             }
             if !all {
@@ -229,10 +231,10 @@ pub mod std_mod {
                 }
                 .into());
             }
-            if !self.exists(file_name) {
+            if !self.exists(file_name)? {
                 return Err(FilestoreError::FileDoesNotExist);
             }
-            if !self.is_file(file_name) {
+            if !self.is_file(file_name)? {
                 return Err(FilestoreError::IsNotFile);
             }
             let mut file = File::open(file_name)?;
@@ -242,10 +244,10 @@ pub mod std_mod {
         }
 
         fn write_data(&self, file: &str, offset: u64, buf: &[u8]) -> Result<(), FilestoreError> {
-            if !self.exists(file) {
+            if !self.exists(file)? {
                 return Err(FilestoreError::FileDoesNotExist);
             }
-            if !self.is_file(file) {
+            if !self.is_file(file)? {
                 return Err(FilestoreError::IsNotFile);
             }
             let mut file = OpenOptions::new().write(true).open(file)?;
@@ -254,17 +256,28 @@ pub mod std_mod {
             Ok(())
         }
 
-        fn is_file(&self, path: &str) -> bool {
-            let path = Path::new(path);
-            path.is_file()
+        fn is_file(&self, str_path: &str) -> Result<bool, FilestoreError> {
+            let path = Path::new(str_path);
+            if !self.exists(str_path)? {
+                return Err(FilestoreError::FileDoesNotExist);
+            }
+            Ok(path.is_file())
         }
 
-        fn exists(&self, path: &str) -> bool {
+        fn exists(&self, path: &str) -> Result<bool, FilestoreError> {
             let path = Path::new(path);
-            if !path.exists() {
-                return false;
+            Ok(self.exists_internal(path))
+        }
+
+        fn file_size(&self, str_path: &str) -> Result<u64, FilestoreError> {
+            let path = Path::new(str_path);
+            if !self.exists_internal(path) {
+                return Err(FilestoreError::FileDoesNotExist);
             }
-            true
+            if !path.is_file() {
+                return Err(FilestoreError::IsNotFile);
+            }
+            Ok(path.metadata()?.len())
         }
 
         fn checksum_verify(
@@ -324,6 +337,13 @@ pub mod std_mod {
             }
             Ok(checksum)
         }
+
+        fn exists_internal(&self, path: &Path) -> bool {
+            if !path.exists() {
+                return false;
+            }
+            true
+        }
     }
 }
 
@@ -350,32 +370,34 @@ mod tests {
         assert!(result.is_ok());
         let path = Path::new(&file_path);
         assert!(path.exists());
-        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()));
-        assert!(NATIVE_FS.is_file(file_path.to_str().unwrap()));
+        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()).unwrap());
+        assert!(NATIVE_FS.is_file(file_path.to_str().unwrap()).unwrap());
     }
 
     #[test]
     fn test_basic_native_fs_file_exists() {
         let tmpdir = tempdir().expect("creating tmpdir failed");
         let file_path = tmpdir.path().join("test.txt");
-        assert!(!NATIVE_FS.exists(file_path.to_str().unwrap()));
+        assert!(!NATIVE_FS.exists(file_path.to_str().unwrap()).unwrap());
         NATIVE_FS
             .create_file(file_path.to_str().expect("getting str for file failed"))
             .unwrap();
-        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()));
-        assert!(NATIVE_FS.is_file(file_path.to_str().unwrap()));
+        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()).unwrap());
+        assert!(NATIVE_FS.is_file(file_path.to_str().unwrap()).unwrap());
     }
 
     #[test]
     fn test_basic_native_fs_dir_exists() {
         let tmpdir = tempdir().expect("creating tmpdir failed");
         let dir_path = tmpdir.path().join("testdir");
-        assert!(!NATIVE_FS.exists(dir_path.to_str().unwrap()));
+        assert!(!NATIVE_FS.exists(dir_path.to_str().unwrap()).unwrap());
         NATIVE_FS
             .create_dir(dir_path.to_str().expect("getting str for file failed"))
             .unwrap();
-        assert!(NATIVE_FS.exists(dir_path.to_str().unwrap()));
-        assert!(NATIVE_FS.is_dir(dir_path.as_path().to_str().unwrap()));
+        assert!(NATIVE_FS.exists(dir_path.to_str().unwrap()).unwrap());
+        assert!(NATIVE_FS
+            .is_dir(dir_path.as_path().to_str().unwrap())
+            .unwrap());
     }
 
     #[test]
@@ -385,23 +407,23 @@ mod tests {
         NATIVE_FS
             .create_file(file_path.to_str().expect("getting str for file failed"))
             .expect("creating file failed");
-        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()));
+        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()).unwrap());
         NATIVE_FS
             .remove_file(file_path.to_str().unwrap())
             .expect("removing file failed");
-        assert!(!NATIVE_FS.exists(file_path.to_str().unwrap()));
+        assert!(!NATIVE_FS.exists(file_path.to_str().unwrap()).unwrap());
     }
 
     #[test]
     fn test_basic_native_fs_write() {
         let tmpdir = tempdir().expect("creating tmpdir failed");
         let file_path = tmpdir.path().join("test.txt");
-        assert!(!NATIVE_FS.exists(file_path.to_str().unwrap()));
+        assert!(!NATIVE_FS.exists(file_path.to_str().unwrap()).unwrap());
         NATIVE_FS
             .create_file(file_path.to_str().expect("getting str for file failed"))
             .unwrap();
-        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()));
-        assert!(NATIVE_FS.is_file(file_path.to_str().unwrap()));
+        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()).unwrap());
+        assert!(NATIVE_FS.is_file(file_path.to_str().unwrap()).unwrap());
         println!("{}", file_path.to_str().unwrap());
         let write_data = "hello world\n";
         NATIVE_FS
@@ -415,12 +437,12 @@ mod tests {
     fn test_basic_native_fs_read() {
         let tmpdir = tempdir().expect("creating tmpdir failed");
         let file_path = tmpdir.path().join("test.txt");
-        assert!(!NATIVE_FS.exists(file_path.to_str().unwrap()));
+        assert!(!NATIVE_FS.exists(file_path.to_str().unwrap()).unwrap());
         NATIVE_FS
             .create_file(file_path.to_str().expect("getting str for file failed"))
             .unwrap();
-        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()));
-        assert!(NATIVE_FS.is_file(file_path.to_str().unwrap()));
+        assert!(NATIVE_FS.exists(file_path.to_str().unwrap()).unwrap());
+        assert!(NATIVE_FS.is_file(file_path.to_str().unwrap()).unwrap());
         println!("{}", file_path.to_str().unwrap());
         let write_data = "hello world\n";
         NATIVE_FS
@@ -449,15 +471,15 @@ mod tests {
     fn test_remove_dir() {
         let tmpdir = tempdir().expect("creating tmpdir failed");
         let dir_path = tmpdir.path().join("testdir");
-        assert!(!NATIVE_FS.exists(dir_path.to_str().unwrap()));
+        assert!(!NATIVE_FS.exists(dir_path.to_str().unwrap()).unwrap());
         NATIVE_FS
             .create_dir(dir_path.to_str().expect("getting str for file failed"))
             .unwrap();
-        assert!(NATIVE_FS.exists(dir_path.to_str().unwrap()));
+        assert!(NATIVE_FS.exists(dir_path.to_str().unwrap()).unwrap());
         NATIVE_FS
             .remove_dir(dir_path.to_str().unwrap(), false)
             .unwrap();
-        assert!(!NATIVE_FS.exists(dir_path.to_str().unwrap()));
+        assert!(!NATIVE_FS.exists(dir_path.to_str().unwrap()).unwrap());
     }
 
     #[test]
@@ -544,7 +566,7 @@ mod tests {
             .unwrap();
         let result = NATIVE_FS.remove_dir(dir_path.to_str().unwrap(), true);
         assert!(result.is_ok());
-        assert!(!NATIVE_FS.exists(dir_path.to_str().unwrap()));
+        assert!(!NATIVE_FS.exists(dir_path.to_str().unwrap()).unwrap());
     }
 
     #[test]

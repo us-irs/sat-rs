@@ -540,6 +540,14 @@ pub mod alloc_mod {
             Ok(())
         }
 
+        pub fn has_source_file(&self) -> bool {
+            self.static_fields.source_file_len > 0
+        }
+
+        pub fn has_dest_file(&self) -> bool {
+            self.static_fields.dest_file_len > 0
+        }
+
         pub fn source_file(&self) -> Result<&str, Utf8Error> {
             core::str::from_utf8(
                 &self.static_fields.source_file_buf[0..self.static_fields.source_file_len],

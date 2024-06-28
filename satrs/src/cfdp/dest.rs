@@ -679,7 +679,7 @@ impl<
         // TODO: This is the only remaining function which uses std.. the easiest way would
         // probably be to use a static pre-allocated dest path buffer to store any concatenated
         // paths.
-        if dest_path.exists() && self.vfs.is_dir(dest_path.to_str().unwrap()) {
+        if dest_path.exists() && self.vfs.is_dir(dest_path.to_str().unwrap())? {
             // Create new destination path by concatenating the last part of the source source
             // name and the destination folder. For example, for a source file of /tmp/hello.txt
             // and a destination name of /home/test, the resulting file name should be
@@ -696,7 +696,7 @@ impl<
             self.tparams.file_properties.dest_path_buf.push(source_name);
         }
         let dest_path_str = self.tparams.file_properties.dest_path_buf.to_str().unwrap();
-        if self.vfs.exists(dest_path_str) {
+        if self.vfs.exists(dest_path_str)? {
             self.vfs.truncate_file(dest_path_str)?;
         } else {
             self.vfs.create_file(dest_path_str)?;

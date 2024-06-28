@@ -1,13 +1,22 @@
+use core::str::Utf8Error;
+
 use spacepackets::{
-    cfdp::{pdu::FileDirectiveType, PduType},
-    util::UnsignedByteField,
+    cfdp::{
+        lv::Lv,
+        pdu::{
+            metadata::{MetadataGenericParams, MetadataPduCreator},
+            CommonPduConfig, FileDirectiveType, PduHeader,
+        },
+        Direction, LargeFileFlag, PduType,
+    },
+    util::{UnsignedByteField, UnsignedEnum},
     ByteConversionError,
 };
 
 use crate::seq_count::SequenceCountProvider;
 
 use super::{
-    filestore::VirtualFilestore,
+    filestore::{FilestoreError, VirtualFilestore},
     request::{ReadablePutRequest, StaticPutRequestCacher},
     user::CfdpUser,
     LocalEntityConfig, PacketInfo, PacketTarget, PduSendProvider, RemoteEntityConfig,
@@ -30,12 +39,13 @@ pub enum TransactionStep {
     NoticeOfCompletion = 10,
 }
 
+#[derive(Default)]
 pub struct FileParams {
     pub progress: usize,
     pub segment_len: usize,
-    pub crc32: Option<[u8; 4]>,
+    //pub crc32: Option<[u8; 4]>,
     pub metadata_only: bool,
-    pub file_size: usize,
+    pub file_size: u64,
     pub no_eof: bool,
 }
 
@@ -76,6 +86,12 @@ pub enum SourceError {
     PutRequestAlreadyActive,
     #[error("error caching put request")]
     PutRequestCaching(ByteConversionError),
+    #[error("filestore error: {0}")]
+    FilestoreError(#[from] FilestoreError),
+    #[error("source file does not have valid UTF8 format: {0}")]
+    SourceFileNotValidUtf8(Utf8Error),
+    #[error("destination file does not have valid UTF8 format: {0}")]
+    DestFileNotValidUtf8(Utf8Error),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -99,7 +115,12 @@ pub struct SourceHandler<
     remote_cfg_table: RemoteCfgTable,
     vfs: Vfs,
     state_helper: StateHelper,
+    // Transfer related state information
     tstate: Option<TransferState>,
+    // File specific transfer fields
+    fparams: FileParams,
+    // PDU configuration is cached so it can be re-used for all PDUs generated for file transfers.
+    pdu_conf: CommonPduConfig,
     seq_count_provider: SeqCountProvider,
 }
 
@@ -127,6 +148,8 @@ impl<
             put_request_cacher,
             state_helper: Default::default(),
             tstate: Default::default(),
+            fparams: Default::default(),
+            pdu_conf: Default::default(),
             seq_count_provider,
         }
     }
@@ -203,10 +226,6 @@ impl<
         }
         self.put_request_cacher.set(put_request)?;
         self.state_helper.state = super::State::Busy;
-        let source_file = self.put_request_cacher.source_file().unwrap();
-        if !self.vfs.exists(source_file) {
-            // TODO: Specific error.
-        }
         let remote_cfg = self.remote_cfg_table.get(
             self.put_request_cacher
                 .static_fields
@@ -218,7 +237,6 @@ impl<
         }
         let remote_cfg = remote_cfg.unwrap();
         self.state_helper.num_packets_ready = 0;
-        //self.tstate.remote_cfg = Some(*remote_cfg);
         let transmission_mode = if self.put_request_cacher.static_fields.trans_mode.is_some() {
             self.put_request_cacher.static_fields.trans_mode.unwrap()
         } else {
@@ -252,10 +270,128 @@ impl<
         Ok(())
     }
 
-    pub fn transmission_mode(&self) {}
+    pub fn transmission_mode(&self) -> Option<super::TransmissionMode> {
+        self.tstate.map(|v| v.transmission_mode)
+    }
 
     fn fsm_busy(&mut self, cfdp_user: &mut impl CfdpUser) -> Result<u32, SourceError> {
+        if self.state_helper.step == TransactionStep::Idle {
+            self.state_helper.step = TransactionStep::TransactionStart;
+        }
+        if self.state_helper.step == TransactionStep::TransactionStart {
+            self.handle_transaction_start(cfdp_user)?;
+            self.state_helper.step = TransactionStep::SendingMetadata;
+        }
+        if self.state_helper.step == TransactionStep::SendingMetadata {
+            self.prepare_and_send_metadata_pdu();
+        }
         Ok(0)
+    }
+
+    fn handle_transaction_start(
+        &mut self,
+        cfdp_user: &mut impl CfdpUser,
+    ) -> Result<(), SourceError> {
+        let tstate = &self.tstate.expect("transfer state unexpectedly empty");
+        if !self.put_request_cacher.has_source_file() {
+            self.fparams.metadata_only = true;
+            self.fparams.no_eof = true;
+        } else {
+            let source_file = self
+                .put_request_cacher
+                .source_file()
+                .map_err(SourceError::SourceFileNotValidUtf8)?;
+            if !self.vfs.exists(source_file)? {
+                return Err(SourceError::FilestoreError(
+                    FilestoreError::FileDoesNotExist,
+                ));
+            }
+            // We expect the destination file path to consist of valid UTF-8 characters as well.
+            self.put_request_cacher
+                .dest_file()
+                .map_err(SourceError::DestFileNotValidUtf8)?;
+            if self.vfs.file_size(source_file)? > u32::MAX as u64 {
+                self.pdu_conf.file_flag = LargeFileFlag::Large
+            } else {
+                self.pdu_conf.file_flag = LargeFileFlag::Normal
+            }
+        }
+        // Both the source entity and destination entity ID field must have the same size.
+        // We use the larger of either the Put Request destination ID or the local entity ID
+        // as the size for the new entity IDs.
+        let larger_entity_width = core::cmp::max(
+            self.local_cfg.id.size(),
+            self.put_request_cacher.static_fields.destination_id.size(),
+        );
+        let create_id = |cached_id: &UnsignedByteField| {
+            if larger_entity_width != cached_id.size() {
+                UnsignedByteField::new(larger_entity_width, cached_id.value_const())
+            } else {
+                self.local_cfg.id
+            }
+        };
+        self.pdu_conf
+            .set_source_and_dest_id(
+                create_id(&self.local_cfg.id),
+                create_id(&self.put_request_cacher.static_fields.destination_id),
+            )
+            .unwrap();
+        // Set up other PDU configuration fields.
+        self.pdu_conf.direction = Direction::TowardsReceiver;
+        self.pdu_conf.crc_flag = tstate.remote_cfg.crc_on_transmission_by_default.into();
+        self.pdu_conf.transaction_seq_num = *tstate.transaction_id.seq_num();
+        self.pdu_conf.trans_mode = tstate.transmission_mode;
+
+        cfdp_user.transaction_indication(&tstate.transaction_id);
+        Ok(())
+    }
+
+    fn prepare_and_send_metadata_pdu(&self) {
+        let tstate = &self.tstate.expect("transfer state unexpectedly empty");
+        if self.fparams.metadata_only {
+            let metadata_params = MetadataGenericParams::new(
+                tstate.closure_requested,
+                tstate.remote_cfg.default_crc_type,
+                self.fparams.file_size,
+            );
+            let metadata_pdu = MetadataPduCreator::new(
+                PduHeader::new_no_file_data(self.pdu_conf, 0),
+                metadata_params,
+                Lv::new_empty(),
+                Lv::new_empty(),
+                &[],
+            );
+            //self.pdu_sender.send_pdu(pdu_type, file_directive_type, raw_pdu)
+        }
+        /*
+        assert self._put_req is not None
+        options = []
+        if self._put_req.metadata_only:
+            params = MetadataParams(
+                closure_requested=self._params.closure_requested,
+                checksum_type=self._crc_helper.checksum_type,
+                file_size=0,
+                dest_file_name=None,
+                source_file_name=None,
+            )
+        else:
+            # Funny name.
+            params = self._prepare_metadata_base_params_with_metadata()
+        if self._put_req.fs_requests is not None:
+            for fs_request in self._put_req.fs_requests:
+                options.append(fs_request)
+        if self._put_req.fault_handler_overrides is not None:
+            for fh_override in self._put_req.fault_handler_overrides:
+                options.append(fh_override)
+        if self._put_req.flow_label_tlv is not None:
+            options.append(self._put_req.flow_label_tlv)
+        if self._put_req.msgs_to_user is not None:
+            for msg_to_user in self._put_req.msgs_to_user:
+                options.append(msg_to_user)
+        self._add_packet_to_be_sent(
+            MetadataPdu(pdu_conf=self._params.pdu_conf, params=params, options=options)
+        )
+        */
     }
 
     fn handle_finished_pdu(&mut self) {}
