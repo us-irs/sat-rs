@@ -132,6 +132,7 @@ pub struct MgmData {
 pub struct MpscModeLeafInterface {
     pub request_rx: mpsc::Receiver<GenericMessage<ModeRequest>>,
     pub reply_to_pus_tx: mpsc::Sender<GenericMessage<ModeReply>>,
+    #[allow(dead_code)]
     pub reply_to_parent_tx: mpsc::SyncSender<GenericMessage<ModeReply>>,
 }
 

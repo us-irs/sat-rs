@@ -88,6 +88,7 @@ impl PowerSwitcherCommandSender<PcduSwitch> for PowerSwitchHelper {
     }
 }
 
+#[allow(dead_code)]
 #[derive(new)]
 pub struct SwitchRequestInfo {
     pub requestor_info: MessageMetadata,
@@ -99,6 +100,7 @@ pub struct SwitchRequestInfo {
 pub struct TestSwitchHelper {
     pub switch_requests: RefCell<VecDeque<SwitchRequestInfo>>,
     pub switch_info_requests: RefCell<VecDeque<PcduSwitch>>,
+    #[allow(dead_code)]
     pub switch_delay_request_count: u32,
     pub next_switch_delay: Duration,
     pub switch_map: RefCell<SwitchMapWrapper>,
