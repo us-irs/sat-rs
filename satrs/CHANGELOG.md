@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 - Renamed `StaticPoolConfig::new` to `StaticPoolConfig::new_from_subpool_cfg_tuples`. The new
   `new` implementation expects a type struct instead of tuples.
+- Moved `cfdp` module to [dedicated crate](https://egit.irs.uni-stuttgart.de/rust/cfdp)
+- Moved `seq_count` module to [spacepackets](https://egit.irs.uni-stuttgart.de/rust/spacepackets)
+  crate
 
 ## Added
 

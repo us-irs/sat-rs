@@ -4,15 +4,18 @@ use std::{
 };
 
 use log::info;
-use satrs::tmtc::{PacketAsVec, PacketInPool, SharedPacketPool};
 use satrs::{
     pool::PoolProvider,
-    seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore},
     spacepackets::{
         ecss::{tm::PusTmZeroCopyWriter, PusPacket},
+        seq_count::CcsdsSimpleSeqCountProvider,
         time::cds::MIN_CDS_FIELD_LEN,
         CcsdsPacket,
     },
+};
+use satrs::{
+    spacepackets::seq_count::SequenceCountProvider,
+    tmtc::{PacketAsVec, PacketInPool, SharedPacketPool},
 };
 
 use crate::interface::tcp::SyncTcpTmSource;

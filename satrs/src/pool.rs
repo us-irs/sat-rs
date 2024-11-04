@@ -1584,23 +1584,21 @@ mod tests {
     mod heapless_tests {
         use super::*;
         use crate::static_subpool;
-        use core::mem::MaybeUninit;
+        use core::ptr::addr_of_mut;
 
         const SUBPOOL_1_BLOCK_SIZE: usize = 4;
         const SUBPOOL_1_NUM_ELEMENTS: u16 = 4;
-        static mut SUBPOOL_1: MaybeUninit<
-            [u8; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE],
-        > = MaybeUninit::new([0; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE]);
-        static mut SUBPOOL_1_SIZES: MaybeUninit<[usize; SUBPOOL_1_NUM_ELEMENTS as usize]> =
-            MaybeUninit::new([STORE_FREE; SUBPOOL_1_NUM_ELEMENTS as usize]);
+        static mut SUBPOOL_1: [u8; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE] =
+            [0; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE];
+        static mut SUBPOOL_1_SIZES: [usize; SUBPOOL_1_NUM_ELEMENTS as usize] =
+            [STORE_FREE; SUBPOOL_1_NUM_ELEMENTS as usize];
 
         const SUBPOOL_2_NUM_ELEMENTS: u16 = 2;
         const SUBPOOL_2_BLOCK_SIZE: usize = 8;
-        static mut SUBPOOL_2: MaybeUninit<
-            [u8; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE],
-        > = MaybeUninit::new([0; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE]);
-        static mut SUBPOOL_2_SIZES: MaybeUninit<[usize; SUBPOOL_2_NUM_ELEMENTS as usize]> =
-            MaybeUninit::new([STORE_FREE; SUBPOOL_2_NUM_ELEMENTS as usize]);
+        static mut SUBPOOL_2: [u8; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE] =
+            [0; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE];
+        static mut SUBPOOL_2_SIZES: [usize; SUBPOOL_2_NUM_ELEMENTS as usize] =
+            [STORE_FREE; SUBPOOL_2_NUM_ELEMENTS as usize];
 
         const SUBPOOL_3_NUM_ELEMENTS: u16 = 1;
         const SUBPOOL_3_BLOCK_SIZE: usize = 16;
@@ -1643,18 +1641,18 @@ mod tests {
                 StaticHeaplessMemoryPool::new(false);
             assert!(heapless_pool
                 .grow(
-                    unsafe { SUBPOOL_1.assume_init_mut() },
-                    unsafe { SUBPOOL_1_SIZES.assume_init_mut() },
+                    unsafe { &mut *addr_of_mut!(SUBPOOL_1) },
+                    unsafe { &mut *addr_of_mut!(SUBPOOL_1_SIZES) },
                     SUBPOOL_1_NUM_ELEMENTS,
-                    false
+                    true
                 )
                 .is_ok());
             assert!(heapless_pool
                 .grow(
-                    unsafe { SUBPOOL_2.assume_init_mut() },
-                    unsafe { SUBPOOL_2_SIZES.assume_init_mut() },
+                    unsafe { &mut *addr_of_mut!(SUBPOOL_2) },
+                    unsafe { &mut *addr_of_mut!(SUBPOOL_2_SIZES) },
                     SUBPOOL_2_NUM_ELEMENTS,
-                    false
+                    true
                 )
                 .is_ok());
             assert!(heapless_pool
@@ -1662,7 +1660,7 @@ mod tests {
                     unsafe { SUBPOOL_3.assume_init_mut() },
                     unsafe { SUBPOOL_3_SIZES.assume_init_mut() },
                     SUBPOOL_3_NUM_ELEMENTS,
-                    false
+                    true
                 )
                 .is_ok());
             heapless_pool
@@ -1782,10 +1780,10 @@ mod tests {
                 StaticHeaplessMemoryPool::new(true);
             assert!(heapless_pool
                 .grow(
-                    unsafe { SUBPOOL_2.assume_init_mut() },
-                    unsafe { SUBPOOL_2_SIZES.assume_init_mut() },
+                    unsafe { &mut *addr_of_mut!(SUBPOOL_2) },
+                    unsafe { &mut *addr_of_mut!(SUBPOOL_2_SIZES) },
                     SUBPOOL_2_NUM_ELEMENTS,
-                    false
+                    true
                 )
                 .is_ok());
             assert!(heapless_pool
@@ -1793,7 +1791,7 @@ mod tests {
                     unsafe { SUBPOOL_4.assume_init_mut() },
                     unsafe { SUBPOOL_4_SIZES.assume_init_mut() },
                     SUBPOOL_4_NUM_ELEMENTS,
-                    false
+                    true
                 )
                 .is_ok());
             generic_test_spills_to_higher_subpools(&mut heapless_pool);
@@ -1808,7 +1806,7 @@ mod tests {
                     unsafe { SUBPOOL_5.assume_init_mut() },
                     unsafe { SUBPOOL_5_SIZES.assume_init_mut() },
                     SUBPOOL_5_NUM_ELEMENTS,
-                    false
+                    true
                 )
                 .is_ok());
             assert!(heapless_pool
@@ -1816,7 +1814,7 @@ mod tests {
                     unsafe { SUBPOOL_3.assume_init_mut() },
                     unsafe { SUBPOOL_3_SIZES.assume_init_mut() },
                     SUBPOOL_3_NUM_ELEMENTS,
-                    false
+                    true
                 )
                 .is_ok());
             generic_test_spillage_fails_as_well(&mut heapless_pool);
@@ -1831,7 +1829,7 @@ mod tests {
                     unsafe { SUBPOOL_5.assume_init_mut() },
                     unsafe { SUBPOOL_5_SIZES.assume_init_mut() },
                     SUBPOOL_5_NUM_ELEMENTS,
-                    false
+                    true
                 )
                 .is_ok());
             assert!(heapless_pool
@@ -1839,7 +1837,7 @@ mod tests {
                     unsafe { SUBPOOL_6.assume_init_mut() },
                     unsafe { SUBPOOL_6_SIZES.assume_init_mut() },
                     SUBPOOL_6_NUM_ELEMENTS,
-                    false
+                    true
                 )
                 .is_ok());
             assert!(heapless_pool
@@ -1847,7 +1845,7 @@ mod tests {
                     unsafe { SUBPOOL_3.assume_init_mut() },
                     unsafe { SUBPOOL_3_SIZES.assume_init_mut() },
                     SUBPOOL_3_NUM_ELEMENTS,
-                    false
+                    true
                 )
                 .is_ok());
             generic_test_spillage_works_across_multiple_subpools(&mut heapless_pool);
@@ -1862,7 +1860,7 @@ mod tests {
                     unsafe { SUBPOOL_5.assume_init_mut() },
                     unsafe { SUBPOOL_5_SIZES.assume_init_mut() },
                     SUBPOOL_5_NUM_ELEMENTS,
-                    false
+                    true
                 )
                 .is_ok());
             assert!(heapless_pool
@@ -1870,7 +1868,7 @@ mod tests {
                     unsafe { SUBPOOL_6.assume_init_mut() },
                     unsafe { SUBPOOL_6_SIZES.assume_init_mut() },
                     SUBPOOL_6_NUM_ELEMENTS,
-                    false
+                    true
                 )
                 .is_ok());
             assert!(heapless_pool
@@ -1878,7 +1876,7 @@ mod tests {
                     unsafe { SUBPOOL_3.assume_init_mut() },
                     unsafe { SUBPOOL_3_SIZES.assume_init_mut() },
                     SUBPOOL_3_NUM_ELEMENTS,
-                    false
+                    true
                 )
                 .is_ok());
             generic_test_spillage_fails_across_multiple_subpools(&mut heapless_pool);

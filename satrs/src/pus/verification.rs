@@ -20,7 +20,7 @@
 //!     VerificationReportingProvider, VerificationReporterCfg, VerificationReporter
 //! };
 //! use satrs::tmtc::{SharedStaticMemoryPool, PacketSenderWithSharedPool};
-//! use satrs::seq_count::SeqCountProviderSimple;
+//! use satrs::spacepackets::seq_count::SeqCountProviderSimple;
 //! use satrs::request::UniqueApidTargetId;
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
@@ -97,8 +97,8 @@ use spacepackets::ecss::EcssEnumeration;
 use spacepackets::{ByteConversionError, CcsdsPacket, PacketId, PacketSequenceCtrl};
 use spacepackets::{SpHeader, MAX_APID};
 
-pub use crate::seq_count::SeqCountProviderSimple;
 pub use spacepackets::ecss::verification::*;
+pub use spacepackets::seq_count::SeqCountProviderSimple;
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
@@ -1702,7 +1702,7 @@ pub mod tests {
     };
     use crate::pus::{ChannelWithId, PusTmVariant};
     use crate::request::MessageMetadata;
-    use crate::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProviderCore};
+    use crate::spacepackets::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProvider};
     use crate::tmtc::{PacketSenderWithSharedPool, SharedPacketPool};
     use crate::ComponentId;
     use alloc::format;
