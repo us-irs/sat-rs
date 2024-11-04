@@ -44,11 +44,13 @@ pub struct PusTcMpscRouter {
     pub event_tc_sender: Sender<EcssTcAndToken>,
     pub sched_tc_sender: Sender<EcssTcAndToken>,
     pub hk_tc_sender: Sender<EcssTcAndToken>,
+    #[allow(dead_code)]
     pub action_tc_sender: Sender<EcssTcAndToken>,
     pub mode_tc_sender: Sender<EcssTcAndToken>,
 }
 
 pub struct PusTcDistributor<TmSender: EcssTmSender> {
+    #[allow(dead_code)]
     pub id: ComponentId,
     pub tm_sender: TmSender,
     pub verif_reporter: VerificationReporter,

@@ -26,6 +26,7 @@ pub enum CompositeRequest {
 
 #[derive(Clone)]
 pub struct GenericRequestRouter {
+    #[allow(dead_code)]
     pub id: ComponentId,
     // All messages which do not have a dedicated queue.
     pub composite_router_map:

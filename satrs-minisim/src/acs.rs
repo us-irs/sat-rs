@@ -31,6 +31,7 @@ const PHASE_Z: f32 = 0.2;
 /// might still be possible and is probably sufficient for many OBSW needs.
 pub struct MagnetometerModel<ReplyProvider: MgmReplyProvider> {
     pub switch_state: SwitchStateBinary,
+    #[allow(dead_code)]
     pub periodicity: Duration,
     pub external_mag_field: Option<MgmSensorValuesMicroTesla>,
     pub reply_sender: mpsc::Sender<SimReply>,
