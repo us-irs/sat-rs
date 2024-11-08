@@ -3,7 +3,7 @@
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::thread;
-use zerocopy::{AsBytes, FromBytes, NetworkEndian, Unaligned, U16};
+use zerocopy::{FromBytes, Immutable, IntoBytes, NetworkEndian, Unaligned, U16};
 
 trait FieldDataProvider: Send {
     fn get_data(&self) -> &[u8];
@@ -35,7 +35,7 @@ struct ExampleMgmSet {
     temperature: u16,
 }
 
-#[derive(FromBytes, AsBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, Unaligned)]
 #[repr(C)]
 struct ExampleMgmSetZc {
     mgm_vec: [u8; 12],

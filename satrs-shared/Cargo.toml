@@ -22,8 +22,9 @@ version = "0.3"
 optional = true
 
 [dependencies.spacepackets]
-version = ">0.9, <=0.12"
+version = ">0.9, <=0.13"
 default-features = false
+path = "../../spacepackets"
 
 [features]
 serde = ["dep:serde", "spacepackets/serde"]
