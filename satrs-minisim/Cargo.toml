@@ -9,8 +9,8 @@ edition = "2021"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
-thiserror = "1"
-fern = "0.5"
+thiserror = "2"
+fern = "0.7"
 strum = { version = "0.26", features = ["derive"] }
 num_enum = "0.7"
 humantime = "2"
@@ -25,4 +25,4 @@ features = ["serde"]
 path = "../satrs"
 
 [dev-dependencies]
-delegate = "0.12"
+delegate = "0.13"

@@ -13,21 +13,22 @@ keywords = ["no-std", "space", "aerospace"]
 categories = ["aerospace", "aerospace::space-protocols", "no-std", "hardware-support", "embedded"]
 
 [dependencies]
-delegate = ">0.7, <=0.10"
+delegate = ">0.7, <=0.13"
 paste = "1"
-derive-new = "0.6"
+derive-new = ">=0.6, <=0.7"
 smallvec = "1"
 crc = "3"
 
 [dependencies.satrs-shared]
 version = ">=0.1.3, <=0.2"
+path = "../satrs-shared"
 
 [dependencies.num_enum]
 version = ">0.5, <=0.7"
 default-features = false
 
 [dependencies.spacepackets]
-version = "0.12"
+version = "0.13"
 default-features = false
 
 [dependencies.cobs]
@@ -45,11 +46,11 @@ version = "1"
 optional = true
 
 [dependencies.hashbrown]
-version = "0.14"
+version = ">=0.14, <=0.15"
 optional = true
 
 [dependencies.heapless]
-version = "0.7"
+version = "0.8"
 optional = true
 
 [dependencies.downcast-rs]
@@ -67,8 +68,8 @@ default-features = false
 optional = true
 
 [dependencies.thiserror]
-version = "1"
-optional = true
+version = "2"
+default-features = false
 
 [dependencies.serde]
 version = "1"
@@ -81,7 +82,7 @@ features = ["all"]
 optional = true
 
 [dependencies.mio]
-version = "0.8"
+version = "1"
 features = ["os-poll", "net"]
 optional = true
 
@@ -91,7 +92,7 @@ optional = true
 
 [dev-dependencies]
 serde = "1"
-zerocopy = "0.7"
+zerocopy = "0.8"
 once_cell = "1"
 serde_json = "1"
 rand = "0.8"
@@ -111,7 +112,7 @@ std = [
     "serde/std",
     "spacepackets/std",
     "num_enum/std",
-    "thiserror",
+    "thiserror/std",
     "socket2",
     "mio"
 ]
@@ -127,7 +128,6 @@ crossbeam = ["crossbeam-channel"]
 heapless = ["dep:heapless"]
 defmt = ["dep:defmt", "spacepackets/defmt"]
 test_util = []
-doc-images = []
 
 [package.metadata.docs.rs]
 all-features = true
