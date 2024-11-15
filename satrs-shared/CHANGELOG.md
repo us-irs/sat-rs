@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.2.1] 2024-11-15
+
+Increased allowed spacepackets to v0.13
+
 # [v0.2.0] 2024-11-04
 
 Semver bump, due to added features in v0.1.4
