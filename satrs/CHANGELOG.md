@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ## Added
 
 - `StaticHeaplessMemoryPool` which can be grown with user-provided static buffers.
+- Scheduling table for systems with a standard runtime
 
 # [v0.2.1] 2024-05-19
 
