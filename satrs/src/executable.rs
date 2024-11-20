@@ -15,18 +15,22 @@ pub enum OpResult {
     TerminationRequested,
 }
 
+#[derive(Debug)]
 pub enum ExecutionType {
     Infinite,
     Cycles(u32),
     OneShot,
 }
 
-pub trait Executable: Send {
+pub trait Executable {
     type Error;
 
-    fn exec_type(&self) -> ExecutionType;
     fn task_name(&self) -> &'static str;
     fn periodic_op(&mut self, op_code: i32) -> Result<OpResult, Self::Error>;
+}
+
+pub trait ExecutableWithType: Executable {
+    fn exec_type(&self) -> ExecutionType;
 }
 
 /// This function allows executing one task which implements the [Executable] trait
@@ -39,7 +43,10 @@ pub trait Executable: Send {
 /// * `op_code`: Operation code which is passed to the executable task
 ///    [operation call][Executable::periodic_op]
 /// * `termination`: Optional termination handler which can cancel threads with a broadcast
-pub fn exec_sched_single<T: Executable<Error = E> + Send + 'static + ?Sized, E: Send + 'static>(
+pub fn exec_sched_single<
+    T: ExecutableWithType<Error = E> + Send + 'static + ?Sized,
+    E: Send + 'static,
+>(
     mut executable: Box<T>,
     task_freq: Option<Duration>,
     op_code: i32,
@@ -88,7 +95,10 @@ pub fn exec_sched_single<T: Executable<Error = E> + Send + 'static + ?Sized, E: 
 /// * `task_freq`: Optional frequency of task. Required for periodic and fixed cycle tasks
 /// * `op_code`: Operation code which is passed to the executable task [operation call][Executable::periodic_op]
 /// * `termination`: Optional termination handler which can cancel threads with a broadcast
-pub fn exec_sched_multi<T: Executable<Error = E> + Send + 'static + ?Sized, E: Send + 'static>(
+pub fn exec_sched_multi<
+    T: ExecutableWithType<Error = E> + Send + 'static + ?Sized,
+    E: Send + 'static,
+>(
     task_name: &'static str,
     mut executable_vec: Vec<Box<T>>,
     task_freq: Option<Duration>,
@@ -142,7 +152,10 @@ pub fn exec_sched_multi<T: Executable<Error = E> + Send + 'static + ?Sized, E: S
 
 #[cfg(test)]
 mod tests {
-    use super::{exec_sched_multi, exec_sched_single, Executable, ExecutionType, OpResult};
+    use super::{
+        exec_sched_multi, exec_sched_single, Executable, ExecutableWithType, ExecutionType,
+        OpResult,
+    };
     use bus::Bus;
     use std::boxed::Box;
     use std::error::Error;
@@ -208,10 +221,6 @@ mod tests {
     impl Executable for OneShotTask {
         type Error = ExampleError;
 
-        fn exec_type(&self) -> ExecutionType {
-            ExecutionType::OneShot
-        }
-
         fn task_name(&self) -> &'static str {
             ONE_SHOT_TASK_NAME
         }
@@ -229,14 +238,16 @@ mod tests {
         }
     }
 
+    impl ExecutableWithType for OneShotTask {
+        fn exec_type(&self) -> ExecutionType {
+            ExecutionType::OneShot
+        }
+    }
+
     const CYCLE_TASK_NAME: &str = "Fixed Cycles Task";
 
     impl Executable for FixedCyclesTask {
         type Error = ExampleError;
-
-        fn exec_type(&self) -> ExecutionType {
-            ExecutionType::Cycles(self.cycles)
-        }
 
         fn task_name(&self) -> &'static str {
             CYCLE_TASK_NAME
@@ -255,14 +266,16 @@ mod tests {
         }
     }
 
+    impl ExecutableWithType for FixedCyclesTask {
+        fn exec_type(&self) -> ExecutionType {
+            ExecutionType::Cycles(self.cycles)
+        }
+    }
+
     const PERIODIC_TASK_NAME: &str = "Periodic Task";
 
     impl Executable for PeriodicTask {
         type Error = ExampleError;
-
-        fn exec_type(&self) -> ExecutionType {
-            ExecutionType::Infinite
-        }
 
         fn task_name(&self) -> &'static str {
             PERIODIC_TASK_NAME
@@ -278,6 +291,12 @@ mod tests {
             } else {
                 Err(ExampleError::new("Example Task Failure", op_code))
             }
+        }
+    }
+
+    impl ExecutableWithType for PeriodicTask {
+        fn exec_type(&self) -> ExecutionType {
+            ExecutionType::Infinite
         }
     }
 
@@ -423,7 +442,7 @@ mod tests {
         });
         assert_eq!(cycled_task_0.task_name(), CYCLE_TASK_NAME);
         assert_eq!(one_shot_task.task_name(), ONE_SHOT_TASK_NAME);
-        let task_vec: Vec<Box<dyn Executable<Error = ExampleError>>> =
+        let task_vec: Vec<Box<dyn ExecutableWithType<Error = ExampleError> + Send>> =
             vec![one_shot_task, cycled_task_0, cycled_task_1];
         let jh = exec_sched_multi(
             "multi-task-name",
@@ -493,7 +512,7 @@ mod tests {
         });
         assert_eq!(periodic_task_0.task_name(), PERIODIC_TASK_NAME);
         assert_eq!(periodic_task_1.task_name(), PERIODIC_TASK_NAME);
-        let task_vec: Vec<Box<dyn Executable<Error = ExampleError>>> =
+        let task_vec: Vec<Box<dyn ExecutableWithType<Error = ExampleError> + Send>> =
             vec![cycled_task, periodic_task_0, periodic_task_1];
         let jh = exec_sched_multi(
             "multi-task-name",
