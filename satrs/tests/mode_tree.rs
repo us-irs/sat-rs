@@ -19,7 +19,8 @@ pub enum TestComponentId {
     Device1 = 1,
     Device2 = 2,
     Assembly = 3,
-    PusModeService = 4,
+    Subsystem = 4,
+    PusModeService = 5,
 }
 
 struct PusModeService {
@@ -41,63 +42,66 @@ impl PusModeService {
     }
 }
 
-struct TestDevice {
+struct TestSubsystem {
     pub name: String,
-    pub mode_node: ModeRequestHandlerMpscBounded,
+    pub mode_node: ModeRequestorAndHandlerMpscBounded,
+    pub mode_requestor_info: Option<MessageMetadata>,
     pub mode_and_submode: ModeAndSubmode,
+    pub target_mode_and_submode: Option<ModeAndSubmode>,
 }
 
-impl TestDevice {
-    pub fn run(&mut self) {
-        self.check_mode_requests().expect("mode messaging error");
-    }
-
-    pub fn check_mode_requests(&mut self) -> Result<(), ModeError> {
-        if let Some(request) = self.mode_node.try_recv_mode_request()? {
-            self.handle_mode_request(request)?
-        }
-        Ok(())
-    }
-}
-
-impl ModeProvider for TestDevice {
+impl ModeProvider for TestSubsystem {
     fn mode_and_submode(&self) -> ModeAndSubmode {
         self.mode_and_submode
     }
 }
 
-impl ModeRequestHandler for TestDevice {
+impl ModeRequestHandler for TestSubsystem {
     type Error = ModeError;
 
     fn start_transition(
         &mut self,
         requestor: MessageMetadata,
         mode_and_submode: ModeAndSubmode,
-    ) -> Result<(), ModeError> {
-        self.mode_and_submode = mode_and_submode;
-        self.handle_mode_reached(Some(requestor))?;
+    ) -> Result<(), Self::Error> {
+        self.mode_requestor_info = Some(requestor);
+        self.target_mode_and_submode = Some(mode_and_submode);
+        // Execute mode map by executing the transition table(s).
         Ok(())
     }
 
-    fn announce_mode(&self, _requestor_info: Option<MessageMetadata>, _recursive: bool) {
+    fn announce_mode(&self, requestor_info: Option<MessageMetadata>, recursive: bool) {
         println!(
-            "{}: announcing mode: {:?}",
-            self.name, self.mode_and_submode
+            "TestAssembly: Announcing mode (recursively: {}): {:?}",
+            recursive, self.mode_and_submode
         );
+        // self.mode_requestor_info = Some((request_id, sender_id));
+        let mut mode_request = ModeRequest::AnnounceMode;
+        if recursive {
+            mode_request = ModeRequest::AnnounceModeRecursive;
+        }
+        let request_id = requestor_info.map_or(0, |info| info.request_id());
+        self.mode_node
+            .request_sender_map
+            .0
+            .iter()
+            .for_each(|(_, sender)| {
+                sender
+                    .send(GenericMessage::new(
+                        MessageMetadata::new(request_id, self.mode_node.local_channel_id_generic()),
+                        mode_request,
+                    ))
+                    .expect("sending mode request failed");
+            });
     }
 
-    fn handle_mode_reached(&mut self, requestor: Option<MessageMetadata>) -> Result<(), ModeError> {
-        if let Some(requestor) = requestor {
+    fn handle_mode_reached(
+        &mut self,
+        requestor_info: Option<MessageMetadata>,
+    ) -> Result<(), Self::Error> {
+        if let Some(requestor) = requestor_info {
             self.send_mode_reply(requestor, ModeReply::ModeReply(self.mode_and_submode))?;
         }
-        Ok(())
-    }
-    fn send_mode_reply(
-        &self,
-        requestor_info: MessageMetadata,
-        reply: ModeReply,
-    ) -> Result<(), ModeError> {
-        self.mode_node.send_mode_reply(requestor_info, reply)?;
         Ok(())
     }
 
@@ -105,14 +109,19 @@ impl ModeRequestHandler for TestDevice {
         &mut self,
         requestor_info: MessageMetadata,
         info: ModeAndSubmode,
-    ) -> Result<(), ModeError> {
-        // A device is a leaf in the tree.. so this really should not happen
-        println!(
-            "{}: unexpected mode info from {:?} with mode: {:?}",
-            self.name,
-            requestor_info.sender_id(),
-            info
-        );
+    ) -> Result<(), Self::Error> {
+        // TODO: Need to check whether mode table execution is finished.
+        // This works by checking the children modes received through replies against the
+        // mode table after all transition tables were executed.
+        Ok(())
+    }
+
+    fn send_mode_reply(
+        &self,
+        requestor_info: MessageMetadata,
+        reply: ModeReply,
+    ) -> Result<(), Self::Error> {
+        self.mode_node.send_mode_reply(requestor_info, reply)?;
         Ok(())
     }
 }
@@ -253,11 +262,88 @@ impl ModeRequestHandler for TestAssembly {
     }
 }
 
+struct TestDevice {
+    pub name: String,
+    pub mode_node: ModeRequestHandlerMpscBounded,
+    pub mode_and_submode: ModeAndSubmode,
+}
+
+impl TestDevice {
+    pub fn run(&mut self) {
+        self.check_mode_requests().expect("mode messaging error");
+    }
+
+    pub fn check_mode_requests(&mut self) -> Result<(), ModeError> {
+        if let Some(request) = self.mode_node.try_recv_mode_request()? {
+            self.handle_mode_request(request)?
+        }
+        Ok(())
+    }
+}
+
+impl ModeProvider for TestDevice {
+    fn mode_and_submode(&self) -> ModeAndSubmode {
+        self.mode_and_submode
+    }
+}
+
+impl ModeRequestHandler for TestDevice {
+    type Error = ModeError;
+
+    fn start_transition(
+        &mut self,
+        requestor: MessageMetadata,
+        mode_and_submode: ModeAndSubmode,
+    ) -> Result<(), ModeError> {
+        self.mode_and_submode = mode_and_submode;
+        self.handle_mode_reached(Some(requestor))?;
+        Ok(())
+    }
+
+    fn announce_mode(&self, _requestor_info: Option<MessageMetadata>, _recursive: bool) {
+        println!(
+            "{}: announcing mode: {:?}",
+            self.name, self.mode_and_submode
+        );
+    }
+
+    fn handle_mode_reached(&mut self, requestor: Option<MessageMetadata>) -> Result<(), ModeError> {
+        if let Some(requestor) = requestor {
+            self.send_mode_reply(requestor, ModeReply::ModeReply(self.mode_and_submode))?;
+        }
+        Ok(())
+    }
+    fn send_mode_reply(
+        &self,
+        requestor_info: MessageMetadata,
+        reply: ModeReply,
+    ) -> Result<(), ModeError> {
+        self.mode_node.send_mode_reply(requestor_info, reply)?;
+        Ok(())
+    }
+
+    fn handle_mode_info(
+        &mut self,
+        requestor_info: MessageMetadata,
+        info: ModeAndSubmode,
+    ) -> Result<(), ModeError> {
+        // A device is a leaf in the tree.. so this really should not happen
+        println!(
+            "{}: unexpected mode info from {:?} with mode: {:?}",
+            self.name,
+            requestor_info.sender_id(),
+            info
+        );
+        Ok(())
+    }
+}
+
 fn main() {
     // All request channel handles.
     let (request_sender_to_dev1, request_receiver_dev1) = mpsc::sync_channel(10);
     let (request_sender_to_dev2, request_receiver_dev2) = mpsc::sync_channel(10);
     let (request_sender_to_assy, request_receiver_assy) = mpsc::sync_channel(10);
+    let (request_sender_to_subsystem, request_receiver_subsystem) = mpsc::sync_channel(10);
 
     // All reply channel handles.
     let (reply_sender_to_assy, reply_receiver_assy) = mpsc::sync_channel(10);
@@ -298,6 +384,11 @@ fn main() {
         TestComponentId::Device2 as ComponentId,
         request_sender_to_dev2.clone(),
     );
+    mode_node_pus.add_message_target(
+        TestComponentId::Subsystem as ComponentId,
+        request_sender_to_subsystem.clone(),
+    );
+
     mode_node_assy.add_request_target(
         TestComponentId::Device1 as ComponentId,
         request_sender_to_dev1,

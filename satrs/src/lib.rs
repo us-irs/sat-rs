@@ -45,6 +45,7 @@ pub mod action;
 pub mod hk;
 pub mod mode;
 pub mod params;
+pub mod subsystem;
 
 pub use spacepackets;
 
