@@ -203,7 +203,7 @@ pub mod tests {
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());
         let sim_reply = sim_reply.unwrap();
-        assert_eq!(sim_reply.component(), SimComponent::MgmLis3Mdl);
+        assert_eq!(sim_reply.component(), SimComponent::Mgm0Lis3Mdl);
         let reply = MgmLis3MdlReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
         assert_eq!(reply.common.switch_state, SwitchStateBinary::Off);
@@ -226,7 +226,7 @@ pub mod tests {
         let mut sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_some());
         let mut sim_reply = sim_reply_res.unwrap();
-        assert_eq!(sim_reply.component(), SimComponent::MgmLis3Mdl);
+        assert_eq!(sim_reply.component(), SimComponent::Mgm0Lis3Mdl);
         let first_reply = MgmLis3MdlReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
         sim_testbench.step_until(Duration::from_millis(50)).unwrap();

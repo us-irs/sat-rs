@@ -1,6 +1,5 @@
 use log::warn;
 use satrs::action::{ActionRequest, ActionRequestVariant};
-use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::action::{
     ActionReplyPus, ActionReplyVariant, ActivePusActionRequestStd, DefaultActiveActionRequestMap,
 };
@@ -10,21 +9,20 @@ use satrs::pus::verification::{
     VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
-    ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
-    EcssTcInVecConverter, EcssTmSender, EcssTmtcError, GenericConversionError, MpscTcReceiver,
-    MpscTmAsVecSender, PusPacketHandlingError, PusReplyHandler, PusServiceHelper,
-    PusTcToRequestConverter,
+    ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter, EcssTmSender, EcssTmtcError,
+    GenericConversionError, MpscTcReceiver, PusPacketHandlingError, PusReplyHandler,
+    PusServiceHelper, PusTcToRequestConverter,
 };
 use satrs::request::{GenericMessage, UniqueApidTargetId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{EcssEnumU16, PusPacket, PusServiceId};
-use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
-use satrs_example::config::components::PUS_ACTION_SERVICE;
+use satrs_example::config::pus::PUS_ACTION_SERVICE;
 use satrs_example::config::tmtc_err;
 use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::requests::GenericRequestRouter;
+use crate::tmtc::sender::TmTcSender;
 
 use super::{
     create_verification_reporter, generic_pus_request_timeout_handler, HandlingStatus,
@@ -207,20 +205,20 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest> for Actio
     }
 }
 
-pub fn create_action_service_static(
-    tm_sender: PacketSenderWithSharedPool,
-    tc_pool: SharedStaticMemoryPool,
+pub fn create_action_service(
+    tm_sender: TmTcSender,
+    tc_in_mem_converter: EcssTcInMemConverter,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     action_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<ActionReplyPus>>,
-) -> ActionServiceWrapper<PacketSenderWithSharedPool, EcssTcInSharedStoreConverter> {
+) -> ActionServiceWrapper {
     let action_request_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
             PUS_ACTION_SERVICE.id(),
             pus_action_rx,
             tm_sender,
             create_verification_reporter(PUS_ACTION_SERVICE.id(), PUS_ACTION_SERVICE.apid),
-            EcssTcInSharedStoreConverter::new(tc_pool.clone(), 2048),
+            tc_in_mem_converter,
         ),
         ActionRequestConverter::default(),
         // TODO: Implementation which does not use run-time allocation? Maybe something like
@@ -235,36 +233,9 @@ pub fn create_action_service_static(
     }
 }
 
-pub fn create_action_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<PacketAsVec>,
-    pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
-    action_router: GenericRequestRouter,
-    reply_receiver: mpsc::Receiver<GenericMessage<ActionReplyPus>>,
-) -> ActionServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {
-    let action_request_handler = PusTargetedRequestService::new(
-        PusServiceHelper::new(
-            PUS_ACTION_SERVICE.id(),
-            pus_action_rx,
-            tm_funnel_tx,
-            create_verification_reporter(PUS_ACTION_SERVICE.id(), PUS_ACTION_SERVICE.apid),
-            EcssTcInVecConverter::default(),
-        ),
-        ActionRequestConverter::default(),
-        DefaultActiveActionRequestMap::default(),
-        ActionReplyHandler::default(),
-        action_router,
-        reply_receiver,
-    );
-    ActionServiceWrapper {
-        service: action_request_handler,
-    }
-}
-
-pub struct ActionServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> {
+pub struct ActionServiceWrapper {
     pub(crate) service: PusTargetedRequestService<
         MpscTcReceiver,
-        TmSender,
-        TcInMemConverter,
         VerificationReporter,
         ActionRequestConverter,
         ActionReplyHandler,
@@ -275,9 +246,7 @@ pub struct ActionServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTc
     >,
 }
 
-impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
-    for ActionServiceWrapper<TmSender, TcInMemConverter>
-{
+impl TargetedPusService for ActionServiceWrapper {
     const SERVICE_ID: u8 = PusServiceId::Action as u8;
     const SERVICE_STR: &'static str = "action";
 
@@ -303,9 +272,10 @@ mod tests {
     use satrs::pus::test_util::{
         TEST_APID, TEST_COMPONENT_ID_0, TEST_COMPONENT_ID_1, TEST_UNIQUE_ID_0, TEST_UNIQUE_ID_1,
     };
-    use satrs::pus::verification;
     use satrs::pus::verification::test_util::TestVerificationReporter;
+    use satrs::pus::{verification, EcssTcInVecConverter};
     use satrs::request::MessageMetadata;
+    use satrs::tmtc::PacketAsVec;
     use satrs::ComponentId;
     use satrs::{
         res_code::ResultU16,
@@ -338,7 +308,7 @@ mod tests {
     {
         pub fn new_for_action(owner_id: ComponentId, target_id: ComponentId) -> Self {
             let _ = env_logger::builder().is_test(true).try_init();
-            let (tm_funnel_tx, tm_funnel_rx) = mpsc::channel();
+            let (tm_funnel_tx, tm_funnel_rx) = mpsc::sync_channel(5);
             let (pus_action_tx, pus_action_rx) = mpsc::channel();
             let (action_reply_tx, action_reply_rx) = mpsc::channel();
             let (action_req_tx, action_req_rx) = mpsc::sync_channel(10);
@@ -352,9 +322,9 @@ mod tests {
                     PusServiceHelper::new(
                         owner_id,
                         pus_action_rx,
-                        tm_funnel_tx.clone(),
+                        TmTcSender::Heap(tm_funnel_tx.clone()),
                         verif_reporter,
-                        EcssTcInVecConverter::default(),
+                        EcssTcInMemConverter::Heap(EcssTcInVecConverter::default()),
                     ),
                     ActionRequestConverter::default(),
                     DefaultActiveActionRequestMap::default(),

@@ -5,7 +5,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum SimComponent {
     SimCtrl,
-    MgmLis3Mdl,
+    Mgm0Lis3Mdl,
+    Mgm1Lis3Mdl,
     Mgt,
     Pcdu,
 }
@@ -277,7 +278,7 @@ pub mod acs {
     }
 
     impl SerializableSimMsgPayload<SimRequest> for MgmRequestLis3Mdl {
-        const TARGET: SimComponent = SimComponent::MgmLis3Mdl;
+        const TARGET: SimComponent = SimComponent::Mgm0Lis3Mdl;
     }
 
     // Normally, small magnetometers generate their output as a signed 16 bit raw format or something
@@ -368,7 +369,7 @@ pub mod acs {
         }
 
         impl SerializableSimMsgPayload<SimReply> for MgmLis3MdlReply {
-            const TARGET: SimComponent = SimComponent::MgmLis3Mdl;
+            const TARGET: SimComponent = SimComponent::Mgm0Lis3Mdl;
         }
 
         impl MgmReplyProvider for MgmLis3MdlReply {
@@ -418,7 +419,7 @@ pub mod acs {
     }
 
     impl SerializableSimMsgPayload<SimReply> for MgtReply {
-        const TARGET: SimComponent = SimComponent::MgmLis3Mdl;
+        const TARGET: SimComponent = SimComponent::Mgm0Lis3Mdl;
     }
 }
 

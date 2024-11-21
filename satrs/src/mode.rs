@@ -11,8 +11,10 @@ pub use alloc_mod::*;
 pub use std_mod::*;
 
 use crate::{
-    queue::GenericTargetedMessagingError,
-    request::{GenericMessage, MessageMetadata, MessageReceiver, MessageReceiverWithId, RequestId},
+    queue::{GenericReceiveError, GenericSendError},
+    request::{
+        GenericMessage, MessageMetadata, MessageReceiverProvider, MessageReceiverWithId, RequestId,
+    },
     ComponentId,
 };
 
@@ -25,6 +27,11 @@ pub struct ModeAndSubmode {
     mode: Mode,
     submode: Submode,
 }
+
+pub const INVALID_MODE_VAL: Mode = Mode::MAX;
+pub const UNKNOWN_MODE_VAL: Mode = Mode::MAX - 1;
+pub const INVALID_MODE: ModeAndSubmode = ModeAndSubmode::new(INVALID_MODE_VAL, 0);
+pub const UNKNOWN_MODE: ModeAndSubmode = ModeAndSubmode::new(UNKNOWN_MODE_VAL, 0);
 
 impl ModeAndSubmode {
     pub const RAW_LEN: usize = size_of::<Mode>() + size_of::<Submode>();
@@ -111,7 +118,10 @@ impl TargetedModeCommand {
 pub enum ModeRequest {
     /// Mode information. Can be used to notify other components of changed modes.
     ModeInfo(ModeAndSubmode),
-    SetMode(ModeAndSubmode),
+    SetMode {
+        mode_and_submode: ModeAndSubmode,
+        forced: bool,
+    },
     ReadMode,
     AnnounceMode,
     AnnounceModeRecursive,
@@ -127,6 +137,8 @@ pub struct TargetedModeRequest {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ModeReply {
+    /// Mode information. Can be used to notify other components of changed modes.
+    ModeInfo(ModeAndSubmode),
     /// Reply to a mode request to confirm the commanded mode was reached.
     ModeReply(ModeAndSubmode),
     // Can not reach the commanded mode. Contains a reason as a [ResultU16].
@@ -147,34 +159,33 @@ pub trait ModeRequestSender {
         request_id: RequestId,
         target_id: ComponentId,
         request: ModeRequest,
-    ) -> Result<(), GenericTargetedMessagingError>;
+    ) -> Result<(), GenericSendError>;
 }
 
 pub trait ModeRequestReceiver {
     fn try_recv_mode_request(
         &self,
-    ) -> Result<Option<GenericMessage<ModeRequest>>, GenericTargetedMessagingError>;
+    ) -> Result<Option<GenericMessage<ModeRequest>>, GenericReceiveError>;
 }
 
-impl<R: MessageReceiver<ModeRequest>> ModeRequestReceiver
+impl<R: MessageReceiverProvider<ModeRequest>> ModeRequestReceiver
     for MessageReceiverWithId<ModeRequest, R>
 {
     fn try_recv_mode_request(
         &self,
-    ) -> Result<Option<GenericMessage<ModeRequest>>, GenericTargetedMessagingError> {
+    ) -> Result<Option<GenericMessage<ModeRequest>>, GenericReceiveError> {
         self.try_recv_message()
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ModeError {
-    Messaging(GenericTargetedMessagingError),
-}
-
-impl From<GenericTargetedMessagingError> for ModeError {
-    fn from(value: GenericTargetedMessagingError) -> Self {
-        Self::Messaging(value)
-    }
+    #[error("Messaging send error: {0}")]
+    Send(#[from] GenericSendError),
+    #[error("Messaging receive error: {0}")]
+    Receive(#[from] GenericReceiveError),
+    #[error("busy with other mode request")]
+    Busy,
 }
 
 pub trait ModeProvider {
@@ -196,6 +207,7 @@ pub trait ModeRequestHandler: ModeProvider {
         &mut self,
         requestor: MessageMetadata,
         mode_and_submode: ModeAndSubmode,
+        forced: bool,
     ) -> Result<(), Self::Error>;
 
     fn announce_mode(&self, requestor_info: Option<MessageMetadata>, recursive: bool);
@@ -222,9 +234,10 @@ pub trait ModeRequestHandler: ModeProvider {
         request: GenericMessage<ModeRequest>,
     ) -> Result<(), Self::Error> {
         match request.message {
-            ModeRequest::SetMode(mode_and_submode) => {
-                self.start_transition(request.requestor_info, mode_and_submode)
-            }
+            ModeRequest::SetMode {
+                mode_and_submode,
+                forced,
+            } => self.start_transition(request.requestor_info, mode_and_submode, forced),
             ModeRequest::ReadMode => self.send_mode_reply(
                 request.requestor_info,
                 ModeReply::ModeReply(self.mode_and_submode()),
@@ -243,15 +256,16 @@ pub trait ModeRequestHandler: ModeProvider {
 }
 
 pub trait ModeReplyReceiver {
-    fn try_recv_mode_reply(
-        &self,
-    ) -> Result<Option<GenericMessage<ModeReply>>, GenericTargetedMessagingError>;
+    fn try_recv_mode_reply(&self)
+        -> Result<Option<GenericMessage<ModeReply>>, GenericReceiveError>;
 }
 
-impl<R: MessageReceiver<ModeReply>> ModeReplyReceiver for MessageReceiverWithId<ModeReply, R> {
+impl<R: MessageReceiverProvider<ModeReply>> ModeReplyReceiver
+    for MessageReceiverWithId<ModeReply, R>
+{
     fn try_recv_mode_reply(
         &self,
-    ) -> Result<Option<GenericMessage<ModeReply>>, GenericTargetedMessagingError> {
+    ) -> Result<Option<GenericMessage<ModeReply>>, GenericReceiveError> {
         self.try_recv_message()
     }
 }
@@ -264,24 +278,28 @@ pub trait ModeReplySender {
         &self,
         requestor_info: MessageMetadata,
         reply: ModeReply,
-    ) -> Result<(), GenericTargetedMessagingError>;
+    ) -> Result<(), GenericSendError>;
 }
 
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
-    use crate::request::{
-        MessageSender, MessageSenderAndReceiver, MessageSenderMap, RequestAndReplySenderAndReceiver,
+    use crate::{
+        queue::{GenericReceiveError, GenericSendError},
+        request::{
+            MessageSenderAndReceiver, MessageSenderMap, MessageSenderProvider,
+            MessageSenderStoreProvider, RequestAndReplySenderAndReceiver,
+        },
     };
 
     use super::*;
 
-    impl<S: MessageSender<ModeReply>> MessageSenderMap<ModeReply, S> {
+    impl<S: MessageSenderProvider<ModeReply>> MessageSenderMap<ModeReply, S> {
         pub fn send_mode_reply(
             &self,
             requestor_info: MessageMetadata,
             target_id: ComponentId,
             request: ModeReply,
-        ) -> Result<(), GenericTargetedMessagingError> {
+        ) -> Result<(), GenericSendError> {
             self.send_message(requestor_info, target_id, request)
         }
 
@@ -290,8 +308,13 @@ pub mod alloc_mod {
         }
     }
 
-    impl<FROM, S: MessageSender<ModeReply>, R: MessageReceiver<FROM>> ModeReplySender
-        for MessageSenderAndReceiver<ModeReply, FROM, S, R>
+    impl<
+            From,
+            Sender: MessageSenderProvider<ModeReply>,
+            Receiver: MessageReceiverProvider<From>,
+            SenderStore: MessageSenderStoreProvider<ModeReply, Sender>,
+        > ModeReplySender
+        for MessageSenderAndReceiver<ModeReply, From, Sender, Receiver, SenderStore>
     {
         fn local_channel_id(&self) -> ComponentId {
             self.local_channel_id_generic()
@@ -301,8 +324,8 @@ pub mod alloc_mod {
             &self,
             requestor_info: MessageMetadata,
             request: ModeReply,
-        ) -> Result<(), GenericTargetedMessagingError> {
-            self.message_sender_map.send_mode_reply(
+        ) -> Result<(), GenericSendError> {
+            self.message_sender_store.send_message(
                 MessageMetadata::new(requestor_info.request_id(), self.local_channel_id()),
                 requestor_info.sender_id(),
                 request,
@@ -310,37 +333,67 @@ pub mod alloc_mod {
         }
     }
 
-    impl<TO, S: MessageSender<TO>, R: MessageReceiver<ModeReply>> ModeReplyReceiver
-        for MessageSenderAndReceiver<TO, ModeReply, S, R>
+    impl<
+            To,
+            Sender: MessageSenderProvider<To>,
+            Receiver: MessageReceiverProvider<ModeReply>,
+            SenderStore: MessageSenderStoreProvider<To, Sender>,
+        > ModeReplyReceiver
+        for MessageSenderAndReceiver<To, ModeReply, Sender, Receiver, SenderStore>
     {
         fn try_recv_mode_reply(
             &self,
-        ) -> Result<Option<GenericMessage<ModeReply>>, GenericTargetedMessagingError> {
+        ) -> Result<Option<GenericMessage<ModeReply>>, GenericReceiveError> {
             self.message_receiver.try_recv_message()
         }
     }
 
     impl<
-            REQUEST,
-            S0: MessageSender<REQUEST>,
-            R0: MessageReceiver<ModeReply>,
-            S1: MessageSender<ModeReply>,
-            R1: MessageReceiver<REQUEST>,
-        > RequestAndReplySenderAndReceiver<REQUEST, ModeReply, S0, R0, S1, R1>
+            Request,
+            ReqSender: MessageSenderProvider<Request>,
+            ReqReceiver: MessageReceiverProvider<Request>,
+            ReqSenderStore: MessageSenderStoreProvider<Request, ReqSender>,
+            Reply,
+            ReplySender: MessageSenderProvider<Reply>,
+            ReplyReceiver: MessageReceiverProvider<Reply>,
+            ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
+        >
+        RequestAndReplySenderAndReceiver<
+            Request,
+            ReqSender,
+            ReqReceiver,
+            ReqSenderStore,
+            Reply,
+            ReplySender,
+            ReplyReceiver,
+            ReplySenderStore,
+        >
     {
-        pub fn add_reply_target(&mut self, target_id: ComponentId, reply_sender: S1) {
-            self.reply_sender_map
+        pub fn add_reply_target(&mut self, target_id: ComponentId, reply_sender: ReplySender) {
+            self.reply_sender_store
                 .add_message_target(target_id, reply_sender)
         }
     }
 
     impl<
-            REQUEST,
-            S0: MessageSender<REQUEST>,
-            R0: MessageReceiver<ModeReply>,
-            S1: MessageSender<ModeReply>,
-            R1: MessageReceiver<REQUEST>,
-        > ModeReplySender for RequestAndReplySenderAndReceiver<REQUEST, ModeReply, S0, R0, S1, R1>
+            Request,
+            ReqSender: MessageSenderProvider<Request>,
+            ReqReceiver: MessageReceiverProvider<Request>,
+            ReqSenderStore: MessageSenderStoreProvider<Request, ReqSender>,
+            ReplySender: MessageSenderProvider<ModeReply>,
+            ReplyReceiver: MessageReceiverProvider<ModeReply>,
+            ReplySenderStore: MessageSenderStoreProvider<ModeReply, ReplySender>,
+        > ModeReplySender
+        for RequestAndReplySenderAndReceiver<
+            Request,
+            ReqSender,
+            ReqReceiver,
+            ReqSenderStore,
+            ModeReply,
+            ReplySender,
+            ReplyReceiver,
+            ReplySenderStore,
+        >
     {
         fn local_channel_id(&self) -> ComponentId {
             self.local_channel_id_generic()
@@ -349,42 +402,56 @@ pub mod alloc_mod {
         fn send_mode_reply(
             &self,
             requestor_info: MessageMetadata,
-            request: ModeReply,
-        ) -> Result<(), GenericTargetedMessagingError> {
-            self.reply_sender_map.send_mode_reply(
+            reply: ModeReply,
+        ) -> Result<(), GenericSendError> {
+            self.reply_sender_store.send_message(
                 MessageMetadata::new(requestor_info.request_id(), self.local_channel_id()),
                 requestor_info.sender_id(),
-                request,
+                reply,
             )
         }
     }
 
     impl<
-            REQUEST,
-            S0: MessageSender<REQUEST>,
-            R0: MessageReceiver<ModeReply>,
-            S1: MessageSender<ModeReply>,
-            R1: MessageReceiver<REQUEST>,
+            Request,
+            ReqSender: MessageSenderProvider<Request>,
+            ReqReceiver: MessageReceiverProvider<Request>,
+            ReqSenderStore: MessageSenderStoreProvider<Request, ReqSender>,
+            ReplySender: MessageSenderProvider<ModeReply>,
+            ReplyReceiver: MessageReceiverProvider<ModeReply>,
+            ReplySenderStore: MessageSenderStoreProvider<ModeReply, ReplySender>,
         > ModeReplyReceiver
-        for RequestAndReplySenderAndReceiver<REQUEST, ModeReply, S0, R0, S1, R1>
+        for RequestAndReplySenderAndReceiver<
+            Request,
+            ReqSender,
+            ReqReceiver,
+            ReqSenderStore,
+            ModeReply,
+            ReplySender,
+            ReplyReceiver,
+            ReplySenderStore,
+        >
     {
         fn try_recv_mode_reply(
             &self,
-        ) -> Result<Option<GenericMessage<ModeReply>>, GenericTargetedMessagingError> {
+        ) -> Result<Option<GenericMessage<ModeReply>>, GenericReceiveError> {
             self.reply_receiver.try_recv_message()
         }
     }
 
     /// Helper type definition for a mode handler which can handle mode requests.
-    pub type ModeRequestHandlerInterface<S, R> =
-        MessageSenderAndReceiver<ModeReply, ModeRequest, S, R>;
+    pub type ModeRequestHandlerInterface<Sender, Receiver, ReplySenderStore> =
+        MessageSenderAndReceiver<ModeReply, ModeRequest, Sender, Receiver, ReplySenderStore>;
 
-    impl<S: MessageSender<ModeReply>, R: MessageReceiver<ModeRequest>>
-        ModeRequestHandlerInterface<S, R>
+    impl<
+            Sender: MessageSenderProvider<ModeReply>,
+            Receiver: MessageReceiverProvider<ModeRequest>,
+            ReplySenderStore: MessageSenderStoreProvider<ModeReply, Sender>,
+        > ModeRequestHandlerInterface<Sender, Receiver, ReplySenderStore>
     {
         pub fn try_recv_mode_request(
             &self,
-        ) -> Result<Option<GenericMessage<ModeRequest>>, GenericTargetedMessagingError> {
+        ) -> Result<Option<GenericMessage<ModeRequest>>, GenericReceiveError> {
             self.try_recv_message()
         }
 
@@ -392,7 +459,7 @@ pub mod alloc_mod {
             &self,
             requestor_info: MessageMetadata,
             reply: ModeReply,
-        ) -> Result<(), GenericTargetedMessagingError> {
+        ) -> Result<(), GenericSendError> {
             self.send_message(
                 requestor_info.request_id(),
                 requestor_info.sender_id(),
@@ -403,12 +470,18 @@ pub mod alloc_mod {
 
     /// Helper type defintion for a mode handler object which can send mode requests and receive
     /// mode replies.
-    pub type ModeRequestorInterface<S, R> = MessageSenderAndReceiver<ModeRequest, ModeReply, S, R>;
+    pub type ModeRequestorInterface<Sender, Receiver, RequestSenderStore> =
+        MessageSenderAndReceiver<ModeRequest, ModeReply, Sender, Receiver, RequestSenderStore>;
 
-    impl<S: MessageSender<ModeRequest>, R: MessageReceiver<ModeReply>> ModeRequestorInterface<S, R> {
+    impl<
+            Sender: MessageSenderProvider<ModeRequest>,
+            Receiver: MessageReceiverProvider<ModeReply>,
+            RequestSenderStore: MessageSenderStoreProvider<ModeRequest, Sender>,
+        > ModeRequestorInterface<Sender, Receiver, RequestSenderStore>
+    {
         pub fn try_recv_mode_reply(
             &self,
-        ) -> Result<Option<GenericMessage<ModeReply>>, GenericTargetedMessagingError> {
+        ) -> Result<Option<GenericMessage<ModeReply>>, GenericReceiveError> {
             self.try_recv_message()
         }
 
@@ -417,23 +490,38 @@ pub mod alloc_mod {
             request_id: RequestId,
             target_id: ComponentId,
             reply: ModeRequest,
-        ) -> Result<(), GenericTargetedMessagingError> {
+        ) -> Result<(), GenericSendError> {
             self.send_message(request_id, target_id, reply)
         }
     }
 
     /// Helper type defintion for a mode handler object which can both send mode requests and
     /// process mode requests.
-    pub type ModeInterface<S0, R0, S1, R1> =
-        RequestAndReplySenderAndReceiver<ModeRequest, ModeReply, S0, R0, S1, R1>;
+    pub type ModeInterface<
+        ReqSender,
+        ReqReceiver,
+        ReqSenderStore,
+        ReplySender,
+        ReplyReceiver,
+        ReplySenderStore,
+    > = RequestAndReplySenderAndReceiver<
+        ModeRequest,
+        ReqSender,
+        ReqReceiver,
+        ReqSenderStore,
+        ModeReply,
+        ReplySender,
+        ReplyReceiver,
+        ReplySenderStore,
+    >;
 
-    impl<S: MessageSender<ModeRequest>> MessageSenderMap<ModeRequest, S> {
+    impl<S: MessageSenderProvider<ModeRequest>> MessageSenderMap<ModeRequest, S> {
         pub fn send_mode_request(
             &self,
             requestor_info: MessageMetadata,
             target_id: ComponentId,
             request: ModeRequest,
-        ) -> Result<(), GenericTargetedMessagingError> {
+        ) -> Result<(), GenericSendError> {
             self.send_message(requestor_info, target_id, request)
         }
 
@@ -442,35 +530,28 @@ pub mod alloc_mod {
         }
     }
 
-    /*
-    impl<S: MessageSender<ModeRequest>> ModeRequestSender for MessageSenderMapWithId<ModeRequest, S> {
-        fn local_channel_id(&self) -> ComponentId {
-            self.local_channel_id
-        }
-
-        fn send_mode_request(
-            &self,
-            request_id: RequestId,
-            target_id: ComponentId,
-            request: ModeRequest,
-        ) -> Result<(), GenericTargetedMessagingError> {
-            self.send_message(request_id, target_id, request)
-        }
-    }
-    */
-
-    impl<TO, S: MessageSender<TO>, R: MessageReceiver<ModeRequest>> ModeRequestReceiver
-        for MessageSenderAndReceiver<TO, ModeRequest, S, R>
+    impl<
+            To,
+            Sender: MessageSenderProvider<To>,
+            Receiver: MessageReceiverProvider<ModeRequest>,
+            SenderStore: MessageSenderStoreProvider<To, Sender>,
+        > ModeRequestReceiver
+        for MessageSenderAndReceiver<To, ModeRequest, Sender, Receiver, SenderStore>
     {
         fn try_recv_mode_request(
             &self,
-        ) -> Result<Option<GenericMessage<ModeRequest>>, GenericTargetedMessagingError> {
+        ) -> Result<Option<GenericMessage<ModeRequest>>, GenericReceiveError> {
             self.message_receiver.try_recv_message()
         }
     }
 
-    impl<FROM, S: MessageSender<ModeRequest>, R: MessageReceiver<FROM>> ModeRequestSender
-        for MessageSenderAndReceiver<ModeRequest, FROM, S, R>
+    impl<
+            From,
+            Sender: MessageSenderProvider<ModeRequest>,
+            Receiver: MessageReceiverProvider<From>,
+            SenderStore: MessageSenderStoreProvider<ModeRequest, Sender>,
+        > ModeRequestSender
+        for MessageSenderAndReceiver<ModeRequest, From, Sender, Receiver, SenderStore>
     {
         fn local_channel_id(&self) -> ComponentId {
             self.local_channel_id_generic()
@@ -481,8 +562,8 @@ pub mod alloc_mod {
             request_id: RequestId,
             target_id: ComponentId,
             request: ModeRequest,
-        ) -> Result<(), GenericTargetedMessagingError> {
-            self.message_sender_map.send_mode_request(
+        ) -> Result<(), GenericSendError> {
+            self.message_sender_store.send_message(
                 MessageMetadata::new(request_id, self.local_channel_id()),
                 target_id,
                 request,
@@ -491,27 +572,50 @@ pub mod alloc_mod {
     }
 
     impl<
-            REPLY,
-            S0: MessageSender<ModeRequest>,
-            R0: MessageReceiver<REPLY>,
-            S1: MessageSender<REPLY>,
-            R1: MessageReceiver<ModeRequest>,
-        > RequestAndReplySenderAndReceiver<ModeRequest, REPLY, S0, R0, S1, R1>
+            ReqSender: MessageSenderProvider<ModeRequest>,
+            ReqReceiver: MessageReceiverProvider<ModeRequest>,
+            ReqSenderStore: MessageSenderStoreProvider<ModeRequest, ReqSender>,
+            Reply,
+            ReplySender: MessageSenderProvider<Reply>,
+            ReplyReceiver: MessageReceiverProvider<Reply>,
+            ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
+        >
+        RequestAndReplySenderAndReceiver<
+            ModeRequest,
+            ReqSender,
+            ReqReceiver,
+            ReqSenderStore,
+            Reply,
+            ReplySender,
+            ReplyReceiver,
+            ReplySenderStore,
+        >
     {
-        pub fn add_request_target(&mut self, target_id: ComponentId, request_sender: S0) {
-            self.request_sender_map
+        pub fn add_request_target(&mut self, target_id: ComponentId, request_sender: ReqSender) {
+            self.request_sender_store
                 .add_message_target(target_id, request_sender)
         }
     }
 
     impl<
-            REPLY,
-            S0: MessageSender<ModeRequest>,
-            R0: MessageReceiver<REPLY>,
-            S1: MessageSender<REPLY>,
-            R1: MessageReceiver<ModeRequest>,
+            ReqSender: MessageSenderProvider<ModeRequest>,
+            ReqReceiver: MessageReceiverProvider<ModeRequest>,
+            ReqSenderStore: MessageSenderStoreProvider<ModeRequest, ReqSender>,
+            Reply,
+            ReplySender: MessageSenderProvider<Reply>,
+            ReplyReceiver: MessageReceiverProvider<Reply>,
+            ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
         > ModeRequestSender
-        for RequestAndReplySenderAndReceiver<ModeRequest, REPLY, S0, R0, S1, R1>
+        for RequestAndReplySenderAndReceiver<
+            ModeRequest,
+            ReqSender,
+            ReqReceiver,
+            ReqSenderStore,
+            Reply,
+            ReplySender,
+            ReplyReceiver,
+            ReplySenderStore,
+        >
     {
         fn local_channel_id(&self) -> ComponentId {
             self.local_channel_id_generic()
@@ -522,8 +626,8 @@ pub mod alloc_mod {
             request_id: RequestId,
             target_id: ComponentId,
             request: ModeRequest,
-        ) -> Result<(), GenericTargetedMessagingError> {
-            self.request_sender_map.send_mode_request(
+        ) -> Result<(), GenericSendError> {
+            self.request_sender_store.send_message(
                 MessageMetadata::new(request_id, self.local_channel_id()),
                 target_id,
                 request,
@@ -532,17 +636,28 @@ pub mod alloc_mod {
     }
 
     impl<
-            REPLY,
-            S0: MessageSender<ModeRequest>,
-            R0: MessageReceiver<REPLY>,
-            S1: MessageSender<REPLY>,
-            R1: MessageReceiver<ModeRequest>,
+            ReqSender: MessageSenderProvider<ModeRequest>,
+            ReqReceiver: MessageReceiverProvider<ModeRequest>,
+            ReqSenderStore: MessageSenderStoreProvider<ModeRequest, ReqSender>,
+            Reply,
+            ReplySender: MessageSenderProvider<Reply>,
+            ReplyReceiver: MessageReceiverProvider<Reply>,
+            ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
         > ModeRequestReceiver
-        for RequestAndReplySenderAndReceiver<ModeRequest, REPLY, S0, R0, S1, R1>
+        for RequestAndReplySenderAndReceiver<
+            ModeRequest,
+            ReqSender,
+            ReqReceiver,
+            ReqSenderStore,
+            Reply,
+            ReplySender,
+            ReplyReceiver,
+            ReplySenderStore,
+        >
     {
         fn try_recv_mode_request(
             &self,
-        ) -> Result<Option<GenericMessage<ModeRequest>>, GenericTargetedMessagingError> {
+        ) -> Result<Option<GenericMessage<ModeRequest>>, GenericReceiveError> {
             self.request_receiver.try_recv_message()
         }
     }
@@ -552,39 +667,97 @@ pub mod alloc_mod {
 pub mod std_mod {
     use std::sync::mpsc;
 
+    use crate::request::{MessageSenderList, OneMessageSender};
+
     use super::*;
 
     pub type ModeRequestHandlerMpsc = ModeRequestHandlerInterface<
         mpsc::Sender<GenericMessage<ModeReply>>,
         mpsc::Receiver<GenericMessage<ModeRequest>>,
+        MessageSenderList<ModeReply, mpsc::Sender<GenericMessage<ModeReply>>>,
     >;
     pub type ModeRequestHandlerMpscBounded = ModeRequestHandlerInterface<
         mpsc::SyncSender<GenericMessage<ModeReply>>,
         mpsc::Receiver<GenericMessage<ModeRequest>>,
+        MessageSenderList<ModeReply, mpsc::SyncSender<GenericMessage<ModeReply>>>,
     >;
 
-    pub type ModeRequestorMpsc = ModeRequestorInterface<
+    pub type ModeRequestorOneChildMpsc = ModeRequestorInterface<
         mpsc::Sender<GenericMessage<ModeRequest>>,
         mpsc::Receiver<GenericMessage<ModeReply>>,
+        OneMessageSender<ModeRequest, mpsc::Sender<GenericMessage<ModeRequest>>>,
     >;
-    pub type ModeRequestorBoundedMpsc = ModeRequestorInterface<
+    pub type ModeRequestorOneChildBoundedMpsc = ModeRequestorInterface<
         mpsc::SyncSender<GenericMessage<ModeRequest>>,
         mpsc::Receiver<GenericMessage<ModeReply>>,
+        OneMessageSender<ModeRequest, mpsc::SyncSender<GenericMessage<ModeRequest>>>,
+    >;
+    pub type ModeRequestorChildListMpsc = ModeRequestorInterface<
+        mpsc::Sender<GenericMessage<ModeRequest>>,
+        mpsc::Receiver<GenericMessage<ModeReply>>,
+        MessageSenderList<ModeRequest, mpsc::Sender<GenericMessage<ModeRequest>>>,
+    >;
+    pub type ModeRequestorChildListBoundedMpsc = ModeRequestorInterface<
+        mpsc::SyncSender<GenericMessage<ModeRequest>>,
+        mpsc::Receiver<GenericMessage<ModeReply>>,
+        MessageSenderList<ModeRequest, mpsc::SyncSender<GenericMessage<ModeRequest>>>,
     >;
 
     pub type ModeRequestorAndHandlerMpsc = ModeInterface<
         mpsc::Sender<GenericMessage<ModeRequest>>,
-        mpsc::Receiver<GenericMessage<ModeReply>>,
-        mpsc::Sender<GenericMessage<ModeReply>>,
         mpsc::Receiver<GenericMessage<ModeRequest>>,
+        MessageSenderList<ModeRequest, mpsc::Sender<GenericMessage<ModeRequest>>>,
+        mpsc::Sender<GenericMessage<ModeReply>>,
+        mpsc::Receiver<GenericMessage<ModeReply>>,
+        MessageSenderList<ModeReply, mpsc::Sender<GenericMessage<ModeReply>>>,
     >;
     pub type ModeRequestorAndHandlerMpscBounded = ModeInterface<
         mpsc::SyncSender<GenericMessage<ModeRequest>>,
-        mpsc::Receiver<GenericMessage<ModeReply>>,
-        mpsc::SyncSender<GenericMessage<ModeReply>>,
         mpsc::Receiver<GenericMessage<ModeRequest>>,
+        MessageSenderList<ModeRequest, mpsc::SyncSender<GenericMessage<ModeRequest>>>,
+        mpsc::SyncSender<GenericMessage<ModeReply>>,
+        mpsc::Receiver<GenericMessage<ModeReply>>,
+        MessageSenderList<ModeReply, mpsc::SyncSender<GenericMessage<ModeReply>>>,
     >;
 }
 
 #[cfg(test)]
-mod tests {}
+pub(crate) mod tests {
+    use core::cell::RefCell;
+    use std::collections::VecDeque;
+
+    use crate::{request::RequestId, ComponentId};
+
+    use super::*;
+
+    pub struct ModeReqWrapper {
+        pub request_id: RequestId,
+        pub target_id: ComponentId,
+        pub request: ModeRequest,
+    }
+
+    #[derive(Default)]
+    pub struct ModeReqSenderMock {
+        pub requests: RefCell<VecDeque<ModeReqWrapper>>,
+    }
+
+    impl ModeRequestSender for ModeReqSenderMock {
+        fn local_channel_id(&self) -> crate::ComponentId {
+            0
+        }
+
+        fn send_mode_request(
+            &self,
+            request_id: RequestId,
+            target_id: ComponentId,
+            request: ModeRequest,
+        ) -> Result<(), GenericSendError> {
+            self.requests.borrow_mut().push_back(ModeReqWrapper {
+                request_id,
+                target_id,
+                request,
+            });
+            Ok(())
+        }
+    }
+}

@@ -1,7 +1,8 @@
 use derive_new::new;
 use satrs::hk::{HkRequest, HkRequestVariant};
+use satrs::mode_tree::{ModeChild, ModeNode};
 use satrs::power::{PowerSwitchInfo, PowerSwitcherCommandSender};
-use satrs::queue::{GenericSendError, GenericTargetedMessagingError};
+use satrs_example::config::pus::PUS_MODE_SERVICE;
 use satrs_example::{DeviceMode, TimestampHelper};
 use satrs_minisim::acs::lis3mdl::{
     MgmLis3MdlReply, MgmLis3RawValues, FIELD_LSB_PER_GAUSS_4_SENS, GAUSS_TO_MICROTESLA_FACTOR,
@@ -15,15 +16,18 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use satrs::mode::{
-    ModeAndSubmode, ModeError, ModeProvider, ModeReply, ModeRequest, ModeRequestHandler,
+    ModeAndSubmode, ModeError, ModeProvider, ModeReply, ModeRequestHandler,
+    ModeRequestHandlerMpscBounded,
 };
 use satrs::pus::{EcssTmSender, PusTmVariant};
 use satrs::request::{GenericMessage, MessageMetadata, UniqueApidTargetId};
-use satrs_example::config::components::{NO_SENDER, PUS_MODE_SERVICE};
+use satrs_example::config::components::NO_SENDER;
 
 use crate::hk::PusHkHelper;
 use crate::pus::hk::{HkReply, HkReplyVariant};
 use crate::requests::CompositeRequest;
+use crate::spi::SpiInterface;
+use crate::tmtc::sender::TmTcSender;
 
 use serde::{Deserialize, Serialize};
 
@@ -46,11 +50,6 @@ pub enum TransitionState {
     Idle,
     PowerSwitching,
     Done,
-}
-
-pub trait SpiInterface {
-    type Error: Debug;
-    fn transfer(&mut self, tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error>;
 }
 
 #[derive(Default)]
@@ -129,13 +128,6 @@ pub struct MgmData {
     pub z: f32,
 }
 
-pub struct MpscModeLeafInterface {
-    pub request_rx: mpsc::Receiver<GenericMessage<ModeRequest>>,
-    pub reply_to_pus_tx: mpsc::Sender<GenericMessage<ModeReply>>,
-    #[allow(dead_code)]
-    pub reply_to_parent_tx: mpsc::SyncSender<GenericMessage<ModeReply>>,
-}
-
 #[derive(Default)]
 pub struct BufWrapper {
     tx_buf: [u8; 32],
@@ -166,16 +158,15 @@ impl Default for ModeHelpers {
 #[allow(clippy::too_many_arguments)]
 pub struct MgmHandlerLis3Mdl<
     ComInterface: SpiInterface,
-    TmSender: EcssTmSender,
     SwitchHelper: PowerSwitchInfo<PcduSwitch> + PowerSwitcherCommandSender<PcduSwitch>,
 > {
     id: UniqueApidTargetId,
     dev_str: &'static str,
-    mode_interface: MpscModeLeafInterface,
+    mode_node: ModeRequestHandlerMpscBounded,
     composite_request_rx: mpsc::Receiver<GenericMessage<CompositeRequest>>,
-    hk_reply_tx: mpsc::Sender<GenericMessage<HkReply>>,
+    hk_reply_tx: mpsc::SyncSender<GenericMessage<HkReply>>,
     switch_helper: SwitchHelper,
-    tm_sender: TmSender,
+    tm_sender: TmTcSender,
     pub com_interface: ComInterface,
     shared_mgm_set: Arc<Mutex<MgmData>>,
     #[new(value = "PusHkHelper::new(id)")]
@@ -190,9 +181,8 @@ pub struct MgmHandlerLis3Mdl<
 
 impl<
         ComInterface: SpiInterface,
-        TmSender: EcssTmSender,
         SwitchHelper: PowerSwitchInfo<PcduSwitch> + PowerSwitcherCommandSender<PcduSwitch>,
-    > MgmHandlerLis3Mdl<ComInterface, TmSender, SwitchHelper>
+    > MgmHandlerLis3Mdl<ComInterface, SwitchHelper>
 {
     pub fn periodic_operation(&mut self) {
         self.stamp_helper.update_from_now();
@@ -275,25 +265,28 @@ impl<
     pub fn handle_mode_requests(&mut self) {
         loop {
             // TODO: Only allow one set mode request per cycle?
-            match self.mode_interface.request_rx.try_recv() {
-                Ok(msg) => {
-                    let result = self.handle_mode_request(msg);
-                    // TODO: Trigger event?
-                    if result.is_err() {
-                        log::warn!(
-                            "{}: mode request failed with error {:?}",
-                            self.dev_str,
-                            result.err().unwrap()
-                        );
-                    }
-                }
-                Err(e) => {
-                    if e != mpsc::TryRecvError::Empty {
-                        log::warn!("{}: failed to receive mode request: {:?}", self.dev_str, e);
+            match self.mode_node.try_recv_mode_request() {
+                Ok(opt_msg) => {
+                    if let Some(msg) = opt_msg {
+                        let result = self.handle_mode_request(msg);
+                        // TODO: Trigger event?
+                        if result.is_err() {
+                            log::warn!(
+                                "{}: mode request failed with error {:?}",
+                                self.dev_str,
+                                result.err().unwrap()
+                            );
+                        }
                     } else {
                         break;
                     }
                 }
+                Err(e) => match e {
+                    satrs::queue::GenericReceiveError::Empty => break,
+                    satrs::queue::GenericReceiveError::TxDisconnected(e) => {
+                        log::warn!("{}: failed to receive mode request: {:?}", self.dev_str, e);
+                    }
+                },
             }
         }
     }
@@ -365,9 +358,8 @@ impl<
 
 impl<
         ComInterface: SpiInterface,
-        TmSender: EcssTmSender,
         SwitchHelper: PowerSwitchInfo<PcduSwitch> + PowerSwitcherCommandSender<PcduSwitch>,
-    > ModeProvider for MgmHandlerLis3Mdl<ComInterface, TmSender, SwitchHelper>
+    > ModeProvider for MgmHandlerLis3Mdl<ComInterface, SwitchHelper>
 {
     fn mode_and_submode(&self) -> ModeAndSubmode {
         self.mode_helpers.current
@@ -376,9 +368,8 @@ impl<
 
 impl<
         ComInterface: SpiInterface,
-        TmSender: EcssTmSender,
         SwitchHelper: PowerSwitchInfo<PcduSwitch> + PowerSwitcherCommandSender<PcduSwitch>,
-    > ModeRequestHandler for MgmHandlerLis3Mdl<ComInterface, TmSender, SwitchHelper>
+    > ModeRequestHandler for MgmHandlerLis3Mdl<ComInterface, SwitchHelper>
 {
     type Error = ModeError;
 
@@ -386,6 +377,7 @@ impl<
         &mut self,
         requestor: MessageMetadata,
         mode_and_submode: ModeAndSubmode,
+        _forced: bool,
     ) -> Result<(), satrs::mode::ModeError> {
         log::info!(
             "{}: transitioning to mode {:?}",
@@ -448,10 +440,9 @@ impl<
                 requestor.sender_id()
             );
         }
-        self.mode_interface
-            .reply_to_pus_tx
-            .send(GenericMessage::new(requestor, reply))
-            .map_err(|_| GenericTargetedMessagingError::Send(GenericSendError::RxDisconnected))?;
+        self.mode_node
+            .send_mode_reply(requestor, reply)
+            .map_err(ModeError::Send)?;
         Ok(())
     }
 
@@ -464,17 +455,44 @@ impl<
     }
 }
 
+impl<
+        ComInterface: SpiInterface,
+        SwitchHelper: PowerSwitchInfo<PcduSwitch> + PowerSwitcherCommandSender<PcduSwitch>,
+    > ModeNode for MgmHandlerLis3Mdl<ComInterface, SwitchHelper>
+{
+    fn id(&self) -> satrs::ComponentId {
+        self.id.into()
+    }
+}
+
+impl<
+        ComInterface: SpiInterface,
+        SwitchHelper: PowerSwitchInfo<PcduSwitch> + PowerSwitcherCommandSender<PcduSwitch>,
+    > ModeChild for MgmHandlerLis3Mdl<ComInterface, SwitchHelper>
+{
+    type Sender = mpsc::SyncSender<GenericMessage<ModeReply>>;
+
+    fn add_mode_parent(&mut self, id: satrs::ComponentId, reply_sender: Self::Sender) {
+        self.mode_node.add_message_target(id, reply_sender);
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::{mpsc, Arc};
+    use std::{
+        collections::HashMap,
+        sync::{mpsc, Arc},
+    };
 
     use satrs::{
         mode::{ModeReply, ModeRequest},
+        mode_tree::ModeParent,
         power::SwitchStateBinary,
         request::{GenericMessage, UniqueApidTargetId},
         tmtc::PacketAsVec,
+        ComponentId,
     };
-    use satrs_example::config::components::Apid;
+    use satrs_example::config::{acs::MGM_ASSEMBLY, components::Apid};
     use satrs_minisim::acs::lis3mdl::MgmLis3RawValues;
 
     use crate::{eps::TestSwitchHelper, pus::hk::HkReply, requests::CompositeRequest};
@@ -502,49 +520,88 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     pub struct MgmTestbench {
-        pub mode_request_tx: mpsc::Sender<GenericMessage<ModeRequest>>,
+        pub mode_request_tx: mpsc::SyncSender<GenericMessage<ModeRequest>>,
         pub mode_reply_rx_to_pus: mpsc::Receiver<GenericMessage<ModeReply>>,
         pub mode_reply_rx_to_parent: mpsc::Receiver<GenericMessage<ModeReply>>,
         pub composite_request_tx: mpsc::Sender<GenericMessage<CompositeRequest>>,
         pub hk_reply_rx: mpsc::Receiver<GenericMessage<HkReply>>,
         pub tm_rx: mpsc::Receiver<PacketAsVec>,
-        pub handler:
-            MgmHandlerLis3Mdl<TestSpiInterface, mpsc::Sender<PacketAsVec>, TestSwitchHelper>,
+        pub handler: MgmHandlerLis3Mdl<TestSpiInterface, TestSwitchHelper>,
+    }
+
+    #[derive(Default)]
+    pub struct MgmAssemblyMock(
+        pub HashMap<ComponentId, mpsc::SyncSender<GenericMessage<ModeRequest>>>,
+    );
+
+    impl ModeNode for MgmAssemblyMock {
+        fn id(&self) -> satrs::ComponentId {
+            PUS_MODE_SERVICE.into()
+        }
+    }
+
+    impl ModeParent for MgmAssemblyMock {
+        type Sender = mpsc::SyncSender<GenericMessage<ModeRequest>>;
+
+        fn add_mode_child(&mut self, id: satrs::ComponentId, request_sender: Self::Sender) {
+            self.0.insert(id, request_sender);
+        }
+    }
+
+    #[derive(Default)]
+    pub struct PusMock {
+        pub request_sender_map: HashMap<ComponentId, mpsc::SyncSender<GenericMessage<ModeRequest>>>,
+    }
+
+    impl ModeNode for PusMock {
+        fn id(&self) -> satrs::ComponentId {
+            PUS_MODE_SERVICE.into()
+        }
+    }
+
+    impl ModeParent for PusMock {
+        type Sender = mpsc::SyncSender<GenericMessage<ModeRequest>>;
+
+        fn add_mode_child(&mut self, id: satrs::ComponentId, request_sender: Self::Sender) {
+            self.request_sender_map.insert(id, request_sender);
+        }
     }
 
     impl MgmTestbench {
         pub fn new() -> Self {
-            let (request_tx, request_rx) = mpsc::channel();
-            let (reply_tx_to_pus, reply_rx_to_pus) = mpsc::channel();
+            let (request_tx, request_rx) = mpsc::sync_channel(5);
+            let (reply_tx_to_pus, reply_rx_to_pus) = mpsc::sync_channel(5);
             let (reply_tx_to_parent, reply_rx_to_parent) = mpsc::sync_channel(5);
-            let mode_interface = MpscModeLeafInterface {
-                request_rx,
-                reply_to_pus_tx: reply_tx_to_pus,
-                reply_to_parent_tx: reply_tx_to_parent,
-            };
+            let id = UniqueApidTargetId::new(Apid::Acs as u16, 1);
+            let mode_node = ModeRequestHandlerMpscBounded::new(id.into(), request_rx);
             let (composite_request_tx, composite_request_rx) = mpsc::channel();
-            let (hk_reply_tx, hk_reply_rx) = mpsc::channel();
-            let (tm_tx, tm_rx) = mpsc::channel::<PacketAsVec>();
+            let (hk_reply_tx, hk_reply_rx) = mpsc::sync_channel(10);
+            let (tm_tx, tm_rx) = mpsc::sync_channel(10);
+            let tm_sender = TmTcSender::Heap(tm_tx);
             let shared_mgm_set = Arc::default();
+            let mut handler = MgmHandlerLis3Mdl::new(
+                id,
+                "TEST_MGM",
+                mode_node,
+                composite_request_rx,
+                hk_reply_tx,
+                TestSwitchHelper::default(),
+                tm_sender,
+                TestSpiInterface::default(),
+                shared_mgm_set,
+            );
+            handler.add_mode_parent(PUS_MODE_SERVICE.into(), reply_tx_to_pus);
+            handler.add_mode_parent(MGM_ASSEMBLY.into(), reply_tx_to_parent);
             Self {
                 mode_request_tx: request_tx,
                 mode_reply_rx_to_pus: reply_rx_to_pus,
                 mode_reply_rx_to_parent: reply_rx_to_parent,
                 composite_request_tx,
+                handler,
                 tm_rx,
                 hk_reply_rx,
-                handler: MgmHandlerLis3Mdl::new(
-                    UniqueApidTargetId::new(Apid::Acs as u16, 1),
-                    "TEST_MGM",
-                    mode_interface,
-                    composite_request_rx,
-                    hk_reply_tx,
-                    TestSwitchHelper::default(),
-                    tm_tx,
-                    TestSpiInterface::default(),
-                    shared_mgm_set,
-                ),
             }
         }
     }
@@ -575,7 +632,10 @@ mod tests {
             .mode_request_tx
             .send(GenericMessage::new(
                 MessageMetadata::new(0, PUS_MODE_SERVICE.id()),
-                ModeRequest::SetMode(ModeAndSubmode::new(DeviceMode::Normal as u32, 0)),
+                ModeRequest::SetMode {
+                    mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
+                    forced: false,
+                },
             ))
             .expect("failed to send mode request");
         testbench.handler.periodic_operation();
@@ -633,7 +693,10 @@ mod tests {
             .mode_request_tx
             .send(GenericMessage::new(
                 MessageMetadata::new(0, PUS_MODE_SERVICE.id()),
-                ModeRequest::SetMode(ModeAndSubmode::new(DeviceMode::Normal as u32, 0)),
+                ModeRequest::SetMode {
+                    mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
+                    forced: false,
+                },
             ))
             .expect("failed to send mode request");
         testbench.handler.periodic_operation();

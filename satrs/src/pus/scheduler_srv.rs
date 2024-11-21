@@ -1,7 +1,7 @@
 use super::scheduler::PusSchedulerProvider;
 use super::verification::{VerificationReporter, VerificationReportingProvider};
 use super::{
-    DirectPusPacketHandlerResult, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
+    DirectPusPacketHandlerResult, EcssTcInMemConversionProvider, EcssTcInSharedPoolConverter,
     EcssTcInVecConverter, EcssTcReceiver, EcssTmSender, HandlingStatus, MpscTcReceiver,
     PartialPusHandlingError, PusServiceHelper,
 };
@@ -24,7 +24,7 @@ use std::sync::mpsc;
 pub struct PusSchedServiceHandler<
     TcReceiver: EcssTcReceiver,
     TmSender: EcssTmSender,
-    TcInMemConverter: EcssTcInMemConverter,
+    TcInMemConverter: EcssTcInMemConversionProvider,
     VerificationReporter: VerificationReportingProvider,
     PusScheduler: PusSchedulerProvider,
 > {
@@ -36,7 +36,7 @@ pub struct PusSchedServiceHandler<
 impl<
         TcReceiver: EcssTcReceiver,
         TmSender: EcssTmSender,
-        TcInMemConverter: EcssTcInMemConverter,
+        TcInMemConverter: EcssTcInMemConversionProvider,
         VerificationReporter: VerificationReportingProvider,
         Scheduler: PusSchedulerProvider,
     >
@@ -229,7 +229,7 @@ pub type PusService11SchedHandlerDynWithBoundedMpsc<PusScheduler> = PusSchedServ
 pub type PusService11SchedHandlerStaticWithMpsc<PusScheduler> = PusSchedServiceHandler<
     MpscTcReceiver,
     PacketSenderWithSharedPool,
-    EcssTcInSharedStoreConverter,
+    EcssTcInSharedPoolConverter,
     VerificationReporter,
     PusScheduler,
 >;
@@ -238,7 +238,7 @@ pub type PusService11SchedHandlerStaticWithMpsc<PusScheduler> = PusSchedServiceH
 pub type PusService11SchedHandlerStaticWithBoundedMpsc<PusScheduler> = PusSchedServiceHandler<
     MpscTcReceiver,
     PacketSenderWithSharedPool,
-    EcssTcInSharedStoreConverter,
+    EcssTcInSharedPoolConverter,
     VerificationReporter,
     PusScheduler,
 >;
@@ -253,7 +253,7 @@ mod tests {
         scheduler::{self, PusSchedulerProvider, TcInfo},
         tests::PusServiceHandlerWithSharedStoreCommon,
         verification::{RequestId, TcStateAccepted, VerificationToken},
-        EcssTcInSharedStoreConverter,
+        EcssTcInSharedPoolConverter,
     };
     use crate::pus::{DirectPusPacketHandlerResult, MpscTcReceiver, PusPacketHandlingError};
     use crate::tmtc::PacketSenderWithSharedPool;
@@ -276,7 +276,7 @@ mod tests {
         handler: PusSchedServiceHandler<
             MpscTcReceiver,
             PacketSenderWithSharedPool,
-            EcssTcInSharedStoreConverter,
+            EcssTcInSharedPoolConverter,
             VerificationReporter,
             TestScheduler,
         >,

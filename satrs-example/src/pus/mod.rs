@@ -1,4 +1,5 @@
 use crate::requests::GenericRequestRouter;
+use crate::tmtc::sender::TmTcSender;
 use log::warn;
 use satrs::pool::PoolAddr;
 use satrs::pus::verification::{
@@ -6,10 +7,10 @@ use satrs::pus::verification::{
     VerificationReporterCfg, VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
-    ActiveRequestMapProvider, ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter,
-    EcssTcReceiver, EcssTmSender, EcssTmtcError, GenericConversionError, GenericRoutingError,
-    HandlingStatus, PusPacketHandlingError, PusReplyHandler, PusRequestRouter, PusServiceHelper,
-    PusTcToRequestConverter, TcInMemory,
+    ActiveRequestMapProvider, ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConversionProvider,
+    EcssTcInMemConverter, EcssTcReceiver, EcssTmSender, EcssTmtcError, GenericConversionError,
+    GenericRoutingError, HandlingStatus, PusPacketHandlingError, PusReplyHandler, PusRequestRouter,
+    PusServiceHelper, PusTcToRequestConverter, TcInMemory,
 };
 use satrs::queue::{GenericReceiveError, GenericSendError};
 use satrs::request::{Apid, GenericMessage, MessageMetadata};
@@ -17,11 +18,11 @@ use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{PusPacket, PusServiceId};
 use satrs::tmtc::{PacketAsVec, PacketInPool};
 use satrs::ComponentId;
-use satrs_example::config::components::PUS_ROUTING_SERVICE;
+use satrs_example::config::pus::PUS_ROUTING_SERVICE;
 use satrs_example::config::{tmtc_err, CustomPusServiceId};
 use satrs_example::TimestampHelper;
 use std::fmt::Debug;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc;
 
 pub mod action;
 pub mod event;
@@ -40,26 +41,26 @@ pub fn create_verification_reporter(owner_id: ComponentId, apid: Apid) -> Verifi
 
 /// Simple router structure which forwards PUS telecommands to dedicated handlers.
 pub struct PusTcMpscRouter {
-    pub test_tc_sender: Sender<EcssTcAndToken>,
-    pub event_tc_sender: Sender<EcssTcAndToken>,
-    pub sched_tc_sender: Sender<EcssTcAndToken>,
-    pub hk_tc_sender: Sender<EcssTcAndToken>,
+    pub test_tc_sender: mpsc::SyncSender<EcssTcAndToken>,
+    pub event_tc_sender: mpsc::SyncSender<EcssTcAndToken>,
+    pub sched_tc_sender: mpsc::SyncSender<EcssTcAndToken>,
+    pub hk_tc_sender: mpsc::SyncSender<EcssTcAndToken>,
     #[allow(dead_code)]
-    pub action_tc_sender: Sender<EcssTcAndToken>,
-    pub mode_tc_sender: Sender<EcssTcAndToken>,
+    pub action_tc_sender: mpsc::SyncSender<EcssTcAndToken>,
+    pub mode_tc_sender: mpsc::SyncSender<EcssTcAndToken>,
 }
 
-pub struct PusTcDistributor<TmSender: EcssTmSender> {
+pub struct PusTcDistributor {
     #[allow(dead_code)]
     pub id: ComponentId,
-    pub tm_sender: TmSender,
+    pub tm_sender: TmTcSender,
     pub verif_reporter: VerificationReporter,
     pub pus_router: PusTcMpscRouter,
     stamp_helper: TimestampHelper,
 }
 
-impl<TmSender: EcssTmSender> PusTcDistributor<TmSender> {
-    pub fn new(tm_sender: TmSender, pus_router: PusTcMpscRouter) -> Self {
+impl PusTcDistributor {
+    pub fn new(tm_sender: TmTcSender, pus_router: PusTcMpscRouter) -> Self {
         Self {
             id: PUS_ROUTING_SERVICE.raw(),
             tm_sender,
@@ -268,8 +269,6 @@ pub trait DirectPusService {
 ///  3. [Self::check_for_request_timeouts] which checks for request timeouts, covering step 7.
 pub struct PusTargetedRequestService<
     TcReceiver: EcssTcReceiver,
-    TmSender: EcssTmSender,
-    TcInMemConverter: EcssTcInMemConverter,
     VerificationReporter: VerificationReportingProvider,
     RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = GenericConversionError>,
     ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType, Error = EcssTmtcError>,
@@ -279,7 +278,7 @@ pub struct PusTargetedRequestService<
     ReplyType,
 > {
     pub service_helper:
-        PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+        PusServiceHelper<TcReceiver, TmTcSender, EcssTcInMemConverter, VerificationReporter>,
     pub request_router: GenericRequestRouter,
     pub request_converter: RequestConverter,
     pub active_request_map: ActiveRequestMap,
@@ -290,8 +289,6 @@ pub struct PusTargetedRequestService<
 
 impl<
         TcReceiver: EcssTcReceiver,
-        TmSender: EcssTmSender,
-        TcInMemConverter: EcssTcInMemConverter,
         VerificationReporter: VerificationReportingProvider,
         RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = GenericConversionError>,
         ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType, Error = EcssTmtcError>,
@@ -302,8 +299,6 @@ impl<
     >
     PusTargetedRequestService<
         TcReceiver,
-        TmSender,
-        TcInMemConverter,
         VerificationReporter,
         RequestConverter,
         ReplyHandler,
@@ -318,8 +313,8 @@ where
     pub fn new(
         service_helper: PusServiceHelper<
             TcReceiver,
-            TmSender,
-            TcInMemConverter,
+            TmTcSender,
+            EcssTcInMemConverter,
             VerificationReporter,
         >,
         request_converter: RequestConverter,
@@ -545,7 +540,7 @@ pub(crate) mod tests {
     use satrs::{
         pus::{
             verification::test_util::TestVerificationReporter, ActivePusRequestStd,
-            ActiveRequestMapProvider, EcssTcInVecConverter, MpscTcReceiver,
+            ActiveRequestMapProvider, MpscTcReceiver,
         },
         request::UniqueApidTargetId,
         spacepackets::{
@@ -766,8 +761,6 @@ pub(crate) mod tests {
     > {
         pub service: PusTargetedRequestService<
             MpscTcReceiver,
-            MpscTmAsVecSender,
-            EcssTcInVecConverter,
             TestVerificationReporter,
             RequestConverter,
             ReplyHandler,

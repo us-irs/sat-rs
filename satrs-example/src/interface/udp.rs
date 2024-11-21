@@ -1,14 +1,15 @@
-use core::fmt::Debug;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc;
 
 use log::{info, warn};
 use satrs::pus::HandlingStatus;
-use satrs::tmtc::{PacketAsVec, PacketInPool, PacketSenderRaw};
+use satrs::tmtc::{PacketAsVec, PacketInPool, StoreAndSendError};
 use satrs::{
     hal::std::udp_server::{ReceiveResult, UdpTcServer},
     pool::{PoolProviderWithGuards, SharedStaticMemoryPool},
 };
+
+use crate::tmtc::sender::TmTcSender;
 
 pub trait UdpTmHandler {
     fn send_tm_to_udp_client(&mut self, socket: &UdpSocket, recv_addr: &SocketAddr);
@@ -65,21 +66,12 @@ impl UdpTmHandler for DynamicUdpTmHandler {
     }
 }
 
-pub struct UdpTmtcServer<
-    TcSender: PacketSenderRaw<Error = SendError>,
-    TmHandler: UdpTmHandler,
-    SendError,
-> {
-    pub udp_tc_server: UdpTcServer<TcSender, SendError>,
+pub struct UdpTmtcServer<TmHandler: UdpTmHandler> {
+    pub udp_tc_server: UdpTcServer<TmTcSender, StoreAndSendError>,
     pub tm_handler: TmHandler,
 }
 
-impl<
-        TcSender: PacketSenderRaw<Error = SendError>,
-        TmHandler: UdpTmHandler,
-        SendError: Debug + 'static,
-    > UdpTmtcServer<TcSender, TmHandler, SendError>
-{
+impl<TmHandler: UdpTmHandler> UdpTmtcServer<TmHandler> {
     pub fn periodic_operation(&mut self) {
         loop {
             if self.poll_tc_server() == HandlingStatus::Empty {
@@ -115,7 +107,6 @@ impl<
 mod tests {
     use std::net::Ipv4Addr;
     use std::{
-        cell::RefCell,
         collections::VecDeque,
         net::IpAddr,
         sync::{Arc, Mutex},
@@ -126,29 +117,15 @@ mod tests {
             ecss::{tc::PusTcCreator, WritablePusPacket},
             SpHeader,
         },
-        tmtc::PacketSenderRaw,
         ComponentId,
     };
     use satrs_example::config::{components, OBSW_SERVER_ADDR};
 
+    use crate::tmtc::sender::{MockSender, TmTcSender};
+
     use super::*;
 
     const UDP_SERVER_ID: ComponentId = 0x05;
-
-    #[derive(Default, Debug)]
-    pub struct TestSender {
-        tc_vec: RefCell<VecDeque<PacketAsVec>>,
-    }
-
-    impl PacketSenderRaw for TestSender {
-        type Error = ();
-
-        fn send_packet(&self, sender_id: ComponentId, tc_raw: &[u8]) -> Result<(), Self::Error> {
-            let mut mut_queue = self.tc_vec.borrow_mut();
-            mut_queue.push_back(PacketAsVec::new(sender_id, tc_raw.to_vec()));
-            Ok(())
-        }
-    }
 
     #[derive(Default, Debug, Clone)]
     pub struct TestTmHandler {
@@ -164,8 +141,7 @@ mod tests {
     #[test]
     fn test_basic() {
         let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), 0);
-        let test_receiver = TestSender::default();
-        // let tc_queue = test_receiver.tc_vec.clone();
+        let test_receiver = TmTcSender::Mock(MockSender::default());
         let udp_tc_server =
             UdpTcServer::new(UDP_SERVER_ID, sock_addr, 2048, test_receiver).unwrap();
         let tm_handler = TestTmHandler::default();
@@ -175,7 +151,13 @@ mod tests {
             tm_handler,
         };
         udp_dyn_server.periodic_operation();
-        let queue = udp_dyn_server.udp_tc_server.tc_sender.tc_vec.borrow();
+        let queue = udp_dyn_server
+            .udp_tc_server
+            .tc_sender
+            .get_mock_sender()
+            .unwrap()
+            .0
+            .borrow();
         assert!(queue.is_empty());
         assert!(tm_handler_calls.lock().unwrap().is_empty());
     }
@@ -183,8 +165,7 @@ mod tests {
     #[test]
     fn test_transactions() {
         let sock_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
-        let test_receiver = TestSender::default();
-        // let tc_queue = test_receiver.tc_vec.clone();
+        let test_receiver = TmTcSender::Mock(MockSender::default());
         let udp_tc_server =
             UdpTcServer::new(UDP_SERVER_ID, sock_addr, 2048, test_receiver).unwrap();
         let server_addr = udp_tc_server.socket.local_addr().unwrap();
@@ -204,7 +185,13 @@ mod tests {
         client.send_to(&ping_tc, server_addr).unwrap();
         udp_dyn_server.periodic_operation();
         {
-            let mut queue = udp_dyn_server.udp_tc_server.tc_sender.tc_vec.borrow_mut();
+            let mut queue = udp_dyn_server
+                .udp_tc_server
+                .tc_sender
+                .get_mock_sender()
+                .unwrap()
+                .0
+                .borrow_mut();
             assert!(!queue.is_empty());
             let packet_with_sender = queue.pop_front().unwrap();
             assert_eq!(packet_with_sender.packet, ping_tc);
@@ -219,7 +206,13 @@ mod tests {
             assert_eq!(received_addr, client_addr);
         }
         udp_dyn_server.periodic_operation();
-        let queue = udp_dyn_server.udp_tc_server.tc_sender.tc_vec.borrow();
+        let queue = udp_dyn_server
+            .udp_tc_server
+            .tc_sender
+            .get_mock_sender()
+            .unwrap()
+            .0
+            .borrow();
         assert!(queue.is_empty());
         drop(queue);
         // Still tries to send to the same client.

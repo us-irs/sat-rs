@@ -1,34 +1,32 @@
 use std::sync::mpsc;
 
 use crate::pus::create_verification_reporter;
-use satrs::pool::SharedStaticMemoryPool;
+use crate::tmtc::sender::TmTcSender;
 use satrs::pus::event_man::EventRequestWithToken;
 use satrs::pus::event_srv::PusEventServiceHandler;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
-    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcInMemConverter,
-    EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTmSender, MpscTcReceiver,
-    MpscTmAsVecSender, PartialPusHandlingError, PusServiceHelper,
+    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcInMemConverter, MpscTcReceiver,
+    PartialPusHandlingError, PusServiceHelper,
 };
 use satrs::spacepackets::ecss::PusServiceId;
-use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
-use satrs_example::config::components::PUS_EVENT_MANAGEMENT;
+use satrs_example::config::pus::PUS_EVENT_MANAGEMENT;
 
 use super::{DirectPusService, HandlingStatus};
 
-pub fn create_event_service_static(
-    tm_sender: PacketSenderWithSharedPool,
-    tc_pool: SharedStaticMemoryPool,
+pub fn create_event_service(
+    tm_sender: TmTcSender,
+    tm_in_pool_converter: EcssTcInMemConverter,
     pus_event_rx: mpsc::Receiver<EcssTcAndToken>,
     event_request_tx: mpsc::Sender<EventRequestWithToken>,
-) -> EventServiceWrapper<PacketSenderWithSharedPool, EcssTcInSharedStoreConverter> {
+) -> EventServiceWrapper {
     let pus_5_handler = PusEventServiceHandler::new(
         PusServiceHelper::new(
             PUS_EVENT_MANAGEMENT.id(),
             pus_event_rx,
             tm_sender,
             create_verification_reporter(PUS_EVENT_MANAGEMENT.id(), PUS_EVENT_MANAGEMENT.apid),
-            EcssTcInSharedStoreConverter::new(tc_pool.clone(), 2048),
+            tm_in_pool_converter,
         ),
         event_request_tx,
     );
@@ -37,34 +35,16 @@ pub fn create_event_service_static(
     }
 }
 
-pub fn create_event_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<PacketAsVec>,
-    pus_event_rx: mpsc::Receiver<EcssTcAndToken>,
-    event_request_tx: mpsc::Sender<EventRequestWithToken>,
-) -> EventServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {
-    let pus_5_handler = PusEventServiceHandler::new(
-        PusServiceHelper::new(
-            PUS_EVENT_MANAGEMENT.id(),
-            pus_event_rx,
-            tm_funnel_tx,
-            create_verification_reporter(PUS_EVENT_MANAGEMENT.id(), PUS_EVENT_MANAGEMENT.apid),
-            EcssTcInVecConverter::default(),
-        ),
-        event_request_tx,
-    );
-    EventServiceWrapper {
-        handler: pus_5_handler,
-    }
+pub struct EventServiceWrapper {
+    pub handler: PusEventServiceHandler<
+        MpscTcReceiver,
+        TmTcSender,
+        EcssTcInMemConverter,
+        VerificationReporter,
+    >,
 }
 
-pub struct EventServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> {
-    pub handler:
-        PusEventServiceHandler<MpscTcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
-}
-
-impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> DirectPusService
-    for EventServiceWrapper<TmSender, TcInMemConverter>
-{
+impl DirectPusService for EventServiceWrapper {
     const SERVICE_ID: u8 = PusServiceId::Event as u8;
 
     const SERVICE_STR: &'static str = "events";

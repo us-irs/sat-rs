@@ -775,7 +775,7 @@ mod alloc_mod {
     ///     if the next fitting subpool is full. This is useful to ensure the pool remains useful
     ///     for all data sizes as long as possible. However, an undesirable side-effect might be
     ///     the chocking of larger subpools by underdimensioned smaller subpools.
-    #[derive(Clone)]
+    #[derive(Debug, Clone)]
     pub struct StaticPoolConfig {
         cfg: Vec<SubpoolConfig>,
         spill_to_higher_subpools: bool,
@@ -834,6 +834,7 @@ mod alloc_mod {
     /// [address][PoolAddr] type. Adding any data to the pool will yield a store address.
     /// Modification and read operations are done using a reference to a store address. Deletion
     /// will consume the store address.
+    #[derive(Debug)]
     pub struct StaticMemoryPool {
         pool_cfg: StaticPoolConfig,
         pool: Vec<Vec<u8>>,

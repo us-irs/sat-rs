@@ -1,15 +1,15 @@
 use derive_new::new;
-use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
+use satrs::mode_tree::{ModeNode, ModeParent};
+use satrs_example::config::pus::PUS_MODE_SERVICE;
 use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::requests::GenericRequestRouter;
-use satrs::pool::SharedStaticMemoryPool;
+use crate::tmtc::sender::TmTcSender;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
-    DefaultActiveRequestMap, EcssTcAndToken, EcssTcInMemConverter, EcssTcInSharedStoreConverter,
-    EcssTcInVecConverter, MpscTcReceiver, MpscTmAsVecSender, PusPacketHandlingError,
-    PusServiceHelper,
+    DefaultActiveRequestMap, EcssTcAndToken, EcssTcInMemConverter, MpscTcReceiver,
+    PusPacketHandlingError, PusServiceHelper,
 };
 use satrs::request::GenericMessage;
 use satrs::{
@@ -34,7 +34,6 @@ use satrs::{
     },
     ComponentId,
 };
-use satrs_example::config::components::PUS_MODE_SERVICE;
 use satrs_example::config::{mode_err, tmtc_err, CustomPusServiceId};
 
 use super::{
@@ -110,6 +109,7 @@ impl PusReplyHandler<ActivePusRequestStd, ModeReply> for ModeReplyHandler {
                     ),
                 )?;
             }
+            ModeReply::ModeInfo(_mode_and_submode) => (),
         };
         Ok(true)
     }
@@ -190,7 +190,13 @@ impl PusTcToRequestConverter<ActivePusRequestStd, ModeRequest> for ModeRequestCo
                 }
                 let mode_and_submode = ModeAndSubmode::from_be_bytes(&tc.user_data()[4..])
                     .expect("mode and submode extraction failed");
-                Ok((active_request, ModeRequest::SetMode(mode_and_submode)))
+                Ok((
+                    active_request,
+                    ModeRequest::SetMode {
+                        mode_and_submode,
+                        forced: false,
+                    },
+                ))
             }
             Subservice::TcReadMode => Ok((active_request, ModeRequest::ReadMode)),
             Subservice::TcAnnounceMode => Ok((active_request, ModeRequest::AnnounceMode)),
@@ -202,20 +208,20 @@ impl PusTcToRequestConverter<ActivePusRequestStd, ModeRequest> for ModeRequestCo
     }
 }
 
-pub fn create_mode_service_static(
-    tm_sender: PacketSenderWithSharedPool,
-    tc_pool: SharedStaticMemoryPool,
+pub fn create_mode_service(
+    tm_sender: TmTcSender,
+    tc_in_mem_converter: EcssTcInMemConverter,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     mode_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<ModeReply>>,
-) -> ModeServiceWrapper<PacketSenderWithSharedPool, EcssTcInSharedStoreConverter> {
+) -> ModeServiceWrapper {
     let mode_request_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
             PUS_MODE_SERVICE.id(),
             pus_action_rx,
             tm_sender,
             create_verification_reporter(PUS_MODE_SERVICE.id(), PUS_MODE_SERVICE.apid),
-            EcssTcInSharedStoreConverter::new(tc_pool, 2048),
+            tc_in_mem_converter,
         ),
         ModeRequestConverter::default(),
         DefaultActiveRequestMap::default(),
@@ -228,36 +234,9 @@ pub fn create_mode_service_static(
     }
 }
 
-pub fn create_mode_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<PacketAsVec>,
-    pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
-    mode_router: GenericRequestRouter,
-    reply_receiver: mpsc::Receiver<GenericMessage<ModeReply>>,
-) -> ModeServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {
-    let mode_request_handler = PusTargetedRequestService::new(
-        PusServiceHelper::new(
-            PUS_MODE_SERVICE.id(),
-            pus_action_rx,
-            tm_funnel_tx,
-            create_verification_reporter(PUS_MODE_SERVICE.id(), PUS_MODE_SERVICE.apid),
-            EcssTcInVecConverter::default(),
-        ),
-        ModeRequestConverter::default(),
-        DefaultActiveRequestMap::default(),
-        ModeReplyHandler::new(PUS_MODE_SERVICE.id()),
-        mode_router,
-        reply_receiver,
-    );
-    ModeServiceWrapper {
-        service: mode_request_handler,
-    }
-}
-
-pub struct ModeServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> {
+pub struct ModeServiceWrapper {
     pub(crate) service: PusTargetedRequestService<
         MpscTcReceiver,
-        TmSender,
-        TcInMemConverter,
         VerificationReporter,
         ModeRequestConverter,
         ModeReplyHandler,
@@ -268,9 +247,24 @@ pub struct ModeServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcIn
     >,
 }
 
-impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
-    for ModeServiceWrapper<TmSender, TcInMemConverter>
-{
+impl ModeNode for ModeServiceWrapper {
+    fn id(&self) -> ComponentId {
+        self.service.service_helper.id()
+    }
+}
+
+impl ModeParent for ModeServiceWrapper {
+    type Sender = mpsc::SyncSender<GenericMessage<ModeRequest>>;
+
+    fn add_mode_child(&mut self, id: ComponentId, request_sender: Self::Sender) {
+        self.service
+            .request_router
+            .mode_router_map
+            .insert(id, request_sender);
+    }
+}
+
+impl TargetedPusService for ModeServiceWrapper {
     const SERVICE_ID: u8 = CustomPusServiceId::Mode as u8;
     const SERVICE_STR: &'static str = "mode";
 
@@ -346,7 +340,13 @@ mod tests {
         let (_active_req, req) = testbench
             .convert(token, &[], TEST_APID, TEST_UNIQUE_ID_0)
             .expect("conversion has failed");
-        assert_eq!(req, ModeRequest::SetMode(mode_and_submode));
+        assert_eq!(
+            req,
+            ModeRequest::SetMode {
+                mode_and_submode,
+                forced: false
+            }
+        );
     }
 
     #[test]

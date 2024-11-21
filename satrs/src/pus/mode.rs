@@ -39,7 +39,7 @@ mod tests {
     use crate::{
         mode::{
             ModeAndSubmode, ModeReply, ModeReplySender, ModeRequest, ModeRequestSender,
-            ModeRequestorAndHandlerMpsc, ModeRequestorMpsc,
+            ModeRequestorAndHandlerMpsc, ModeRequestorOneChildMpsc,
         },
         request::{GenericMessage, MessageMetadata},
     };
@@ -52,7 +52,8 @@ mod tests {
     fn test_simple_mode_requestor() {
         let (reply_sender, reply_receiver) = mpsc::channel();
         let (request_sender, request_receiver) = mpsc::channel();
-        let mut mode_requestor = ModeRequestorMpsc::new(TEST_COMPONENT_ID_0, reply_receiver);
+        let mut mode_requestor =
+            ModeRequestorOneChildMpsc::new(TEST_COMPONENT_ID_0, reply_receiver);
         mode_requestor.add_message_target(TEST_COMPONENT_ID_1, request_sender);
 
         // Send a request and verify it arrives at the receiver.

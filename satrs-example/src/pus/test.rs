@@ -1,35 +1,34 @@
 use crate::pus::create_verification_reporter;
+use crate::tmtc::sender::TmTcSender;
 use log::info;
 use satrs::event_man::{EventMessage, EventMessageU32};
-use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::test::PusService17TestHandler;
 use satrs::pus::verification::{FailParams, VerificationReporter, VerificationReportingProvider};
+use satrs::pus::PartialPusHandlingError;
 use satrs::pus::{
-    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcInMemConverter, EcssTcInVecConverter,
-    EcssTmSender, MpscTcReceiver, MpscTmAsVecSender, PusServiceHelper,
+    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcInMemConversionProvider,
+    EcssTcInMemConverter, MpscTcReceiver, PusServiceHelper,
 };
-use satrs::pus::{EcssTcInSharedStoreConverter, PartialPusHandlingError};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{PusPacket, PusServiceId};
-use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
-use satrs_example::config::components::PUS_TEST_SERVICE;
+use satrs_example::config::pus::PUS_TEST_SERVICE;
 use satrs_example::config::{tmtc_err, TEST_EVENT};
 use std::sync::mpsc;
 
 use super::{DirectPusService, HandlingStatus};
 
-pub fn create_test_service_static(
-    tm_sender: PacketSenderWithSharedPool,
-    tc_pool: SharedStaticMemoryPool,
+pub fn create_test_service(
+    tm_sender: TmTcSender,
+    tc_in_mem_converter: EcssTcInMemConverter,
     event_sender: mpsc::SyncSender<EventMessageU32>,
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
-) -> TestCustomServiceWrapper<PacketSenderWithSharedPool, EcssTcInSharedStoreConverter> {
+) -> TestCustomServiceWrapper {
     let pus17_handler = PusService17TestHandler::new(PusServiceHelper::new(
         PUS_TEST_SERVICE.id(),
         pus_test_rx,
         tm_sender,
         create_verification_reporter(PUS_TEST_SERVICE.id(), PUS_TEST_SERVICE.apid),
-        EcssTcInSharedStoreConverter::new(tc_pool, 2048),
+        tc_in_mem_converter,
     ));
     TestCustomServiceWrapper {
         handler: pus17_handler,
@@ -37,34 +36,17 @@ pub fn create_test_service_static(
     }
 }
 
-pub fn create_test_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<PacketAsVec>,
-    event_sender: mpsc::SyncSender<EventMessageU32>,
-    pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
-) -> TestCustomServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {
-    let pus17_handler = PusService17TestHandler::new(PusServiceHelper::new(
-        PUS_TEST_SERVICE.id(),
-        pus_test_rx,
-        tm_funnel_tx,
-        create_verification_reporter(PUS_TEST_SERVICE.id(), PUS_TEST_SERVICE.apid),
-        EcssTcInVecConverter::default(),
-    ));
-    TestCustomServiceWrapper {
-        handler: pus17_handler,
-        event_tx: event_sender,
-    }
-}
-
-pub struct TestCustomServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
-{
-    pub handler:
-        PusService17TestHandler<MpscTcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
+pub struct TestCustomServiceWrapper {
+    pub handler: PusService17TestHandler<
+        MpscTcReceiver,
+        TmTcSender,
+        EcssTcInMemConverter,
+        VerificationReporter,
+    >,
     pub event_tx: mpsc::SyncSender<EventMessageU32>,
 }
 
-impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> DirectPusService
-    for TestCustomServiceWrapper<TmSender, TcInMemConverter>
-{
+impl DirectPusService for TestCustomServiceWrapper {
     const SERVICE_ID: u8 = PusServiceId::Test as u8;
 
     const SERVICE_STR: &'static str = "test";

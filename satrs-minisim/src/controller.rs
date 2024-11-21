@@ -24,7 +24,8 @@ const PCDU_REQ_WIRETAPPING: bool = false;
 const MGT_REQ_WIRETAPPING: bool = false;
 
 pub struct ModelAddrWrapper {
-    mgm_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
+    mgm_0_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
+    mgm_1_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
     pcdu_addr: Address<PcduModel>,
     mgt_addr: Address<MagnetorquerModel>,
 }
@@ -42,12 +43,14 @@ pub struct SimController {
 
 impl ModelAddrWrapper {
     pub fn new(
-        mgm_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
+        mgm_0_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
+        mgm_1_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
         pcdu_addr: Address<PcduModel>,
         mgt_addr: Address<MagnetorquerModel>,
     ) -> Self {
         Self {
-            mgm_addr,
+            mgm_0_addr,
+            mgm_1_addr,
             pcdu_addr,
             mgt_addr,
         }
@@ -96,7 +99,8 @@ impl SimController {
                     }
                     if let Err(e) = match request.component() {
                         SimComponent::SimCtrl => self.handle_ctrl_request(&request),
-                        SimComponent::MgmLis3Mdl => self.handle_mgm_request(&request),
+                        SimComponent::Mgm0Lis3Mdl => self.handle_mgm_request(0, &request),
+                        SimComponent::Mgm1Lis3Mdl => self.handle_mgm_request(1, &request),
                         SimComponent::Mgt => self.handle_mgt_request(&request),
                         SimComponent::Pcdu => self.handle_pcdu_request(&request),
                     } {
@@ -128,19 +132,25 @@ impl SimController {
         Ok(())
     }
 
-    fn handle_mgm_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
+    fn handle_mgm_request(
+        &mut self,
+        mgm_idx: usize,
+        request: &SimRequest,
+    ) -> Result<(), SimRequestError> {
         let mgm_request = MgmRequestLis3Mdl::from_sim_message(request)?;
         if MGM_REQ_WIRETAPPING {
             log::info!("received MGM request: {:?}", mgm_request);
         }
         match mgm_request {
             MgmRequestLis3Mdl::RequestSensorData => {
+                let addr = match mgm_idx {
+                    0 => &self.addr_wrapper.mgm_0_addr,
+                    1 => &self.addr_wrapper.mgm_1_addr,
+
+                    _ => panic!("invalid mgm index"),
+                };
                 self.simulation
-                    .process_event(
-                        MagnetometerModel::send_sensor_values,
-                        (),
-                        &self.addr_wrapper.mgm_addr,
-                    )
+                    .process_event(MagnetometerModel::send_sensor_values, (), addr)
                     .expect("event execution error for mgm");
             }
         }

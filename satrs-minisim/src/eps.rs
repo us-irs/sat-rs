@@ -14,7 +14,8 @@ pub const SWITCH_INFO_DELAY_MS: u64 = 10;
 
 pub struct PcduModel {
     pub switcher_map: SwitchMapBinaryWrapper,
-    pub mgm_switch: Output<SwitchStateBinary>,
+    pub mgm_0_switch: Output<SwitchStateBinary>,
+    pub mgm_1_switch: Output<SwitchStateBinary>,
     pub mgt_switch: Output<SwitchStateBinary>,
     pub reply_sender: mpsc::Sender<SimReply>,
 }
@@ -23,7 +24,8 @@ impl PcduModel {
     pub fn new(reply_sender: mpsc::Sender<SimReply>) -> Self {
         Self {
             switcher_map: Default::default(),
-            mgm_switch: Output::new(),
+            mgm_0_switch: Output::new(),
+            mgm_1_switch: Output::new(),
             mgt_switch: Output::new(),
             reply_sender,
         }
@@ -55,7 +57,7 @@ impl PcduModel {
         *val = switch_and_target_state.1;
         match switch_and_target_state.0 {
             PcduSwitch::Mgm => {
-                self.mgm_switch.send(switch_and_target_state.1).await;
+                self.mgm_0_switch.send(switch_and_target_state.1).await;
             }
             PcduSwitch::Mgt => {
                 self.mgt_switch.send(switch_and_target_state.1).await;

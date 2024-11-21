@@ -9,8 +9,9 @@ use std::sync::mpsc;
 
 use super::verification::{VerificationReporter, VerificationReportingProvider};
 use super::{
-    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTcReceiver,
-    EcssTmSender, GenericConversionError, HandlingStatus, MpscTcReceiver, PusServiceHelper,
+    EcssTcInMemConversionProvider, EcssTcInSharedPoolConverter, EcssTcInVecConverter,
+    EcssTcReceiver, EcssTmSender, GenericConversionError, HandlingStatus, MpscTcReceiver,
+    PusServiceHelper,
 };
 
 /// This is a helper class for [std] environments to handle generic PUS 17 (test service) packets.
@@ -18,7 +19,7 @@ use super::{
 pub struct PusService17TestHandler<
     TcReceiver: EcssTcReceiver,
     TmSender: EcssTmSender,
-    TcInMemConverter: EcssTcInMemConverter,
+    TcInMemConverter: EcssTcInMemConversionProvider,
     VerificationReporter: VerificationReportingProvider,
 > {
     pub service_helper:
@@ -28,7 +29,7 @@ pub struct PusService17TestHandler<
 impl<
         TcReceiver: EcssTcReceiver,
         TmSender: EcssTmSender,
-        TcInMemConverter: EcssTcInMemConverter,
+        TcInMemConverter: EcssTcInMemConversionProvider,
         VerificationReporter: VerificationReportingProvider,
     > PusService17TestHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
@@ -127,7 +128,7 @@ pub type PusService17TestHandlerDynWithBoundedMpsc = PusService17TestHandler<
 pub type PusService17TestHandlerStaticWithBoundedMpsc = PusService17TestHandler<
     MpscTcReceiver,
     PacketSenderWithSharedPool,
-    EcssTcInSharedStoreConverter,
+    EcssTcInSharedPoolConverter,
     VerificationReporter,
 >;
 
@@ -142,7 +143,7 @@ mod tests {
     };
     use crate::pus::verification::{TcStateAccepted, VerificationToken};
     use crate::pus::{
-        DirectPusPacketHandlerResult, EcssTcInSharedStoreConverter, EcssTcInVecConverter,
+        DirectPusPacketHandlerResult, EcssTcInSharedPoolConverter, EcssTcInVecConverter,
         GenericConversionError, HandlingStatus, MpscTcReceiver, MpscTmAsVecSender,
         PartialPusHandlingError, PusPacketHandlingError,
     };
@@ -162,7 +163,7 @@ mod tests {
         handler: PusService17TestHandler<
             MpscTcReceiver,
             PacketSenderWithSharedPool,
-            EcssTcInSharedStoreConverter,
+            EcssTcInSharedPoolConverter,
             VerificationReporter,
         >,
     }

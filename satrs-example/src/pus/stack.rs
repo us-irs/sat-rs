@@ -1,9 +1,6 @@
 use crate::pus::mode::ModeServiceWrapper;
 use derive_new::new;
-use satrs::{
-    pus::{EcssTcInMemConverter, EcssTmSender},
-    spacepackets::time::{cds, TimeWriter},
-};
+use satrs::spacepackets::time::{cds, TimeWriter};
 
 use super::{
     action::ActionServiceWrapper, event::EventServiceWrapper, hk::HkServiceWrapper,
@@ -11,21 +8,17 @@ use super::{
     HandlingStatus, TargetedPusService,
 };
 
-// TODO: For better extensibility, we could create 2 vectors: One for direct PUS services and one
-// for targeted services..
 #[derive(new)]
-pub struct PusStack<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> {
-    test_srv: TestCustomServiceWrapper<TmSender, TcInMemConverter>,
-    hk_srv_wrapper: HkServiceWrapper<TmSender, TcInMemConverter>,
-    event_srv: EventServiceWrapper<TmSender, TcInMemConverter>,
-    action_srv_wrapper: ActionServiceWrapper<TmSender, TcInMemConverter>,
-    schedule_srv: SchedulingServiceWrapper<TmSender, TcInMemConverter>,
-    mode_srv: ModeServiceWrapper<TmSender, TcInMemConverter>,
+pub struct PusStack {
+    pub test_srv: TestCustomServiceWrapper,
+    pub hk_srv_wrapper: HkServiceWrapper,
+    pub event_srv: EventServiceWrapper,
+    pub action_srv_wrapper: ActionServiceWrapper,
+    pub schedule_srv: SchedulingServiceWrapper,
+    pub mode_srv: ModeServiceWrapper,
 }
 
-impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
-    PusStack<TmSender, TcInMemConverter>
-{
+impl PusStack {
     pub fn periodic_operation(&mut self) {
         // Release all telecommands which reached their release time before calling the service
         // handlers.
