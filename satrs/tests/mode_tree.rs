@@ -2,11 +2,15 @@ use core::cell::Cell;
 use std::{println, sync::mpsc};
 
 use satrs::mode::{
-    ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler,
-    ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestorAndHandlerMpscBounded,
-    ModeRequestorBoundedMpsc,
+    Mode, ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler,
+    ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestSender,
+    ModeRequestorAndHandlerMpscBounded, ModeRequestorBoundedMpsc,
 };
-use satrs::request::MessageMetadata;
+use satrs::mode_tree::alloc_mod::{
+    ModeStoreVec, SequenceModeTables, SequenceTableMapValue, TargetModeTables, TargetTableMapValue,
+};
+use satrs::mode_tree::ModeStoreProvider;
+use satrs::request::{MessageMetadata, MessageSender};
 use satrs::{
     mode::{ModeAndSubmode, ModeReply, ModeRequest},
     queue::GenericTargetedMessagingError,
@@ -15,12 +19,63 @@ use satrs::{
 };
 use std::string::{String, ToString};
 
+const INVALID_MODE: ModeAndSubmode = ModeAndSubmode::new(0xffffffff, 0);
+const UNKNOWN_MODE: ModeAndSubmode = ModeAndSubmode::new(0xffffffff - 1, 0);
+
 pub enum TestComponentId {
-    Device1 = 1,
-    Device2 = 2,
-    Assembly = 3,
-    Subsystem = 4,
-    PusModeService = 5,
+    MagnetometerDevice = 1,
+    MagnetorquerDevice = 2,
+    ReactionWheelDevice = 3,
+    StartrackerDevice = 4,
+    ReactionWheelAssembly = 8,
+    MagnetometerAssembly = 9,
+    AcsController = 14,
+    AcsSubsystem = 15,
+    PusModeService = 16,
+}
+
+pub type RequestSenderType = mpsc::SyncSender<GenericMessage<ModeRequest>>;
+pub type ReplySenderType = mpsc::SyncSender<GenericMessage<ModeReply>>;
+
+/// Trait which denotes that an object is a parent in a mode tree.
+///
+/// A mode parent is capable of sending mode requests to child objects and has a unique component
+/// ID.
+pub trait ModeParent {
+    type Sender: MessageSender<ModeRequest>;
+
+    fn id(&self) -> ComponentId;
+    fn add_mode_child(&mut self, id: ComponentId, request_sender: Self::Sender);
+}
+
+/// Trait which denotes that an object is a child in a mode tree.
+///
+/// A child is capable of sending mode replies to parent objects and has a unique component ID.
+pub trait ModeChild {
+    type Sender: MessageSender<ModeReply>;
+
+    fn id(&self) -> ComponentId;
+    fn add_mode_parent(&mut self, id: ComponentId, reply_sender: Self::Sender);
+}
+
+/// Utility method which connects a mode tree parent object to a child object by calling
+/// [ModeParent::add_mode_child] on the [parent][ModeParent] and calling
+/// [ModeChild::add_mode_parent] on the [child][ModeChild].
+///
+/// # Arguments
+///
+/// * `parent` - The parent object which implements [ModeParent].
+/// * `request_sender` - Sender object to send mode requests to the child.
+/// * `child` - The child object which implements [ModeChild].
+/// * `reply_sender` - Sender object to send mode replies to the parent.
+pub fn connect_mode_nodes<ReqSender, ReplySender>(
+    parent: &mut impl ModeParent<Sender=ReqSender>,
+    request_sender: ReqSender,
+    child: &mut impl ModeChild<Sender=ReplySender>,
+    reply_sender: ReplySender,
+) {
+    parent.add_mode_child(child.id(), request_sender);
+    child.add_mode_parent(parent.id(), reply_sender);
 }
 
 struct PusModeService {
@@ -29,11 +84,11 @@ struct PusModeService {
 }
 
 impl PusModeService {
-    pub fn send_announce_mode_cmd_to_assy(&self) {
+    pub fn send_announce_mode_cmd_to_subsystem(&self) {
         self.mode_node
             .send_mode_request(
                 self.request_id_counter.get(),
-                TestComponentId::Assembly as ComponentId,
+                TestComponentId::AcsSubsystem as ComponentId,
                 ModeRequest::AnnounceModeRecursive,
             )
             .unwrap();
@@ -42,21 +97,71 @@ impl PusModeService {
     }
 }
 
-struct TestSubsystem {
-    pub name: String,
+impl ModeParent for PusModeService {
+    type Sender = RequestSenderType;
+
+    fn id(&self) -> ComponentId {
+        TestComponentId::PusModeService as ComponentId
+    }
+
+    fn add_mode_child(&mut self, id: ComponentId, request_sender: RequestSenderType) {
+        self.mode_node.add_message_target(id, request_sender);
+    }
+}
+
+struct AcsSubsystem {
     pub mode_node: ModeRequestorAndHandlerMpscBounded,
     pub mode_requestor_info: Option<MessageMetadata>,
     pub mode_and_submode: ModeAndSubmode,
     pub target_mode_and_submode: Option<ModeAndSubmode>,
+    pub children_mode_store: ModeStoreVec,
+    pub target_tables: TargetModeTables,
+    pub sequence_tables: SequenceModeTables,
 }
 
-impl ModeProvider for TestSubsystem {
+impl AcsSubsystem {
+    pub fn add_target_and_sequence_table(
+        &mut self,
+        mode: Mode,
+        target_table_val: TargetTableMapValue,
+        sequence_table_val: SequenceTableMapValue,
+    ) {
+        self.target_tables.0.insert(mode, target_table_val);
+        self.sequence_tables.0.insert(mode, sequence_table_val);
+    }
+}
+
+impl ModeParent for AcsSubsystem {
+    type Sender = RequestSenderType;
+
+    fn id(&self) -> ComponentId {
+        TestComponentId::PusModeService as ComponentId
+    }
+
+    fn add_mode_child(&mut self, id: ComponentId, request_sender: RequestSenderType) {
+        self.children_mode_store.add_component(id, UNKNOWN_MODE);
+        self.mode_node.add_request_target(id, request_sender);
+    }
+}
+
+impl ModeChild for AcsSubsystem {
+    type Sender = ReplySenderType;
+
+    fn id(&self) -> ComponentId {
+        TestComponentId::PusModeService as ComponentId
+    }
+    fn add_mode_parent(&mut self, id: ComponentId, reply_sender: ReplySenderType) {
+        self.mode_node.add_reply_target(id, reply_sender);
+    }
+}
+
+impl ModeProvider for AcsSubsystem {
     fn mode_and_submode(&self) -> ModeAndSubmode {
         self.mode_and_submode
     }
 }
 
-impl ModeRequestHandler for TestSubsystem {
+impl ModeRequestHandler for AcsSubsystem {
     type Error = ModeError;
 
     fn start_transition(
@@ -75,7 +180,6 @@ impl ModeRequestHandler for TestSubsystem {
             "TestAssembly: Announcing mode (recursively: {}): {:?}",
             recursive, self.mode_and_submode
         );
-        // self.mode_requestor_info = Some((request_id, sender_id));
         let mut mode_request = ModeRequest::AnnounceMode;
         if recursive {
             mode_request = ModeRequest::AnnounceModeRecursive;
@@ -126,20 +230,14 @@ impl ModeRequestHandler for TestSubsystem {
     }
 }
 
-struct TestAssembly {
+struct MgmAssembly {
     pub mode_node: ModeRequestorAndHandlerMpscBounded,
     pub mode_requestor_info: Option<MessageMetadata>,
     pub mode_and_submode: ModeAndSubmode,
     pub target_mode_and_submode: Option<ModeAndSubmode>,
 }
 
-impl ModeProvider for TestAssembly {
-    fn mode_and_submode(&self) -> ModeAndSubmode {
-        self.mode_and_submode
-    }
-}
-
-impl TestAssembly {
+impl MgmAssembly {
     pub fn run(&mut self) {
         self.check_mode_requests().expect("mode messaging error");
         self.check_mode_replies().expect("mode messaging error");
@@ -196,7 +294,37 @@ impl TestAssembly {
     }
 }
 
-impl ModeRequestHandler for TestAssembly {
+impl ModeParent for MgmAssembly {
+    type Sender = RequestSenderType;
+
+    fn id(&self) -> ComponentId {
+        TestComponentId::AcsSubsystem as ComponentId
+    }
+
+    fn add_mode_child(&mut self, id: ComponentId, request_sender: RequestSenderType) {
+        self.mode_node.add_request_target(id, request_sender);
+    }
+}
+
+impl ModeChild for MgmAssembly {
+    type Sender = ReplySenderType;
+
+    fn id(&self) -> ComponentId {
+        TestComponentId::PusModeService as ComponentId
+    }
+
+    fn add_mode_parent(&mut self, id: ComponentId, reply_sender: ReplySenderType) {
+        self.mode_node.add_reply_target(id, reply_sender);
+    }
+}
+
+impl ModeProvider for MgmAssembly {
+    fn mode_and_submode(&self) -> ModeAndSubmode {
+        self.mode_and_submode
+    }
+}
+
+impl ModeRequestHandler for MgmAssembly {
     type Error = ModeError;
     fn start_transition(
         &mut self,
@@ -262,13 +390,23 @@ impl ModeRequestHandler for TestAssembly {
     }
 }
 
-struct TestDevice {
-    pub name: String,
+struct CommonDevice {
+    name: String,
+    pub id: ComponentId,
     pub mode_node: ModeRequestHandlerMpscBounded,
     pub mode_and_submode: ModeAndSubmode,
 }
 
-impl TestDevice {
+impl CommonDevice {
+    pub fn new(name: String, id: ComponentId, mode_node: ModeRequestHandlerMpscBounded) -> Self {
+        Self {
+            name,
+            id,
+            mode_node,
+            mode_and_submode: ModeAndSubmode::new(0, 0),
+        }
+    }
+
     pub fn run(&mut self) {
         self.check_mode_requests().expect("mode messaging error");
     }
@@ -281,13 +419,25 @@ impl TestDevice {
     }
 }
 
-impl ModeProvider for TestDevice {
+impl ModeChild for CommonDevice {
+    type Sender = ReplySenderType;
+
+    fn id(&self) -> ComponentId {
+        self.id
+    }
+
+    fn add_mode_parent(&mut self, id: ComponentId, reply_sender: ReplySenderType) {
+        self.mode_node.add_message_target(id, reply_sender);
+    }
+}
+
+impl ModeProvider for CommonDevice {
     fn mode_and_submode(&self) -> ModeAndSubmode {
         self.mode_and_submode
     }
 }
 
-impl ModeRequestHandler for TestDevice {
+impl ModeRequestHandler for CommonDevice {
     type Error = ModeError;
 
     fn start_transition(
@@ -338,22 +488,120 @@ impl ModeRequestHandler for TestDevice {
     }
 }
 
+pub struct AcsController {
+    pub mode_node: ModeRequestHandlerMpscBounded,
+    pub mode_and_submode: ModeAndSubmode,
+}
+
+impl AcsController {
+    pub fn run(&mut self) {
+        self.check_mode_requests().expect("mode messaging error");
+    }
+
+    pub fn check_mode_requests(&mut self) -> Result<(), ModeError> {
+        if let Some(request) = self.mode_node.try_recv_mode_request()? {
+            self.handle_mode_request(request)?
+        }
+        Ok(())
+    }
+}
+
+impl ModeChild for AcsController {
+    type Sender = ReplySenderType;
+
+    fn id(&self) -> ComponentId {
+        TestComponentId::AcsController as u64
+    }
+
+    fn add_mode_parent(&mut self, id: ComponentId, reply_sender: ReplySenderType) {
+        self.mode_node.add_message_target(id, reply_sender);
+    }
+}
+
+impl ModeProvider for AcsController {
+    fn mode_and_submode(&self) -> ModeAndSubmode {
+        self.mode_and_submode
+    }
+}
+
+impl ModeRequestHandler for AcsController {
+    type Error = ModeError;
+
+    fn start_transition(
+        &mut self,
+        requestor: MessageMetadata,
+        mode_and_submode: ModeAndSubmode,
+    ) -> Result<(), Self::Error> {
+        self.mode_and_submode = mode_and_submode;
+        self.handle_mode_reached(Some(requestor))?;
+        Ok(())
+    }
+
+    fn announce_mode(&self, requestor_info: Option<MessageMetadata>, recursive: bool) {
+        println!(
+            "ACS Controllerj: announcing mode: {:?}",
+            self.mode_and_submode
+        );
+    }
+
+    fn handle_mode_reached(
+        &mut self,
+        requestor_info: Option<MessageMetadata>,
+    ) -> Result<(), Self::Error> {
+        if let Some(requestor) = requestor_info {
+            self.send_mode_reply(requestor, ModeReply::ModeReply(self.mode_and_submode))?;
+        }
+        Ok(())
+    }
+
+    fn handle_mode_info(
+        &mut self,
+        requestor_info: MessageMetadata,
+        info: ModeAndSubmode,
+    ) -> Result<(), Self::Error> {
+        // The controller is a leaf in the tree.. so this really should not happen
+        println!(
+            "ACS Controller: unexpected mode info from {:?} with mode: {:?}",
+            requestor_info.sender_id(),
+            info
+        );
+        Ok(())
+    }
+
+    fn send_mode_reply(
+        &self,
+        requestor_info: MessageMetadata,
+        reply: ModeReply,
+    ) -> Result<(), Self::Error> {
+        self.mode_node.send_mode_reply(requestor_info, reply)?;
+        Ok(())
+    }
+}
+
+#[test]
 fn main() {
     // All request channel handles.
-    let (request_sender_to_dev1, request_receiver_dev1) = mpsc::sync_channel(10);
-    let (request_sender_to_dev2, request_receiver_dev2) = mpsc::sync_channel(10);
-    let (request_sender_to_assy, request_receiver_assy) = mpsc::sync_channel(10);
-    let (request_sender_to_subsystem, request_receiver_subsystem) = mpsc::sync_channel(10);
+    let (request_sender_to_mgm_dev, request_receiver_mgm_dev) = mpsc::sync_channel(10);
+    let (request_sender_to_mgt_dev, request_receiver_mgt_dev) = mpsc::sync_channel(10);
+    let (request_sender_to_mgm_assy, request_receiver_mgm_assy) = mpsc::sync_channel(10);
+    let (request_sender_to_acs_subsystem, request_receiver_acs_subsystem) = mpsc::sync_channel(10);
+    let (request_sender_to_acs_ctrl, request_receiver_acs_ctrl) = mpsc::sync_channel(10);
 
     // All reply channel handles.
-    let (reply_sender_to_assy, reply_receiver_assy) = mpsc::sync_channel(10);
+    let (reply_sender_to_mgm_assy, reply_receiver_mgm_assy) = mpsc::sync_channel(10);
+    let (reply_sender_to_acs_subsystem, reply_receiver_acs_subsystem) = mpsc::sync_channel(10);
     let (reply_sender_to_pus, reply_receiver_pus) = mpsc::sync_channel(10);
 
     // Mode requestors and handlers.
-    let mut mode_node_assy = ModeRequestorAndHandlerMpscBounded::new(
-        TestComponentId::Assembly as ComponentId,
-        request_receiver_assy,
-        reply_receiver_assy,
+    let mut mgm_assy_node = ModeRequestorAndHandlerMpscBounded::new(
+        TestComponentId::MagnetometerAssembly as ComponentId,
+        request_receiver_mgm_assy,
+        reply_receiver_mgm_assy,
+    );
+    let mut acs_subsystem_node = ModeRequestorAndHandlerMpscBounded::new(
+        TestComponentId::AcsSubsystem as ComponentId,
+        request_receiver_acs_subsystem,
+        reply_receiver_acs_subsystem,
     );
     // Mode requestors only.
     let mut mode_node_pus = ModeRequestorBoundedMpsc::new(
@@ -362,88 +610,130 @@ fn main() {
     );
 
     // Request handlers only.
-    let mut mode_node_dev1 = ModeRequestHandlerMpscBounded::new(
-        TestComponentId::Device1 as ComponentId,
-        request_receiver_dev1,
+    let mut mgm_dev_node = ModeRequestHandlerMpscBounded::new(
+        TestComponentId::MagnetometerDevice as ComponentId,
+        request_receiver_mgm_dev,
     );
-    let mut mode_node_dev2 = ModeRequestHandlerMpscBounded::new(
-        TestComponentId::Device2 as ComponentId,
-        request_receiver_dev2,
+    let mut mgt_dev_node = ModeRequestHandlerMpscBounded::new(
+        TestComponentId::MagnetorquerDevice as ComponentId,
+        request_receiver_mgt_dev,
     );
-
-    // Set up mode request senders first.
-    mode_node_pus.add_message_target(
-        TestComponentId::Assembly as ComponentId,
-        request_sender_to_assy,
-    );
-    mode_node_pus.add_message_target(
-        TestComponentId::Device1 as ComponentId,
-        request_sender_to_dev1.clone(),
-    );
-    mode_node_pus.add_message_target(
-        TestComponentId::Device2 as ComponentId,
-        request_sender_to_dev2.clone(),
-    );
-    mode_node_pus.add_message_target(
-        TestComponentId::Subsystem as ComponentId,
-        request_sender_to_subsystem.clone(),
-    );
-
-    mode_node_assy.add_request_target(
-        TestComponentId::Device1 as ComponentId,
-        request_sender_to_dev1,
-    );
-    mode_node_assy.add_request_target(
-        TestComponentId::Device2 as ComponentId,
-        request_sender_to_dev2,
+    let mut acs_ctrl_node = ModeRequestHandlerMpscBounded::new(
+        TestComponentId::AcsController as ComponentId,
+        request_receiver_acs_ctrl,
     );
 
     // Set up mode reply senders.
-    mode_node_dev1.add_message_target(
-        TestComponentId::Assembly as ComponentId,
-        reply_sender_to_assy.clone(),
+    mgm_dev_node.add_message_target(
+        TestComponentId::MagnetometerAssembly as ComponentId,
+        reply_sender_to_mgm_assy.clone(),
     );
-    mode_node_dev1.add_message_target(
+    mgt_dev_node.add_message_target(
+        TestComponentId::MagnetometerAssembly as ComponentId,
+        reply_sender_to_mgm_assy.clone(),
+    );
+    mgm_assy_node.add_reply_target(
         TestComponentId::PusModeService as ComponentId,
         reply_sender_to_pus.clone(),
     );
-    mode_node_dev2.add_message_target(
-        TestComponentId::Assembly as ComponentId,
-        reply_sender_to_assy,
-    );
-    mode_node_dev2.add_message_target(
-        TestComponentId::PusModeService as ComponentId,
+    mgm_assy_node.add_reply_target(
+        TestComponentId::AcsSubsystem as ComponentId,
         reply_sender_to_pus.clone(),
-    );
-    mode_node_assy.add_reply_target(
-        TestComponentId::PusModeService as ComponentId,
-        reply_sender_to_pus,
     );
 
-    let mut device1 = TestDevice {
-        name: "Test Device 1".to_string(),
-        mode_node: mode_node_dev1,
-        mode_and_submode: ModeAndSubmode::new(0, 0),
-    };
-    let mut device2 = TestDevice {
-        name: "Test Device 2".to_string(),
-        mode_node: mode_node_dev2,
-        mode_and_submode: ModeAndSubmode::new(0, 0),
-    };
-    let mut assy = TestAssembly {
-        mode_node: mode_node_assy,
+    let mut mode_store_acs_subsystem = ModeStoreVec::default();
+    let mut target_tables_acs_subsystem = TargetModeTables::default();
+    let mut sequence_tables_acs_subsystem = SequenceModeTables::default();
+
+    let mut mgm_dev = CommonDevice::new(
+        "MGM".to_string(),
+        TestComponentId::MagnetometerDevice as u64,
+        mgm_dev_node,
+    );
+    let mut mgt_dev = CommonDevice::new(
+        "MGT".to_string(),
+        TestComponentId::MagnetorquerDevice as u64,
+        mgt_dev_node,
+    );
+    let mut mgm_assy = MgmAssembly {
+        mode_node: mgm_assy_node,
         mode_requestor_info: None,
         mode_and_submode: ModeAndSubmode::new(0, 0),
         target_mode_and_submode: None,
     };
-    let pus_service = PusModeService {
+    let mut acs_subsystem = AcsSubsystem {
+        mode_node: acs_subsystem_node,
+        mode_requestor_info: None,
+        mode_and_submode: ModeAndSubmode::new(0, 0),
+        target_mode_and_submode: None,
+        children_mode_store: mode_store_acs_subsystem,
+        target_tables: target_tables_acs_subsystem,
+        sequence_tables: sequence_tables_acs_subsystem,
+    };
+    let mut acs_ctrl = AcsController {
+        mode_node: acs_ctrl_node,
+        mode_and_submode: ModeAndSubmode::new(0, 0),
+    };
+    let mut pus_service = PusModeService {
         request_id_counter: Cell::new(0),
         mode_node: mode_node_pus,
     };
 
-    pus_service.send_announce_mode_cmd_to_assy();
-    assy.run();
-    device1.run();
-    device2.run();
-    assy.run();
+    // Connect the PUS mode service to all mode objects.
+    connect_mode_nodes(
+        &mut pus_service,
+        request_sender_to_acs_subsystem,
+        &mut acs_subsystem,
+        reply_sender_to_pus.clone(),
+    );
+    connect_mode_nodes(
+        &mut pus_service,
+        request_sender_to_acs_ctrl.clone(),
+        &mut acs_ctrl,
+        reply_sender_to_pus.clone(),
+    );
+    connect_mode_nodes(
+        &mut pus_service,
+        request_sender_to_mgm_dev.clone(),
+        &mut mgm_dev,
+        reply_sender_to_pus.clone(),
+    );
+    connect_mode_nodes(
+        &mut pus_service,
+        request_sender_to_mgm_assy.clone(),
+        &mut mgm_assy,
+        reply_sender_to_pus.clone(),
+    );
+    connect_mode_nodes(
+        &mut pus_service,
+        request_sender_to_mgt_dev,
+        &mut mgt_dev,
+        reply_sender_to_pus.clone(),
+    );
+
+    // Connect the ACS subsystem to all children.
+    connect_mode_nodes(
+        &mut acs_subsystem,
+        request_sender_to_mgm_assy,
+        &mut mgm_assy,
+        reply_sender_to_acs_subsystem.clone(),
+    );
+    connect_mode_nodes(
+        &mut acs_subsystem,
+        request_sender_to_acs_ctrl,
+        &mut acs_ctrl,
+        reply_sender_to_acs_subsystem.clone(),
+    );
+
+    connect_mode_nodes(
+        &mut mgm_assy,
+        request_sender_to_mgm_dev,
+        &mut mgm_dev,
+        reply_sender_to_mgm_assy,
+    );
+
+    pus_service.send_announce_mode_cmd_to_subsystem();
+    mgm_assy.run();
+    mgm_dev.run();
+    mgt_dev.run();
 }

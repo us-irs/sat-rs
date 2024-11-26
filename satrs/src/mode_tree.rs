@@ -6,6 +6,9 @@ use crate::{
     ComponentId,
 };
 
+#[cfg(feature = "alloc")]
+pub use alloc_mod::*;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TableEntryType {
     /// Target table containing information of the expected children modes for  given mode.
@@ -79,31 +82,11 @@ impl TargetTableEntry {
     }
 }
 
-#[derive(Debug)]
-pub struct TargetTableMapValue {
-    /// Name for a given mode table entry.
-    pub name: &'static str,
-    /// These are the rows of the a target table.
-    pub entries: Vec<TargetTableEntry>,
-}
-
-impl TargetTableMapValue {
-    pub fn new(name: &'static str) -> Self {
-        Self {
-            name,
-            entries: Default::default(),
-        }
-    }
-
-    pub fn add_entry(&mut self, entry: TargetTableEntry) {
-        self.entries.push(entry);
-    }
-}
-
 /// An entry for the sequence tables.
 ///
 /// The `check_success` field instructs the mode sequence executor to verify that the
 /// target mode was actually reached before executing the next sequence.
+#[derive(Debug)]
 pub struct SequenceTableEntry {
     pub common: ModeTableEntryCommon,
     pub check_success: bool,
@@ -135,48 +118,124 @@ impl SequenceTableEntry {
     }
 }
 
-pub struct SequenceTableMapTable {
-    /// Name for a given mode sequence.
-    pub name: &'static str,
-    /// These are the rows of the a sequence table.
-    pub entries: Vec<SequenceTableEntry>,
+pub trait ModeStoreProvider {
+    fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode);
+    fn get_mode(&self, target_id: ComponentId) -> Option<ModeAndSubmode>;
+    fn set_mode(&mut self, target_id: ComponentId, mode: ModeAndSubmode);
 }
 
-impl SequenceTableMapTable {
-    pub fn new(name: &'static str) -> Self {
-        Self {
-            name,
-            entries: Default::default(),
+#[cfg(feature = "alloc")]
+pub mod alloc_mod {
+    use super::*;
+
+    #[derive(Debug)]
+    pub struct TargetTableMapValue {
+        /// Name for a given mode table entry.
+        pub name: &'static str,
+        /// These are the rows of the a target table.
+        pub entries: Vec<TargetTableEntry>,
+    }
+
+    impl TargetTableMapValue {
+        pub fn new(name: &'static str) -> Self {
+            Self {
+                name,
+                entries: Default::default(),
+            }
+        }
+
+        pub fn add_entry(&mut self, entry: TargetTableEntry) {
+            self.entries.push(entry);
         }
     }
 
-    pub fn add_entry(&mut self, entry: SequenceTableEntry) {
-        self.entries.push(entry);
+    #[derive(Debug)]
+    pub struct SequenceTableMapTable {
+        /// Name for a given mode sequence.
+        pub name: &'static str,
+        /// These are the rows of the a sequence table.
+        pub entries: Vec<SequenceTableEntry>,
     }
-}
 
-pub struct SequenceTableMapValue {
-    /// Name for a given mode sequence.
-    pub name: &'static str,
-    /// Each sequence can consists of multiple sequences that are executed consecutively.
-    pub entries: Vec<SequenceTableMapTable>,
-}
+    impl SequenceTableMapTable {
+        pub fn new(name: &'static str) -> Self {
+            Self {
+                name,
+                entries: Default::default(),
+            }
+        }
 
-impl SequenceTableMapValue {
-    pub fn new(name: &'static str) -> Self {
-        Self {
-            name,
-            entries: Default::default(),
+        pub fn add_entry(&mut self, entry: SequenceTableEntry) {
+            self.entries.push(entry);
         }
     }
 
-    pub fn add_sequence_table(&mut self, entry: SequenceTableMapTable) {
-        self.entries.push(entry);
+    #[derive(Debug)]
+    pub struct SequenceTableMapValue {
+        /// Name for a given mode sequence.
+        pub name: &'static str,
+        /// Each sequence can consists of multiple sequences that are executed consecutively.
+        pub entries: Vec<SequenceTableMapTable>,
+    }
+
+    impl SequenceTableMapValue {
+        pub fn new(name: &'static str) -> Self {
+            Self {
+                name,
+                entries: Default::default(),
+            }
+        }
+
+        pub fn add_sequence_table(&mut self, entry: SequenceTableMapTable) {
+            self.entries.push(entry);
+        }
+    }
+
+    #[derive(Debug, Default)]
+    pub struct TargetModeTables(pub HashMap<Mode, TargetTableMapValue>);
+    #[derive(Debug, Default)]
+    pub struct SequenceModeTables(pub HashMap<Mode, SequenceTableMapValue>);
+
+    #[derive(Debug, Default)]
+    pub struct ModeStoreVec(pub alloc::vec::Vec<(ComponentId, ModeAndSubmode)>);
+    #[derive(Debug, Default)]
+    pub struct ModeStoreMap(pub hashbrown::HashMap<ComponentId, ModeAndSubmode>);
+
+    impl ModeStoreProvider for ModeStoreVec {
+        fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode) {
+            self.0.push((target_id, mode));
+        }
+
+        fn get_mode(&self, target_id: ComponentId) -> Option<ModeAndSubmode> {
+            self.0.iter().find_map(|(id, mode)| {
+                if *id == target_id {
+                    return Some(*mode);
+                }
+                None
+            })
+        }
+
+        fn set_mode(&mut self, target_id: ComponentId, mode_to_set: ModeAndSubmode) {
+            self.0.iter_mut().for_each(|(id, mode)| {
+                if *id == target_id {
+                    *mode = mode_to_set;
+                }
+            });
+        }
+    }
+
+    impl ModeStoreProvider for ModeStoreMap {
+        fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode) {
+            self.0.insert(target_id, mode);
+        }
+        fn get_mode(&self, target_id: ComponentId) -> Option<ModeAndSubmode> {
+            self.0.get(&target_id).copied()
+        }
+        fn set_mode(&mut self, target_id: ComponentId, mode_to_set: ModeAndSubmode) {
+            self.0.insert(target_id, mode_to_set);
+        }
     }
 }
-
-pub struct TargetModeTable(pub HashMap<Mode, TargetTableMapValue>);
-pub struct SequenceModeTable(pub HashMap<Mode, SequenceTableMapValue>);
 
 #[cfg(test)]
 mod tests {}

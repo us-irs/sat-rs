@@ -1,6 +1,6 @@
 use crate::{
     mode::{Mode, ModeAndSubmode, ModeRequest, ModeRequestSender},
-    mode_tree::{SequenceModeTable, SequenceTableMapTable, SequenceTableMapValue},
+    mode_tree::{SequenceModeTables, SequenceTableMapTable, SequenceTableMapValue},
     queue::GenericTargetedMessagingError,
     request::RequestId,
     ComponentId,
@@ -40,9 +40,9 @@ impl SequenceExecutionHelper {
     pub fn new(
         mode: Mode,
         request_id: RequestId,
-        sequence_table: &SequenceModeTable,
+        sequence_tables: &SequenceModeTables,
     ) -> Option<Self> {
-        if !sequence_table.0.contains_key(&mode) {
+        if !sequence_tables.0.contains_key(&mode) {
             return None;
         }
         Some(Self {
@@ -61,7 +61,7 @@ impl SequenceExecutionHelper {
 
     pub fn run(
         &mut self,
-        table: &SequenceModeTable,
+        table: &SequenceModeTables,
         sender: &impl ModeRequestSender,
     ) -> Result<SequenceHandlerResult, GenericTargetedMessagingError> {
         if self.state == SequenceExecutionHelperStates::AwaitingCheckSuccess {
@@ -110,7 +110,6 @@ impl SequenceExecutionHelper {
     pub fn execute_sequence(
         request_id: RequestId,
         map_table: &SequenceTableMapTable,
-        //sequence_idx: usize,
         sender: &impl ModeRequestSender,
     ) -> Result<bool, GenericTargetedMessagingError> {
         let mut some_succes_check_required = false;
@@ -129,6 +128,4 @@ impl SequenceExecutionHelper {
 }
 
 #[cfg(test)]
-mod tests {
-    pub struct SatSystem {}
-}
+mod tests {}
