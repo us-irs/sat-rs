@@ -2,12 +2,56 @@ use alloc::vec::Vec;
 use hashbrown::HashMap;
 
 use crate::{
-    mode::{Mode, ModeAndSubmode, Submode},
+    mode::{Mode, ModeAndSubmode, ModeReply, ModeRequest, Submode},
+    request::MessageSender,
     ComponentId,
 };
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
+
+/// Common trait for node modes which can have mode parents or mode children.
+pub trait ModeNode {
+    fn id(&self) -> ComponentId;
+}
+/// Trait which denotes that an object is a parent in a mode tree.
+///
+/// A mode parent is capable of sending mode requests to child objects and has a unique component
+/// ID.
+pub trait ModeParent: ModeNode {
+    type Sender: MessageSender<ModeRequest>;
+
+    fn add_mode_child(&mut self, id: ComponentId, request_sender: Self::Sender);
+}
+
+/// Trait which denotes that an object is a child in a mode tree.
+///
+/// A child is capable of sending mode replies to parent objects and has a unique component ID.
+pub trait ModeChild: ModeNode {
+    type Sender: MessageSender<ModeReply>;
+
+    fn add_mode_parent(&mut self, id: ComponentId, reply_sender: Self::Sender);
+}
+
+/// Utility method which connects a mode tree parent object to a child object by calling
+/// [ModeParent::add_mode_child] on the [parent][ModeParent] and calling
+/// [ModeChild::add_mode_parent] on the [child][ModeChild].
+///
+/// # Arguments
+///
+/// * `parent` - The parent object which implements [ModeParent].
+/// * `request_sender` - Sender object to send mode requests to the child.
+/// * `child` - The child object which implements [ModeChild].
+/// * `reply_sender` - Sender object to send mode replies to the parent.
+pub fn connect_mode_nodes<ReqSender, ReplySender>(
+    parent: &mut impl ModeParent<Sender = ReqSender>,
+    request_sender: ReqSender,
+    child: &mut impl ModeChild<Sender = ReplySender>,
+    reply_sender: ReplySender,
+) {
+    parent.add_mode_child(child.id(), request_sender);
+    child.add_mode_parent(parent.id(), reply_sender);
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TableEntryType {
@@ -58,6 +102,24 @@ pub struct TargetTableEntry {
 
 impl TargetTableEntry {
     pub fn new(
+        name: &'static str,
+        target_id: ComponentId,
+        mode_submode: ModeAndSubmode,
+        monitor_state: bool,
+        allowed_submode_mask: Option<Submode>,
+    ) -> Self {
+        Self {
+            common: ModeTableEntryCommon {
+                name,
+                target_id,
+                mode_submode,
+                allowed_submode_mask,
+            },
+            monitor_state,
+        }
+    }
+
+    pub fn new_with_precise_submode(
         name: &'static str,
         target_id: ComponentId,
         mode_submode: ModeAndSubmode,
@@ -129,14 +191,14 @@ pub mod alloc_mod {
     use super::*;
 
     #[derive(Debug)]
-    pub struct TargetTableMapValue {
+    pub struct TargetTablesMapValue {
         /// Name for a given mode table entry.
         pub name: &'static str,
         /// These are the rows of the a target table.
         pub entries: Vec<TargetTableEntry>,
     }
 
-    impl TargetTableMapValue {
+    impl TargetTablesMapValue {
         pub fn new(name: &'static str) -> Self {
             Self {
                 name,
@@ -171,14 +233,14 @@ pub mod alloc_mod {
     }
 
     #[derive(Debug)]
-    pub struct SequenceTableMapValue {
+    pub struct SequenceTablesMapValue {
         /// Name for a given mode sequence.
         pub name: &'static str,
         /// Each sequence can consists of multiple sequences that are executed consecutively.
         pub entries: Vec<SequenceTableMapTable>,
     }
 
-    impl SequenceTableMapValue {
+    impl SequenceTablesMapValue {
         pub fn new(name: &'static str) -> Self {
             Self {
                 name,
@@ -192,9 +254,9 @@ pub mod alloc_mod {
     }
 
     #[derive(Debug, Default)]
-    pub struct TargetModeTables(pub HashMap<Mode, TargetTableMapValue>);
+    pub struct TargetModeTables(pub HashMap<Mode, TargetTablesMapValue>);
     #[derive(Debug, Default)]
-    pub struct SequenceModeTables(pub HashMap<Mode, SequenceTableMapValue>);
+    pub struct SequenceModeTables(pub HashMap<Mode, SequenceTablesMapValue>);
 
     #[derive(Debug, Default)]
     pub struct ModeStoreVec(pub alloc::vec::Vec<(ComponentId, ModeAndSubmode)>);
