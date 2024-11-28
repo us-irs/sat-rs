@@ -1,6 +1,6 @@
 use crate::{
     mode::{Mode, ModeAndSubmode, ModeRequest, ModeRequestSender},
-    mode_tree::{SequenceModeTables, SequenceTableMapTable, SequenceTableMapValue},
+    mode_tree::{SequenceModeTables, SequenceTableMapTable, SequenceTablesMapValue},
     queue::GenericTargetedMessagingError,
     request::RequestId,
     ComponentId,
@@ -88,7 +88,7 @@ impl SequenceExecutionHelper {
 
     pub fn execute_sequence_and_map_to_result(
         &mut self,
-        seq_table_value: &SequenceTableMapValue,
+        seq_table_value: &SequenceTablesMapValue,
         sequence_idx: usize,
         sender: &impl ModeRequestSender,
     ) -> Result<SequenceHandlerResult, GenericTargetedMessagingError> {
