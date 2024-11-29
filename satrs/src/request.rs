@@ -140,24 +140,27 @@ impl<Message> GenericMessage<Message> {
 }
 
 /// Generic trait for objects which can send targeted messages.
-pub trait MessageSender<MSG>: Send {
+pub trait MessageSenderProvider<MSG>: Send {
     fn send(&self, message: GenericMessage<MSG>) -> Result<(), GenericTargetedMessagingError>;
 }
 
 // Generic trait for objects which can receive targeted messages.
-pub trait MessageReceiver<MSG> {
+pub trait MessageReceiverProvider<MSG> {
     fn try_recv(&self) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError>;
 }
 
-pub struct MessageWithSenderIdReceiver<MSG, R: MessageReceiver<MSG>>(pub R, PhantomData<MSG>);
+pub struct MessageWithSenderIdReceiver<MSG, R: MessageReceiverProvider<MSG>>(
+    pub R,
+    PhantomData<MSG>,
+);
 
-impl<MSG, R: MessageReceiver<MSG>> From<R> for MessageWithSenderIdReceiver<MSG, R> {
+impl<MSG, R: MessageReceiverProvider<MSG>> From<R> for MessageWithSenderIdReceiver<MSG, R> {
     fn from(receiver: R) -> Self {
         MessageWithSenderIdReceiver(receiver, PhantomData)
     }
 }
 
-impl<MSG, R: MessageReceiver<MSG>> MessageWithSenderIdReceiver<MSG, R> {
+impl<MSG, R: MessageReceiverProvider<MSG>> MessageWithSenderIdReceiver<MSG, R> {
     pub fn try_recv_message(
         &self,
     ) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
@@ -165,12 +168,12 @@ impl<MSG, R: MessageReceiver<MSG>> MessageWithSenderIdReceiver<MSG, R> {
     }
 }
 
-pub struct MessageReceiverWithId<MSG, R: MessageReceiver<MSG>> {
+pub struct MessageReceiverWithId<MSG, R: MessageReceiverProvider<MSG>> {
     local_channel_id: ComponentId,
     reply_receiver: MessageWithSenderIdReceiver<MSG, R>,
 }
 
-impl<MSG, R: MessageReceiver<MSG>> MessageReceiverWithId<MSG, R> {
+impl<MSG, R: MessageReceiverProvider<MSG>> MessageReceiverWithId<MSG, R> {
     pub fn new(local_channel_id: ComponentId, reply_receiver: R) -> Self {
         Self {
             local_channel_id,
@@ -183,12 +186,23 @@ impl<MSG, R: MessageReceiver<MSG>> MessageReceiverWithId<MSG, R> {
     }
 }
 
-impl<MSG, R: MessageReceiver<MSG>> MessageReceiverWithId<MSG, R> {
+impl<MSG, R: MessageReceiverProvider<MSG>> MessageReceiverWithId<MSG, R> {
     pub fn try_recv_message(
         &self,
     ) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
         self.reply_receiver.0.try_recv()
     }
+}
+
+pub trait MessageSenderStoreProvider<Message, Sender>: Default {
+    fn add_message_target(&mut self, target_id: ComponentId, message_sender: Sender);
+
+    fn send_message(
+        &self,
+        requestor_info: MessageMetadata,
+        target_channel_id: ComponentId,
+        message: Message,
+    ) -> Result<(), GenericTargetedMessagingError>;
 }
 
 #[cfg(feature = "alloc")]
@@ -198,23 +212,99 @@ pub mod alloc_mod {
     use super::*;
     use hashbrown::HashMap;
 
-    pub struct MessageSenderMap<MSG, S: MessageSender<MSG>>(
-        pub HashMap<ComponentId, S>,
+    pub struct OneMessageSender<Msg, S: MessageSenderProvider<Msg>> {
+        pub id_and_sender: Option<(ComponentId, S)>,
+        pub(crate) phantom: PhantomData<Msg>,
+    }
+
+    impl<Msg, S: MessageSenderProvider<Msg>> Default for OneMessageSender<Msg, S> {
+        fn default() -> Self {
+            Self {
+                id_and_sender: Default::default(),
+                phantom: Default::default(),
+            }
+        }
+    }
+
+    impl<Msg, S: MessageSenderProvider<Msg>> MessageSenderStoreProvider<Msg, S>
+        for OneMessageSender<Msg, S>
+    {
+        fn add_message_target(&mut self, target_id: ComponentId, message_sender: S) {
+            if self.id_and_sender.is_some() {
+                return;
+            }
+            self.id_and_sender = Some((target_id, message_sender));
+        }
+
+        fn send_message(
+            &self,
+            requestor_info: MessageMetadata,
+            target_channel_id: ComponentId,
+            message: Msg,
+        ) -> Result<(), GenericTargetedMessagingError> {
+            if let Some((current_id, sender)) = &self.id_and_sender {
+                if *current_id == target_channel_id {
+                    sender.send(GenericMessage::new(requestor_info, message))?;
+                    return Ok(());
+                }
+            }
+            Err(GenericSendError::TargetDoesNotExist(target_channel_id).into())
+        }
+    }
+
+    pub struct MessageSenderList<MSG, S: MessageSenderProvider<MSG>>(
+        pub alloc::vec::Vec<(ComponentId, S)>,
         pub(crate) PhantomData<MSG>,
     );
 
-    impl<MSG, S: MessageSender<MSG>> Default for MessageSenderMap<MSG, S> {
+    impl<MSG, S: MessageSenderProvider<MSG>> Default for MessageSenderList<MSG, S> {
         fn default() -> Self {
             Self(Default::default(), PhantomData)
         }
     }
 
-    impl<MSG, S: MessageSender<MSG>> MessageSenderMap<MSG, S> {
-        pub fn add_message_target(&mut self, target_id: ComponentId, message_sender: S) {
+    impl<MSG, S: MessageSenderProvider<MSG>> MessageSenderStoreProvider<MSG, S>
+        for MessageSenderList<MSG, S>
+    {
+        fn add_message_target(&mut self, target_id: ComponentId, message_sender: S) {
+            self.0.push((target_id, message_sender));
+        }
+
+        fn send_message(
+            &self,
+            requestor_info: MessageMetadata,
+            target_channel_id: ComponentId,
+            message: MSG,
+        ) -> Result<(), GenericTargetedMessagingError> {
+            for (current_id, sender) in &self.0 {
+                if *current_id == target_channel_id {
+                    sender.send(GenericMessage::new(requestor_info, message))?;
+                    return Ok(());
+                }
+            }
+            Err(GenericSendError::TargetDoesNotExist(target_channel_id).into())
+        }
+    }
+
+    pub struct MessageSenderMap<MSG, S: MessageSenderProvider<MSG>>(
+        pub HashMap<ComponentId, S>,
+        pub(crate) PhantomData<MSG>,
+    );
+
+    impl<MSG, S: MessageSenderProvider<MSG>> Default for MessageSenderMap<MSG, S> {
+        fn default() -> Self {
+            Self(Default::default(), PhantomData)
+        }
+    }
+
+    impl<MSG, S: MessageSenderProvider<MSG>> MessageSenderStoreProvider<MSG, S>
+        for MessageSenderMap<MSG, S>
+    {
+        fn add_message_target(&mut self, target_id: ComponentId, message_sender: S) {
             self.0.insert(target_id, message_sender);
         }
 
-        pub fn send_message(
+        fn send_message(
             &self,
             requestor_info: MessageMetadata,
             target_channel_id: ComponentId,
@@ -231,25 +321,38 @@ pub mod alloc_mod {
         }
     }
 
-    pub struct MessageSenderAndReceiver<TO, FROM, S: MessageSender<TO>, R: MessageReceiver<FROM>> {
+    pub struct MessageSenderAndReceiver<
+        To,
+        From,
+        Sender: MessageSenderProvider<To>,
+        Receiver: MessageReceiverProvider<From>,
+        SenderStore: MessageSenderStoreProvider<To, Sender>,
+    > {
         pub local_channel_id: ComponentId,
-        pub message_sender_map: MessageSenderMap<TO, S>,
-        pub message_receiver: MessageWithSenderIdReceiver<FROM, R>,
+        pub message_sender_store: SenderStore,
+        pub message_receiver: MessageWithSenderIdReceiver<From, Receiver>,
+        pub(crate) phantom: PhantomData<(To, Sender)>,
     }
 
-    impl<TO, FROM, S: MessageSender<TO>, R: MessageReceiver<FROM>>
-        MessageSenderAndReceiver<TO, FROM, S, R>
+    impl<
+            To,
+            From,
+            Sender: MessageSenderProvider<To>,
+            Receiver: MessageReceiverProvider<From>,
+            SenderStore: MessageSenderStoreProvider<To, Sender>,
+        > MessageSenderAndReceiver<To, From, Sender, Receiver, SenderStore>
     {
-        pub fn new(local_channel_id: ComponentId, message_receiver: R) -> Self {
+        pub fn new(local_channel_id: ComponentId, message_receiver: Receiver) -> Self {
             Self {
                 local_channel_id,
-                message_sender_map: Default::default(),
+                message_sender_store: Default::default(),
                 message_receiver: MessageWithSenderIdReceiver::from(message_receiver),
+                phantom: PhantomData,
             }
         }
 
-        pub fn add_message_target(&mut self, target_id: ComponentId, message_sender: S) {
-            self.message_sender_map
+        pub fn add_message_target(&mut self, target_id: ComponentId, message_sender: Sender) {
+            self.message_sender_store
                 .add_message_target(target_id, message_sender)
         }
 
@@ -262,9 +365,9 @@ pub mod alloc_mod {
             &self,
             request_id: RequestId,
             target_id: ComponentId,
-            message: TO,
+            message: To,
         ) -> Result<(), GenericTargetedMessagingError> {
-            self.message_sender_map.send_message(
+            self.message_sender_store.send_message(
                 MessageMetadata::new(request_id, self.local_channel_id_generic()),
                 target_id,
                 message,
@@ -274,7 +377,7 @@ pub mod alloc_mod {
         /// Try to receive a message, which can be a reply or a request, depending on the generics.
         pub fn try_recv_message(
             &self,
-        ) -> Result<Option<GenericMessage<FROM>>, GenericTargetedMessagingError> {
+        ) -> Result<Option<GenericMessage<From>>, GenericTargetedMessagingError> {
             self.message_receiver.try_recv_message()
         }
     }
@@ -282,10 +385,10 @@ pub mod alloc_mod {
     pub struct RequestAndReplySenderAndReceiver<
         REQUEST,
         REPLY,
-        S0: MessageSender<REQUEST>,
-        R0: MessageReceiver<REPLY>,
-        S1: MessageSender<REPLY>,
-        R1: MessageReceiver<REQUEST>,
+        S0: MessageSenderProvider<REQUEST>,
+        R0: MessageReceiverProvider<REPLY>,
+        S1: MessageSenderProvider<REPLY>,
+        R1: MessageReceiverProvider<REQUEST>,
     > {
         pub local_channel_id: ComponentId,
         // These 2 are a functional group.
@@ -299,10 +402,10 @@ pub mod alloc_mod {
     impl<
             REQUEST,
             REPLY,
-            S0: MessageSender<REQUEST>,
-            R0: MessageReceiver<REPLY>,
-            S1: MessageSender<REPLY>,
-            R1: MessageReceiver<REQUEST>,
+            S0: MessageSenderProvider<REQUEST>,
+            R0: MessageReceiverProvider<REPLY>,
+            S1: MessageSenderProvider<REPLY>,
+            R1: MessageReceiverProvider<REQUEST>,
         > RequestAndReplySenderAndReceiver<REQUEST, REPLY, S0, R0, S1, R1>
     {
         pub fn new(
@@ -333,14 +436,14 @@ pub mod std_mod {
 
     use crate::queue::{GenericReceiveError, GenericSendError};
 
-    impl<MSG: Send> MessageSender<MSG> for mpsc::Sender<GenericMessage<MSG>> {
+    impl<MSG: Send> MessageSenderProvider<MSG> for mpsc::Sender<GenericMessage<MSG>> {
         fn send(&self, message: GenericMessage<MSG>) -> Result<(), GenericTargetedMessagingError> {
             self.send(message)
                 .map_err(|_| GenericSendError::RxDisconnected)?;
             Ok(())
         }
     }
-    impl<MSG: Send> MessageSender<MSG> for mpsc::SyncSender<GenericMessage<MSG>> {
+    impl<MSG: Send> MessageSenderProvider<MSG> for mpsc::SyncSender<GenericMessage<MSG>> {
         fn send(&self, message: GenericMessage<MSG>) -> Result<(), GenericTargetedMessagingError> {
             if let Err(e) = self.try_send(message) {
                 return match e {
@@ -357,7 +460,7 @@ pub mod std_mod {
     pub type MessageSenderMapMpsc<MSG> = MessageReceiverWithId<MSG, mpsc::Sender<MSG>>;
     pub type MessageSenderMapBoundedMpsc<MSG> = MessageReceiverWithId<MSG, mpsc::SyncSender<MSG>>;
 
-    impl<MSG> MessageReceiver<MSG> for mpsc::Receiver<GenericMessage<MSG>> {
+    impl<MSG> MessageReceiverProvider<MSG> for mpsc::Receiver<GenericMessage<MSG>> {
         fn try_recv(&self) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError> {
             match self.try_recv() {
                 Ok(msg) => Ok(Some(msg)),
@@ -386,7 +489,7 @@ mod tests {
 
     use crate::{
         queue::{GenericReceiveError, GenericSendError, GenericTargetedMessagingError},
-        request::{MessageMetadata, MessageSenderMap},
+        request::{MessageMetadata, MessageSenderMap, MessageSenderStoreProvider},
     };
 
     use super::{GenericMessage, MessageReceiverWithId, UniqueApidTargetId};
