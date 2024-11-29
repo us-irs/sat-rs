@@ -39,7 +39,7 @@ mod tests {
     use crate::{
         mode::{
             ModeAndSubmode, ModeReply, ModeReplySender, ModeRequest, ModeRequestSender,
-            ModeRequestorAndHandlerMpsc, ModeRequestorMpsc,
+            ModeRequestorAndHandlerOneParentMpsc, ModeRequestorOneChildMpsc,
         },
         request::{GenericMessage, MessageMetadata},
     };
@@ -52,7 +52,7 @@ mod tests {
     fn test_simple_mode_requestor() {
         let (reply_sender, reply_receiver) = mpsc::channel();
         let (request_sender, request_receiver) = mpsc::channel();
-        let mut mode_requestor = ModeRequestorMpsc::new(TEST_COMPONENT_ID_0, reply_receiver);
+        let mut mode_requestor = ModeRequestorOneChildMpsc::new(TEST_COMPONENT_ID_0, reply_receiver);
         mode_requestor.add_message_target(TEST_COMPONENT_ID_1, request_sender);
 
         // Send a request and verify it arrives at the receiver.
@@ -89,7 +89,7 @@ mod tests {
 
         let (request_sender_to_channel_1, request_receiver_channel_1) = mpsc::channel();
         //let (reply_sender_to_channel_2, reply_receiver_channel_2) = mpsc::channel();
-        let mut mode_connector = ModeRequestorAndHandlerMpsc::new(
+        let mut mode_connector = ModeRequestorAndHandlerOneParentMpsc::new(
             TEST_COMPONENT_ID_0,
             request_receiver_of_connector,
             reply_receiver_of_connector,
@@ -128,7 +128,7 @@ mod tests {
         let (_request_sender_to_connector, request_receiver_of_connector) = mpsc::channel();
 
         let (reply_sender_to_channel_2, reply_receiver_channel_2) = mpsc::channel();
-        let mut mode_connector = ModeRequestorAndHandlerMpsc::new(
+        let mut mode_connector = ModeRequestorAndHandlerOneParentMpsc::new(
             TEST_COMPONENT_ID_0,
             request_receiver_of_connector,
             reply_receiver_of_connector,

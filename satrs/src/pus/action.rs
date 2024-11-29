@@ -68,7 +68,8 @@ pub mod alloc_mod {
         action::ActionRequest,
         queue::GenericTargetedMessagingError,
         request::{
-            GenericMessage, MessageReceiver, MessageSender, MessageSenderAndReceiver, RequestId,
+            GenericMessage, MessageReceiverProvider, MessageSenderAndReceiver,
+            MessageSenderProvider, MessageSenderStoreProvider, RequestId,
         },
         ComponentId,
     };
@@ -76,11 +77,14 @@ pub mod alloc_mod {
     use super::ActionReplyPus;
 
     /// Helper type definition for a mode handler which can handle mode requests.
-    pub type ActionRequestHandlerInterface<S, R> =
-        MessageSenderAndReceiver<ActionReplyPus, ActionRequest, S, R>;
+    pub type ActionRequestHandlerInterface<Sender, Receiver, ReplySenderStore> =
+        MessageSenderAndReceiver<ActionReplyPus, ActionRequest, Sender, Receiver, ReplySenderStore>;
 
-    impl<S: MessageSender<ActionReplyPus>, R: MessageReceiver<ActionRequest>>
-        ActionRequestHandlerInterface<S, R>
+    impl<
+            Sender: MessageSenderProvider<ActionReplyPus>,
+            Receiver: MessageReceiverProvider<ActionRequest>,
+            ReplySender: MessageSenderStoreProvider<ActionReplyPus, Sender>,
+        > ActionRequestHandlerInterface<Sender, Receiver, ReplySender>
     {
         pub fn try_recv_action_request(
             &self,
@@ -100,11 +104,20 @@ pub mod alloc_mod {
 
     /// Helper type defintion for a mode handler object which can send mode requests and receive
     /// mode replies.
-    pub type ActionRequestorInterface<S, R> =
-        MessageSenderAndReceiver<ActionRequest, ActionReplyPus, S, R>;
+    pub type ActionRequestorInterface<Sender, Receiver, RequestSenderStore> =
+        MessageSenderAndReceiver<
+            ActionRequest,
+            ActionReplyPus,
+            Sender,
+            Receiver,
+            RequestSenderStore,
+        >;
 
-    impl<S: MessageSender<ActionRequest>, R: MessageReceiver<ActionReplyPus>>
-        ActionRequestorInterface<S, R>
+    impl<
+            Sender: MessageSenderProvider<ActionRequest>,
+            Receiver: MessageReceiverProvider<ActionReplyPus>,
+            RequestSenderStore: MessageSenderStoreProvider<ActionRequest, Sender>,
+        > ActionRequestorInterface<Sender, Receiver, RequestSenderStore>
     {
         pub fn try_recv_action_reply(
             &self,
@@ -132,6 +145,7 @@ pub mod std_mod {
             verification::{self, TcStateToken},
             ActivePusRequestStd, ActiveRequestProvider, DefaultActiveRequestMap,
         },
+        request::{MessageSenderMap, OneMessageSender},
         ComponentId,
     };
 
@@ -174,22 +188,38 @@ pub mod std_mod {
     }
     pub type DefaultActiveActionRequestMap = DefaultActiveRequestMap<ActivePusActionRequestStd>;
 
-    pub type ActionRequestHandlerMpsc = ActionRequestHandlerInterface<
+    pub type ActionRequestHandlerOneSenderMpsc = ActionRequestHandlerInterface<
         mpsc::Sender<GenericMessage<ActionReplyPus>>,
         mpsc::Receiver<GenericMessage<ActionRequest>>,
+        OneMessageSender<
+            GenericMessage<ActionReplyPus>,
+            mpsc::Sender<GenericMessage<ActionReplyPus>>,
+        >,
     >;
-    pub type ActionRequestHandlerMpscBounded = ActionRequestHandlerInterface<
+    pub type ActionRequestHandlerOneSenderMpscBounded = ActionRequestHandlerInterface<
         mpsc::SyncSender<GenericMessage<ActionReplyPus>>,
         mpsc::Receiver<GenericMessage<ActionRequest>>,
+        OneMessageSender<
+            GenericMessage<ActionReplyPus>,
+            mpsc::SyncSender<GenericMessage<ActionReplyPus>>,
+        >,
     >;
 
-    pub type ActionRequestorMpsc = ActionRequestorInterface<
+    pub type ActionRequestorWithSenderMapMpsc = ActionRequestorInterface<
         mpsc::Sender<GenericMessage<ActionRequest>>,
         mpsc::Receiver<GenericMessage<ActionReplyPus>>,
+        MessageSenderMap<
+            GenericMessage<ActionRequest>,
+            mpsc::Sender<GenericMessage<ActionRequest>>,
+        >,
     >;
-    pub type ActionRequestorBoundedMpsc = ActionRequestorInterface<
+    pub type ActionRequestorWithSenderMapBoundedMpsc = ActionRequestorInterface<
         mpsc::SyncSender<GenericMessage<ActionRequest>>,
         mpsc::Receiver<GenericMessage<ActionReplyPus>>,
+        MessageSenderMap<
+            GenericMessage<ActionRequest>,
+            mpsc::SyncSender<GenericMessage<ActionRequest>>,
+        >,
     >;
 }
 

@@ -3,7 +3,7 @@ use hashbrown::HashMap;
 
 use crate::{
     mode::{Mode, ModeAndSubmode, ModeReply, ModeRequest, Submode},
-    request::MessageSender,
+    request::MessageSenderProvider,
     ComponentId,
 };
 
@@ -19,7 +19,7 @@ pub trait ModeNode {
 /// A mode parent is capable of sending mode requests to child objects and has a unique component
 /// ID.
 pub trait ModeParent: ModeNode {
-    type Sender: MessageSender<ModeRequest>;
+    type Sender: MessageSenderProvider<ModeRequest>;
 
     fn add_mode_child(&mut self, id: ComponentId, request_sender: Self::Sender);
 }
@@ -28,7 +28,7 @@ pub trait ModeParent: ModeNode {
 ///
 /// A child is capable of sending mode replies to parent objects and has a unique component ID.
 pub trait ModeChild: ModeNode {
-    type Sender: MessageSender<ModeReply>;
+    type Sender: MessageSenderProvider<ModeReply>;
 
     fn add_mode_parent(&mut self, id: ComponentId, reply_sender: Self::Sender);
 }
