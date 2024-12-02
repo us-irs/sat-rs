@@ -1,8 +1,12 @@
 use core::cell::Cell;
-use satrs::mode::{Mode, ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler, ModeRequestHandlerOneParentMpscBounded, ModeRequestReceiver, ModeRequestSender, ModeRequestorAndHandlerOneParentMpscBounded, ModeRequestorOneChildBoundedMpsc};
+use satrs::mode::{
+    Mode, ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler,
+    ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestorAndHandlerMpscBounded,
+    ModeRequestorOneChildBoundedMpsc,
+};
 use satrs::mode_tree::{
-    connect_mode_nodes, ModeChild, ModeNode, ModeParent, ModeStoreProvider, SequenceTableMapTable,
-    TargetTableEntry,
+    connect_mode_nodes, ModeChild, ModeNode, ModeParent, ModeStoreProvider, SequenceTableEntry,
+    SequenceTableMapTable, TargetTableEntry,
 };
 use satrs::mode_tree::{
     ModeStoreVec, SequenceModeTables, SequenceTablesMapValue, TargetModeTables,
@@ -187,17 +191,17 @@ impl ModeParent for PusModeService {
 }
 
 struct AcsSubsystem {
-    pub mode_node: ModeRequestorAndHandlerOneParentMpscBounded,
+    pub mode_node: ModeRequestorAndHandlerMpscBounded,
     pub mode_requestor_info: Option<MessageMetadata>,
     pub mode_and_submode: ModeAndSubmode,
     pub target_mode_and_submode: Option<ModeAndSubmode>,
     pub subsystem_helper: SubsystemHelper,
     pub mode_req_handler_mock: ModeRequestHandlerMock,
-    pub mode_msgs_recvd: u32,
+    pub mode_req_recvd: u32,
 }
 
 impl AcsSubsystem {
-    pub fn new(mode_node: ModeRequestorAndHandlerOneParentMpscBounded) -> Self {
+    pub fn new(mode_node: ModeRequestorAndHandlerMpscBounded) -> Self {
         Self {
             mode_node,
             mode_requestor_info: None,
@@ -205,23 +209,23 @@ impl AcsSubsystem {
             target_mode_and_submode: None,
             subsystem_helper: Default::default(),
             mode_req_handler_mock: Default::default(),
-            mode_msgs_recvd: 0,
+            mode_req_recvd: 0,
         }
     }
 
-    pub fn get_and_clear_num_mode_msgs(&mut self) -> u32 {
-        let tmp = self.mode_msgs_recvd;
-        self.mode_msgs_recvd = 0;
+    pub fn get_and_clear_num_mode_requests(&mut self) -> u32 {
+        let tmp = self.mode_req_recvd;
+        self.mode_req_recvd = 0;
         tmp
     }
 
     pub fn run(&mut self) {
         if let Some(request) = self.mode_node.try_recv_mode_request().unwrap() {
-            self.mode_msgs_recvd += 1;
+            self.mode_req_recvd += 1;
             self.handle_mode_request(request)
                 .expect("mode messaging error");
         }
-        if let Some(_reply) = self.mode_node.try_recv_mode_reply().unwrap(){
+        if let Some(_reply) = self.mode_node.try_recv_mode_reply().unwrap() {
             // TODO: Implementation.
         }
     }
@@ -298,7 +302,7 @@ impl ModeRequestHandler for AcsSubsystem {
         }
         let request_id = requestor_info.map_or(0, |info| info.request_id());
         self.mode_node
-            .request_sender_map
+            .request_sender_store
             .0
             .iter()
             .for_each(|(_, sender)| {
@@ -354,7 +358,7 @@ impl ModeRequestHandler for AcsSubsystem {
 }
 
 struct MgmAssembly {
-    pub mode_node: ModeRequestorAndHandlerOneParentMpscBounded,
+    pub mode_node: ModeRequestorAndHandlerMpscBounded,
     pub mode_requestor_info: Option<MessageMetadata>,
     pub mode_and_submode: ModeAndSubmode,
     pub target_mode_and_submode: Option<ModeAndSubmode>,
@@ -363,7 +367,7 @@ struct MgmAssembly {
 }
 
 impl MgmAssembly {
-    pub fn new(mode_node: ModeRequestorAndHandlerOneParentMpscBounded) -> Self {
+    pub fn new(mode_node: ModeRequestorAndHandlerMpscBounded) -> Self {
         Self {
             mode_node,
             mode_requestor_info: None,
@@ -386,6 +390,7 @@ impl MgmAssembly {
 
     pub fn check_mode_requests(&mut self) -> Result<(), GenericTargetedMessagingError> {
         if let Some(request) = self.mode_node.try_recv_mode_request()? {
+            self.mode_msgs_recvd += 1;
             self.handle_mode_request(request).unwrap();
         }
         Ok(())
@@ -469,7 +474,7 @@ impl ModeRequestHandler for MgmAssembly {
         }
         let request_id = requestor_info.map_or(0, |info| info.request_id());
         self.mode_node
-            .request_sender_map
+            .request_sender_store
             .0
             .iter()
             .for_each(|(_, sender)| {
@@ -524,17 +529,17 @@ impl ModeRequestHandler for MgmAssembly {
 struct DeviceManager {
     name: &'static str,
     pub id: ComponentId,
-    pub mode_node: ModeRequestorAndHandlerOneParentMpscBounded,
+    pub mode_node: ModeRequestorAndHandlerMpscBounded,
     pub mode_and_submode: ModeAndSubmode,
     pub mode_req_mock: ModeRequestHandlerMock,
-    pub mode_msgs_recvd: u32,
+    pub mode_req_recvd: u32,
 }
 
 impl DeviceManager {
     pub fn new(
         name: &'static str,
         id: ComponentId,
-        mode_node: ModeRequestorAndHandlerOneParentMpscBounded,
+        mode_node: ModeRequestorAndHandlerMpscBounded,
     ) -> Self {
         Self {
             name,
@@ -542,13 +547,13 @@ impl DeviceManager {
             mode_node,
             mode_and_submode: UNKNOWN_MODE,
             mode_req_mock: Default::default(),
-            mode_msgs_recvd: 0,
+            mode_req_recvd: 0,
         }
     }
 
-    pub fn get_and_clear_num_mode_msgs(&mut self) -> u32 {
-        let tmp = self.mode_msgs_recvd;
-        self.mode_msgs_recvd = 0;
+    pub fn get_and_clear_num_mode_requests(&mut self) -> u32 {
+        let tmp = self.mode_req_recvd;
+        self.mode_req_recvd = 0;
         tmp
     }
 
@@ -558,6 +563,7 @@ impl DeviceManager {
 
     pub fn check_mode_requests(&mut self) -> Result<(), ModeError> {
         if let Some(request) = self.mode_node.try_recv_mode_request()? {
+            self.mode_req_recvd += 1;
             self.handle_mode_request(request)?
         }
         Ok(())
@@ -619,7 +625,7 @@ impl ModeRequestHandler for DeviceManager {
         }
         let request_id = requestor_info.map_or(0, |info| info.request_id());
         self.mode_node
-            .request_sender_map
+            .request_sender_store
             .0
             .iter()
             .for_each(|(_, sender)| {
@@ -674,7 +680,7 @@ impl ModeRequestHandler for DeviceManager {
 struct CommonDevice {
     name: &'static str,
     pub id: ComponentId,
-    pub mode_node: ModeRequestHandlerOneParentMpscBounded,
+    pub mode_node: ModeRequestHandlerMpscBounded,
     pub mode_and_submode: ModeAndSubmode,
     pub mode_req_mock: ModeRequestHandlerMock,
     pub num_mode_msgs_recvd: u32,
@@ -684,7 +690,7 @@ impl CommonDevice {
     pub fn new(
         name: &'static str,
         id: ComponentId,
-        mode_node: ModeRequestHandlerOneParentMpscBounded,
+        mode_node: ModeRequestHandlerMpscBounded,
     ) -> Self {
         Self {
             name,
@@ -804,7 +810,7 @@ pub struct AnnounceModeInfo {
 }
 
 pub struct AcsController {
-    pub mode_node: ModeRequestHandlerOneParentMpscBounded,
+    pub mode_node: ModeRequestHandlerMpscBounded,
     pub mode_and_submode: ModeAndSubmode,
     pub announce_mode_queue: RefCell<VecDeque<AnnounceModeInfo>>,
     pub mode_req_mock: ModeRequestHandlerMock,
@@ -953,36 +959,36 @@ impl TreeTestbench {
         );
 
         // Mode requestors and handlers.
-        let mgm_assy_node = ModeRequestorAndHandlerOneParentMpscBounded::new(
+        let mgm_assy_node = ModeRequestorAndHandlerMpscBounded::new(
             TestComponentId::MagnetometerAssembly as ComponentId,
             request_receiver_mgm_assy,
             reply_receiver_mgm_assy,
         );
-        let mgt_dev_mgmt_node = ModeRequestorAndHandlerOneParentMpscBounded::new(
+        let mgt_dev_mgmt_node = ModeRequestorAndHandlerMpscBounded::new(
             TestComponentId::MgtDevManager as ComponentId,
             request_receiver_mgt_man,
             reply_receiver_mgt_man,
         );
-        let acs_subsystem_node = ModeRequestorAndHandlerOneParentMpscBounded::new(
+        let acs_subsystem_node = ModeRequestorAndHandlerMpscBounded::new(
             TestComponentId::AcsSubsystem as ComponentId,
             request_receiver_acs_subsystem,
             reply_receiver_acs_subsystem,
         );
 
         // Request handlers only.
-        let mgm_dev_node_0 = ModeRequestHandlerOneParentMpscBounded::new(
+        let mgm_dev_node_0 = ModeRequestHandlerMpscBounded::new(
             TestComponentId::MagnetometerDevice0 as ComponentId,
             request_receiver_mgm_dev_0,
         );
-        let mgm_dev_node_1 = ModeRequestHandlerOneParentMpscBounded::new(
+        let mgm_dev_node_1 = ModeRequestHandlerMpscBounded::new(
             TestComponentId::MagnetometerDevice1 as ComponentId,
             request_receiver_mgm_dev_1,
         );
-        let mgt_dev_node = ModeRequestHandlerOneParentMpscBounded::new(
+        let mgt_dev_node = ModeRequestHandlerMpscBounded::new(
             TestComponentId::MagnetorquerDevice as ComponentId,
             request_receiver_mgt_dev,
         );
-        let acs_ctrl_node = ModeRequestHandlerOneParentMpscBounded::new(
+        let acs_ctrl_node = ModeRequestHandlerMpscBounded::new(
             TestComponentId::AcsController as ComponentId,
             request_receiver_acs_ctrl,
         );
@@ -1036,9 +1042,35 @@ impl TreeTestbench {
             ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
             true,
         ));
-        let sequence_tbl_safe_0 = SequenceTableMapTable::new("SAFE_SEQ_0_TBL");
-        let sequence_tbl_safe_1 = SequenceTableMapTable::new("SAFE_SEQ_1_TBL");
-        let sequence_tbl_safe = SequenceTablesMapValue::new("SAFE_SEQ_TBL");
+        target_table_safe.add_entry(TargetTableEntry::new_with_precise_submode(
+            "MGT_MAN_NML",
+            TestComponentId::MgtDevManager as u64,
+            ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+            true,
+        ));
+        let mut sequence_tbl_safe_0 = SequenceTableMapTable::new("SAFE_SEQ_0_TBL");
+        sequence_tbl_safe_0.add_entry(SequenceTableEntry::new(
+            "SAFE_SEQ_0_MGM_A",
+            TestComponentId::MagnetometerAssembly as u64,
+            ModeAndSubmode::new(DefaultMode::NORMAL as Mode, 0),
+            false,
+        ));
+        sequence_tbl_safe_0.add_entry(SequenceTableEntry::new(
+            "SAFE_SEQ_0_MGT_MAN",
+            TestComponentId::MgtDevManager as u64,
+            ModeAndSubmode::new(DefaultMode::NORMAL as Mode, 0),
+            false,
+        ));
+        let mut sequence_tbl_safe_1 = SequenceTableMapTable::new("SAFE_SEQ_1_TBL");
+        sequence_tbl_safe_1.add_entry(SequenceTableEntry::new(
+            "SAFE_SEQ_1_ACS_CTRL",
+            TestComponentId::AcsController as u64,
+            ModeAndSubmode::new(AcsMode::IDLE as Mode, 0),
+            false,
+        ));
+        let mut sequence_tbl_safe = SequenceTablesMapValue::new("SAFE_SEQ_TBL");
+        sequence_tbl_safe.add_sequence_table(sequence_tbl_safe_0);
+        sequence_tbl_safe.add_sequence_table(sequence_tbl_safe_1);
         acs_subsystem.add_target_and_sequence_table(
             AcsMode::SAFE as u32,
             target_table_safe,
@@ -1154,6 +1186,7 @@ fn announce_recursively() {
         tb.mgm_devs[1].run();
         tb.mgt_dev.run();
     }
+    assert_eq!(tb.subsystem.get_and_clear_num_mode_requests(), 1);
     let mut announces = tb
         .subsystem
         .mode_req_handler_mock
@@ -1164,6 +1197,7 @@ fn announce_recursively() {
     assert_eq!(tb.ctrl.mode_req_mock.start_transition_calls.len(), 0);
     assert_eq!(tb.ctrl.mode_and_submode(), UNKNOWN_MODE);
     assert_eq!(announces.len(), 1);
+    assert_eq!(tb.mgm_assy.get_and_clear_num_mode_msgs(), 1);
     announces = tb.mgm_assy.mode_req_mock.announce_mode_calls.borrow_mut();
     assert_eq!(tb.mgm_assy.mode_req_mock.start_transition_calls.len(), 0);
     assert_eq!(tb.mgm_assy.mode_and_submode(), UNKNOWN_MODE);
@@ -1181,6 +1215,7 @@ fn announce_recursively() {
     assert_eq!(tb.mgt_dev.mode_req_mock.start_transition_calls.len(), 0);
     assert_eq!(tb.mgt_dev.mode_and_submode(), UNKNOWN_MODE);
     assert_eq!(announces.len(), 1);
+    assert_eq!(tb.mgt_manager.get_and_clear_num_mode_requests(), 1);
     announces = tb
         .mgt_manager
         .mode_req_mock
