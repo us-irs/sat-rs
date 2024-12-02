@@ -149,9 +149,9 @@ pub trait MessageReceiverProvider<MSG> {
     fn try_recv(&self) -> Result<Option<GenericMessage<MSG>>, GenericTargetedMessagingError>;
 }
 
-pub struct MessageWithSenderIdReceiver<MSG, R: MessageReceiverProvider<MSG>>(
-    pub R,
-    PhantomData<MSG>,
+pub struct MessageWithSenderIdReceiver<Msg, Receiver: MessageReceiverProvider<Msg>>(
+    pub Receiver,
+    PhantomData<Msg>,
 );
 
 impl<MSG, R: MessageReceiverProvider<MSG>> From<R> for MessageWithSenderIdReceiver<MSG, R> {
@@ -208,6 +208,7 @@ pub trait MessageSenderStoreProvider<Message, Sender>: Default {
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
     use crate::queue::GenericSendError;
+    use std::convert::From;
 
     use super::*;
     use hashbrown::HashMap;
@@ -226,10 +227,10 @@ pub mod alloc_mod {
         }
     }
 
-    impl<Msg, S: MessageSenderProvider<Msg>> MessageSenderStoreProvider<Msg, S>
-        for OneMessageSender<Msg, S>
+    impl<Msg, Sender: MessageSenderProvider<Msg>> MessageSenderStoreProvider<Msg, Sender>
+        for OneMessageSender<Msg, Sender>
     {
-        fn add_message_target(&mut self, target_id: ComponentId, message_sender: S) {
+        fn add_message_target(&mut self, target_id: ComponentId, message_sender: Sender) {
             if self.id_and_sender.is_some() {
                 return;
             }
@@ -263,10 +264,10 @@ pub mod alloc_mod {
         }
     }
 
-    impl<MSG, S: MessageSenderProvider<MSG>> MessageSenderStoreProvider<MSG, S>
-        for MessageSenderList<MSG, S>
+    impl<Msg, Sender: MessageSenderProvider<Msg>> MessageSenderStoreProvider<Msg, Sender>
+        for MessageSenderList<Msg, Sender>
     {
-        fn add_message_target(&mut self, target_id: ComponentId, message_sender: S) {
+        fn add_message_target(&mut self, target_id: ComponentId, message_sender: Sender) {
             self.0.push((target_id, message_sender));
         }
 
@@ -274,7 +275,7 @@ pub mod alloc_mod {
             &self,
             requestor_info: MessageMetadata,
             target_channel_id: ComponentId,
-            message: MSG,
+            message: Msg,
         ) -> Result<(), GenericTargetedMessagingError> {
             for (current_id, sender) in &self.0 {
                 if *current_id == target_channel_id {
@@ -297,10 +298,10 @@ pub mod alloc_mod {
         }
     }
 
-    impl<MSG, S: MessageSenderProvider<MSG>> MessageSenderStoreProvider<MSG, S>
-        for MessageSenderMap<MSG, S>
+    impl<Msg, Sender: MessageSenderProvider<Msg>> MessageSenderStoreProvider<Msg, Sender>
+        for MessageSenderMap<Msg, Sender>
     {
-        fn add_message_target(&mut self, target_id: ComponentId, message_sender: S) {
+        fn add_message_target(&mut self, target_id: ComponentId, message_sender: Sender) {
             self.0.insert(target_id, message_sender);
         }
 
@@ -308,7 +309,7 @@ pub mod alloc_mod {
             &self,
             requestor_info: MessageMetadata,
             target_channel_id: ComponentId,
-            message: MSG,
+            message: Msg,
         ) -> Result<(), GenericTargetedMessagingError> {
             if self.0.contains_key(&target_channel_id) {
                 return self
@@ -383,42 +384,58 @@ pub mod alloc_mod {
     }
 
     pub struct RequestAndReplySenderAndReceiver<
-        REQUEST,
-        REPLY,
-        S0: MessageSenderProvider<REQUEST>,
-        R0: MessageReceiverProvider<REPLY>,
-        S1: MessageSenderProvider<REPLY>,
-        R1: MessageReceiverProvider<REQUEST>,
+        Request,
+        ReqSender: MessageSenderProvider<Request>,
+        ReqReceiver: MessageReceiverProvider<Request>,
+        ReqSenderStore: MessageSenderStoreProvider<Request, ReqSender>,
+        Reply,
+        ReplySender: MessageSenderProvider<Reply>,
+        ReplyReceiver: MessageReceiverProvider<Reply>,
+        ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
     > {
         pub local_channel_id: ComponentId,
         // These 2 are a functional group.
-        pub request_sender_map: MessageSenderMap<REQUEST, S0>,
-        pub reply_receiver: MessageWithSenderIdReceiver<REPLY, R0>,
+        pub request_sender_store: ReqSenderStore,
+        pub reply_receiver: MessageWithSenderIdReceiver<Reply, ReplyReceiver>,
         // These 2 are a functional group.
-        pub request_receiver: MessageWithSenderIdReceiver<REQUEST, R1>,
-        pub reply_sender_map: MessageSenderMap<REPLY, S1>,
+        pub request_receiver: MessageWithSenderIdReceiver<Request, ReqReceiver>,
+        pub reply_sender_store: ReplySenderStore,
+        phantom: PhantomData<(ReqSender, ReplySender)>,
     }
 
     impl<
-            REQUEST,
-            REPLY,
-            S0: MessageSenderProvider<REQUEST>,
-            R0: MessageReceiverProvider<REPLY>,
-            S1: MessageSenderProvider<REPLY>,
-            R1: MessageReceiverProvider<REQUEST>,
-        > RequestAndReplySenderAndReceiver<REQUEST, REPLY, S0, R0, S1, R1>
+            Request,
+            ReqSender: MessageSenderProvider<Request>,
+            ReqReceiver: MessageReceiverProvider<Request>,
+            ReqSenderStore: MessageSenderStoreProvider<Request, ReqSender>,
+            Reply,
+            ReplySender: MessageSenderProvider<Reply>,
+            ReplyReceiver: MessageReceiverProvider<Reply>,
+            ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
+        >
+        RequestAndReplySenderAndReceiver<
+            Request,
+            ReqSender,
+            ReqReceiver,
+            ReqSenderStore,
+            Reply,
+            ReplySender,
+            ReplyReceiver,
+            ReplySenderStore,
+        >
     {
         pub fn new(
             local_channel_id: ComponentId,
-            request_receiver: R1,
-            reply_receiver: R0,
+            request_receiver: ReqReceiver,
+            reply_receiver: ReplyReceiver,
         ) -> Self {
             Self {
                 local_channel_id,
                 request_receiver: request_receiver.into(),
                 reply_receiver: reply_receiver.into(),
-                request_sender_map: Default::default(),
-                reply_sender_map: Default::default(),
+                request_sender_store: Default::default(),
+                reply_sender_store: Default::default(),
+                phantom: PhantomData,
             }
         }
 
