@@ -13,6 +13,7 @@ use satrs::mode_tree::{
     TargetTablesMapValue,
 };
 use satrs::request::MessageMetadata;
+use satrs::subsystem::SequenceExecutionHelper;
 use satrs::{
     mode::{ModeAndSubmode, ModeReply, ModeRequest},
     queue::GenericTargetedMessagingError,
@@ -62,8 +63,22 @@ pub struct SubsystemHelper {
     pub children_mode_store: ModeStoreVec,
     pub target_tables: TargetModeTables,
     pub sequence_tables: SequenceModeTables,
+    pub helper: SequenceExecutionHelper,
 }
 impl SubsystemHelper {
+    pub fn new(
+        children_mode_store: ModeStoreVec,
+        target_tables: TargetModeTables,
+        sequence_tables: SequenceModeTables,
+    ) -> Self{
+        Self {
+            children_mode_store,
+            target_tables,
+            sequence_tables,
+            helper: Default::default(),
+        }
+    }
+
     pub fn add_target_and_sequence_table(
         &mut self,
         mode: Mode,
