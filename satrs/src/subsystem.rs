@@ -21,6 +21,16 @@ pub struct SequenceExecutionHelper {
     current_sequence_index: Option<usize>,
 }
 
+impl Default for SequenceExecutionHelper {
+    fn default() -> Self {
+        Self {
+            target_mode: 0,
+            state: SequenceExecutionHelperStates::Idle,
+            request_id: 0,
+            current_sequence_index: todo!(),
+        }
+    }
+}
 pub trait CheckSuccessProvider {
     fn mode_request_requires_success_check(
         &mut self,
@@ -37,20 +47,19 @@ pub enum SequenceHandlerResult {
 }
 
 impl SequenceExecutionHelper {
-    pub fn new(
+    pub fn load(
+        &mut self,
         mode: Mode,
         request_id: RequestId,
         sequence_tables: &SequenceModeTables,
-    ) -> Option<Self> {
+    ) -> Result<(), ()> {
         if !sequence_tables.0.contains_key(&mode) {
-            return None;
+            return Err(());
         }
-        Some(Self {
-            target_mode: mode,
-            state: SequenceExecutionHelperStates::Idle,
-            request_id,
-            current_sequence_index: None,
-        })
+        self.target_mode = mode;
+        self.request_id = request_id;
+        self.current_sequence_index = None;
+        Ok(())
     }
 
     pub fn confirm_sequence_done(&mut self) {
