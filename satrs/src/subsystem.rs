@@ -6,31 +6,13 @@ use crate::{
     ComponentId,
 };
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum SequenceExecutionHelperStates {
     Idle,
     AwaitingCheckSuccess,
     Done,
 }
 
-#[derive(Debug)]
-pub struct SequenceExecutionHelper {
-    target_mode: Mode,
-    state: SequenceExecutionHelperStates,
-    request_id: RequestId,
-    current_sequence_index: Option<usize>,
-}
-
-impl Default for SequenceExecutionHelper {
-    fn default() -> Self {
-        Self {
-            target_mode: 0,
-            state: SequenceExecutionHelperStates::Idle,
-            request_id: 0,
-            current_sequence_index: todo!(),
-        }
-    }
-}
 pub trait CheckSuccessProvider {
     fn mode_request_requires_success_check(
         &mut self,
@@ -46,15 +28,38 @@ pub enum SequenceHandlerResult {
     AwaitingSuccessCheck,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Mode {0} does not exist")]
+pub struct ModeDoesNotExistError(Mode);
+
+#[derive(Debug)]
+pub struct SequenceExecutionHelper {
+    target_mode: Mode,
+    state: SequenceExecutionHelperStates,
+    request_id: RequestId,
+    current_sequence_index: Option<usize>,
+}
+
+impl Default for SequenceExecutionHelper {
+    fn default() -> Self {
+        Self {
+            target_mode: 0,
+            state: SequenceExecutionHelperStates::Idle,
+            request_id: 0,
+            current_sequence_index: None,
+        }
+    }
+}
+
 impl SequenceExecutionHelper {
     pub fn load(
         &mut self,
         mode: Mode,
         request_id: RequestId,
         sequence_tables: &SequenceModeTables,
-    ) -> Result<(), ()> {
+    ) -> Result<(), ModeDoesNotExistError> {
         if !sequence_tables.0.contains_key(&mode) {
-            return Err(());
+            return Err(ModeDoesNotExistError(mode));
         }
         self.target_mode = mode;
         self.request_id = request_id;
@@ -66,6 +71,21 @@ impl SequenceExecutionHelper {
         if let SequenceExecutionHelperStates::AwaitingCheckSuccess = self.state {
             self.state = SequenceExecutionHelperStates::Idle;
         }
+    }
+
+    pub fn state(&self) -> SequenceExecutionHelperStates {
+        self.state
+    }
+
+    pub fn awaiting_check_success(&self) -> bool {
+        matches!(
+            self.state,
+            SequenceExecutionHelperStates::AwaitingCheckSuccess
+        )
+    }
+
+    pub fn current_sequence_index(&self) -> Option<usize> {
+        self.current_sequence_index
     }
 
     pub fn run(
