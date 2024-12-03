@@ -180,10 +180,30 @@ impl SequenceTableEntry {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("target {0} not in mode store")]
+pub struct TargetNotInModeStoreError(pub ComponentId);
+
 pub trait ModeStoreProvider {
     fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode);
+
+    fn has_component(&self, target_id: ComponentId) -> bool;
+
     fn get_mode(&self, target_id: ComponentId) -> Option<ModeAndSubmode>;
-    fn set_mode(&mut self, target_id: ComponentId, mode: ModeAndSubmode);
+
+    fn set_mode_for_contained_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode);
+
+    fn set_mode(
+        &mut self,
+        target_id: ComponentId,
+        mode: ModeAndSubmode,
+    ) -> Result<(), TargetNotInModeStoreError> {
+        if !self.has_component(target_id) {
+            return Err(TargetNotInModeStoreError(target_id));
+        }
+        self.set_mode_for_contained_component(target_id, mode);
+        Ok(())
+    }
 }
 
 #[cfg(feature = "alloc")]
@@ -268,6 +288,10 @@ pub mod alloc_mod {
             self.0.push((target_id, mode));
         }
 
+        fn has_component(&self, target_id: ComponentId) -> bool {
+            self.0.iter().any(|(id, _)| *id == target_id)
+        }
+
         fn get_mode(&self, target_id: ComponentId) -> Option<ModeAndSubmode> {
             self.0.iter().find_map(|(id, mode)| {
                 if *id == target_id {
@@ -277,7 +301,11 @@ pub mod alloc_mod {
             })
         }
 
-        fn set_mode(&mut self, target_id: ComponentId, mode_to_set: ModeAndSubmode) {
+        fn set_mode_for_contained_component(
+            &mut self,
+            target_id: ComponentId,
+            mode_to_set: ModeAndSubmode,
+        ) {
             self.0.iter_mut().for_each(|(id, mode)| {
                 if *id == target_id {
                     *mode = mode_to_set;
@@ -290,10 +318,19 @@ pub mod alloc_mod {
         fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode) {
             self.0.insert(target_id, mode);
         }
+
+        fn has_component(&self, target_id: ComponentId) -> bool {
+            self.0.contains_key(&target_id)
+        }
+
         fn get_mode(&self, target_id: ComponentId) -> Option<ModeAndSubmode> {
             self.0.get(&target_id).copied()
         }
-        fn set_mode(&mut self, target_id: ComponentId, mode_to_set: ModeAndSubmode) {
+        fn set_mode_for_contained_component(
+            &mut self,
+            target_id: ComponentId,
+            mode_to_set: ModeAndSubmode,
+        ) {
             self.0.insert(target_id, mode_to_set);
         }
     }

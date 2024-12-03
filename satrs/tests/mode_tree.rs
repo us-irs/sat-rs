@@ -1,19 +1,19 @@
 use core::cell::Cell;
 use satrs::mode::{
     Mode, ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler,
-    ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestorAndHandlerMpscBounded,
-    ModeRequestorOneChildBoundedMpsc,
+    ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestSender,
+    ModeRequestorAndHandlerMpscBounded, ModeRequestorOneChildBoundedMpsc,
 };
 use satrs::mode_tree::{
     connect_mode_nodes, ModeChild, ModeNode, ModeParent, ModeStoreProvider, SequenceTableEntry,
-    SequenceTableMapTable, TargetTableEntry,
+    SequenceTableMapTable, TargetNotInModeStoreError, TargetTableEntry,
 };
 use satrs::mode_tree::{
     ModeStoreVec, SequenceModeTables, SequenceTablesMapValue, TargetModeTables,
     TargetTablesMapValue,
 };
 use satrs::request::MessageMetadata;
-use satrs::subsystem::SequenceExecutionHelper;
+use satrs::subsystem::{SequenceExecutionHelper, SequenceHandlerResult};
 use satrs::{
     mode::{ModeAndSubmode, ModeReply, ModeRequest},
     queue::GenericTargetedMessagingError,
@@ -58,6 +58,10 @@ pub enum TestComponentId {
 pub type RequestSenderType = mpsc::SyncSender<GenericMessage<ModeRequest>>;
 pub type ReplySenderType = mpsc::SyncSender<GenericMessage<ModeReply>>;
 
+// TODO:
+//
+// 1. Fallback mode?
+// 2. State to determine whether we are in sequence execution mode or in target keeping mode.
 #[derive(Default)]
 pub struct SubsystemHelper {
     pub children_mode_store: ModeStoreVec,
@@ -70,7 +74,7 @@ impl SubsystemHelper {
         children_mode_store: ModeStoreVec,
         target_tables: TargetModeTables,
         sequence_tables: SequenceModeTables,
-    ) -> Self{
+    ) -> Self {
         Self {
             children_mode_store,
             target_tables,
@@ -88,6 +92,39 @@ impl SubsystemHelper {
         self.target_tables.0.insert(mode, target_table_val);
         self.sequence_tables.0.insert(mode, sequence_table_val);
     }
+
+    pub fn update_child_mode(
+        &mut self,
+        child: ComponentId,
+        mode: ModeAndSubmode,
+    ) -> Result<(), TargetNotInModeStoreError> {
+        self.children_mode_store.set_mode(child, mode)
+    }
+
+    pub fn insert_mode_reply(&mut self, reply: &ModeReply) {
+        // 1. Update child mode store (also, do we really need one?)
+        // 2. If a sequence is active, check whether this completes the sequence. How do we best
+        //    do this? We would have to remember which IDs need a mode confirmation. We could
+        //    extend the mode store for this.
+        // 3. If no sequence is active and we are in target mode, we need to check whether the
+        //    target mode table is violated. If it is, we need to command the fallback mode.
+    }
+
+    pub fn run(
+        &mut self,
+        req_sender: &impl ModeRequestSender,
+    ) -> Result<SequenceHandlerResult, GenericTargetedMessagingError> {
+        //if self.helper.awaiting_check_success() {
+        //self.check_current_sequence_against_mode_store();
+        //}
+        self.helper.run(&self.sequence_tables, req_sender)
+    }
+
+    //pub fn check_current_sequence_against_mode_store(&self) {
+    // TODO: Check whether current sequence requires success checks and if some are required,
+    // check mode store content against the sequence target mode.
+
+    //}
 }
 
 #[derive(Default, Debug)]
