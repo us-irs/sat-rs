@@ -129,6 +129,8 @@ pub struct TargetedModeRequest {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ModeReply {
+    /// Mode information. Can be used to notify other components of changed modes.
+    ModeInfo(ModeAndSubmode),
     /// Reply to a mode request to confirm the commanded mode was reached.
     ModeReply(ModeAndSubmode),
     // Can not reach the commanded mode. Contains a reason as a [ResultU16].

@@ -58,24 +58,51 @@ pub enum TestComponentId {
 pub type RequestSenderType = mpsc::SyncSender<GenericMessage<ModeRequest>>;
 pub type ReplySenderType = mpsc::SyncSender<GenericMessage<ModeReply>>;
 
+#[derive(Debug)]
+pub enum ModeTreeHelperState {
+    Idle,
+    TargetKeeping = 1,
+    SequenceCommanding = 2,
+}
+
+#[derive(Debug)]
+pub enum ModeTreeHelperResult {
+    Idle,
+    TargetKeeping,
+    SequenceCommanding(SequenceHandlerResult),
+}
+
+impl From<SequenceHandlerResult> for ModeTreeHelperResult {
+    fn from(value: SequenceHandlerResult) -> Self {
+        Self::SequenceCommanding(value)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ModeTreeHelperError {
+    #[error("generic targeted messaging error: {0}")]
+    Message(#[from] GenericTargetedMessagingError),
+}
 // TODO:
 //
-// 1. Fallback mode?
+// 1. Fallback mode? Needs to be a part of the target mode table..
 // 2. State to determine whether we are in sequence execution mode or in target keeping mode.
-#[derive(Default)]
-pub struct SubsystemHelper {
+pub struct ModeTreeCommandingHelper {
+    pub state: ModeTreeHelperState,
     pub children_mode_store: ModeStoreVec,
     pub target_tables: TargetModeTables,
     pub sequence_tables: SequenceModeTables,
     pub helper: SequenceExecutionHelper,
 }
-impl SubsystemHelper {
+
+impl ModeTreeCommandingHelper {
     pub fn new(
         children_mode_store: ModeStoreVec,
         target_tables: TargetModeTables,
         sequence_tables: SequenceModeTables,
     ) -> Self {
         Self {
+            state: ModeTreeHelperState::Idle,
             children_mode_store,
             target_tables,
             sequence_tables,
@@ -101,23 +128,53 @@ impl SubsystemHelper {
         self.children_mode_store.set_mode(child, mode)
     }
 
-    pub fn insert_mode_reply(&mut self, reply: &ModeReply) {
-        // 1. Update child mode store (also, do we really need one?)
-        // 2. If a sequence is active, check whether this completes the sequence. How do we best
-        //    do this? We would have to remember which IDs need a mode confirmation. We could
-        //    extend the mode store for this.
-        // 3. If no sequence is active and we are in target mode, we need to check whether the
-        //    target mode table is violated. If it is, we need to command the fallback mode.
+    pub fn handle_mode_reply(&mut self, reply: &GenericMessage<ModeReply>) {
+        let mut update_mode_store = |target_id, mode_and_submode| {
+            if !self.children_mode_store.has_component(target_id) {
+                return;
+            }
+            self.children_mode_store
+                .set_mode_for_contained_component(target_id, mode_and_submode);
+            // TODO:
+            // 1. If we are in IDLE Mode, we are done.
+            // 2. If we are in sequencing mode, check whether this completes the sequence. How do
+            //    we best do this? We would have to remember which IDs need a mode confirmation.
+            //    We could extend the mode store for this.
+            // 3. If we are in target keeping mode, we have to check whether the target keeping was
+            //    violated.
+        };
+        match reply.message {
+            ModeReply::ModeInfo(mode_and_submode) => {
+                update_mode_store(reply.sender_id(), mode_and_submode);
+            }
+            ModeReply::ModeReply(mode_and_submode) => {
+                update_mode_store(reply.sender_id(), mode_and_submode);
+            }
+            ModeReply::CantReachMode(_) => (),
+            ModeReply::WrongMode { reached, .. } => {
+                update_mode_store(reply.sender_id(), reached);
+            }
+        };
     }
 
-    pub fn run(
+    pub fn state_machine(
         &mut self,
+        opt_reply: Option<&GenericMessage<ModeReply>>,
         req_sender: &impl ModeRequestSender,
-    ) -> Result<SequenceHandlerResult, GenericTargetedMessagingError> {
-        //if self.helper.awaiting_check_success() {
-        //self.check_current_sequence_against_mode_store();
-        //}
-        self.helper.run(&self.sequence_tables, req_sender)
+    ) -> Result<ModeTreeHelperResult, ModeTreeHelperError> {
+        if let Some(reply) = opt_reply {
+            self.handle_mode_reply(reply);
+        }
+        match self.state {
+            ModeTreeHelperState::Idle => todo!(),
+            ModeTreeHelperState::TargetKeeping => {
+                // TODO: Verify children modes against target table where applicable.
+                Ok(ModeTreeHelperResult::TargetKeeping)
+            }
+            ModeTreeHelperState::SequenceCommanding => {
+                Ok(self.helper.run(&self.sequence_tables, req_sender)?.into())
+            }
+        }
     }
 
     //pub fn check_current_sequence_against_mode_store(&self) {
@@ -247,7 +304,7 @@ struct AcsSubsystem {
     pub mode_requestor_info: Option<MessageMetadata>,
     pub mode_and_submode: ModeAndSubmode,
     pub target_mode_and_submode: Option<ModeAndSubmode>,
-    pub subsystem_helper: SubsystemHelper,
+    pub subsystem_helper: ModeTreeCommandingHelper,
     pub mode_req_handler_mock: ModeRequestHandlerMock,
     pub mode_req_recvd: u32,
 }
