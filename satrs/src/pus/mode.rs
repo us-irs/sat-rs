@@ -39,7 +39,7 @@ mod tests {
     use crate::{
         mode::{
             ModeAndSubmode, ModeReply, ModeReplySender, ModeRequest, ModeRequestSender,
-            ModeRequestorAndHandlerOneParentMpsc, ModeRequestorOneChildMpsc,
+            ModeRequestorAndHandlerMpsc, ModeRequestorOneChildMpsc,
         },
         request::{GenericMessage, MessageMetadata},
     };
@@ -90,7 +90,7 @@ mod tests {
 
         let (request_sender_to_channel_1, request_receiver_channel_1) = mpsc::channel();
         //let (reply_sender_to_channel_2, reply_receiver_channel_2) = mpsc::channel();
-        let mut mode_connector = ModeRequestorAndHandlerOneParentMpsc::new(
+        let mut mode_connector = ModeRequestorAndHandlerMpsc::new(
             TEST_COMPONENT_ID_0,
             request_receiver_of_connector,
             reply_receiver_of_connector,
@@ -129,7 +129,7 @@ mod tests {
         let (_request_sender_to_connector, request_receiver_of_connector) = mpsc::channel();
 
         let (reply_sender_to_channel_2, reply_receiver_channel_2) = mpsc::channel();
-        let mut mode_connector = ModeRequestorAndHandlerOneParentMpsc::new(
+        let mut mode_connector = ModeRequestorAndHandlerMpsc::new(
             TEST_COMPONENT_ID_0,
             request_receiver_of_connector,
             reply_receiver_of_connector,

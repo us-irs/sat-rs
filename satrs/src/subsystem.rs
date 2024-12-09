@@ -1,6 +1,6 @@
 use crate::{
     mode::{Mode, ModeAndSubmode, ModeRequest, ModeRequestSender},
-    mode_tree::{SequenceModeTables, SequenceTableMapTable, SequenceTablesMapValue},
+    mode_tree::{ModeStoreVec, SequenceModeTables, SequenceTableMapTable, SequenceTablesMapValue},
     queue::GenericTargetedMessagingError,
     request::RequestId,
     ComponentId,
@@ -19,6 +19,12 @@ pub trait CheckSuccessProvider {
         target_id: ComponentId,
         target_mode: ModeAndSubmode,
     );
+}
+
+#[derive(Debug)]
+pub enum TargetKeepingResult {
+    Ok,
+    Violated { fallback_mode: Option<Mode> },
 }
 
 #[derive(Debug)]
@@ -92,6 +98,7 @@ impl SequenceExecutionHelper {
         &mut self,
         table: &SequenceModeTables,
         sender: &impl ModeRequestSender,
+        mode_store_vec: &mut ModeStoreVec,
     ) -> Result<SequenceHandlerResult, GenericTargetedMessagingError> {
         if self.state == SequenceExecutionHelperStates::AwaitingCheckSuccess {
             return Ok(SequenceHandlerResult::AwaitingSuccessCheck);
@@ -100,7 +107,12 @@ impl SequenceExecutionHelper {
             Some(idx) => {
                 // Execute the sequence.
                 let seq_table_value = table.0.get(&self.target_mode).unwrap();
-                self.execute_sequence_and_map_to_result(seq_table_value, idx, sender)
+                self.execute_sequence_and_map_to_result(
+                    seq_table_value,
+                    idx,
+                    sender,
+                    mode_store_vec,
+                )
             }
             None => {
                 // Find the first sequence
@@ -109,7 +121,12 @@ impl SequenceExecutionHelper {
                     Ok(SequenceHandlerResult::SequenceDone)
                 } else {
                     self.current_sequence_index = Some(0);
-                    self.execute_sequence_and_map_to_result(seq_table_value, 0, sender)
+                    self.execute_sequence_and_map_to_result(
+                        seq_table_value,
+                        0,
+                        sender,
+                        mode_store_vec,
+                    )
                 }
             }
         }
@@ -120,11 +137,13 @@ impl SequenceExecutionHelper {
         seq_table_value: &SequenceTablesMapValue,
         sequence_idx: usize,
         sender: &impl ModeRequestSender,
+        mode_store_vec: &mut ModeStoreVec,
     ) -> Result<SequenceHandlerResult, GenericTargetedMessagingError> {
         if Self::execute_sequence(
             self.request_id,
             &seq_table_value.entries[sequence_idx],
             sender,
+            mode_store_vec,
         )? {
             self.state = SequenceExecutionHelperStates::AwaitingCheckSuccess;
             Ok(SequenceHandlerResult::AwaitingSuccessCheck)
@@ -140,6 +159,7 @@ impl SequenceExecutionHelper {
         request_id: RequestId,
         map_table: &SequenceTableMapTable,
         sender: &impl ModeRequestSender,
+        mode_store_vec: &mut ModeStoreVec,
     ) -> Result<bool, GenericTargetedMessagingError> {
         let mut some_succes_check_required = false;
         for entry in &map_table.entries {
@@ -148,6 +168,11 @@ impl SequenceExecutionHelper {
                 entry.common.target_id,
                 ModeRequest::SetMode(entry.common.mode_submode),
             )?;
+            mode_store_vec.0.iter_mut().for_each(|val| {
+                if val.id() == entry.common.target_id {
+                    val.awaiting_reply = true;
+                }
+            });
             if entry.check_success {
                 some_succes_check_required = true;
             }
