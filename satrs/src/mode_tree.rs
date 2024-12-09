@@ -105,7 +105,6 @@ impl TargetTableEntry {
         name: &'static str,
         target_id: ComponentId,
         mode_submode: ModeAndSubmode,
-        monitor_state: bool,
         allowed_submode_mask: Option<Submode>,
     ) -> Self {
         Self {
@@ -115,7 +114,7 @@ impl TargetTableEntry {
                 mode_submode,
                 allowed_submode_mask,
             },
-            monitor_state,
+            monitor_state: true,
         }
     }
 
@@ -123,7 +122,6 @@ impl TargetTableEntry {
         name: &'static str,
         target_id: ComponentId,
         mode_submode: ModeAndSubmode,
-        monitor_state: bool,
     ) -> Self {
         Self {
             common: ModeTableEntryCommon {
@@ -132,7 +130,7 @@ impl TargetTableEntry {
                 mode_submode,
                 allowed_submode_mask: None,
             },
-            monitor_state,
+            monitor_state: true,
         }
     }
 
@@ -214,14 +212,17 @@ pub mod alloc_mod {
     pub struct TargetTablesMapValue {
         /// Name for a given mode table entry.
         pub name: &'static str,
+        /// Optional fallback mode if the target mode can not be kept.
+        pub fallback_mode: Option<Mode>,
         /// These are the rows of the a target table.
         pub entries: Vec<TargetTableEntry>,
     }
 
     impl TargetTablesMapValue {
-        pub fn new(name: &'static str) -> Self {
+        pub fn new(name: &'static str, fallback_mode: Option<Mode>) -> Self {
             Self {
                 name,
+                fallback_mode,
                 entries: Default::default(),
             }
         }
@@ -278,24 +279,49 @@ pub mod alloc_mod {
     #[derive(Debug, Default)]
     pub struct SequenceModeTables(pub HashMap<Mode, SequenceTablesMapValue>);
 
+    #[derive(Debug)]
+    pub struct ModeStoreVecValue {
+        id: ComponentId,
+        mode_and_submode: ModeAndSubmode,
+        pub awaiting_reply: bool,
+    }
+
+    impl ModeStoreVecValue {
+        pub fn new(id: ComponentId, mode_and_submode: ModeAndSubmode) -> Self {
+            Self {
+                id,
+                mode_and_submode,
+                awaiting_reply: false,
+            }
+        }
+
+        pub fn id(&self) -> ComponentId {
+            self.id
+        }
+
+        pub fn mode_and_submode(&self) -> ModeAndSubmode {
+            self.mode_and_submode
+        }
+    }
+
     #[derive(Debug, Default)]
-    pub struct ModeStoreVec(pub alloc::vec::Vec<(ComponentId, ModeAndSubmode)>);
+    pub struct ModeStoreVec(pub alloc::vec::Vec<ModeStoreVecValue>);
     #[derive(Debug, Default)]
     pub struct ModeStoreMap(pub hashbrown::HashMap<ComponentId, ModeAndSubmode>);
 
     impl ModeStoreProvider for ModeStoreVec {
         fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode) {
-            self.0.push((target_id, mode));
+            self.0.push(ModeStoreVecValue::new(target_id, mode));
         }
 
         fn has_component(&self, target_id: ComponentId) -> bool {
-            self.0.iter().any(|(id, _)| *id == target_id)
+            self.0.iter().any(|val| val.id == target_id)
         }
 
         fn get_mode(&self, target_id: ComponentId) -> Option<ModeAndSubmode> {
-            self.0.iter().find_map(|(id, mode)| {
-                if *id == target_id {
-                    return Some(*mode);
+            self.0.iter().find_map(|val| {
+                if val.id == target_id {
+                    return Some(val.mode_and_submode);
                 }
                 None
             })
@@ -306,9 +332,9 @@ pub mod alloc_mod {
             target_id: ComponentId,
             mode_to_set: ModeAndSubmode,
         ) {
-            self.0.iter_mut().for_each(|(id, mode)| {
-                if *id == target_id {
-                    *mode = mode_to_set;
+            self.0.iter_mut().for_each(|val| {
+                if val.id == target_id {
+                    val.mode_and_submode = mode_to_set;
                 }
             });
         }

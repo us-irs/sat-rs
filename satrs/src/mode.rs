@@ -28,6 +28,9 @@ pub struct ModeAndSubmode {
     submode: Submode,
 }
 
+pub const INVALID_MODE: ModeAndSubmode = ModeAndSubmode::new(u32::MAX, 0);
+pub const UNKNOWN_MODE: ModeAndSubmode = ModeAndSubmode::new(u32::MAX - 1, 0);
+
 impl ModeAndSubmode {
     pub const RAW_LEN: usize = size_of::<Mode>() + size_of::<Submode>();
 

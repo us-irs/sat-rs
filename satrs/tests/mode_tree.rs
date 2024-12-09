@@ -2,7 +2,8 @@ use core::cell::Cell;
 use satrs::mode::{
     Mode, ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler,
     ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestSender,
-    ModeRequestorAndHandlerMpscBounded, ModeRequestorOneChildBoundedMpsc,
+    ModeRequestorAndHandlerMpscBounded, ModeRequestorOneChildBoundedMpsc, INVALID_MODE,
+    UNKNOWN_MODE,
 };
 use satrs::mode_tree::{
     connect_mode_nodes, ModeChild, ModeNode, ModeParent, ModeStoreProvider, SequenceTableEntry,
@@ -13,7 +14,7 @@ use satrs::mode_tree::{
     TargetTablesMapValue,
 };
 use satrs::request::MessageMetadata;
-use satrs::subsystem::{SequenceExecutionHelper, SequenceHandlerResult};
+use satrs::subsystem::{SequenceExecutionHelper, SequenceHandlerResult, TargetKeepingResult};
 use satrs::{
     mode::{ModeAndSubmode, ModeReply, ModeRequest},
     queue::GenericTargetedMessagingError,
@@ -24,9 +25,6 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::{println, sync::mpsc};
-
-const INVALID_MODE: ModeAndSubmode = ModeAndSubmode::new(0xffffffff, 0);
-const UNKNOWN_MODE: ModeAndSubmode = ModeAndSubmode::new(0xffffffff - 1, 0);
 
 pub enum DefaultMode {
     OFF = 0,
@@ -58,8 +56,9 @@ pub enum TestComponentId {
 pub type RequestSenderType = mpsc::SyncSender<GenericMessage<ModeRequest>>;
 pub type ReplySenderType = mpsc::SyncSender<GenericMessage<ModeReply>>;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum ModeTreeHelperState {
+    #[default]
     Idle,
     TargetKeeping = 1,
     SequenceCommanding = 2,
@@ -68,8 +67,14 @@ pub enum ModeTreeHelperState {
 #[derive(Debug)]
 pub enum ModeTreeHelperResult {
     Idle,
-    TargetKeeping,
+    TargetKeeping(TargetKeepingResult),
     SequenceCommanding(SequenceHandlerResult),
+}
+
+impl From<TargetKeepingResult> for ModeTreeHelperResult {
+    fn from(value: TargetKeepingResult) -> Self {
+        Self::TargetKeeping(value)
+    }
 }
 
 impl From<SequenceHandlerResult> for ModeTreeHelperResult {
@@ -82,17 +87,34 @@ impl From<SequenceHandlerResult> for ModeTreeHelperResult {
 pub enum ModeTreeHelperError {
     #[error("generic targeted messaging error: {0}")]
     Message(#[from] GenericTargetedMessagingError),
+    #[error("current mode {0} is not contained in target table")]
+    CurrentModeNotInTargetTable(Mode),
 }
+
 // TODO:
 //
 // 1. Fallback mode? Needs to be a part of the target mode table..
 // 2. State to determine whether we are in sequence execution mode or in target keeping mode.
 pub struct ModeTreeCommandingHelper {
+    pub current_mode: ModeAndSubmode,
     pub state: ModeTreeHelperState,
     pub children_mode_store: ModeStoreVec,
     pub target_tables: TargetModeTables,
     pub sequence_tables: SequenceModeTables,
     pub helper: SequenceExecutionHelper,
+}
+
+impl Default for ModeTreeCommandingHelper {
+    fn default() -> Self {
+        Self {
+            current_mode: UNKNOWN_MODE,
+            state: Default::default(),
+            children_mode_store: Default::default(),
+            target_tables: Default::default(),
+            sequence_tables: Default::default(),
+            helper: Default::default(),
+        }
+    }
 }
 
 impl ModeTreeCommandingHelper {
@@ -102,6 +124,7 @@ impl ModeTreeCommandingHelper {
         sequence_tables: SequenceModeTables,
     ) -> Self {
         Self {
+            current_mode: UNKNOWN_MODE,
             state: ModeTreeHelperState::Idle,
             children_mode_store,
             target_tables,
@@ -135,13 +158,24 @@ impl ModeTreeCommandingHelper {
             }
             self.children_mode_store
                 .set_mode_for_contained_component(target_id, mode_and_submode);
-            // TODO:
-            // 1. If we are in IDLE Mode, we are done.
-            // 2. If we are in sequencing mode, check whether this completes the sequence. How do
-            //    we best do this? We would have to remember which IDs need a mode confirmation.
-            //    We could extend the mode store for this.
-            // 3. If we are in target keeping mode, we have to check whether the target keeping was
-            //    violated.
+            match self.state {
+                ModeTreeHelperState::Idle => (),
+                ModeTreeHelperState::TargetKeeping => {}
+                ModeTreeHelperState::SequenceCommanding => {
+                    let mut still_awating_replies = false;
+                    self.children_mode_store.0.iter_mut().for_each(|val| {
+                        if val.id() == target_id {
+                            val.awaiting_reply = false;
+                        }
+                        if val.awaiting_reply {
+                            still_awating_replies = true;
+                        }
+                    });
+                    if !still_awating_replies {
+                        self.helper.confirm_sequence_done();
+                    }
+                }
+            }
         };
         match reply.message {
             ModeReply::ModeInfo(mode_and_submode) => {
@@ -166,22 +200,49 @@ impl ModeTreeCommandingHelper {
             self.handle_mode_reply(reply);
         }
         match self.state {
-            ModeTreeHelperState::Idle => todo!(),
+            ModeTreeHelperState::Idle => Ok(ModeTreeHelperResult::Idle),
             ModeTreeHelperState::TargetKeeping => {
-                // TODO: Verify children modes against target table where applicable.
-                Ok(ModeTreeHelperResult::TargetKeeping)
+                // We check whether the current mode is modelled by a target table first.
+                if let Some(target_table) = self.target_tables.0.get(&self.current_mode.mode()) {
+                    for entry in &target_table.entries {
+                        if !entry.monitor_state {
+                            continue;
+                        }
+                        let mut target_mode_violated = false;
+                        self.children_mode_store.0.iter().for_each(|val| {
+                            if val.id() == entry.common.target_id {
+                                target_mode_violated = if let Some(allowed_submode_mask) =
+                                    entry.allowed_submode_mask()
+                                {
+                                    let fixed_bits = !allowed_submode_mask;
+                                    (val.mode_and_submode().mode()
+                                        != entry.common.mode_submode.mode())
+                                        && (val.mode_and_submode().submode() & fixed_bits
+                                            != entry.common.mode_submode.submode() & fixed_bits)
+                                } else {
+                                    val.mode_and_submode() != entry.common.mode_submode
+                                };
+                            }
+                        })
+                    }
+                    // Target keeping violated. Report violation and fallback mode to user.
+                    return Ok(TargetKeepingResult::Violated {
+                        fallback_mode: None,
+                    }
+                    .into());
+                }
+                Ok(ModeTreeHelperResult::TargetKeeping(TargetKeepingResult::Ok))
             }
-            ModeTreeHelperState::SequenceCommanding => {
-                Ok(self.helper.run(&self.sequence_tables, req_sender)?.into())
-            }
+            ModeTreeHelperState::SequenceCommanding => Ok(self
+                .helper
+                .run(
+                    &self.sequence_tables,
+                    req_sender,
+                    &mut self.children_mode_store,
+                )?
+                .into()),
         }
     }
-
-    //pub fn check_current_sequence_against_mode_store(&self) {
-    // TODO: Check whether current sequence requires success checks and if some are required,
-    // check mode store content against the sequence target mode.
-
-    //}
 }
 
 #[derive(Default, Debug)]
@@ -266,6 +327,9 @@ impl ModeRequestHandler for ModeRequestHandlerMock {
     }
 }
 
+#[derive(Default, Debug)]
+pub struct ModeReplyHandlerMock {}
+
 struct PusModeService {
     pub request_id_counter: Cell<u32>,
     pub mode_node: ModeRequestorOneChildBoundedMpsc,
@@ -316,7 +380,7 @@ impl AcsSubsystem {
             mode_requestor_info: None,
             mode_and_submode: UNKNOWN_MODE,
             target_mode_and_submode: None,
-            subsystem_helper: Default::default(),
+            subsystem_helper: ModeTreeCommandingHelper::default(),
             mode_req_handler_mock: Default::default(),
             mode_req_recvd: 0,
         }
@@ -506,6 +570,7 @@ impl MgmAssembly {
     }
 
     pub fn check_mode_replies(&mut self) -> Result<(), GenericTargetedMessagingError> {
+        // TODO: Call mode reply handler mock.
         if let Some(reply_and_id) = self.mode_node.try_recv_mode_reply()? {
             match reply_and_id.message {
                 ModeReply::ModeReply(reply) => {
@@ -524,6 +589,7 @@ impl MgmAssembly {
                         expected
                     );
                 }
+                ModeReply::ModeInfo(_mode_and_submode) => {}
             }
         }
         Ok(())
@@ -1136,12 +1202,11 @@ impl TreeTestbench {
         };
 
         // ACS subsystem tables
-        let mut target_table_safe = TargetTablesMapValue::new("SAFE_TARGET_TBL");
+        let mut target_table_safe = TargetTablesMapValue::new("SAFE_TARGET_TBL", None);
         target_table_safe.add_entry(TargetTableEntry::new(
             "CTRL_SAFE",
             TestComponentId::AcsController as u64,
             ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
-            true,
             // All submodes allowed.
             Some(0xffff),
         ));
@@ -1149,13 +1214,11 @@ impl TreeTestbench {
             "MGM_A_NML",
             TestComponentId::MagnetometerAssembly as u64,
             ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
-            true,
         ));
         target_table_safe.add_entry(TargetTableEntry::new_with_precise_submode(
             "MGT_MAN_NML",
             TestComponentId::MgtDevManager as u64,
             ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
-            true,
         ));
         let mut sequence_tbl_safe_0 = SequenceTableMapTable::new("SAFE_SEQ_0_TBL");
         sequence_tbl_safe_0.add_entry(SequenceTableEntry::new(

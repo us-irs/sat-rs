@@ -110,6 +110,7 @@ impl PusReplyHandler<ActivePusRequestStd, ModeReply> for ModeReplyHandler {
                     ),
                 )?;
             }
+            ModeReply::ModeInfo(_mode_and_submode) => (),
         };
         Ok(true)
     }
