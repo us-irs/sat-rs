@@ -40,7 +40,7 @@ pub struct ModeDoesNotExistError(Mode);
 
 #[derive(Debug)]
 pub struct SequenceExecutionHelper {
-    target_mode: Mode,
+    target_mode: Option<Mode>,
     state: SequenceExecutionHelperStates,
     request_id: RequestId,
     current_sequence_index: Option<usize>,
@@ -49,7 +49,7 @@ pub struct SequenceExecutionHelper {
 impl Default for SequenceExecutionHelper {
     fn default() -> Self {
         Self {
-            target_mode: 0,
+            target_mode: None,
             state: SequenceExecutionHelperStates::Idle,
             request_id: 0,
             current_sequence_index: None,
@@ -67,10 +67,14 @@ impl SequenceExecutionHelper {
         if !sequence_tables.0.contains_key(&mode) {
             return Err(ModeDoesNotExistError(mode));
         }
-        self.target_mode = mode;
+        self.target_mode = Some(mode);
         self.request_id = request_id;
         self.current_sequence_index = None;
         Ok(())
+    }
+
+    pub fn target_mode(&self) -> Option<Mode> {
+        self.target_mode
     }
 
     pub fn confirm_sequence_done(&mut self) {
@@ -103,10 +107,13 @@ impl SequenceExecutionHelper {
         if self.state == SequenceExecutionHelperStates::AwaitingCheckSuccess {
             return Ok(SequenceHandlerResult::AwaitingSuccessCheck);
         }
+        if self.target_mode.is_none() {
+            return Ok(SequenceHandlerResult::SequenceDone);
+        }
         match self.current_sequence_index {
             Some(idx) => {
                 // Execute the sequence.
-                let seq_table_value = table.0.get(&self.target_mode).unwrap();
+                let seq_table_value = table.0.get(&self.target_mode.unwrap()).unwrap();
                 self.execute_sequence_and_map_to_result(
                     seq_table_value,
                     idx,
@@ -116,7 +123,7 @@ impl SequenceExecutionHelper {
             }
             None => {
                 // Find the first sequence
-                let seq_table_value = table.0.get(&self.target_mode).unwrap();
+                let seq_table_value = table.0.get(&self.target_mode.unwrap()).unwrap();
                 if seq_table_value.entries.is_empty() {
                     Ok(SequenceHandlerResult::SequenceDone)
                 } else {

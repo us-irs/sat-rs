@@ -176,15 +176,10 @@ impl<R: MessageReceiverProvider<ModeRequest>> ModeRequestReceiver
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ModeError {
-    Messaging(GenericTargetedMessagingError),
-}
-
-impl From<GenericTargetedMessagingError> for ModeError {
-    fn from(value: GenericTargetedMessagingError) -> Self {
-        Self::Messaging(value)
-    }
+    #[error("Messaging error: {0}")]
+    Messaging(#[from] GenericTargetedMessagingError),
 }
 
 pub trait ModeProvider {
