@@ -386,6 +386,7 @@ impl<
         &mut self,
         requestor: MessageMetadata,
         mode_and_submode: ModeAndSubmode,
+        _forced: bool,
     ) -> Result<(), satrs::mode::ModeError> {
         log::info!(
             "{}: transitioning to mode {:?}",
@@ -575,7 +576,10 @@ mod tests {
             .mode_request_tx
             .send(GenericMessage::new(
                 MessageMetadata::new(0, PUS_MODE_SERVICE.id()),
-                ModeRequest::SetMode(ModeAndSubmode::new(DeviceMode::Normal as u32, 0)),
+                ModeRequest::SetMode {
+                    mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
+                    forced: false,
+                },
             ))
             .expect("failed to send mode request");
         testbench.handler.periodic_operation();
@@ -633,7 +637,10 @@ mod tests {
             .mode_request_tx
             .send(GenericMessage::new(
                 MessageMetadata::new(0, PUS_MODE_SERVICE.id()),
-                ModeRequest::SetMode(ModeAndSubmode::new(DeviceMode::Normal as u32, 0)),
+                ModeRequest::SetMode {
+                    mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
+                    forced: false,
+                },
             ))
             .expect("failed to send mode request");
         testbench.handler.periodic_operation();

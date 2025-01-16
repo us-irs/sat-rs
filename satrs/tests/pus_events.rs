@@ -6,7 +6,6 @@ use satrs::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
 use satrs::params::U32Pair;
 use satrs::params::{Params, ParamsHeapless, WritableToBeBytes};
 use satrs::pus::event_man::{DefaultPusEventReportingMap, EventReporter, PusEventTmCreatorWithMap};
-use satrs::pus::test_util::TEST_COMPONENT_ID_0;
 use satrs::request::UniqueApidTargetId;
 use satrs::tmtc::PacketAsVec;
 use spacepackets::ecss::tm::PusTmReader;
@@ -100,10 +99,7 @@ fn test_threaded_usage() {
     // Event sender and TM checker thread
     let jh1 = thread::spawn(move || {
         event_tx
-            .send(EventMessage::new(
-                TEST_COMPONENT_ID_0.id(),
-                INFO_EVENT.into(),
-            ))
+            .send(EventMessage::new(TEST_ID.id(), INFO_EVENT.into()))
             .expect("Sending info event failed");
         loop {
             match event_packet_rx.try_recv() {
@@ -130,7 +126,7 @@ fn test_threaded_usage() {
         }
         event_tx
             .send(EventMessage::new_with_params(
-                TEST_COMPONENT_ID_0.id(),
+                TEST_ID.id(),
                 LOW_SEV_EVENT,
                 &Params::Heapless((2_u32, 3_u32).into()),
             ))

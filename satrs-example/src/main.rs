@@ -291,7 +291,10 @@ fn static_tmtc_pool_main() {
     pcdu_handler_mode_tx
         .send(GenericMessage::new(
             MessageMetadata::new(0, NO_SENDER),
-            ModeRequest::SetMode(ModeAndSubmode::new(DeviceMode::Normal as Mode, 0)),
+            ModeRequest::SetMode {
+                mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as Mode, 0),
+                forced: false,
+            },
         ))
         .expect("sending initial mode request failed");
 
@@ -598,7 +601,10 @@ fn dyn_tmtc_pool_main() {
     pcdu_handler_mode_tx
         .send(GenericMessage::new(
             MessageMetadata::new(0, NO_SENDER),
-            ModeRequest::SetMode(ModeAndSubmode::new(DeviceMode::Normal as Mode, 0)),
+            ModeRequest::SetMode {
+                mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as Mode, 0),
+                forced: false,
+            },
         ))
         .expect("sending initial mode request failed");
 

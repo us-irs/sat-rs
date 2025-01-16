@@ -191,7 +191,13 @@ impl PusTcToRequestConverter<ActivePusRequestStd, ModeRequest> for ModeRequestCo
                 }
                 let mode_and_submode = ModeAndSubmode::from_be_bytes(&tc.user_data()[4..])
                     .expect("mode and submode extraction failed");
-                Ok((active_request, ModeRequest::SetMode(mode_and_submode)))
+                Ok((
+                    active_request,
+                    ModeRequest::SetMode {
+                        mode_and_submode,
+                        forced: false,
+                    },
+                ))
             }
             Subservice::TcReadMode => Ok((active_request, ModeRequest::ReadMode)),
             Subservice::TcAnnounceMode => Ok((active_request, ModeRequest::AnnounceMode)),
@@ -347,7 +353,13 @@ mod tests {
         let (_active_req, req) = testbench
             .convert(token, &[], TEST_APID, TEST_UNIQUE_ID_0)
             .expect("conversion has failed");
-        assert_eq!(req, ModeRequest::SetMode(mode_and_submode));
+        assert_eq!(
+            req,
+            ModeRequest::SetMode {
+                mode_and_submode,
+                forced: false
+            }
+        );
     }
 
     #[test]

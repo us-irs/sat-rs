@@ -166,7 +166,10 @@ impl SequenceExecutionHelper {
             sender.send_mode_request(
                 request_id,
                 entry.common.target_id,
-                ModeRequest::SetMode(entry.common.mode_submode),
+                ModeRequest::SetMode {
+                    mode_and_submode: entry.common.mode_submode,
+                    forced: false,
+                },
             )?;
             mode_store_vec.0.iter_mut().for_each(|val| {
                 if val.id() == entry.common.target_id {

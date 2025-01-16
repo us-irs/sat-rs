@@ -13,8 +13,10 @@ use satrs::mode_tree::{
     ModeStoreVec, SequenceModeTables, SequenceTablesMapValue, TargetModeTables,
     TargetTablesMapValue,
 };
-use satrs::request::MessageMetadata;
-use satrs::subsystem::{SequenceExecutionHelper, SequenceHandlerResult, TargetKeepingResult};
+use satrs::request::{MessageMetadata, RequestId};
+use satrs::subsystem::{
+    ModeDoesNotExistError, SequenceExecutionHelper, SequenceHandlerResult, TargetKeepingResult,
+};
 use satrs::{
     mode::{ModeAndSubmode, ModeReply, ModeRequest},
     queue::GenericTargetedMessagingError,
@@ -191,13 +193,23 @@ impl ModeTreeCommandingHelper {
         };
     }
 
+    pub fn start_command_sequence(
+        &mut self,
+        mode: Mode,
+        request_id: RequestId,
+    ) -> Result<(), ModeDoesNotExistError> {
+        self.helper.load(mode, request_id, &self.sequence_tables)?;
+        self.state = ModeTreeHelperState::SequenceCommanding;
+        Ok(())
+    }
+
     pub fn state_machine(
         &mut self,
-        opt_reply: Option<&GenericMessage<ModeReply>>,
+        opt_reply: Option<GenericMessage<ModeReply>>,
         req_sender: &impl ModeRequestSender,
     ) -> Result<ModeTreeHelperResult, ModeTreeHelperError> {
         if let Some(reply) = opt_reply {
-            self.handle_mode_reply(reply);
+            self.handle_mode_reply(&reply);
         }
         match self.state {
             ModeTreeHelperState::Idle => Ok(ModeTreeHelperResult::Idle),
@@ -280,6 +292,7 @@ impl ModeRequestHandler for ModeRequestHandlerMock {
         &mut self,
         requestor: MessageMetadata,
         mode_and_submode: ModeAndSubmode,
+        _forced: bool,
     ) -> Result<(), Self::Error> {
         self.start_transition_calls
             .push_back((requestor, mode_and_submode));
@@ -347,6 +360,21 @@ impl PusModeService {
         self.request_id_counter
             .replace(self.request_id_counter.get() + 1);
     }
+
+    pub fn send_mode_cmd(&self, mode: ModeAndSubmode) {
+        self.mode_node
+            .send_mode_request(
+                self.request_id_counter.get(),
+                TestComponentId::AcsSubsystem as ComponentId,
+                ModeRequest::SetMode {
+                    mode_and_submode: mode,
+                    forced: false,
+                },
+            )
+            .unwrap();
+        self.request_id_counter
+            .replace(self.request_id_counter.get() + 1);
+    }
 }
 
 impl ModeNode for PusModeService {
@@ -398,8 +426,23 @@ impl AcsSubsystem {
             self.handle_mode_request(request)
                 .expect("mode messaging error");
         }
-        if let Some(_reply) = self.mode_node.try_recv_mode_reply().unwrap() {
-            // TODO: Implementation.
+        let mut mode_reply = None;
+        if let Some(reply) = self.mode_node.try_recv_mode_reply().unwrap() {
+            mode_reply = Some(reply);
+        }
+        match self
+            .subsystem_helper
+            .state_machine(mode_reply, &self.mode_node)
+        {
+            Ok(result) => match result {
+                ModeTreeHelperResult::Idle => todo!(),
+                ModeTreeHelperResult::TargetKeeping(target_keeping_result) => todo!(),
+                ModeTreeHelperResult::SequenceCommanding(sequence_handler_result) => todo!(),
+            },
+            Err(error) => match error {
+                ModeTreeHelperError::Message(generic_targeted_messaging_error) => todo!(),
+                ModeTreeHelperError::CurrentModeNotInTargetTable(_) => todo!(),
+            },
         }
     }
     pub fn add_target_and_sequence_table(
@@ -454,13 +497,21 @@ impl ModeRequestHandler for AcsSubsystem {
         &mut self,
         requestor: MessageMetadata,
         mode_and_submode: ModeAndSubmode,
+        forced: bool,
     ) -> Result<(), Self::Error> {
         self.mode_requestor_info = Some(requestor);
         self.target_mode_and_submode = Some(mode_and_submode);
         self.mode_req_handler_mock
-            .start_transition(requestor, mode_and_submode)
+            .start_transition(requestor, mode_and_submode, forced)
             .unwrap();
+        // TODO: CHeck if a transition is already active. For now, we do not allow a new transition
+        // if one is already active.
         // Execute mode map by executing the transition table(s).
+        // TODO: How to deal with error handling? Add this error to generic ModeError, or create
+        // new error type?
+        self.subsystem_helper
+            .start_command_sequence(mode_and_submode.mode(), requestor.request_id())
+            .unwrap();
         Ok(())
     }
 
@@ -629,11 +680,12 @@ impl ModeRequestHandler for MgmAssembly {
         &mut self,
         requestor: MessageMetadata,
         mode_and_submode: ModeAndSubmode,
+        forced: bool,
     ) -> Result<(), Self::Error> {
         self.mode_requestor_info = Some(requestor);
         self.target_mode_and_submode = Some(mode_and_submode);
         self.mode_req_mock
-            .start_transition(requestor, mode_and_submode)
+            .start_transition(requestor, mode_and_submode, forced)
             .unwrap();
         Ok(())
     }
@@ -780,11 +832,12 @@ impl ModeRequestHandler for DeviceManager {
         &mut self,
         requestor: MessageMetadata,
         mode_and_submode: ModeAndSubmode,
+        forced: bool,
     ) -> Result<(), ModeError> {
         self.mode_and_submode = mode_and_submode;
         self.handle_mode_reached(Some(requestor))?;
         self.mode_req_mock
-            .start_transition(requestor, mode_and_submode)
+            .start_transition(requestor, mode_and_submode, forced)
             .unwrap();
         Ok(())
     }
@@ -923,11 +976,12 @@ impl ModeRequestHandler for CommonDevice {
         &mut self,
         requestor: MessageMetadata,
         mode_and_submode: ModeAndSubmode,
+        forced: bool,
     ) -> Result<(), ModeError> {
         self.mode_and_submode = mode_and_submode;
         self.handle_mode_reached(Some(requestor))?;
         self.mode_req_mock
-            .start_transition(requestor, mode_and_submode)
+            .start_transition(requestor, mode_and_submode, forced)
             .unwrap();
         Ok(())
     }
@@ -1031,11 +1085,12 @@ impl ModeRequestHandler for AcsController {
         &mut self,
         requestor: MessageMetadata,
         mode_and_submode: ModeAndSubmode,
+        forced: bool,
     ) -> Result<(), Self::Error> {
         self.mode_and_submode = mode_and_submode;
         self.handle_mode_reached(Some(requestor))?;
         self.mode_req_mock
-            .start_transition(requestor, mode_and_submode)
+            .start_transition(requestor, mode_and_submode, forced)
             .unwrap();
         Ok(())
     }
@@ -1407,4 +1462,6 @@ fn command_safe_mode() {
     tb.mgt_dev.run();
     tb.mgm_devs[0].run();
     tb.mgm_devs[1].run();
+    tb.pus
+        .send_mode_cmd(ModeAndSubmode::new(AcsMode::IDLE as u32, 0));
 }

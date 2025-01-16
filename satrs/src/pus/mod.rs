@@ -1221,8 +1221,9 @@ pub(crate) fn source_buffer_large_enough(
 
 #[cfg(any(feature = "test_util", test))]
 pub mod test_util {
-    use crate::request::UniqueApidTargetId;
     use spacepackets::ecss::{tc::PusTcCreator, tm::PusTmReader};
+
+    use crate::request::UniqueApidTargetId;
 
     use super::{
         verification::{self, TcStateAccepted, VerificationToken},
@@ -1232,6 +1233,7 @@ pub mod test_util {
     pub const TEST_APID: u16 = 0x101;
     pub const TEST_UNIQUE_ID_0: u32 = 0x05;
     pub const TEST_UNIQUE_ID_1: u32 = 0x06;
+
     pub const TEST_COMPONENT_ID_0: UniqueApidTargetId =
         UniqueApidTargetId::new(TEST_APID, TEST_UNIQUE_ID_0);
     pub const TEST_COMPONENT_ID_1: UniqueApidTargetId =
@@ -1268,13 +1270,12 @@ pub mod tests {
     use spacepackets::ecss::tm::{GenericPusTmSecondaryHeader, PusTmCreator, PusTmReader};
     use spacepackets::ecss::{PusPacket, WritablePusPacket};
     use spacepackets::CcsdsPacket;
+    use test_util::{TEST_APID, TEST_COMPONENT_ID_0};
 
     use crate::pool::{PoolProvider, SharedStaticMemoryPool, StaticMemoryPool, StaticPoolConfig};
     use crate::pus::verification::{RequestId, VerificationReporter};
     use crate::tmtc::{PacketAsVec, PacketInPool, PacketSenderWithSharedPool, SharedPacketPool};
     use crate::ComponentId;
-
-    use super::test_util::{TEST_APID, TEST_COMPONENT_ID_0};
 
     use super::verification::test_util::TestVerificationReporter;
     use super::verification::{

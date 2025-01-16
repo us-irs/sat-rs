@@ -116,7 +116,10 @@ impl TargetedModeCommand {
 pub enum ModeRequest {
     /// Mode information. Can be used to notify other components of changed modes.
     ModeInfo(ModeAndSubmode),
-    SetMode(ModeAndSubmode),
+    SetMode {
+        mode_and_submode: ModeAndSubmode,
+        forced: bool,
+    },
     ReadMode,
     AnnounceMode,
     AnnounceModeRecursive,
@@ -203,6 +206,7 @@ pub trait ModeRequestHandler: ModeProvider {
         &mut self,
         requestor: MessageMetadata,
         mode_and_submode: ModeAndSubmode,
+        forced: bool,
     ) -> Result<(), Self::Error>;
 
     fn announce_mode(&self, requestor_info: Option<MessageMetadata>, recursive: bool);
@@ -229,9 +233,10 @@ pub trait ModeRequestHandler: ModeProvider {
         request: GenericMessage<ModeRequest>,
     ) -> Result<(), Self::Error> {
         match request.message {
-            ModeRequest::SetMode(mode_and_submode) => {
-                self.start_transition(request.requestor_info, mode_and_submode)
-            }
+            ModeRequest::SetMode {
+                mode_and_submode,
+                forced,
+            } => self.start_transition(request.requestor_info, mode_and_submode, forced),
             ModeRequest::ReadMode => self.send_mode_reply(
                 request.requestor_info,
                 ModeReply::ModeReply(self.mode_and_submode()),

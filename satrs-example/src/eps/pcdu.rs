@@ -412,6 +412,7 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> ModeRequestHandler
         &mut self,
         requestor: MessageMetadata,
         mode_and_submode: ModeAndSubmode,
+        _forced: bool,
     ) -> Result<(), satrs::mode::ModeError> {
         log::info!(
             "{}: transitioning to mode {:?}",
@@ -660,7 +661,10 @@ mod tests {
             .mode_request_tx
             .send(GenericMessage::new(
                 MessageMetadata::new(0, PUS_MODE_SERVICE.id()),
-                ModeRequest::SetMode(ModeAndSubmode::new(DeviceMode::Normal as u32, 0)),
+                ModeRequest::SetMode {
+                    mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
+                    forced: false,
+                },
             ))
             .expect("failed to send mode request");
         let switch_map_shared = testbench.handler.shared_switch_map.lock().unwrap();
@@ -692,7 +696,10 @@ mod tests {
             .mode_request_tx
             .send(GenericMessage::new(
                 MessageMetadata::new(0, PUS_MODE_SERVICE.id()),
-                ModeRequest::SetMode(ModeAndSubmode::new(DeviceMode::Normal as u32, 0)),
+                ModeRequest::SetMode {
+                    mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
+                    forced: false,
+                },
             ))
             .expect("failed to send mode request");
         testbench
