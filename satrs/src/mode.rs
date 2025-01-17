@@ -180,6 +180,8 @@ impl<R: MessageReceiverProvider<ModeRequest>> ModeRequestReceiver
 pub enum ModeError {
     #[error("Messaging error: {0}")]
     Messaging(#[from] GenericTargetedMessagingError),
+    #[error("busy with other mode request")]
+    Busy,
 }
 
 pub trait ModeProvider {

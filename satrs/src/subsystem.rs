@@ -28,9 +28,9 @@ pub enum TargetKeepingResult {
 }
 
 #[derive(Debug)]
-pub enum SequenceHandlerResult {
-    SequenceDone,
-    SequenceStepDone,
+pub enum ModeCommandingResult {
+    CommandingDone,
+    CommandingStepDone,
     AwaitingSuccessCheck,
 }
 
@@ -103,12 +103,12 @@ impl SequenceExecutionHelper {
         table: &SequenceModeTables,
         sender: &impl ModeRequestSender,
         mode_store_vec: &mut ModeStoreVec,
-    ) -> Result<SequenceHandlerResult, GenericTargetedMessagingError> {
+    ) -> Result<ModeCommandingResult, GenericTargetedMessagingError> {
         if self.state == SequenceExecutionHelperStates::AwaitingCheckSuccess {
-            return Ok(SequenceHandlerResult::AwaitingSuccessCheck);
+            return Ok(ModeCommandingResult::AwaitingSuccessCheck);
         }
         if self.target_mode.is_none() {
-            return Ok(SequenceHandlerResult::SequenceDone);
+            return Ok(ModeCommandingResult::CommandingDone);
         }
         match self.current_sequence_index {
             Some(idx) => {
@@ -125,7 +125,7 @@ impl SequenceExecutionHelper {
                 // Find the first sequence
                 let seq_table_value = table.0.get(&self.target_mode.unwrap()).unwrap();
                 if seq_table_value.entries.is_empty() {
-                    Ok(SequenceHandlerResult::SequenceDone)
+                    Ok(ModeCommandingResult::CommandingDone)
                 } else {
                     self.current_sequence_index = Some(0);
                     self.execute_sequence_and_map_to_result(
@@ -145,7 +145,7 @@ impl SequenceExecutionHelper {
         sequence_idx: usize,
         sender: &impl ModeRequestSender,
         mode_store_vec: &mut ModeStoreVec,
-    ) -> Result<SequenceHandlerResult, GenericTargetedMessagingError> {
+    ) -> Result<ModeCommandingResult, GenericTargetedMessagingError> {
         if Self::execute_sequence(
             self.request_id,
             &seq_table_value.entries[sequence_idx],
@@ -153,12 +153,12 @@ impl SequenceExecutionHelper {
             mode_store_vec,
         )? {
             self.state = SequenceExecutionHelperStates::AwaitingCheckSuccess;
-            Ok(SequenceHandlerResult::AwaitingSuccessCheck)
+            Ok(ModeCommandingResult::AwaitingSuccessCheck)
         } else if seq_table_value.entries.len() - 1 == sequence_idx {
-            return Ok(SequenceHandlerResult::SequenceDone);
+            return Ok(ModeCommandingResult::CommandingDone);
         } else {
             self.current_sequence_index = Some(sequence_idx + 1);
-            return Ok(SequenceHandlerResult::SequenceStepDone);
+            return Ok(ModeCommandingResult::CommandingStepDone);
         }
     }
 

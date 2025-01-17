@@ -282,7 +282,7 @@ pub mod alloc_mod {
     #[derive(Debug)]
     pub struct ModeStoreVecValue {
         id: ComponentId,
-        mode_and_submode: ModeAndSubmode,
+        pub mode_and_submode: ModeAndSubmode,
         pub awaiting_reply: bool,
     }
 
@@ -309,6 +309,30 @@ pub mod alloc_mod {
     #[derive(Debug, Default)]
     pub struct ModeStoreMap(pub hashbrown::HashMap<ComponentId, ModeAndSubmode>);
 
+    impl ModeStoreVec {
+        /// Generic handler for mode replies received from child components.
+        ///
+        /// It returns whether any children are still awating replies.
+        pub fn generic_reply_handler(
+            &mut self,
+            sender_id: ComponentId,
+            reported_mode_and_submode: Option<ModeAndSubmode>,
+        ) -> bool {
+            let mut still_awating_replies = false;
+            self.0.iter_mut().for_each(|val| {
+                if val.id() == sender_id {
+                    if let Some(mode_and_submode) = reported_mode_and_submode {
+                        val.mode_and_submode = mode_and_submode;
+                    }
+                    val.awaiting_reply = false;
+                }
+                if val.awaiting_reply {
+                    still_awating_replies = true;
+                }
+            });
+            still_awating_replies
+        }
+    }
     impl ModeStoreProvider for ModeStoreVec {
         fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode) {
             self.0.push(ModeStoreVecValue::new(target_id, mode));
