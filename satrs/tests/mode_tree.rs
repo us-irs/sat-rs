@@ -108,6 +108,7 @@ pub struct SubsystemCommandingHelper {
     pub current_mode: ModeAndSubmode,
     pub state: ModeTreeHelperState,
     pub children_mode_store: ModeStoreVec,
+    pub active_request_id: Option<RequestId>,
     pub target_tables: TargetModeTables,
     pub sequence_tables: SequenceModeTables,
     pub helper: SequenceExecutionHelper,
@@ -119,6 +120,7 @@ impl Default for SubsystemCommandingHelper {
             current_mode: UNKNOWN_MODE,
             state: Default::default(),
             children_mode_store: Default::default(),
+            active_request_id: None,
             target_tables: Default::default(),
             sequence_tables: Default::default(),
             helper: Default::default(),
@@ -136,6 +138,7 @@ impl SubsystemCommandingHelper {
             current_mode: UNKNOWN_MODE,
             state: ModeTreeHelperState::Idle,
             children_mode_store,
+            active_request_id: None,
             target_tables,
             sequence_tables,
             helper: Default::default(),
@@ -206,6 +209,7 @@ impl SubsystemCommandingHelper {
                 // mode after an executed sequence.
                 if let ModeCommandingResult::CommandingDone = result {
                     self.state = ModeTreeHelperState::TargetKeeping;
+                    self.active_request_id = None;
                     self.current_mode = ModeAndSubmode::new(self.helper.target_mode().unwrap(), 0);
                 }
                 Ok(result.into())
@@ -219,9 +223,21 @@ impl SubsystemCommandingHelper {
         }
         let mut generic_mode_reply_handler =
             |sender_id, mode_and_submode: Option<ModeAndSubmode>| {
-                let still_awating_replies = self
-                    .children_mode_store
-                    .generic_reply_handler(sender_id, mode_and_submode);
+                // Tying the reply awaition to the request ID ensures that something like replies
+                // belonging to older requests do not interfere with the completion handling of
+                // the mode commanding. This is important for forced mode commands.
+                let mut handle_awaition = false;
+                if self.state == ModeTreeHelperState::ModeCommanding
+                    && self.active_request_id.is_some()
+                    && reply.request_id() == self.active_request_id.unwrap()
+                {
+                    handle_awaition = true;
+                }
+                let still_awating_replies = self.children_mode_store.generic_reply_handler(
+                    sender_id,
+                    mode_and_submode,
+                    handle_awaition,
+                );
                 if self.state == ModeTreeHelperState::ModeCommanding && !still_awating_replies {
                     self.helper.confirm_sequence_done();
                 }
@@ -655,6 +671,8 @@ pub struct AssemblyCommandingHelper {
     pub children_mode_store: ModeStoreVec,
     /// Target mode used for mode commanding.
     pub target_mode: Option<ModeAndSubmode>,
+    /// Request ID of active mode commanding request.
+    pub active_request_id: Option<RequestId>,
     pub state: ModeTreeHelperState,
 }
 
@@ -678,6 +696,7 @@ impl AssemblyCommandingHelper {
             )?;
             child.awaiting_reply = true;
         }
+        self.active_request_id = Some(request_id);
         Ok(())
     }
 
@@ -704,9 +723,21 @@ impl AssemblyCommandingHelper {
             return AssemblyHelperResult::Idle;
         }
         let mut generic_mode_reply_handler = |mode_and_submode: Option<ModeAndSubmode>| {
-            let still_awating_replies = self
-                .children_mode_store
-                .generic_reply_handler(mode_reply.sender_id(), mode_and_submode);
+            // Tying the reply awaition to the request ID ensures that something like replies
+            // belonging to older requests do not interfere with the completion handling of
+            // the mode commanding. This is important for forced mode commands.
+            let mut handle_awaition = false;
+            if self.state == ModeTreeHelperState::ModeCommanding
+                && self.active_request_id.is_some()
+                && mode_reply.request_id() == self.active_request_id.unwrap()
+            {
+                handle_awaition = true;
+            }
+            let still_awating_replies = self.children_mode_store.generic_reply_handler(
+                mode_reply.sender_id(),
+                mode_and_submode,
+                handle_awaition,
+            );
             if self.state == ModeTreeHelperState::TargetKeeping
                 && mode_and_submode.is_some()
                 && self.target_mode.is_some()
@@ -714,8 +745,12 @@ impl AssemblyCommandingHelper {
             {
                 return AssemblyHelperResult::TargetKeepingViolation(mode_reply.sender_id());
             }
-            if self.state == ModeTreeHelperState::ModeCommanding && !still_awating_replies {
+            if self.state == ModeTreeHelperState::ModeCommanding
+                && handle_awaition
+                && !still_awating_replies
+            {
                 self.state = ModeTreeHelperState::TargetKeeping;
+                self.active_request_id = None;
                 return AssemblyHelperResult::ModeCommandingDone;
             }
             AssemblyHelperResult::Idle
@@ -760,6 +795,7 @@ impl MgmAssembly {
         self.check_mode_requests().expect("mode messaging error");
         self.check_mode_replies().expect("mode messaging error");
     }
+
     pub fn get_num_mode_requests(&mut self) -> usize {
         self.mode_req_mock.mode_messages_received()
     }
@@ -829,6 +865,8 @@ impl ModeRequestHandler for MgmAssembly {
         forced: bool,
     ) -> Result<(), Self::Error> {
         // Always accept forced commands and commands to mode OFF.
+        // TODO: Forced transitions are special because now we might receive a reply where the
+        // request ID is relevant!
         if self.assembly_helper.target_mode.is_some()
             && !forced
             && mode_and_submode.mode() != DefaultMode::OFF as u32

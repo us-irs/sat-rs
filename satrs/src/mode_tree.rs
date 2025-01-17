@@ -317,6 +317,7 @@ pub mod alloc_mod {
             &mut self,
             sender_id: ComponentId,
             reported_mode_and_submode: Option<ModeAndSubmode>,
+            handle_reply_awaition: bool,
         ) -> bool {
             let mut still_awating_replies = false;
             self.0.iter_mut().for_each(|val| {
@@ -324,9 +325,11 @@ pub mod alloc_mod {
                     if let Some(mode_and_submode) = reported_mode_and_submode {
                         val.mode_and_submode = mode_and_submode;
                     }
-                    val.awaiting_reply = false;
+                    if handle_reply_awaition {
+                        val.awaiting_reply = false;
+                    }
                 }
-                if val.awaiting_reply {
+                if handle_reply_awaition && val.awaiting_reply {
                     still_awating_replies = true;
                 }
             });
