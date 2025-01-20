@@ -159,6 +159,22 @@ impl SubsystemCommandingHelper {
         Ok(())
     }
 
+    pub fn send_announce_mode_cmd_to_children(
+        &self,
+        request_id: RequestId,
+        req_sender: &impl ModeRequestSender,
+        recursive: bool,
+    ) -> Result<(), GenericTargetedMessagingError> {
+        let mut request = ModeRequest::AnnounceMode;
+        if recursive {
+            request = ModeRequest::AnnounceModeRecursive;
+        }
+        for child in &self.children_mode_store.0 {
+            req_sender.send_mode_request(request_id, child.id(), request)?;
+        }
+        Ok(())
+    }
+
     pub fn state_machine(
         &mut self,
         opt_reply: Option<GenericMessage<ModeReply>>,
@@ -593,23 +609,10 @@ impl ModeRequestHandler for AcsSubsystem {
             "TestAssembly: Announcing mode (recursively: {}): {:?}",
             recursive, self.subsystem_helper.current_mode
         );
-        let mut mode_request = ModeRequest::AnnounceMode;
-        if recursive {
-            mode_request = ModeRequest::AnnounceModeRecursive;
-        }
         let request_id = requestor_info.map_or(0, |info| info.request_id());
-        self.mode_node
-            .request_sender_store
-            .0
-            .iter()
-            .for_each(|(_, sender)| {
-                sender
-                    .send(GenericMessage::new(
-                        MessageMetadata::new(request_id, self.mode_node.local_channel_id_generic()),
-                        mode_request,
-                    ))
-                    .expect("sending mode request failed");
-            });
+        self.subsystem_helper
+            .send_announce_mode_cmd_to_children(request_id, &self.mode_node, recursive)
+            .expect("sending mode request failed");
         self.mode_req_handler_mock
             .announce_mode(requestor_info, recursive);
     }
@@ -659,6 +662,11 @@ impl ModeRequestHandler for AcsSubsystem {
     }
 }
 
+/// A generic helper for manager components which manage child components in a mode tree.
+///
+/// Mode commands are usually forwarded to all children components transparently.
+/// For example, this could be used in an Assembly component which manages multiple redundant
+/// child components. It can also be used inside a manager component which only manages one device.
 #[derive(Debug, Default)]
 pub struct DevManagerCommandingHelper {
     /// The IDs, modes and reply awaition status of all children are tracked in this data
@@ -693,6 +701,22 @@ impl DevManagerCommandingHelper {
         }
         self.active_request_id = Some(request_id);
         self.state = ModeTreeHelperState::ModeCommanding;
+        Ok(())
+    }
+
+    pub fn send_announce_mode_cmd_to_children(
+        &self,
+        request_id: RequestId,
+        mode_req_sender: &impl ModeRequestSender,
+        recursive: bool,
+    ) -> Result<(), GenericTargetedMessagingError> {
+        let mut request = ModeRequest::AnnounceMode;
+        if recursive {
+            request = ModeRequest::AnnounceModeRecursive;
+        }
+        for child in self.children_mode_store.0.iter() {
+            mode_req_sender.send_mode_request(request_id, child.id(), request)?;
+        }
         Ok(())
     }
 
@@ -768,8 +792,6 @@ impl DevManagerCommandingHelper {
     }
 }
 
-// TODO: This assembly requires some helper component to process commands.. Maybe implement it
-// manually first?
 struct MgmAssembly {
     pub mode_node: ModeRequestorAndHandlerMpscBounded,
     pub mode_requestor_info: Option<MessageMetadata>,
@@ -891,23 +913,10 @@ impl ModeRequestHandler for MgmAssembly {
             "TestAssembly: Announcing mode (recursively: {}): {:?}",
             recursive, self.mode_and_submode
         );
-        let mut mode_request = ModeRequest::AnnounceMode;
-        if recursive {
-            mode_request = ModeRequest::AnnounceModeRecursive;
-        }
         let request_id = requestor_info.map_or(0, |info| info.request_id());
-        self.mode_node
-            .request_sender_store
-            .0
-            .iter()
-            .for_each(|(_, sender)| {
-                sender
-                    .send(GenericMessage::new(
-                        MessageMetadata::new(request_id, self.mode_node.local_channel_id_generic()),
-                        mode_request,
-                    ))
-                    .expect("sending mode request failed");
-            });
+        self.commanding_helper
+            .send_announce_mode_cmd_to_children(request_id, &self.mode_node, recursive)
+            .expect("sending mode request failed");
         self.mode_req_mock.announce_mode(requestor_info, recursive);
     }
 
@@ -1084,23 +1093,12 @@ impl ModeRequestHandler for DeviceManager {
             "{}: announcing mode: {:?}",
             self.name, self.mode_and_submode
         );
-        let mut mode_request = ModeRequest::AnnounceMode;
-        if recursive {
-            mode_request = ModeRequest::AnnounceModeRecursive;
-        }
         let request_id = requestor_info.map_or(0, |info| info.request_id());
-        self.mode_node
-            .request_sender_store
-            .0
-            .iter()
-            .for_each(|(_, sender)| {
-                sender
-                    .send(GenericMessage::new(
-                        MessageMetadata::new(request_id, self.mode_node.local_channel_id_generic()),
-                        mode_request,
-                    ))
-                    .expect("sending mode request failed");
-            });
+        self.commanding_helper.send_announce_mode_cmd_to_children(
+            request_id,
+            &self.mode_node,
+            recursive,
+        ).expect("sending mode announce request failed");
         self.mode_req_mock.announce_mode(requestor_info, recursive);
     }
 
@@ -1111,6 +1109,7 @@ impl ModeRequestHandler for DeviceManager {
         self.mode_req_mock.handle_mode_reached(requestor).unwrap();
         Ok(())
     }
+
     fn handle_mode_info(
         &mut self,
         requestor_info: MessageMetadata,
@@ -1727,4 +1726,6 @@ fn command_safe_mode() {
         tb.mgt_dev.mode_and_submode(),
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0)
     );
+    // TODO: Check whether the correct amount of mode requests and mode replies
+    // was sent/received to each component.
 }
