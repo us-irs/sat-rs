@@ -145,6 +145,10 @@ impl SubsystemCommandingHelper {
         }
     }
 
+    pub fn add_mode_child(&mut self, child: ComponentId, mode: ModeAndSubmode) {
+        self.children_mode_store.add_component(child, mode);
+    }
+
     pub fn start_command_sequence(
         &mut self,
         mode: Mode,
@@ -535,9 +539,7 @@ impl ModeParent for AcsSubsystem {
     type Sender = RequestSenderType;
 
     fn add_mode_child(&mut self, id: ComponentId, request_sender: RequestSenderType) {
-        self.subsystem_helper
-            .children_mode_store
-            .add_component(id, UNKNOWN_MODE);
+        self.subsystem_helper.add_mode_child(id, UNKNOWN_MODE);
         self.mode_node.add_request_target(id, request_sender);
     }
 }
@@ -658,7 +660,7 @@ impl ModeRequestHandler for AcsSubsystem {
 }
 
 #[derive(Debug, Default)]
-pub struct AssemblyCommandingHelper {
+pub struct DevManagerCommandingHelper {
     /// The IDs, modes and reply awaition status of all children are tracked in this data
     /// structure.
     pub children_mode_store: ModeStoreVec,
@@ -669,7 +671,7 @@ pub struct AssemblyCommandingHelper {
     pub state: ModeTreeHelperState,
 }
 
-impl AssemblyCommandingHelper {
+impl DevManagerCommandingHelper {
     pub fn send_mode_cmd_to_all_children_with_reply_awaition(
         &mut self,
         request_id: RequestId,
@@ -692,6 +694,10 @@ impl AssemblyCommandingHelper {
         self.active_request_id = Some(request_id);
         self.state = ModeTreeHelperState::ModeCommanding;
         Ok(())
+    }
+
+    pub fn add_mode_child(&mut self, target_id: ComponentId, mode: ModeAndSubmode) {
+        self.children_mode_store.add_component(target_id, mode);
     }
 
     pub fn count_number_of_children_with_target_mode(&self) -> Option<usize> {
@@ -768,7 +774,7 @@ struct MgmAssembly {
     pub mode_node: ModeRequestorAndHandlerMpscBounded,
     pub mode_requestor_info: Option<MessageMetadata>,
     pub mode_and_submode: ModeAndSubmode,
-    pub assembly_helper: AssemblyCommandingHelper,
+    pub commanding_helper: DevManagerCommandingHelper,
     pub mode_req_mock: ModeRequestHandlerMock,
     pub mode_reply_mock: ModeReplyHandlerMock,
 }
@@ -779,7 +785,7 @@ impl MgmAssembly {
             mode_node,
             mode_requestor_info: None,
             mode_and_submode: UNKNOWN_MODE,
-            assembly_helper: Default::default(),
+            commanding_helper: Default::default(),
             mode_req_mock: Default::default(),
             mode_reply_mock: Default::default(),
         }
@@ -804,17 +810,17 @@ impl MgmAssembly {
     pub fn check_mode_replies(&mut self) -> Result<(), ModeError> {
         while let Some(reply_and_id) = self.mode_node.try_recv_mode_reply()? {
             self.mode_reply_mock.handle_mode_reply(&reply_and_id);
-            match self.assembly_helper.handle_mode_reply(&reply_and_id) {
+            match self.commanding_helper.handle_mode_reply(&reply_and_id) {
                 AssemblyHelperResult::Idle => (),
                 AssemblyHelperResult::TargetKeepingViolation(_id) => {
                     // TODO: Check whether enough children are available to keep the mode.
                     // Otherwise, we command everything OFF, because we can not keep the mode.
                 }
                 AssemblyHelperResult::ModeCommandingDone => {
-                    if self.assembly_helper.target_mode.is_some() {
+                    if self.commanding_helper.target_mode.is_some() {
                         // Complete the mode command.
                         self.handle_mode_reached(self.mode_requestor_info)?;
-                        self.mode_and_submode = self.assembly_helper.target_mode.take().unwrap();
+                        self.mode_and_submode = self.commanding_helper.target_mode.take().unwrap();
                     }
                 }
             }
@@ -833,9 +839,7 @@ impl ModeParent for MgmAssembly {
 
     fn add_mode_child(&mut self, id: ComponentId, request_sender: RequestSenderType) {
         self.mode_node.add_request_target(id, request_sender);
-        self.assembly_helper
-            .children_mode_store
-            .add_component(id, UNKNOWN_MODE);
+        self.commanding_helper.add_mode_child(id, UNKNOWN_MODE);
     }
 }
 
@@ -862,9 +866,7 @@ impl ModeRequestHandler for MgmAssembly {
         forced: bool,
     ) -> Result<(), Self::Error> {
         // Always accept forced commands and commands to mode OFF.
-        // TODO: Forced transitions are special because now we might receive a reply where the
-        // request ID is relevant!
-        if self.assembly_helper.target_mode.is_some()
+        if self.commanding_helper.target_mode.is_some()
             && !forced
             && mode_and_submode.mode() != DefaultMode::OFF as u32
         {
@@ -874,7 +876,7 @@ impl ModeRequestHandler for MgmAssembly {
         self.mode_req_mock
             .start_transition(requestor, mode_and_submode, forced)
             .unwrap();
-        self.assembly_helper
+        self.commanding_helper
             .send_mode_cmd_to_all_children_with_reply_awaition(
                 requestor.request_id(),
                 mode_and_submode,
@@ -950,10 +952,12 @@ impl ModeRequestHandler for MgmAssembly {
 struct DeviceManager {
     name: &'static str,
     pub id: ComponentId,
+    pub commanding_helper: DevManagerCommandingHelper,
     pub mode_node: ModeRequestorAndHandlerMpscBounded,
+    pub mode_requestor_info: Option<MessageMetadata>,
     pub mode_and_submode: ModeAndSubmode,
     pub mode_req_mock: ModeRequestHandlerMock,
-    pub mode_req_recvd: u32,
+    pub mode_reply_mock: ModeReplyHandlerMock,
 }
 
 impl DeviceManager {
@@ -966,26 +970,55 @@ impl DeviceManager {
             name,
             id,
             mode_node,
+            mode_requestor_info: None,
+            commanding_helper: Default::default(),
             mode_and_submode: UNKNOWN_MODE,
             mode_req_mock: Default::default(),
-            mode_req_recvd: 0,
+            mode_reply_mock: Default::default(),
         }
     }
 
-    pub fn get_and_clear_num_mode_requests(&mut self) -> u32 {
-        let tmp = self.mode_req_recvd;
-        self.mode_req_recvd = 0;
-        tmp
+    pub fn get_num_mode_requests(&mut self) -> usize {
+        self.mode_req_mock.mode_messages_received()
     }
 
     pub fn run(&mut self) {
         self.check_mode_requests().expect("mode messaging error");
+        self.check_mode_replies().expect("mode reply error");
     }
 
     pub fn check_mode_requests(&mut self) -> Result<(), ModeError> {
-        if let Some(request) = self.mode_node.try_recv_mode_request()? {
-            self.mode_req_recvd += 1;
+        while let Some(request) = self.mode_node.try_recv_mode_request()? {
             self.handle_mode_request(request)?
+        }
+        Ok(())
+    }
+
+    pub fn check_mode_replies(&mut self) -> Result<(), ModeError> {
+        while let Some(reply) = self.mode_node.try_recv_mode_reply()? {
+            self.handle_mode_reply(&reply)?;
+        }
+        Ok(())
+    }
+
+    pub fn handle_mode_reply(
+        &mut self,
+        mode_reply: &GenericMessage<ModeReply>,
+    ) -> Result<(), ModeError> {
+        self.mode_reply_mock.handle_mode_reply(mode_reply);
+        match self.commanding_helper.handle_mode_reply(mode_reply) {
+            AssemblyHelperResult::Idle => (),
+            AssemblyHelperResult::TargetKeepingViolation(_id) => {
+                // TODO: Check whether enough children are available to keep the mode.
+                // Otherwise, we command everything OFF, because we can not keep the mode.
+            }
+            AssemblyHelperResult::ModeCommandingDone => {
+                if self.commanding_helper.target_mode.is_some() {
+                    // Complete the mode command.
+                    self.handle_mode_reached(self.mode_requestor_info)?;
+                    self.mode_and_submode = self.commanding_helper.target_mode.take().unwrap();
+                }
+            }
         }
         Ok(())
     }
@@ -1009,6 +1042,9 @@ impl ModeParent for DeviceManager {
     type Sender = RequestSenderType;
 
     fn add_mode_child(&mut self, id: ComponentId, request_sender: Self::Sender) {
+        self.commanding_helper
+            .children_mode_store
+            .add_component(id, UNKNOWN_MODE);
         self.mode_node.add_request_target(id, request_sender);
     }
 }
@@ -1029,10 +1065,17 @@ impl ModeRequestHandler for DeviceManager {
         forced: bool,
     ) -> Result<(), ModeError> {
         self.mode_and_submode = mode_and_submode;
-        self.handle_mode_reached(Some(requestor))?;
+        self.mode_requestor_info = Some(requestor);
         self.mode_req_mock
             .start_transition(requestor, mode_and_submode, forced)
             .unwrap();
+        self.commanding_helper
+            .send_mode_cmd_to_all_children_with_reply_awaition(
+                requestor.request_id(),
+                mode_and_submode,
+                forced,
+                &self.mode_node,
+            )?;
         Ok(())
     }
 
@@ -1638,7 +1681,7 @@ fn announce_recursively() {
     assert_eq!(tb.mgt_dev.mode_req_mock.start_transition_calls.len(), 0);
     assert_eq!(tb.mgt_dev.mode_and_submode(), UNKNOWN_MODE);
     assert_eq!(announces.len(), 1);
-    assert_eq!(tb.mgt_manager.get_and_clear_num_mode_requests(), 1);
+    assert_eq!(tb.mgt_manager.get_num_mode_requests(), 1);
     announces = tb
         .mgt_manager
         .mode_req_mock
@@ -1674,6 +1717,14 @@ fn command_safe_mode() {
     );
     assert_eq!(
         tb.mgm_assy.mode_and_submode(),
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0)
+    );
+    assert_eq!(
+        tb.mgt_manager.mode_and_submode(),
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0)
+    );
+    assert_eq!(
+        tb.mgt_dev.mode_and_submode(),
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0)
     );
 }
