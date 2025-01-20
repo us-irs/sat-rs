@@ -24,7 +24,7 @@ use satrs::{
     request::GenericMessage,
     ComponentId,
 };
-use std::borrow::Borrow;
+use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::convert::Infallible;
@@ -421,10 +421,17 @@ impl ModeReplyHandlerMock {
 
 struct PusModeService {
     pub request_id_counter: Cell<u32>,
+    pub mode_reply_mock: ModeReplyHandlerMock,
     pub mode_node: ModeRequestorOneChildBoundedMpsc,
 }
 
 impl PusModeService {
+    pub fn run(&mut self) {
+        while let Some(reply) = self.mode_node.try_recv_mode_reply().unwrap() {
+            self.mode_reply_mock.handle_mode_reply(&reply);
+        }
+    }
+
     pub fn announce_modes_recursively(&self) {
         self.mode_node
             .send_mode_request(
@@ -437,10 +444,11 @@ impl PusModeService {
             .replace(self.request_id_counter.get() + 1);
     }
 
-    pub fn send_mode_cmd(&self, mode: ModeAndSubmode) {
+    pub fn send_mode_cmd(&self, mode: ModeAndSubmode) -> RequestId {
+        let request_id = self.request_id_counter.get();
         self.mode_node
             .send_mode_request(
-                self.request_id_counter.get(),
+                request_id,
                 TestComponentId::AcsSubsystem as ComponentId,
                 ModeRequest::SetMode {
                     mode_and_submode: mode,
@@ -448,8 +456,8 @@ impl PusModeService {
                 },
             )
             .unwrap();
-        self.request_id_counter
-            .replace(self.request_id_counter.get() + 1);
+        self.request_id_counter.replace(request_id + 1);
+        request_id
     }
 }
 
@@ -472,7 +480,7 @@ struct AcsSubsystem {
     pub mode_requestor_info: Option<MessageMetadata>,
     pub target_mode_and_submode: Option<ModeAndSubmode>,
     pub subsystem_helper: SubsystemCommandingHelper,
-    pub mode_req_handler_mock: ModeRequestHandlerMock,
+    pub mode_req_mock: ModeRequestHandlerMock,
 }
 
 impl AcsSubsystem {
@@ -482,12 +490,47 @@ impl AcsSubsystem {
             mode_requestor_info: None,
             target_mode_and_submode: None,
             subsystem_helper: SubsystemCommandingHelper::default(),
-            mode_req_handler_mock: Default::default(),
+            mode_req_mock: Default::default(),
         }
     }
 
     pub fn get_num_mode_requests(&mut self) -> usize {
-        self.mode_req_handler_mock.mode_messages_received()
+        self.mode_req_mock.mode_messages_received()
+    }
+
+    pub fn handle_subsystem_helper_result(
+        &mut self,
+        result: Result<SubsystemHelperResult, ModeTreeHelperError>,
+    ) {
+        match result {
+            Ok(result) => match result {
+                SubsystemHelperResult::Idle => (),
+                SubsystemHelperResult::TargetKeeping(target_keeping_result) => {
+                    match target_keeping_result {
+                        TargetKeepingResult::Ok => (),
+                        TargetKeepingResult::Violated { fallback_mode } => {
+                            if let Some(fallback_mode) = fallback_mode {
+                                self.subsystem_helper
+                                    .start_command_sequence(fallback_mode, 0)
+                                    .unwrap();
+                            }
+                        }
+                    }
+                }
+                SubsystemHelperResult::ModeCommanding(mode_commanding_result) => {
+                    if let ModeCommandingResult::CommandingDone = mode_commanding_result {
+                        self.handle_mode_reached(self.mode_requestor_info)
+                            .expect("mode reply handling failed");
+                    }
+                }
+            },
+            Err(error) => match error {
+                ModeTreeHelperError::Message(_generic_targeted_messaging_error) => {
+                    panic!("messaging error")
+                }
+                ModeTreeHelperError::CurrentModeNotInTargetTable(_) => panic!("mode not found"),
+            },
+        }
     }
 
     pub fn run(&mut self) {
@@ -499,38 +542,17 @@ impl AcsSubsystem {
         let mut received_reply = false;
         while let Some(mode_reply) = self.mode_node.try_recv_mode_reply().unwrap() {
             received_reply = true;
-            match self
+            let result = self
                 .subsystem_helper
-                .state_machine(Some(mode_reply), &self.mode_node)
-            {
-                Ok(result) => {
-                    if let SubsystemHelperResult::TargetKeeping(target_keeping_result) = result {
-                        match target_keeping_result {
-                            TargetKeepingResult::Ok => (),
-                            TargetKeepingResult::Violated { fallback_mode } => {
-                                if let Some(fallback_mode) = fallback_mode {
-                                    self.subsystem_helper
-                                        .start_command_sequence(fallback_mode, 0)
-                                        .unwrap();
-                                }
-                            }
-                        }
-                    }
-                }
-                Err(error) => match error {
-                    ModeTreeHelperError::Message(_generic_targeted_messaging_error) => {
-                        panic!("messaging error")
-                    }
-                    ModeTreeHelperError::CurrentModeNotInTargetTable(_) => panic!("mode not found"),
-                },
-            }
+                .state_machine(Some(mode_reply), &self.mode_node);
+            self.handle_subsystem_helper_result(result);
         }
         if !received_reply {
-            self.subsystem_helper
-                .state_machine(None, &self.mode_node)
-                .expect("subsystem helper error");
+            let result = self.subsystem_helper.state_machine(None, &self.mode_node);
+            self.handle_subsystem_helper_result(result);
         }
     }
+
     pub fn add_target_and_sequence_table(
         &mut self,
         mode: Mode,
@@ -596,7 +618,7 @@ impl ModeRequestHandler for AcsSubsystem {
         }
         self.mode_requestor_info = Some(requestor);
         self.target_mode_and_submode = Some(mode_and_submode);
-        self.mode_req_handler_mock
+        self.mode_req_mock
             .start_transition(requestor, mode_and_submode, forced)
             .unwrap();
         self.subsystem_helper
@@ -613,23 +635,22 @@ impl ModeRequestHandler for AcsSubsystem {
         self.subsystem_helper
             .send_announce_mode_cmd_to_children(request_id, &self.mode_node, recursive)
             .expect("sending mode request failed");
-        self.mode_req_handler_mock
-            .announce_mode(requestor_info, recursive);
+        self.mode_req_mock.announce_mode(requestor_info, recursive);
     }
 
     fn handle_mode_reached(
         &mut self,
         requestor_info: Option<MessageMetadata>,
     ) -> Result<(), Self::Error> {
+        self.mode_req_mock
+            .handle_mode_reached(requestor_info)
+            .unwrap();
         if let Some(requestor) = requestor_info {
             self.send_mode_reply(
                 requestor,
                 ModeReply::ModeReply(self.subsystem_helper.current_mode),
             )?;
         }
-        self.mode_req_handler_mock
-            .handle_mode_reached(requestor_info)
-            .unwrap();
         Ok(())
     }
 
@@ -638,7 +659,7 @@ impl ModeRequestHandler for AcsSubsystem {
         requestor_info: MessageMetadata,
         info: ModeAndSubmode,
     ) -> Result<(), Self::Error> {
-        self.mode_req_handler_mock
+        self.mode_req_mock
             .handle_mode_info(requestor_info, info)
             .unwrap();
         // TODO: Need to check whether mode table execution is finished.
@@ -652,7 +673,7 @@ impl ModeRequestHandler for AcsSubsystem {
         requestor_info: MessageMetadata,
         reply: ModeReply,
     ) -> Result<(), Self::Error> {
-        self.mode_req_handler_mock
+        self.mode_req_mock
             .send_mode_reply(requestor_info, reply)
             .unwrap();
         self.mode_node
@@ -1094,11 +1115,9 @@ impl ModeRequestHandler for DeviceManager {
             self.name, self.mode_and_submode
         );
         let request_id = requestor_info.map_or(0, |info| info.request_id());
-        self.commanding_helper.send_announce_mode_cmd_to_children(
-            request_id,
-            &self.mode_node,
-            recursive,
-        ).expect("sending mode announce request failed");
+        self.commanding_helper
+            .send_announce_mode_cmd_to_children(request_id, &self.mode_node, recursive)
+            .expect("sending mode announce request failed");
         self.mode_req_mock.announce_mode(requestor_info, recursive);
     }
 
@@ -1489,6 +1508,7 @@ impl TreeTestbench {
         let mut pus_service = PusModeService {
             request_id_counter: Cell::new(0),
             mode_node: mode_node_pus,
+            mode_reply_mock: Default::default(),
         };
 
         // ACS subsystem tables
@@ -1634,6 +1654,7 @@ impl TreeTestbench {
     }
 
     pub fn run(&mut self) {
+        self.pus.run();
         self.subsystem.run();
         self.ctrl.run();
         self.mgt_manager.run();
@@ -1652,11 +1673,7 @@ fn announce_recursively() {
     tb.run();
     tb.run();
     assert_eq!(tb.subsystem.get_num_mode_requests(), 1);
-    let mut announces = tb
-        .subsystem
-        .mode_req_handler_mock
-        .announce_mode_calls
-        .borrow_mut();
+    let mut announces = tb.subsystem.mode_req_mock.announce_mode_calls.borrow_mut();
     assert_eq!(announces.len(), 1);
     announces = tb.ctrl.mode_req_mock.announce_mode_calls.borrow_mut();
     assert_eq!(tb.ctrl.mode_req_mock.start_transition_calls.len(), 0);
@@ -1698,7 +1715,8 @@ fn command_safe_mode() {
     assert_eq!(tb.mgm_devs[0].mode_and_submode(), UNKNOWN_MODE);
     assert_eq!(tb.mgm_devs[1].mode_and_submode(), UNKNOWN_MODE);
     tb.run();
-    tb.pus
+    let request_id = tb
+        .pus
         .send_mode_cmd(ModeAndSubmode::new(AcsMode::SAFE as u32, 0));
     tb.run();
     tb.run();
@@ -1726,6 +1744,60 @@ fn command_safe_mode() {
         tb.mgt_dev.mode_and_submode(),
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0)
     );
-    // TODO: Check whether the correct amount of mode requests and mode replies
-    // was sent/received to each component.
+    assert_eq!(
+        tb.subsystem.mode_and_submode(),
+        ModeAndSubmode::new(AcsMode::SAFE as u32, 0)
+    );
+
+    // Check function calls for subsystem
+    let generic_mock_check =
+        |mock: &mut ModeRequestHandlerMock, expected_mode_for_transition: ModeAndSubmode| {
+            assert_eq!(mock.start_transition_calls.borrow().len(), 1);
+            let start_transition_call = mock.start_transition_calls.borrow_mut().front().unwrap();
+            assert_eq!(start_transition_call.0.request_id(), request_id);
+            assert_eq!(start_transition_call.1, expected_mode_for_transition);
+            assert_eq!(mock.handle_mode_reached_calls.borrow().len(), 1);
+
+            let handle_mode_reached_ref = mock.handle_mode_reached_calls.borrow();
+            let handle_mode_reached_call = handle_mode_reached_ref.front().unwrap();
+            assert_eq!(
+                handle_mode_reached_call.as_ref().unwrap().request_id(),
+                request_id
+            );
+            drop(handle_mode_reached_ref);
+
+            assert_eq!(mock.send_mode_reply_calls.borrow().len(), 1);
+            // TODO: Check all mode replies
+            assert_eq!(mock.mode_messages_received(), 3);
+            mock.clear();
+        };
+
+    generic_mock_check(
+        &mut tb.subsystem.mode_req_mock,
+        ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
+    );
+    generic_mock_check(
+        &mut tb.ctrl.mode_req_mock,
+        ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
+    );
+    generic_mock_check(
+        &mut tb.mgm_assy.mode_req_mock,
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+    );
+    generic_mock_check(
+        &mut tb.mgt_manager.mode_req_mock,
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+    );
+    generic_mock_check(
+        &mut tb.mgt_dev.mode_req_mock,
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+    );
+    generic_mock_check(
+        &mut tb.mgm_devs[0].mode_req_mock,
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+    );
+    generic_mock_check(
+        &mut tb.mgm_devs[1].mode_req_mock,
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+    );
 }
