@@ -453,7 +453,6 @@ struct AcsSubsystem {
     pub target_mode_and_submode: Option<ModeAndSubmode>,
     pub subsystem_helper: SubsystemCommandingHelper,
     pub mode_req_handler_mock: ModeRequestHandlerMock,
-    pub mode_req_recvd: u32,
 }
 
 impl AcsSubsystem {
@@ -464,58 +463,52 @@ impl AcsSubsystem {
             target_mode_and_submode: None,
             subsystem_helper: SubsystemCommandingHelper::default(),
             mode_req_handler_mock: Default::default(),
-            mode_req_recvd: 0,
         }
     }
 
-    pub fn get_and_clear_num_mode_requests(&mut self) -> u32 {
-        let tmp = self.mode_req_recvd;
-        self.mode_req_recvd = 0;
-        tmp
+    pub fn get_num_mode_requests(&mut self) -> usize {
+        self.mode_req_handler_mock.mode_messages_received()
     }
 
     pub fn run(&mut self) {
-        if let Some(request) = self.mode_node.try_recv_mode_request().unwrap() {
-            self.mode_req_recvd += 1;
+        while let Some(request) = self.mode_node.try_recv_mode_request().unwrap() {
             self.handle_mode_request(request)
                 .expect("mode messaging error");
         }
-        let mut mode_reply = None;
-        if let Some(reply) = self.mode_node.try_recv_mode_reply().unwrap() {
-            mode_reply = Some(reply);
-        }
-        match self
-            .subsystem_helper
-            .state_machine(mode_reply, &self.mode_node)
-        {
-            Ok(result) => match result {
-                SubsystemHelperResult::Idle => (),
-                SubsystemHelperResult::TargetKeeping(target_keeping_result) => {
-                    match target_keeping_result {
-                        TargetKeepingResult::Ok => todo!(),
-                        TargetKeepingResult::Violated { fallback_mode } => {
-                            if let Some(fallback_mode) = fallback_mode {
-                                self.subsystem_helper
-                                    .start_command_sequence(fallback_mode, 0)
-                                    .unwrap();
+
+        let mut received_reply = false;
+        while let Some(mode_reply) = self.mode_node.try_recv_mode_reply().unwrap() {
+            received_reply = true;
+            match self
+                .subsystem_helper
+                .state_machine(Some(mode_reply), &self.mode_node)
+            {
+                Ok(result) => {
+                    if let SubsystemHelperResult::TargetKeeping(target_keeping_result) = result {
+                        match target_keeping_result {
+                            TargetKeepingResult::Ok => (),
+                            TargetKeepingResult::Violated { fallback_mode } => {
+                                if let Some(fallback_mode) = fallback_mode {
+                                    self.subsystem_helper
+                                        .start_command_sequence(fallback_mode, 0)
+                                        .unwrap();
+                                }
                             }
                         }
                     }
                 }
-                SubsystemHelperResult::ModeCommanding(sequence_handler_result) => {
-                    match sequence_handler_result {
-                        ModeCommandingResult::CommandingDone => (),
-                        ModeCommandingResult::CommandingStepDone => (),
-                        ModeCommandingResult::AwaitingSuccessCheck => (),
+                Err(error) => match error {
+                    ModeTreeHelperError::Message(_generic_targeted_messaging_error) => {
+                        panic!("messaging error")
                     }
-                }
-            },
-            Err(error) => match error {
-                ModeTreeHelperError::Message(_generic_targeted_messaging_error) => {
-                    panic!("messaging error")
-                }
-                ModeTreeHelperError::CurrentModeNotInTargetTable(_) => panic!("mode not found"),
-            },
+                    ModeTreeHelperError::CurrentModeNotInTargetTable(_) => panic!("mode not found"),
+                },
+            }
+        }
+        if !received_reply {
+            self.subsystem_helper
+                .state_machine(None, &self.mode_node)
+                .expect("subsystem helper error");
         }
     }
     pub fn add_target_and_sequence_table(
@@ -697,6 +690,7 @@ impl AssemblyCommandingHelper {
             child.awaiting_reply = true;
         }
         self.active_request_id = Some(request_id);
+        self.state = ModeTreeHelperState::ModeCommanding;
         Ok(())
     }
 
@@ -801,14 +795,14 @@ impl MgmAssembly {
     }
 
     pub fn check_mode_requests(&mut self) -> Result<(), GenericTargetedMessagingError> {
-        if let Some(request) = self.mode_node.try_recv_mode_request()? {
+        while let Some(request) = self.mode_node.try_recv_mode_request()? {
             self.handle_mode_request(request).unwrap();
         }
         Ok(())
     }
 
     pub fn check_mode_replies(&mut self) -> Result<(), ModeError> {
-        if let Some(reply_and_id) = self.mode_node.try_recv_mode_reply()? {
+        while let Some(reply_and_id) = self.mode_node.try_recv_mode_reply()? {
             self.mode_reply_mock.handle_mode_reply(&reply_and_id);
             match self.assembly_helper.handle_mode_reply(&reply_and_id) {
                 AssemblyHelperResult::Idle => (),
@@ -839,6 +833,9 @@ impl ModeParent for MgmAssembly {
 
     fn add_mode_child(&mut self, id: ComponentId, request_sender: RequestSenderType) {
         self.mode_node.add_request_target(id, request_sender);
+        self.assembly_helper
+            .children_mode_store
+            .add_component(id, UNKNOWN_MODE);
     }
 }
 
@@ -1108,7 +1105,6 @@ struct CommonDevice {
     pub mode_node: ModeRequestHandlerMpscBounded,
     pub mode_and_submode: ModeAndSubmode,
     pub mode_req_mock: ModeRequestHandlerMock,
-    pub num_mode_msgs_recvd: u32,
 }
 
 impl CommonDevice {
@@ -1123,7 +1119,6 @@ impl CommonDevice {
             mode_node,
             mode_and_submode: UNKNOWN_MODE,
             mode_req_mock: Default::default(),
-            num_mode_msgs_recvd: 0,
         }
     }
 
@@ -1133,16 +1128,13 @@ impl CommonDevice {
 
     pub fn check_mode_requests(&mut self) -> Result<(), ModeError> {
         if let Some(request) = self.mode_node.try_recv_mode_request()? {
-            self.num_mode_msgs_recvd += 1;
             self.handle_mode_request(request)?
         }
         Ok(())
     }
 
-    pub fn get_and_clear_num_mode_msgs(&mut self) -> u32 {
-        let tmp = self.num_mode_msgs_recvd;
-        self.num_mode_msgs_recvd = 0;
-        tmp
+    pub fn get_and_clear_num_mode_msgs(&mut self) -> usize {
+        self.mode_req_mock.mode_messages_received()
     }
 }
 
@@ -1617,7 +1609,7 @@ fn announce_recursively() {
     // Run everything twice so the order does not matter.
     tb.run();
     tb.run();
-    assert_eq!(tb.subsystem.get_and_clear_num_mode_requests(), 1);
+    assert_eq!(tb.subsystem.get_num_mode_requests(), 1);
     let mut announces = tb
         .subsystem
         .mode_req_handler_mock
@@ -1660,6 +1652,9 @@ fn announce_recursively() {
 #[test]
 fn command_safe_mode() {
     let mut tb = TreeTestbench::new();
+    assert_eq!(tb.ctrl.mode_and_submode(), UNKNOWN_MODE);
+    assert_eq!(tb.mgm_devs[0].mode_and_submode(), UNKNOWN_MODE);
+    assert_eq!(tb.mgm_devs[1].mode_and_submode(), UNKNOWN_MODE);
     tb.run();
     tb.pus
         .send_mode_cmd(ModeAndSubmode::new(AcsMode::SAFE as u32, 0));
@@ -1668,6 +1663,14 @@ fn command_safe_mode() {
     assert_eq!(
         tb.ctrl.mode_and_submode(),
         ModeAndSubmode::new(AcsMode::SAFE as u32, 0)
+    );
+    assert_eq!(
+        tb.mgm_devs[0].mode_and_submode(),
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0)
+    );
+    assert_eq!(
+        tb.mgm_devs[1].mode_and_submode(),
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0)
     );
     assert_eq!(
         tb.mgm_assy.mode_and_submode(),
