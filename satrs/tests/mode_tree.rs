@@ -299,12 +299,22 @@ impl SubsystemCommandingHelper {
 
 #[derive(Default, Debug)]
 pub struct ModeRequestHandlerMock {
+    pub id: ComponentId,
     get_mode_calls: RefCell<usize>,
     start_transition_calls: VecDeque<(MessageMetadata, ModeAndSubmode)>,
     announce_mode_calls: RefCell<VecDeque<AnnounceModeInfo>>,
     handle_mode_info_calls: VecDeque<(MessageMetadata, ModeAndSubmode)>,
     handle_mode_reached_calls: RefCell<VecDeque<Option<MessageMetadata>>>,
     send_mode_reply_calls: RefCell<VecDeque<(MessageMetadata, ModeReply)>>,
+}
+
+impl ModeRequestHandlerMock {
+    pub fn new(id: ComponentId) -> Self {
+        Self {
+            id,
+            ..Default::default()
+        }
+    }
 }
 
 impl ModeRequestHandlerMock {
@@ -388,8 +398,9 @@ impl ModeRequestHandler for ModeRequestHandlerMock {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct ModeReplyHandlerMock {
+    pub id: ComponentId,
     mode_info_messages: VecDeque<(MessageMetadata, ModeAndSubmode)>,
     mode_reply_messages: VecDeque<(MessageMetadata, ModeAndSubmode)>,
     cant_reach_mode_messages: VecDeque<(MessageMetadata, ResultU16)>,
@@ -397,6 +408,23 @@ pub struct ModeReplyHandlerMock {
 }
 
 impl ModeReplyHandlerMock {
+    pub fn new(id: ComponentId) -> Self {
+        Self {
+            id,
+            mode_info_messages: Default::default(),
+            mode_reply_messages: Default::default(),
+            cant_reach_mode_messages: Default::default(),
+            wrong_mode_messages: Default::default(),
+        }
+    }
+
+    pub fn num_of_received_mode_replies(&self) -> usize {
+        self.mode_info_messages.len()
+            + self.mode_reply_messages.len()
+            + self.cant_reach_mode_messages.len()
+            + self.wrong_mode_messages.len()
+    }
+
     pub fn handle_mode_reply(&mut self, request: &GenericMessage<ModeReply>) {
         match request.message {
             ModeReply::ModeInfo(mode_and_submode) => {
@@ -481,16 +509,22 @@ struct AcsSubsystem {
     pub target_mode_and_submode: Option<ModeAndSubmode>,
     pub subsystem_helper: SubsystemCommandingHelper,
     pub mode_req_mock: ModeRequestHandlerMock,
+    pub mode_reply_mock: ModeReplyHandlerMock,
 }
 
 impl AcsSubsystem {
+    pub fn id() -> ComponentId {
+        TestComponentId::AcsSubsystem as u64
+    }
+
     pub fn new(mode_node: ModeRequestorAndHandlerMpscBounded) -> Self {
         Self {
             mode_node,
             mode_requestor_info: None,
             target_mode_and_submode: None,
             subsystem_helper: SubsystemCommandingHelper::default(),
-            mode_req_mock: Default::default(),
+            mode_req_mock: ModeRequestHandlerMock::new(Self::id()),
+            mode_reply_mock: ModeReplyHandlerMock::new(Self::id()),
         }
     }
 
@@ -542,6 +576,7 @@ impl AcsSubsystem {
         let mut received_reply = false;
         while let Some(mode_reply) = self.mode_node.try_recv_mode_reply().unwrap() {
             received_reply = true;
+            self.mode_reply_mock.handle_mode_reply(&mode_reply);
             let result = self
                 .subsystem_helper
                 .state_machine(Some(mode_reply), &self.mode_node);
@@ -689,7 +724,7 @@ impl ModeRequestHandler for AcsSubsystem {
 /// For example, this could be used in an Assembly component which manages multiple redundant
 /// child components. It can also be used inside a manager component which only manages one device.
 #[derive(Debug, Default)]
-pub struct DevManagerCommandingHelper {
+pub struct AssemblyCommandingHelper {
     /// The IDs, modes and reply awaition status of all children are tracked in this data
     /// structure.
     pub children_mode_store: ModeStoreVec,
@@ -700,7 +735,9 @@ pub struct DevManagerCommandingHelper {
     pub state: ModeTreeHelperState,
 }
 
-impl DevManagerCommandingHelper {
+pub type DevManagerCommandingHelper = AssemblyCommandingHelper;
+
+impl AssemblyCommandingHelper {
     pub fn send_mode_cmd_to_all_children_with_reply_awaition(
         &mut self,
         request_id: RequestId,
@@ -817,20 +854,23 @@ struct MgmAssembly {
     pub mode_node: ModeRequestorAndHandlerMpscBounded,
     pub mode_requestor_info: Option<MessageMetadata>,
     pub mode_and_submode: ModeAndSubmode,
-    pub commanding_helper: DevManagerCommandingHelper,
+    pub commanding_helper: AssemblyCommandingHelper,
     pub mode_req_mock: ModeRequestHandlerMock,
     pub mode_reply_mock: ModeReplyHandlerMock,
 }
 
 impl MgmAssembly {
+    pub fn id() -> ComponentId {
+        TestComponentId::MagnetometerAssembly as u64
+    }
     pub fn new(mode_node: ModeRequestorAndHandlerMpscBounded) -> Self {
         Self {
             mode_node,
             mode_requestor_info: None,
             mode_and_submode: UNKNOWN_MODE,
             commanding_helper: Default::default(),
-            mode_req_mock: Default::default(),
-            mode_reply_mock: Default::default(),
+            mode_req_mock: ModeRequestHandlerMock::new(Self::id()),
+            mode_reply_mock: ModeReplyHandlerMock::new(Self::id()),
         }
     }
 
@@ -862,8 +902,8 @@ impl MgmAssembly {
                 AssemblyHelperResult::ModeCommandingDone => {
                     if self.commanding_helper.target_mode.is_some() {
                         // Complete the mode command.
-                        self.handle_mode_reached(self.mode_requestor_info)?;
                         self.mode_and_submode = self.commanding_helper.target_mode.take().unwrap();
+                        self.handle_mode_reached(self.mode_requestor_info)?;
                     }
                 }
             }
@@ -874,7 +914,7 @@ impl MgmAssembly {
 
 impl ModeNode for MgmAssembly {
     fn id(&self) -> ComponentId {
-        TestComponentId::MagnetometerAssembly as u64
+        Self::id()
     }
 }
 impl ModeParent for MgmAssembly {
@@ -982,7 +1022,7 @@ impl ModeRequestHandler for MgmAssembly {
 struct DeviceManager {
     name: &'static str,
     pub id: ComponentId,
-    pub commanding_helper: DevManagerCommandingHelper,
+    pub commanding_helper: AssemblyCommandingHelper,
     pub mode_node: ModeRequestorAndHandlerMpscBounded,
     pub mode_requestor_info: Option<MessageMetadata>,
     pub mode_and_submode: ModeAndSubmode,
@@ -1003,8 +1043,8 @@ impl DeviceManager {
             mode_requestor_info: None,
             commanding_helper: Default::default(),
             mode_and_submode: UNKNOWN_MODE,
-            mode_req_mock: Default::default(),
-            mode_reply_mock: Default::default(),
+            mode_req_mock: ModeRequestHandlerMock::new(id),
+            mode_reply_mock: ModeReplyHandlerMock::new(id),
         }
     }
 
@@ -1041,6 +1081,18 @@ impl DeviceManager {
             AssemblyHelperResult::TargetKeepingViolation(_id) => {
                 // TODO: Check whether enough children are available to keep the mode.
                 // Otherwise, we command everything OFF, because we can not keep the mode.
+                if self
+                    .commanding_helper
+                    .count_number_of_children_with_target_mode()
+                    .unwrap()
+                    < 1
+                {
+                    if let Err(_e) = self.start_transition(
+                        MessageMetadata::new(0, self.id()),
+                        ModeAndSubmode::new(DefaultMode::OFF as Mode, 0),
+                        false,
+                    ) {}
+                }
             }
             AssemblyHelperResult::ModeCommandingDone => {
                 if self.commanding_helper.target_mode.is_some() {
@@ -1179,7 +1231,7 @@ impl CommonDevice {
             id,
             mode_node,
             mode_and_submode: UNKNOWN_MODE,
-            mode_req_mock: Default::default(),
+            mode_req_mock: ModeRequestHandlerMock::new(id),
         }
     }
 
@@ -1302,7 +1354,7 @@ impl AcsController {
             mode_node,
             mode_and_submode: UNKNOWN_MODE,
             announce_mode_queue: Default::default(),
-            mode_req_mock: Default::default(),
+            mode_req_mock: ModeRequestHandlerMock::new(TestComponentId::AcsController as u64),
         }
     }
     pub fn run(&mut self) {
@@ -1508,7 +1560,7 @@ impl TreeTestbench {
         let mut pus_service = PusModeService {
             request_id_counter: Cell::new(0),
             mode_node: mode_node_pus,
-            mode_reply_mock: Default::default(),
+            mode_reply_mock: ModeReplyHandlerMock::new(TestComponentId::PusModeService as u64),
         };
 
         // ACS subsystem tables
@@ -1767,6 +1819,17 @@ fn command_safe_mode() {
             drop(handle_mode_reached_ref);
 
             assert_eq!(mock.send_mode_reply_calls.borrow().len(), 1);
+            let mode_reply_call = *mock.send_mode_reply_calls.borrow_mut().front().unwrap();
+            assert_eq!(mode_reply_call.0.request_id(), request_id);
+            if let ModeReply::ModeReply(mode_and_submode) = mode_reply_call.1 {
+                assert_eq!(
+                    mode_and_submode, expected_mode_for_transition,
+                    "unexpected mode for component {}",
+                    mock.id
+                );
+            } else {
+                panic!("Unexpected mode reply for component {}", mock.id);
+            }
             // TODO: Check all mode replies
             assert_eq!(mock.mode_messages_received(), 3);
             mock.clear();
@@ -1774,6 +1837,15 @@ fn command_safe_mode() {
 
     generic_mock_check(
         &mut tb.subsystem.mode_req_mock,
+        ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
+    );
+    assert!(tb.subsystem.subsystem_helper.active_request_id.is_none());
+    assert_eq!(
+        tb.subsystem.subsystem_helper.state,
+        ModeTreeHelperState::TargetKeeping
+    );
+    assert_eq!(
+        tb.subsystem.subsystem_helper.current_mode,
         ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
     );
     generic_mock_check(
