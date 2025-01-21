@@ -1,4 +1,5 @@
 use core::cell::Cell;
+use num_enum::TryFromPrimitive;
 use satrs::mode::{
     Mode, ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler,
     ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestSender,
@@ -26,7 +27,7 @@ use satrs::{
 };
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 use std::{println, sync::mpsc};
 
@@ -43,6 +44,8 @@ pub enum AcsMode {
     IDLE = 2,
 }
 
+#[derive(Debug, TryFromPrimitive)]
+#[repr(u64)]
 pub enum TestComponentId {
     MagnetometerDevice0 = 1,
     MagnetometerDevice1 = 2,
@@ -1760,6 +1763,24 @@ fn announce_recursively() {
     assert_eq!(announces.len(), 1);
 }
 
+fn generic_mode_reply_checker(
+    reply_meta: MessageMetadata,
+    mode_and_submode: ModeAndSubmode,
+    expected_modes: &mut HashMap<u64, ModeAndSubmode>,
+) {
+    let id = TestComponentId::try_from(reply_meta.sender_id()).expect("invalid sender id");
+    if !expected_modes.contains_key(&reply_meta.sender_id()) {
+        panic!("received unexpected mode reply from component {:?}", id);
+    }
+    let expected_mode = expected_modes.get(&reply_meta.sender_id()).unwrap();
+    assert_eq!(
+        expected_mode, &mode_and_submode,
+        "mode mismatch for component {:?}, expected {:?}, got {:?}",
+        id, expected_mode, mode_and_submode
+    );
+    expected_modes.remove(&reply_meta.sender_id());
+}
+
 #[test]
 fn command_safe_mode() {
     let mut tb = TreeTestbench::new();
@@ -1770,6 +1791,7 @@ fn command_safe_mode() {
     let request_id = tb
         .pus
         .send_mode_cmd(ModeAndSubmode::new(AcsMode::SAFE as u32, 0));
+    tb.run();
     tb.run();
     tb.run();
     assert_eq!(
@@ -1848,6 +1870,28 @@ fn command_safe_mode() {
         tb.subsystem.subsystem_helper.current_mode,
         ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
     );
+    assert_eq!(
+        tb.subsystem.mode_reply_mock.num_of_received_mode_replies(),
+        3
+    );
+    let mut expected_modes = HashMap::new();
+    expected_modes.insert(
+        TestComponentId::AcsController as u64,
+        ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
+    );
+    expected_modes.insert(
+        TestComponentId::MagnetometerAssembly as u64,
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+    );
+    expected_modes.insert(
+        TestComponentId::MgtDevManager as u64,
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+    );
+    while let Some(reply) = tb.subsystem.mode_reply_mock.mode_reply_messages.pop_front() {
+        generic_mode_reply_checker(reply.0, reply.1, &mut expected_modes);
+    }
+    assert!(expected_modes.is_empty());
+
     generic_mock_check(
         &mut tb.ctrl.mode_req_mock,
         ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
