@@ -1,23 +1,21 @@
 use core::cell::Cell;
 use num_enum::TryFromPrimitive;
+use satrs::dev_mgmt::{AssemblyCommandingHelper, AssemblyHelperResult};
 use satrs::mode::{
     Mode, ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler,
-    ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestSender,
-    ModeRequestorAndHandlerMpscBounded, ModeRequestorOneChildBoundedMpsc, INVALID_MODE,
-    UNKNOWN_MODE,
+    ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestorAndHandlerMpscBounded,
+    ModeRequestorOneChildBoundedMpsc, INVALID_MODE, UNKNOWN_MODE,
 };
 use satrs::mode_tree::{
     connect_mode_nodes, ModeChild, ModeNode, ModeParent, ModeStoreProvider, SequenceTableEntry,
-    SequenceTableMapTable, TargetNotInModeStoreError, TargetTableEntry,
+    SequenceTableMapTable, TargetTableEntry,
 };
-use satrs::mode_tree::{
-    ModeStoreVec, SequenceModeTables, SequenceTablesMapValue, TargetModeTables,
-    TargetTablesMapValue,
-};
+use satrs::mode_tree::{SequenceTablesMapValue, TargetTablesMapValue};
 use satrs::request::{MessageMetadata, RequestId};
 use satrs::res_code::ResultU16;
 use satrs::subsystem::{
-    ModeCommandingResult, ModeDoesNotExistError, SequenceExecutionHelper, TargetKeepingResult,
+    ModeCommandingResult, ModeDoesNotExistError, ModeTreeHelperError, ModeTreeHelperState,
+    SubsystemCommandingHelper, SubsystemHelperResult, TargetKeepingResult,
 };
 use satrs::{
     mode::{ModeAndSubmode, ModeReply, ModeRequest},
@@ -62,243 +60,6 @@ pub enum TestComponentId {
 
 pub type RequestSenderType = mpsc::SyncSender<GenericMessage<ModeRequest>>;
 pub type ReplySenderType = mpsc::SyncSender<GenericMessage<ModeReply>>;
-
-#[derive(Debug, Default, PartialEq, Eq)]
-pub enum ModeTreeHelperState {
-    #[default]
-    Idle,
-    TargetKeeping = 1,
-    ModeCommanding = 2,
-}
-
-#[derive(Debug, Default)]
-pub enum AssemblyHelperResult {
-    #[default]
-    Idle,
-    TargetKeepingViolation(ComponentId),
-    ModeCommandingDone,
-}
-
-#[derive(Debug, Default)]
-pub enum SubsystemHelperResult {
-    #[default]
-    Idle,
-    TargetKeeping(TargetKeepingResult),
-    ModeCommanding(ModeCommandingResult),
-}
-
-impl From<TargetKeepingResult> for SubsystemHelperResult {
-    fn from(value: TargetKeepingResult) -> Self {
-        Self::TargetKeeping(value)
-    }
-}
-
-impl From<ModeCommandingResult> for SubsystemHelperResult {
-    fn from(value: ModeCommandingResult) -> Self {
-        Self::ModeCommanding(value)
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ModeTreeHelperError {
-    #[error("generic targeted messaging error: {0}")]
-    Message(#[from] GenericTargetedMessagingError),
-    #[error("current mode {0} is not contained in target table")]
-    CurrentModeNotInTargetTable(Mode),
-}
-
-pub struct SubsystemCommandingHelper {
-    pub current_mode: ModeAndSubmode,
-    pub state: ModeTreeHelperState,
-    pub children_mode_store: ModeStoreVec,
-    pub active_request_id: Option<RequestId>,
-    pub target_tables: TargetModeTables,
-    pub sequence_tables: SequenceModeTables,
-    pub helper: SequenceExecutionHelper,
-}
-
-impl Default for SubsystemCommandingHelper {
-    fn default() -> Self {
-        Self {
-            current_mode: UNKNOWN_MODE,
-            state: Default::default(),
-            children_mode_store: Default::default(),
-            active_request_id: None,
-            target_tables: Default::default(),
-            sequence_tables: Default::default(),
-            helper: Default::default(),
-        }
-    }
-}
-
-impl SubsystemCommandingHelper {
-    pub fn new(
-        children_mode_store: ModeStoreVec,
-        target_tables: TargetModeTables,
-        sequence_tables: SequenceModeTables,
-    ) -> Self {
-        Self {
-            current_mode: UNKNOWN_MODE,
-            state: ModeTreeHelperState::Idle,
-            children_mode_store,
-            active_request_id: None,
-            target_tables,
-            sequence_tables,
-            helper: Default::default(),
-        }
-    }
-
-    pub fn add_mode_child(&mut self, child: ComponentId, mode: ModeAndSubmode) {
-        self.children_mode_store.add_component(child, mode);
-    }
-
-    pub fn start_command_sequence(
-        &mut self,
-        mode: Mode,
-        request_id: RequestId,
-    ) -> Result<(), ModeDoesNotExistError> {
-        self.helper.load(mode, request_id, &self.sequence_tables)?;
-        self.state = ModeTreeHelperState::ModeCommanding;
-        Ok(())
-    }
-
-    pub fn send_announce_mode_cmd_to_children(
-        &self,
-        request_id: RequestId,
-        req_sender: &impl ModeRequestSender,
-        recursive: bool,
-    ) -> Result<(), GenericTargetedMessagingError> {
-        let mut request = ModeRequest::AnnounceMode;
-        if recursive {
-            request = ModeRequest::AnnounceModeRecursive;
-        }
-        for child in &self.children_mode_store.0 {
-            req_sender.send_mode_request(request_id, child.id(), request)?;
-        }
-        Ok(())
-    }
-
-    pub fn state_machine(
-        &mut self,
-        opt_reply: Option<GenericMessage<ModeReply>>,
-        req_sender: &impl ModeRequestSender,
-    ) -> Result<SubsystemHelperResult, ModeTreeHelperError> {
-        if let Some(reply) = opt_reply {
-            self.handle_mode_reply(&reply);
-        }
-        match self.state {
-            ModeTreeHelperState::Idle => Ok(SubsystemHelperResult::Idle),
-            ModeTreeHelperState::TargetKeeping => {
-                // We check whether the current mode is modelled by a target table first.
-                if let Some(target_table) = self.target_tables.0.get(&self.current_mode.mode()) {
-                    for entry in &target_table.entries {
-                        if !entry.monitor_state {
-                            continue;
-                        }
-                        let mut target_mode_violated = false;
-                        self.children_mode_store.0.iter().for_each(|val| {
-                            if val.id() == entry.common.target_id {
-                                target_mode_violated = if let Some(allowed_submode_mask) =
-                                    entry.allowed_submode_mask()
-                                {
-                                    let fixed_bits = !allowed_submode_mask;
-                                    (val.mode_and_submode().mode()
-                                        != entry.common.mode_submode.mode())
-                                        && (val.mode_and_submode().submode() & fixed_bits
-                                            != entry.common.mode_submode.submode() & fixed_bits)
-                                } else {
-                                    val.mode_and_submode() != entry.common.mode_submode
-                                };
-                            }
-                        })
-                    }
-                    // Target keeping violated. Report violation and fallback mode to user.
-                    return Ok(TargetKeepingResult::Violated {
-                        fallback_mode: None,
-                    }
-                    .into());
-                }
-                Ok(SubsystemHelperResult::TargetKeeping(
-                    TargetKeepingResult::Ok,
-                ))
-            }
-            ModeTreeHelperState::ModeCommanding => {
-                let result = self.helper.run(
-                    &self.sequence_tables,
-                    req_sender,
-                    &mut self.children_mode_store,
-                )?;
-                // By default, the helper will automatically transition into the target keeping
-                // mode after an executed sequence.
-                if let ModeCommandingResult::CommandingDone = result {
-                    self.state = ModeTreeHelperState::TargetKeeping;
-                    self.active_request_id = None;
-                    self.current_mode = ModeAndSubmode::new(self.helper.target_mode().unwrap(), 0);
-                }
-                Ok(result.into())
-            }
-        }
-    }
-
-    pub fn handle_mode_reply(&mut self, reply: &GenericMessage<ModeReply>) {
-        if !self.children_mode_store.has_component(reply.sender_id()) {
-            return;
-        }
-        let mut generic_mode_reply_handler =
-            |sender_id, mode_and_submode: Option<ModeAndSubmode>| {
-                // Tying the reply awaition to the request ID ensures that something like replies
-                // belonging to older requests do not interfere with the completion handling of
-                // the mode commanding. This is important for forced mode commands.
-                let mut handle_awaition = false;
-                if self.state == ModeTreeHelperState::ModeCommanding
-                    && self.active_request_id.is_some()
-                    && reply.request_id() == self.active_request_id.unwrap()
-                {
-                    handle_awaition = true;
-                }
-                let still_awating_replies = self.children_mode_store.generic_reply_handler(
-                    sender_id,
-                    mode_and_submode,
-                    handle_awaition,
-                );
-                if self.state == ModeTreeHelperState::ModeCommanding && !still_awating_replies {
-                    self.helper.confirm_sequence_done();
-                }
-            };
-        match reply.message {
-            ModeReply::ModeInfo(mode_and_submode) => {
-                generic_mode_reply_handler(reply.sender_id(), Some(mode_and_submode));
-            }
-            ModeReply::ModeReply(mode_and_submode) => {
-                generic_mode_reply_handler(reply.sender_id(), Some(mode_and_submode));
-            }
-            ModeReply::CantReachMode(_) => {
-                generic_mode_reply_handler(reply.sender_id(), None);
-            }
-            ModeReply::WrongMode { reached, .. } => {
-                generic_mode_reply_handler(reply.sender_id(), Some(reached));
-            }
-        };
-    }
-
-    pub fn add_target_and_sequence_table(
-        &mut self,
-        mode: Mode,
-        target_table_val: TargetTablesMapValue,
-        sequence_table_val: SequenceTablesMapValue,
-    ) {
-        self.target_tables.0.insert(mode, target_table_val);
-        self.sequence_tables.0.insert(mode, sequence_table_val);
-    }
-
-    pub fn update_child_mode(
-        &mut self,
-        child: ComponentId,
-        mode: ModeAndSubmode,
-    ) -> Result<(), TargetNotInModeStoreError> {
-        self.children_mode_store.set_mode(child, mode)
-    }
-}
 
 #[derive(Default, Debug)]
 pub struct ModeRequestHandlerMock {
@@ -607,7 +368,7 @@ impl AcsSubsystem {
 
 impl ModeNode for AcsSubsystem {
     fn id(&self) -> ComponentId {
-        TestComponentId::AcsSubsystem as ComponentId
+        Self::id()
     }
 }
 
@@ -718,138 +479,6 @@ impl ModeRequestHandler for AcsSubsystem {
             .send_mode_reply(requestor_info, reply)
             .map_err(ModeError::Messaging)?;
         Ok(())
-    }
-}
-
-/// A generic helper for manager components which manage child components in a mode tree.
-///
-/// Mode commands are usually forwarded to all children components transparently.
-/// For example, this could be used in an Assembly component which manages multiple redundant
-/// child components. It can also be used inside a manager component which only manages one device.
-#[derive(Debug, Default)]
-pub struct AssemblyCommandingHelper {
-    /// The IDs, modes and reply awaition status of all children are tracked in this data
-    /// structure.
-    pub children_mode_store: ModeStoreVec,
-    /// Target mode used for mode commanding.
-    pub target_mode: Option<ModeAndSubmode>,
-    /// Request ID of active mode commanding request.
-    pub active_request_id: Option<RequestId>,
-    pub state: ModeTreeHelperState,
-}
-
-pub type DevManagerCommandingHelper = AssemblyCommandingHelper;
-
-impl AssemblyCommandingHelper {
-    pub fn send_mode_cmd_to_all_children_with_reply_awaition(
-        &mut self,
-        request_id: RequestId,
-        mode_and_submode: ModeAndSubmode,
-        forced: bool,
-        mode_req_sender: &impl ModeRequestSender,
-    ) -> Result<(), GenericTargetedMessagingError> {
-        self.target_mode = Some(mode_and_submode);
-        for child in self.children_mode_store.0.iter_mut() {
-            mode_req_sender.send_mode_request(
-                request_id,
-                child.id(),
-                ModeRequest::SetMode {
-                    mode_and_submode,
-                    forced,
-                },
-            )?;
-            child.awaiting_reply = true;
-        }
-        self.active_request_id = Some(request_id);
-        self.state = ModeTreeHelperState::ModeCommanding;
-        Ok(())
-    }
-
-    pub fn send_announce_mode_cmd_to_children(
-        &self,
-        request_id: RequestId,
-        mode_req_sender: &impl ModeRequestSender,
-        recursive: bool,
-    ) -> Result<(), GenericTargetedMessagingError> {
-        let mut request = ModeRequest::AnnounceMode;
-        if recursive {
-            request = ModeRequest::AnnounceModeRecursive;
-        }
-        for child in self.children_mode_store.0.iter() {
-            mode_req_sender.send_mode_request(request_id, child.id(), request)?;
-        }
-        Ok(())
-    }
-
-    pub fn add_mode_child(&mut self, target_id: ComponentId, mode: ModeAndSubmode) {
-        self.children_mode_store.add_component(target_id, mode);
-    }
-
-    pub fn count_number_of_children_with_target_mode(&self) -> Option<usize> {
-        self.target_mode?;
-        let target_mode = self.target_mode.unwrap();
-        let mut children_in_target_mode = 0;
-        for child in self.children_mode_store.0.iter() {
-            if child.mode_and_submode() == target_mode {
-                children_in_target_mode += 1;
-            }
-        }
-        Some(children_in_target_mode)
-    }
-
-    pub fn handle_mode_reply(
-        &mut self,
-        mode_reply: &GenericMessage<ModeReply>,
-    ) -> AssemblyHelperResult {
-        if !self
-            .children_mode_store
-            .has_component(mode_reply.sender_id())
-        {
-            return AssemblyHelperResult::Idle;
-        }
-        let mut generic_mode_reply_handler = |mode_and_submode: Option<ModeAndSubmode>| {
-            // Tying the reply awaition to the request ID ensures that something like replies
-            // belonging to older requests do not interfere with the completion handling of
-            // the mode commanding. This is important for forced mode commands.
-            let mut handle_awaition = false;
-            if self.state == ModeTreeHelperState::ModeCommanding
-                && self.active_request_id.is_some()
-                && mode_reply.request_id() == self.active_request_id.unwrap()
-            {
-                handle_awaition = true;
-            }
-            let still_awating_replies = self.children_mode_store.generic_reply_handler(
-                mode_reply.sender_id(),
-                mode_and_submode,
-                handle_awaition,
-            );
-            if self.state == ModeTreeHelperState::TargetKeeping
-                && mode_and_submode.is_some()
-                && self.target_mode.is_some()
-                && mode_and_submode.unwrap() != self.target_mode.unwrap()
-            {
-                return AssemblyHelperResult::TargetKeepingViolation(mode_reply.sender_id());
-            }
-            if self.state == ModeTreeHelperState::ModeCommanding
-                && handle_awaition
-                && !still_awating_replies
-            {
-                self.state = ModeTreeHelperState::TargetKeeping;
-                self.active_request_id = None;
-                return AssemblyHelperResult::ModeCommandingDone;
-            }
-            AssemblyHelperResult::Idle
-        };
-        match mode_reply.message {
-            ModeReply::ModeInfo(mode_and_submode) | ModeReply::ModeReply(mode_and_submode) => {
-                generic_mode_reply_handler(Some(mode_and_submode))
-            }
-            ModeReply::CantReachMode(_result_u16) => generic_mode_reply_handler(None),
-            ModeReply::WrongMode {
-                expected: _,
-                reached,
-            } => generic_mode_reply_handler(Some(reached)),
-        }
     }
 }
 
@@ -1900,10 +1529,37 @@ fn command_safe_mode() {
         &mut tb.mgm_assy.mode_req_mock,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
     );
+    let mut expected_modes = HashMap::new();
+    expected_modes.insert(
+        TestComponentId::MagnetometerDevice0 as u64,
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+    );
+    expected_modes.insert(
+        TestComponentId::MagnetometerDevice1 as u64,
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+    );
+    while let Some(reply) = tb.mgm_assy.mode_reply_mock.mode_reply_messages.pop_front() {
+        generic_mode_reply_checker(reply.0, reply.1, &mut expected_modes);
+    }
+    assert!(expected_modes.is_empty());
+
     generic_mock_check(
         &mut tb.mgt_manager.mode_req_mock,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
     );
+    let mut expected_modes = HashMap::new();
+    expected_modes.insert(
+        TestComponentId::MagnetorquerDevice as u64,
+        ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+    );
+    let reply = tb
+        .mgt_manager
+        .mode_reply_mock
+        .mode_reply_messages
+        .pop_front()
+        .unwrap();
+    generic_mode_reply_checker(reply.0, reply.1, &mut expected_modes);
+
     generic_mock_check(
         &mut tb.mgt_dev.mode_req_mock,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),

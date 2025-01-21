@@ -40,11 +40,13 @@ pub mod res_code;
 pub mod scheduling;
 pub mod time;
 pub mod tmtc;
-
 pub mod action;
 pub mod hk;
 pub mod mode;
 pub mod params;
+#[cfg(feature = "alloc")]
+pub mod dev_mgmt;
+#[cfg(feature = "alloc")]
 pub mod subsystem;
 
 pub use spacepackets;
