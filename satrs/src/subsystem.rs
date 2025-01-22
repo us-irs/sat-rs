@@ -529,6 +529,105 @@ impl SubsystemCommandingHelper {
 
 #[cfg(test)]
 mod tests {
-    // TODO: Test sequence execution helper
+    use core::cell::RefCell;
+    use std::collections::VecDeque;
+
+    use crate::{
+        mode::{ModeAndSubmode, ModeRequest, ModeRequestSender, UNKNOWN_MODE},
+        mode_tree::{
+            ModeStoreProvider, ModeStoreVec, SequenceModeTables, SequenceTableEntry,
+            SequenceTableMapTable, SequenceTablesMapValue,
+        },
+        queue::GenericTargetedMessagingError,
+        request::RequestId,
+        subsystem::SequenceExecutionHelperState,
+        ComponentId,
+    };
+
+    use super::SequenceExecutionHelper;
+
+    #[derive(Debug)]
+    pub enum ExampleTargetId {
+        Target0 = 1,
+        Target1 = 2,
+        Target2 = 3,
+    }
+
+    #[derive(Debug)]
+    pub enum ExampleMode {
+        Mode0 = 1,
+        Mode1 = 2,
+        Mode2 = 3,
+    }
+
+    #[derive(Default)]
+    pub struct ModeReqSenderMock {
+        pub requests: RefCell<VecDeque<(RequestId, ComponentId, ModeRequest)>>,
+    }
+
+    impl ModeRequestSender for ModeReqSenderMock {
+        fn local_channel_id(&self) -> crate::ComponentId {
+            0
+        }
+
+        fn send_mode_request(
+            &self,
+            request_id: RequestId,
+            target_id: ComponentId,
+            request: ModeRequest,
+        ) -> Result<(), GenericTargetedMessagingError> {
+            self.requests
+                .borrow_mut()
+                .push_back((request_id, target_id, request));
+            Ok(())
+        }
+    }
+
+    fn create_default_mode_store() -> ModeStoreVec {
+        let mut mode_store = ModeStoreVec::default();
+        mode_store.add_component(ExampleTargetId::Target0 as u64, UNKNOWN_MODE);
+        mode_store.add_component(ExampleTargetId::Target1 as u64, UNKNOWN_MODE);
+        mode_store.add_component(ExampleTargetId::Target2 as u64, UNKNOWN_MODE);
+        mode_store
+    }
+
+    fn create_simple_sample_seq_table() -> SequenceModeTables {
+        let mut table = SequenceModeTables::default();
+        let mut table_val = SequenceTablesMapValue::new("MODE_0");
+        let mut table_seq_0 = SequenceTableMapTable::new("MODE_0_SEQ_0");
+        table_seq_0.add_entry(SequenceTableEntry::new(
+            "TARGET_0",
+            ExampleTargetId::Target0 as u64,
+            ModeAndSubmode::new(ExampleMode::Mode0 as u32, 0),
+            false,
+        ));
+        table_seq_0.add_entry(SequenceTableEntry::new(
+            "TARGET_1",
+            ExampleTargetId::Target1 as u64,
+            ModeAndSubmode::new(ExampleMode::Mode1 as u32, 0),
+            true,
+        ));
+        table_val.add_sequence_table(table_seq_0);
+        table.0.insert(ExampleMode::Mode0 as u32, table_val);
+        table
+    }
+
+    #[test]
+    fn test_sequence_execution_helper() {
+        let sender = ModeReqSenderMock::default();
+        let mut mode_store = create_default_mode_store();
+        let mut execution_helper = SequenceExecutionHelper::new();
+        assert_eq!(execution_helper.state(), SequenceExecutionHelperState::Idle);
+        let simple_table = create_simple_sample_seq_table();
+        execution_helper
+            .load(ExampleMode::Mode0 as u32, 1, &simple_table)
+            .unwrap();
+        assert_eq!(execution_helper.state(), SequenceExecutionHelperState::Busy);
+        execution_helper
+            .run(&simple_table, &sender, &mut mode_store)
+            .expect("sequence exeecution helper run failure");
+        // TODO: continue tests
+    }
+
     // TODO: Test subsystem commanding helper
 }
