@@ -154,7 +154,7 @@ pub mod std_mod {
         }
 
         /// Can be used to set the start of the slot to the current time. This is useful if a custom
-        /// runner implementation is used instead of the [Self::start] method.
+        /// runner implementation is used instead of the [Self::run_one_task_cycle] method.
         pub fn init_start_of_slot(&mut self) {
             self.start_of_slot = Instant::now();
         }

@@ -981,12 +981,15 @@ pub struct AcsController {
 }
 
 impl AcsController {
+    pub fn id() -> ComponentId {
+        TestComponentId::AcsController as u64
+    }
     pub fn new(mode_node: ModeRequestHandlerMpscBounded) -> Self {
         Self {
             mode_node,
             mode_and_submode: UNKNOWN_MODE,
             announce_mode_queue: Default::default(),
-            mode_req_mock: ModeRequestHandlerMock::new(TestComponentId::AcsController as u64),
+            mode_req_mock: ModeRequestHandlerMock::new(Self::id()),
         }
     }
     pub fn run(&mut self) {

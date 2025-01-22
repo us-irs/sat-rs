@@ -144,7 +144,7 @@ impl TargetTableEntry {
 
 /// An entry for the sequence tables.
 ///
-/// The `check_success` field instructs the mode sequence executor to verify that the
+/// The [Self::check_success] field specifies that a mode sequence executor should check that the
 /// target mode was actually reached before executing the next sequence.
 #[derive(Debug)]
 pub struct SequenceTableEntry {
@@ -232,6 +232,10 @@ pub mod alloc_mod {
         }
     }
 
+    /// One sequence of a [SequenceTablesMapValue] in a [SequenceModeTables].
+    ///
+    /// It contains all mode requests which need to be executed for a sequence step and it also
+    /// associates a [Self::name] with the sequence.
     #[derive(Debug)]
     pub struct SequenceTableMapTable {
         /// Name for a given mode sequence.
@@ -253,6 +257,11 @@ pub mod alloc_mod {
         }
     }
 
+    /// A sequence table entry.
+    ///
+    /// This is simply a list of [SequenceTableMapTable]s which also associates a [Self::name]
+    /// with the sequence. The order of sub-tables in the list also specifies the execution order
+    /// in the mode sequence.
     #[derive(Debug)]
     pub struct SequenceTablesMapValue {
         /// Name for a given mode sequence.
@@ -276,17 +285,26 @@ pub mod alloc_mod {
 
     #[derive(Debug, Default)]
     pub struct TargetModeTables(pub HashMap<Mode, TargetTablesMapValue>);
+
+    /// This is the core data structure used to store mode sequence tables.
+    ///
+    /// A mode sequence table specifies which commands have to be sent in which order
+    /// to reach a certain [Mode]. Therefore, it simply maps a [Mode] to a [SequenceTablesMapValue].
     #[derive(Debug, Default)]
     pub struct SequenceModeTables(pub HashMap<Mode, SequenceTablesMapValue>);
 
-    #[derive(Debug)]
-    pub struct ModeStoreVecValue {
+    /// Mode store value type.
+    #[derive(Debug, Copy, Clone)]
+    pub struct ModeStoreValue {
+        /// ID of the mode component.
         id: ComponentId,
+        /// Current mode and submode of the component.
         pub mode_and_submode: ModeAndSubmode,
+        /// State information to track whether a reply should be awaited for the mode component.
         pub awaiting_reply: bool,
     }
 
-    impl ModeStoreVecValue {
+    impl ModeStoreValue {
         pub fn new(id: ComponentId, mode_and_submode: ModeAndSubmode) -> Self {
             Self {
                 id,
@@ -304,10 +322,13 @@ pub mod alloc_mod {
         }
     }
 
+    /// Mode store which tracks the [mode information][ModeStoreValue] inside a [Vec]
     #[derive(Debug, Default)]
-    pub struct ModeStoreVec(pub alloc::vec::Vec<ModeStoreVecValue>);
+    pub struct ModeStoreVec(pub alloc::vec::Vec<ModeStoreValue>);
+
+    /// Mode store which tracks the mode information inside a [hashbrown::HashMap]
     #[derive(Debug, Default)]
-    pub struct ModeStoreMap(pub hashbrown::HashMap<ComponentId, ModeAndSubmode>);
+    pub struct ModeStoreMap(pub hashbrown::HashMap<ComponentId, ModeStoreValue>);
 
     impl ModeStoreVec {
         /// Generic handler for mode replies received from child components.
@@ -338,7 +359,7 @@ pub mod alloc_mod {
     }
     impl ModeStoreProvider for ModeStoreVec {
         fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode) {
-            self.0.push(ModeStoreVecValue::new(target_id, mode));
+            self.0.push(ModeStoreValue::new(target_id, mode));
         }
 
         fn has_component(&self, target_id: ComponentId) -> bool {
@@ -369,7 +390,8 @@ pub mod alloc_mod {
 
     impl ModeStoreProvider for ModeStoreMap {
         fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode) {
-            self.0.insert(target_id, mode);
+            self.0
+                .insert(target_id, ModeStoreValue::new(target_id, mode));
         }
 
         fn has_component(&self, target_id: ComponentId) -> bool {
@@ -377,14 +399,15 @@ pub mod alloc_mod {
         }
 
         fn get_mode(&self, target_id: ComponentId) -> Option<ModeAndSubmode> {
-            self.0.get(&target_id).copied()
+            self.0.get(&target_id).map(|v| v.mode_and_submode())
         }
+
         fn set_mode_for_contained_component(
             &mut self,
             target_id: ComponentId,
             mode_to_set: ModeAndSubmode,
         ) {
-            self.0.insert(target_id, mode_to_set);
+            self.0.get_mut(&target_id).unwrap().mode_and_submode = mode_to_set;
         }
     }
 }
