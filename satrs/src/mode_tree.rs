@@ -182,26 +182,71 @@ impl SequenceTableEntry {
 #[error("target {0} not in mode store")]
 pub struct TargetNotInModeStoreError(pub ComponentId);
 
+/// Mode store value type.
+#[derive(Debug, Copy, Clone)]
+pub struct ModeStoreValue {
+    /// ID of the mode component.
+    id: ComponentId,
+    /// Current mode and submode of the component.
+    pub mode_and_submode: ModeAndSubmode,
+    /// State information to track whether a reply should be awaited for the mode component.
+    pub awaiting_reply: bool,
+}
+
+impl ModeStoreValue {
+    pub fn new(id: ComponentId, mode_and_submode: ModeAndSubmode) -> Self {
+        Self {
+            id,
+            mode_and_submode,
+            awaiting_reply: false,
+        }
+    }
+
+    pub fn id(&self) -> ComponentId {
+        self.id
+    }
+
+    pub fn mode_and_submode(&self) -> ModeAndSubmode {
+        self.mode_and_submode
+    }
+}
+
 pub trait ModeStoreProvider {
     fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode);
 
     fn has_component(&self, target_id: ComponentId) -> bool;
 
-    fn get_mode(&self, target_id: ComponentId) -> Option<ModeAndSubmode>;
+    fn get(&self, target_id: ComponentId) -> Option<&ModeStoreValue>;
 
-    fn set_mode_for_contained_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode);
+    fn get_mut(&mut self, target_id: ComponentId) -> Option<&mut ModeStoreValue>;
 
-    fn set_mode(
+    /// Generic handler for mode replies received from child components.
+    ///
+    /// Implementation should clear the awaition flag if the `handle_reply_awaition` argument is
+    /// true and returns whether any children are still awaiting replies. If the flag is not set
+    fn mode_reply_handler_with_reply_awaition(
         &mut self,
-        target_id: ComponentId,
-        mode: ModeAndSubmode,
-    ) -> Result<(), TargetNotInModeStoreError> {
-        if !self.has_component(target_id) {
-            return Err(TargetNotInModeStoreError(target_id));
-        }
-        self.set_mode_for_contained_component(target_id, mode);
-        Ok(())
+        sender_id: ComponentId,
+        reported_mode_and_submode: Option<ModeAndSubmode>,
+    ) -> bool {
+        self.mode_reply_handler(sender_id, reported_mode_and_submode, true)
+            .unwrap_or(false)
     }
+
+    fn mode_reply_handler_without_reply_awaition(
+        &mut self,
+        sender_id: ComponentId,
+        reported_mode_and_submode: Option<ModeAndSubmode>,
+    ) {
+        self.mode_reply_handler(sender_id, reported_mode_and_submode, false);
+    }
+
+    fn mode_reply_handler(
+        &mut self,
+        sender_id: ComponentId,
+        reported_mode_and_submode: Option<ModeAndSubmode>,
+        with_reply_awaition: bool,
+    ) -> Option<bool>;
 }
 
 #[cfg(feature = "alloc")]
@@ -293,35 +338,6 @@ pub mod alloc_mod {
     #[derive(Debug, Default)]
     pub struct SequenceModeTables(pub HashMap<Mode, SequenceTablesMapValue>);
 
-    /// Mode store value type.
-    #[derive(Debug, Copy, Clone)]
-    pub struct ModeStoreValue {
-        /// ID of the mode component.
-        id: ComponentId,
-        /// Current mode and submode of the component.
-        pub mode_and_submode: ModeAndSubmode,
-        /// State information to track whether a reply should be awaited for the mode component.
-        pub awaiting_reply: bool,
-    }
-
-    impl ModeStoreValue {
-        pub fn new(id: ComponentId, mode_and_submode: ModeAndSubmode) -> Self {
-            Self {
-                id,
-                mode_and_submode,
-                awaiting_reply: false,
-            }
-        }
-
-        pub fn id(&self) -> ComponentId {
-            self.id
-        }
-
-        pub fn mode_and_submode(&self) -> ModeAndSubmode {
-            self.mode_and_submode
-        }
-    }
-
     /// Mode store which tracks the [mode information][ModeStoreValue] inside a [Vec]
     #[derive(Debug, Default)]
     pub struct ModeStoreVec(pub alloc::vec::Vec<ModeStoreValue>);
@@ -330,17 +346,33 @@ pub mod alloc_mod {
     #[derive(Debug, Default)]
     pub struct ModeStoreMap(pub hashbrown::HashMap<ComponentId, ModeStoreValue>);
 
-    impl ModeStoreVec {
-        /// Generic handler for mode replies received from child components.
-        ///
-        /// It returns whether any children are still awating replies.
-        pub fn generic_reply_handler(
+    impl ModeStoreProvider for ModeStoreVec {
+        fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode) {
+            self.0.push(ModeStoreValue::new(target_id, mode));
+        }
+
+        fn has_component(&self, target_id: ComponentId) -> bool {
+            self.0.iter().any(|val| val.id == target_id)
+        }
+
+        fn get(&self, target_id: ComponentId) -> Option<&ModeStoreValue> {
+            self.0.iter().find(|val| val.id == target_id)
+        }
+
+        fn get_mut(&mut self, target_id: ComponentId) -> Option<&mut ModeStoreValue> {
+            self.0.iter_mut().find(|val| val.id == target_id)
+        }
+
+        fn mode_reply_handler(
             &mut self,
             sender_id: ComponentId,
             reported_mode_and_submode: Option<ModeAndSubmode>,
             handle_reply_awaition: bool,
-        ) -> bool {
-            let mut still_awating_replies = false;
+        ) -> Option<bool> {
+            let mut still_awating_replies = None;
+            if handle_reply_awaition {
+                still_awating_replies = Some(false);
+            }
             self.0.iter_mut().for_each(|val| {
                 if val.id() == sender_id {
                     if let Some(mode_and_submode) = reported_mode_and_submode {
@@ -351,40 +383,10 @@ pub mod alloc_mod {
                     }
                 }
                 if handle_reply_awaition && val.awaiting_reply {
-                    still_awating_replies = true;
+                    still_awating_replies = Some(true);
                 }
             });
             still_awating_replies
-        }
-    }
-    impl ModeStoreProvider for ModeStoreVec {
-        fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode) {
-            self.0.push(ModeStoreValue::new(target_id, mode));
-        }
-
-        fn has_component(&self, target_id: ComponentId) -> bool {
-            self.0.iter().any(|val| val.id == target_id)
-        }
-
-        fn get_mode(&self, target_id: ComponentId) -> Option<ModeAndSubmode> {
-            self.0.iter().find_map(|val| {
-                if val.id == target_id {
-                    return Some(val.mode_and_submode);
-                }
-                None
-            })
-        }
-
-        fn set_mode_for_contained_component(
-            &mut self,
-            target_id: ComponentId,
-            mode_to_set: ModeAndSubmode,
-        ) {
-            self.0.iter_mut().for_each(|val| {
-                if val.id == target_id {
-                    val.mode_and_submode = mode_to_set;
-                }
-            });
         }
     }
 
@@ -398,19 +400,170 @@ pub mod alloc_mod {
             self.0.contains_key(&target_id)
         }
 
-        fn get_mode(&self, target_id: ComponentId) -> Option<ModeAndSubmode> {
-            self.0.get(&target_id).map(|v| v.mode_and_submode())
+        fn get(&self, target_id: ComponentId) -> Option<&ModeStoreValue> {
+            self.0.get(&target_id)
         }
 
-        fn set_mode_for_contained_component(
+        fn get_mut(&mut self, target_id: ComponentId) -> Option<&mut ModeStoreValue> {
+            self.0.get_mut(&target_id)
+        }
+
+        fn mode_reply_handler(
             &mut self,
-            target_id: ComponentId,
-            mode_to_set: ModeAndSubmode,
-        ) {
-            self.0.get_mut(&target_id).unwrap().mode_and_submode = mode_to_set;
+            sender_id: ComponentId,
+            reported_mode_and_submode: Option<ModeAndSubmode>,
+            handle_reply_awaition: bool,
+        ) -> Option<bool> {
+            let mut still_awating_replies = None;
+            if handle_reply_awaition {
+                still_awating_replies = Some(false);
+            }
+            for val in self.0.values_mut() {
+                if val.id() == sender_id {
+                    if let Some(mode_and_submode) = reported_mode_and_submode {
+                        val.mode_and_submode = mode_and_submode;
+                    }
+                    if handle_reply_awaition {
+                        val.awaiting_reply = false;
+                    }
+                }
+                if handle_reply_awaition && val.awaiting_reply {
+                    still_awating_replies = Some(true);
+                }
+            }
+            still_awating_replies
         }
     }
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+
+    fn generic_test(mode_store: &mut impl ModeStoreProvider) {
+        mode_store.add_component(1, ModeAndSubmode::new(0, 0));
+        mode_store.add_component(2, ModeAndSubmode::new(1, 0));
+        assert!(mode_store.has_component(1));
+        assert!(mode_store.has_component(2));
+        assert_eq!(
+            mode_store.get(1).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(0, 0)
+        );
+        assert!(!mode_store.get(1).unwrap().awaiting_reply);
+        assert!(!mode_store.get(2).unwrap().awaiting_reply);
+        assert_eq!(mode_store.get(1).unwrap().id, 1);
+        assert_eq!(mode_store.get(2).unwrap().id, 2);
+        assert!(mode_store.get(3).is_none());
+        assert!(mode_store.get_mut(3).is_none());
+    }
+
+    fn generic_reply_handling_with_reply_awaition(mode_store: &mut impl ModeStoreProvider) {
+        mode_store.add_component(1, ModeAndSubmode::new(0, 0));
+        mode_store.add_component(2, ModeAndSubmode::new(1, 0));
+        mode_store.get_mut(1).unwrap().awaiting_reply = true;
+        mode_store.get_mut(2).unwrap().awaiting_reply = true;
+        let mut reply_awation_pending =
+            mode_store.mode_reply_handler_with_reply_awaition(1, Some(ModeAndSubmode::new(2, 0)));
+        assert!(reply_awation_pending);
+        reply_awation_pending = mode_store.mode_reply_handler_with_reply_awaition(2, None);
+        assert!(!reply_awation_pending);
+        assert!(!mode_store.get(1).unwrap().awaiting_reply);
+        assert!(!mode_store.get(2).unwrap().awaiting_reply);
+        assert_eq!(
+            mode_store.get(1).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(2, 0)
+        );
+        assert_eq!(
+            mode_store.get(2).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(1, 0)
+        );
+    }
+
+    fn generic_reply_handling_test_no_reply_awaition(mode_store: &mut impl ModeStoreProvider) {
+        mode_store.add_component(1, ModeAndSubmode::new(0, 0));
+        mode_store.add_component(2, ModeAndSubmode::new(1, 0));
+        mode_store.get_mut(1).unwrap().awaiting_reply = true;
+        mode_store.get_mut(2).unwrap().awaiting_reply = true;
+        mode_store.mode_reply_handler_without_reply_awaition(1, Some(ModeAndSubmode::new(2, 0)));
+        mode_store.mode_reply_handler_without_reply_awaition(2, None);
+        assert!(mode_store.get(1).unwrap().awaiting_reply);
+        assert!(mode_store.get(2).unwrap().awaiting_reply);
+        assert_eq!(
+            mode_store.get(1).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(2, 0)
+        );
+        assert_eq!(
+            mode_store.get(2).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(1, 0)
+        );
+    }
+
+    fn generic_reply_handling_with_reply_awaition_2(mode_store: &mut impl ModeStoreProvider) {
+        mode_store.add_component(1, ModeAndSubmode::new(0, 0));
+        mode_store.add_component(2, ModeAndSubmode::new(1, 0));
+        mode_store.get_mut(1).unwrap().awaiting_reply = true;
+        mode_store.get_mut(2).unwrap().awaiting_reply = true;
+        let mut reply_awation_pending =
+            mode_store.mode_reply_handler(1, Some(ModeAndSubmode::new(2, 0)), true);
+        assert!(reply_awation_pending.unwrap());
+        reply_awation_pending = mode_store.mode_reply_handler(2, None, true);
+        assert!(!reply_awation_pending.unwrap());
+        assert!(!mode_store.get(1).unwrap().awaiting_reply);
+        assert!(!mode_store.get(2).unwrap().awaiting_reply);
+        assert_eq!(
+            mode_store.get(1).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(2, 0)
+        );
+        assert_eq!(
+            mode_store.get(2).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(1, 0)
+        );
+    }
+
+    #[test]
+    fn test_vec_mode_store() {
+        let mut mode_store = ModeStoreVec::default();
+        generic_test(&mut mode_store);
+    }
+
+    #[test]
+    fn test_map_mode_store() {
+        let mut mode_store = ModeStoreMap::default();
+        generic_test(&mut mode_store);
+    }
+
+    #[test]
+    fn test_generic_reply_handler_vec_with_reply_awaition() {
+        let mut mode_store = ModeStoreVec::default();
+        generic_reply_handling_with_reply_awaition(&mut mode_store);
+    }
+
+    #[test]
+    fn test_generic_reply_handler_vec_with_reply_awaition_2() {
+        let mut mode_store = ModeStoreVec::default();
+        generic_reply_handling_with_reply_awaition_2(&mut mode_store);
+    }
+
+    #[test]
+    fn test_generic_reply_handler_map_with_reply_awaition() {
+        let mut mode_store = ModeStoreMap::default();
+        generic_reply_handling_with_reply_awaition(&mut mode_store);
+    }
+
+    #[test]
+    fn test_generic_reply_handler_map_with_reply_awaition_2() {
+        let mut mode_store = ModeStoreMap::default();
+        generic_reply_handling_with_reply_awaition_2(&mut mode_store);
+    }
+
+    #[test]
+    fn test_generic_reply_handler_vec_no_reply_awaition() {
+        let mut mode_store = ModeStoreVec::default();
+        generic_reply_handling_test_no_reply_awaition(&mut mode_store);
+    }
+    #[test]
+    fn test_generic_reply_handler_map_no_reply_awaition() {
+        let mut mode_store = ModeStoreMap::default();
+        generic_reply_handling_test_no_reply_awaition(&mut mode_store);
+    }
+}

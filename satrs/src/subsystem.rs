@@ -486,12 +486,14 @@ impl SubsystemCommandingHelper {
                 {
                     handle_awaition = true;
                 }
-                let still_awating_replies = self.children_mode_store.generic_reply_handler(
+                let still_awating_replies = self.children_mode_store.mode_reply_handler(
                     sender_id,
                     mode_and_submode,
                     handle_awaition,
                 );
-                if self.state == ModeTreeHelperState::ModeCommanding && !still_awating_replies {
+                if self.state == ModeTreeHelperState::ModeCommanding
+                    && !still_awating_replies.unwrap_or(false)
+                {
                     self.seq_exec_helper.confirm_sequence_done();
                 }
             };
@@ -516,7 +518,12 @@ impl SubsystemCommandingHelper {
         child: ComponentId,
         mode: ModeAndSubmode,
     ) -> Result<(), TargetNotInModeStoreError> {
-        self.children_mode_store.set_mode(child, mode)
+        let val_mut = self
+            .children_mode_store
+            .get_mut(child)
+            .ok_or(TargetNotInModeStoreError(child))?;
+        val_mut.mode_and_submode = mode;
+        Ok(())
     }
 }
 

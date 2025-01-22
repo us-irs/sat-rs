@@ -112,7 +112,7 @@ impl AssemblyCommandingHelper {
             {
                 handle_awaition = true;
             }
-            let still_awating_replies = self.children_mode_store.generic_reply_handler(
+            let still_awating_replies = self.children_mode_store.mode_reply_handler(
                 mode_reply.sender_id(),
                 mode_and_submode,
                 handle_awaition,
@@ -124,9 +124,11 @@ impl AssemblyCommandingHelper {
             {
                 return AssemblyHelperResult::TargetKeepingViolation(mode_reply.sender_id());
             }
+            // It is okay to unwrap: If awaition should be handled, the returned value should
+            // always be some valid value.
             if self.state == ModeTreeHelperState::ModeCommanding
                 && handle_awaition
-                && !still_awating_replies
+                && !still_awating_replies.unwrap()
             {
                 self.state = ModeTreeHelperState::TargetKeeping;
                 self.active_request_id = None;
