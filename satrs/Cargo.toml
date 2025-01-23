@@ -131,3 +131,8 @@ test_util = []
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--generate-link-to-definition"]
+
+[[test]]
+name = "event_test"
+path = "tests/pus_events.rs"
+required-features = ["test_util"]
