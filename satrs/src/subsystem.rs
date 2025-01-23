@@ -173,7 +173,6 @@ impl SequenceExecutionHelper {
     /// Confirm that a sequence which is awaiting a success check is done
     pub fn confirm_sequence_done(&mut self) {
         if let SequenceExecutionHelperState::AwaitingSuccessCheck = self.state {
-            self.current_sequence_index = Some(self.current_sequence_index.unwrap() + 1);
             self.state = SequenceExecutionHelperState::Busy;
             if let (Some(last_sequence_index), Some(current_sequence_index)) =
                 (self.last_sequence_index, self.current_sequence_index)
@@ -182,6 +181,7 @@ impl SequenceExecutionHelper {
                     self.state = SequenceExecutionHelperState::Idle;
                 }
             }
+            self.current_sequence_index = Some(self.current_sequence_index.unwrap() + 1);
         }
     }
 
@@ -638,7 +638,10 @@ mod tests {
                     .unwrap(),
                 ModeCommandingResult::Done
             );
-            assert!(self.execution_helper.state() == SequenceExecutionHelperState::Idle);
+            assert_eq!(
+                self.execution_helper.state(),
+                SequenceExecutionHelperState::Idle
+            );
             assert!(self.sender.requests.borrow().is_empty());
         }
 
@@ -987,6 +990,8 @@ mod tests {
         assert!(tb.execution_helper.awaiting_success_check());
         assert_eq!(tb.execution_helper.current_sequence_index().unwrap(), 1);
         tb.generic_checks_subsystem_md1_step1(expected_req_id);
+        tb.execution_helper.confirm_sequence_done();
+        tb.check_run_is_no_op();
     }
 
     // TODO: Test subsystem commanding helper
