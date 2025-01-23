@@ -17,37 +17,37 @@ impl PusTmWithCdsShortHelper {
     }
 
     #[cfg(feature = "std")]
-    pub fn create_pus_tm_timestamp_now<'a>(
-        &'a mut self,
+    pub fn create_pus_tm_timestamp_now<'data>(
+        &mut self,
         service: u8,
         subservice: u8,
-        source_data: &'a [u8],
+        source_data: &'data [u8],
         seq_count: u16,
-    ) -> PusTmCreator {
+    ) -> PusTmCreator<'_, 'data> {
         let time_stamp = CdsTime::now_with_u16_days().unwrap();
         time_stamp.write_to_bytes(&mut self.cds_short_buf).unwrap();
         self.create_pus_tm_common(service, subservice, source_data, seq_count)
     }
 
-    pub fn create_pus_tm_with_stamper<'a>(
-        &'a mut self,
+    pub fn create_pus_tm_with_stamper<'data>(
+        &mut self,
         service: u8,
         subservice: u8,
-        source_data: &'a [u8],
+        source_data: &'data [u8],
         stamper: &CdsTime,
         seq_count: u16,
-    ) -> PusTmCreator {
+    ) -> PusTmCreator<'_, 'data> {
         stamper.write_to_bytes(&mut self.cds_short_buf).unwrap();
         self.create_pus_tm_common(service, subservice, source_data, seq_count)
     }
 
-    fn create_pus_tm_common<'a>(
-        &'a self,
+    fn create_pus_tm_common<'data>(
+        &self,
         service: u8,
         subservice: u8,
-        source_data: &'a [u8],
+        source_data: &'data [u8],
         seq_count: u16,
-    ) -> PusTmCreator {
+    ) -> PusTmCreator<'_, 'data> {
         let reply_header = SpHeader::new_for_unseg_tm(self.apid, seq_count, 0);
         let tc_header = PusTmSecondaryHeader::new_simple(service, subservice, &self.cds_short_buf);
         PusTmCreator::new(reply_header, tc_header, source_data, true)
