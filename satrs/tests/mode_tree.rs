@@ -316,7 +316,7 @@ impl AcsSubsystem {
                     }
                 }
                 SubsystemHelperResult::ModeCommanding(mode_commanding_result) => {
-                    if let ModeCommandingResult::CommandingDone = mode_commanding_result {
+                    if let ModeCommandingResult::Done = mode_commanding_result {
                         self.handle_mode_reached(self.mode_requestor_info)
                             .expect("mode reply handling failed");
                     }

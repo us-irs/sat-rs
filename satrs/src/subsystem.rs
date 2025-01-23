@@ -18,7 +18,7 @@ pub enum SequenceExecutionHelperState {
     Busy,
     /// The sequence helper is still awaiting a reply from a mode children. The reply awaition
     /// is a property of a mode commanding sequence
-    AwaitingCheckSuccess,
+    AwaitingSuccessCheck,
 }
 
 #[derive(Debug)]
@@ -27,12 +27,12 @@ pub enum TargetKeepingResult {
     Violated { fallback_mode: Option<Mode> },
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ModeCommandingResult {
     /// The commanding of all children is finished
-    CommandingDone,
+    Done,
     /// One step of a commanding chain is finished
-    CommandingStepDone,
+    StepDone,
     /// Reply awaition is required for some children
     AwaitingSuccessCheck,
 }
@@ -53,6 +53,7 @@ pub struct SequenceExecutionHelper {
     state: SequenceExecutionHelperState,
     request_id: Option<RequestId>,
     current_sequence_index: Option<usize>,
+    last_sequence_index: Option<usize>,
 }
 
 impl Default for SequenceExecutionHelper {
@@ -62,6 +63,7 @@ impl Default for SequenceExecutionHelper {
             state: SequenceExecutionHelperState::Idle,
             request_id: None,
             current_sequence_index: None,
+            last_sequence_index: None,
         }
     }
 }
@@ -125,13 +127,13 @@ impl SequenceExecutionHelper {
         children_mode_store: &mut ModeStoreVec,
     ) -> Result<ModeCommandingResult, GenericTargetedMessagingError> {
         if self.state == SequenceExecutionHelperState::Idle {
-            return Ok(ModeCommandingResult::CommandingDone);
+            return Ok(ModeCommandingResult::Done);
         }
-        if self.state == SequenceExecutionHelperState::AwaitingCheckSuccess {
+        if self.state == SequenceExecutionHelperState::AwaitingSuccessCheck {
             return Ok(ModeCommandingResult::AwaitingSuccessCheck);
         }
         if self.target_mode.is_none() {
-            return Ok(ModeCommandingResult::CommandingDone);
+            return Ok(ModeCommandingResult::Done);
         }
         match self.current_sequence_index {
             Some(idx) => {
@@ -147,8 +149,9 @@ impl SequenceExecutionHelper {
             None => {
                 // Find the first sequence
                 let seq_table_value = table.0.get(&self.target_mode.unwrap()).unwrap();
+                self.last_sequence_index = Some(seq_table_value.entries.len() - 1);
                 if seq_table_value.entries.is_empty() {
-                    Ok(ModeCommandingResult::CommandingDone)
+                    Ok(ModeCommandingResult::Done)
                 } else {
                     self.current_sequence_index = Some(0);
                     self.execute_sequence_and_map_to_result(
@@ -169,8 +172,16 @@ impl SequenceExecutionHelper {
 
     /// Confirm that a sequence which is awaiting a success check is done
     pub fn confirm_sequence_done(&mut self) {
-        if let SequenceExecutionHelperState::AwaitingCheckSuccess = self.state {
-            self.state = SequenceExecutionHelperState::Idle;
+        if let SequenceExecutionHelperState::AwaitingSuccessCheck = self.state {
+            self.current_sequence_index = Some(self.current_sequence_index.unwrap() + 1);
+            self.state = SequenceExecutionHelperState::Busy;
+            if let (Some(last_sequence_index), Some(current_sequence_index)) =
+                (self.last_sequence_index, self.current_sequence_index)
+            {
+                if current_sequence_index == last_sequence_index {
+                    self.state = SequenceExecutionHelperState::Idle;
+                }
+            }
         }
     }
 
@@ -179,8 +190,8 @@ impl SequenceExecutionHelper {
         self.state
     }
 
-    pub fn awaiting_check_success(&self) -> bool {
-        self.state == SequenceExecutionHelperState::AwaitingCheckSuccess
+    pub fn awaiting_success_check(&self) -> bool {
+        self.state == SequenceExecutionHelperState::AwaitingSuccessCheck
     }
 
     pub fn current_sequence_index(&self) -> Option<usize> {
@@ -199,7 +210,7 @@ impl SequenceExecutionHelper {
         mode_store_vec: &mut ModeStoreVec,
     ) -> Result<ModeCommandingResult, GenericTargetedMessagingError> {
         if self.state() == SequenceExecutionHelperState::Idle || self.request_id.is_none() {
-            return Ok(ModeCommandingResult::CommandingDone);
+            return Ok(ModeCommandingResult::Done);
         }
         if Self::execute_sequence(
             self.request_id.unwrap(),
@@ -207,14 +218,14 @@ impl SequenceExecutionHelper {
             sender,
             mode_store_vec,
         )? {
-            self.state = SequenceExecutionHelperState::AwaitingCheckSuccess;
+            self.state = SequenceExecutionHelperState::AwaitingSuccessCheck;
             Ok(ModeCommandingResult::AwaitingSuccessCheck)
         } else if seq_table_value.entries.len() - 1 == sequence_idx {
             self.state = SequenceExecutionHelperState::Idle;
-            return Ok(ModeCommandingResult::CommandingDone);
+            return Ok(ModeCommandingResult::Done);
         } else {
             self.current_sequence_index = Some(sequence_idx + 1);
-            return Ok(ModeCommandingResult::CommandingStepDone);
+            return Ok(ModeCommandingResult::StepDone);
         }
     }
 
@@ -427,7 +438,7 @@ impl SubsystemCommandingHelper {
                 )?;
                 // By default, the helper will automatically transition into the target keeping
                 // mode after an executed sequence.
-                if let ModeCommandingResult::CommandingDone = result {
+                if let ModeCommandingResult::Done = result {
                     self.state = ModeTreeHelperState::TargetKeeping;
                     self.active_request_id = None;
                     self.current_mode =
@@ -533,14 +544,14 @@ mod tests {
     use std::collections::VecDeque;
 
     use crate::{
-        mode::{ModeAndSubmode, ModeRequest, ModeRequestSender, UNKNOWN_MODE},
+        mode::{Mode, ModeAndSubmode, ModeRequest, ModeRequestSender, UNKNOWN_MODE},
         mode_tree::{
             ModeStoreProvider, ModeStoreVec, SequenceModeTables, SequenceTableEntry,
             SequenceTableMapTable, SequenceTablesMapValue,
         },
         queue::GenericTargetedMessagingError,
         request::RequestId,
-        subsystem::SequenceExecutionHelperState,
+        subsystem::{ModeCommandingResult, SequenceExecutionHelperState},
         ComponentId,
     };
 
@@ -560,9 +571,15 @@ mod tests {
         Mode2 = 3,
     }
 
+    pub struct ModeReqWrapper {
+        pub request_id: RequestId,
+        pub target_id: ComponentId,
+        pub request: ModeRequest,
+    }
+
     #[derive(Default)]
     pub struct ModeReqSenderMock {
-        pub requests: RefCell<VecDeque<(RequestId, ComponentId, ModeRequest)>>,
+        pub requests: RefCell<VecDeque<ModeReqWrapper>>,
     }
 
     impl ModeRequestSender for ModeReqSenderMock {
@@ -576,10 +593,125 @@ mod tests {
             target_id: ComponentId,
             request: ModeRequest,
         ) -> Result<(), GenericTargetedMessagingError> {
-            self.requests
-                .borrow_mut()
-                .push_back((request_id, target_id, request));
+            self.requests.borrow_mut().push_back(ModeReqWrapper {
+                request_id,
+                target_id,
+                request,
+            });
             Ok(())
+        }
+    }
+
+    pub struct SequenceExecutorTestbench {
+        pub sender: ModeReqSenderMock,
+        pub mode_store: ModeStoreVec,
+        pub seq_table: SequenceModeTables,
+        pub execution_helper: SequenceExecutionHelper,
+    }
+
+    impl SequenceExecutorTestbench {
+        pub fn new() -> Self {
+            let mode_store = create_default_mode_store();
+            let seq_table = create_simple_sample_seq_table(false, false);
+            Self {
+                sender: ModeReqSenderMock::default(),
+                mode_store,
+                seq_table,
+                execution_helper: SequenceExecutionHelper::new(),
+            }
+        }
+
+        pub fn get_mode_table(&mut self, mode: ExampleMode) -> &mut SequenceTablesMapValue {
+            self.seq_table.0.get_mut(&(mode as Mode)).unwrap()
+        }
+
+        pub fn run(&mut self) -> Result<ModeCommandingResult, GenericTargetedMessagingError> {
+            self.execution_helper
+                .run(&self.seq_table, &self.sender, &mut self.mode_store)
+        }
+
+        fn check_run_is_no_op(&mut self) {
+            // Assure that no unexpected behaviour occurs.
+            assert_eq!(
+                self.execution_helper
+                    .run(&self.seq_table, &self.sender, &mut self.mode_store)
+                    .unwrap(),
+                ModeCommandingResult::Done
+            );
+            assert!(self.execution_helper.state() == SequenceExecutionHelperState::Idle);
+            assert!(self.sender.requests.borrow().is_empty());
+        }
+
+        fn generic_checks_subsystem_md1_step0(&mut self, expected_req_id: RequestId) {
+            assert_eq!(
+                self.execution_helper.target_mode().unwrap(),
+                ExampleMode::Mode1 as Mode
+            );
+            assert_eq!(self.sender.requests.borrow().len(), 2);
+            let req_0 = self.sender.requests.get_mut().pop_front().unwrap();
+            assert_eq!(req_0.target_id, ExampleTargetId::Target0 as u64);
+            assert_eq!(req_0.request_id, expected_req_id);
+            assert_eq!(
+                req_0.request,
+                ModeRequest::SetMode {
+                    mode_and_submode: SUBSYSTEM_MD1_ST0_TGT0_MODE,
+                    forced: false
+                }
+            );
+            let req_1 = self.sender.requests.borrow_mut().pop_front().unwrap();
+            assert_eq!(req_1.target_id, ExampleTargetId::Target1 as u64);
+            assert_eq!(
+                req_1.request,
+                ModeRequest::SetMode {
+                    mode_and_submode: SUBSYSTEM_MD1_ST0_TGT1_MODE,
+                    forced: false
+                }
+            );
+        }
+        fn generic_checks_subsystem_md1_step1(&mut self, expected_req_id: RequestId) {
+            assert_eq!(
+                self.execution_helper.target_mode().unwrap(),
+                ExampleMode::Mode1 as Mode
+            );
+            assert_eq!(self.sender.requests.borrow().len(), 1);
+            let req_0 = self.sender.requests.get_mut().pop_front().unwrap();
+            assert_eq!(req_0.target_id, ExampleTargetId::Target2 as u64);
+            assert_eq!(req_0.request_id, expected_req_id);
+            assert_eq!(
+                req_0.request,
+                ModeRequest::SetMode {
+                    mode_and_submode: SUBSYSTEM_MD1_ST1_TGT2_MODE,
+                    forced: false
+                }
+            );
+        }
+
+        fn generic_checks_subsystem_md0(&mut self, expected_req_id: RequestId) {
+            assert_eq!(
+                self.execution_helper.target_mode().unwrap(),
+                ExampleMode::Mode0 as Mode
+            );
+            assert_eq!(self.execution_helper.current_sequence_index().unwrap(), 0);
+            assert_eq!(self.sender.requests.borrow().len(), 2);
+            let req_0 = self.sender.requests.get_mut().pop_front().unwrap();
+            assert_eq!(req_0.target_id, ExampleTargetId::Target0 as u64);
+            assert_eq!(req_0.request_id, expected_req_id);
+            assert_eq!(
+                req_0.request,
+                ModeRequest::SetMode {
+                    mode_and_submode: SUBSYSTEM_MD0_TGT_0_MODE,
+                    forced: false
+                }
+            );
+            let req_1 = self.sender.requests.borrow_mut().pop_front().unwrap();
+            assert_eq!(req_1.target_id, ExampleTargetId::Target1 as u64);
+            assert_eq!(
+                req_1.request,
+                ModeRequest::SetMode {
+                    mode_and_submode: SUBSYSTEM_MD0_TGT_1_MODE,
+                    forced: false
+                }
+            );
         }
     }
 
@@ -591,42 +723,270 @@ mod tests {
         mode_store
     }
 
-    fn create_simple_sample_seq_table() -> SequenceModeTables {
+    fn create_simple_sample_seq_table(
+        success_check_tgt0: bool,
+        success_check_tgt1: bool,
+    ) -> SequenceModeTables {
         let mut table = SequenceModeTables::default();
+        // Mode 0 - One step command
         let mut table_val = SequenceTablesMapValue::new("MODE_0");
         let mut table_seq_0 = SequenceTableMapTable::new("MODE_0_SEQ_0");
         table_seq_0.add_entry(SequenceTableEntry::new(
             "TARGET_0",
             ExampleTargetId::Target0 as u64,
-            ModeAndSubmode::new(ExampleMode::Mode0 as u32, 0),
-            false,
+            SUBSYSTEM_MD0_TGT_0_MODE,
+            success_check_tgt0,
         ));
         table_seq_0.add_entry(SequenceTableEntry::new(
             "TARGET_1",
             ExampleTargetId::Target1 as u64,
-            ModeAndSubmode::new(ExampleMode::Mode1 as u32, 0),
-            true,
+            SUBSYSTEM_MD0_TGT_1_MODE,
+            success_check_tgt1,
         ));
         table_val.add_sequence_table(table_seq_0);
         table.0.insert(ExampleMode::Mode0 as u32, table_val);
+
+        // Mode 1 - Multi Step command
+        let mut table_val = SequenceTablesMapValue::new("MODE_1");
+        let mut table_seq_0 = SequenceTableMapTable::new("MODE_1_SEQ_0");
+        table_seq_0.add_entry(SequenceTableEntry::new(
+            "MD1_SEQ0_TGT0",
+            ExampleTargetId::Target0 as u64,
+            SUBSYSTEM_MD1_ST0_TGT0_MODE,
+            false,
+        ));
+        table_seq_0.add_entry(SequenceTableEntry::new(
+            "MD1_SEQ0_TGT1",
+            ExampleTargetId::Target1 as u64,
+            SUBSYSTEM_MD1_ST0_TGT1_MODE,
+            false,
+        ));
+        table_val.add_sequence_table(table_seq_0);
+        let mut table_seq_1 = SequenceTableMapTable::new("MODE_1_SEQ_1");
+        table_seq_1.add_entry(SequenceTableEntry::new(
+            "MD1_SEQ1_TGT2",
+            ExampleTargetId::Target2 as u64,
+            SUBSYSTEM_MD1_ST1_TGT2_MODE,
+            false,
+        ));
+        table_val.add_sequence_table(table_seq_1);
+        table.0.insert(ExampleMode::Mode1 as u32, table_val);
         table
     }
 
+    const SUBSYSTEM_MD0_TGT_0_MODE: ModeAndSubmode =
+        ModeAndSubmode::new(ExampleMode::Mode0 as u32, 0);
+    const SUBSYSTEM_MD0_TGT_1_MODE: ModeAndSubmode =
+        ModeAndSubmode::new(ExampleMode::Mode1 as u32, 0);
+
+    const SUBSYSTEM_MD1_ST0_TGT0_MODE: ModeAndSubmode =
+        ModeAndSubmode::new(ExampleMode::Mode2 as u32, 0);
+    const SUBSYSTEM_MD1_ST0_TGT1_MODE: ModeAndSubmode =
+        ModeAndSubmode::new(ExampleMode::Mode0 as u32, 0);
+    const SUBSYSTEM_MD1_ST1_TGT2_MODE: ModeAndSubmode =
+        ModeAndSubmode::new(ExampleMode::Mode1 as u32, 0);
+
     #[test]
-    fn test_sequence_execution_helper() {
-        let sender = ModeReqSenderMock::default();
-        let mut mode_store = create_default_mode_store();
-        let mut execution_helper = SequenceExecutionHelper::new();
+    fn test_init_state() {
+        let execution_helper = SequenceExecutionHelper::new();
         assert_eq!(execution_helper.state(), SequenceExecutionHelperState::Idle);
-        let simple_table = create_simple_sample_seq_table();
-        execution_helper
-            .load(ExampleMode::Mode0 as u32, 1, &simple_table)
+        assert!(!execution_helper.awaiting_success_check());
+        assert!(execution_helper.target_mode().is_none());
+        assert!(execution_helper.current_sequence_index().is_none());
+    }
+
+    #[test]
+    fn test_sequence_execution_helper_no_success_check() {
+        let mut tb = SequenceExecutorTestbench::new();
+        let expected_req_id = 1;
+        tb.execution_helper
+            .load(ExampleMode::Mode0 as u32, expected_req_id, &tb.seq_table)
             .unwrap();
-        assert_eq!(execution_helper.state(), SequenceExecutionHelperState::Busy);
-        execution_helper
-            .run(&simple_table, &sender, &mut mode_store)
-            .expect("sequence exeecution helper run failure");
-        // TODO: continue tests
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::Busy
+        );
+        assert!(!tb.execution_helper.awaiting_success_check());
+        assert_eq!(
+            tb.execution_helper.target_mode().unwrap(),
+            ExampleMode::Mode0 as Mode
+        );
+        assert_eq!(
+            tb.execution_helper
+                .run(&tb.seq_table, &tb.sender, &mut tb.mode_store)
+                .expect("sequence exeecution helper run failure"),
+            ModeCommandingResult::Done
+        );
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::Idle
+        );
+        assert!(!tb.execution_helper.awaiting_success_check());
+        tb.generic_checks_subsystem_md0(expected_req_id);
+        tb.check_run_is_no_op();
+    }
+
+    #[test]
+    fn test_sequence_execution_helper_with_success_check() {
+        let mut tb = SequenceExecutorTestbench::new();
+        let mode0_table = tb.get_mode_table(ExampleMode::Mode0);
+        mode0_table.entries[0].entries[0].check_success = true;
+        mode0_table.entries[0].entries[1].check_success = true;
+        let expected_req_id = 1;
+        tb.execution_helper
+            .load(ExampleMode::Mode0 as u32, expected_req_id, &tb.seq_table)
+            .unwrap();
+
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::Busy
+        );
+        assert!(!tb.execution_helper.awaiting_success_check());
+        assert_eq!(
+            tb.execution_helper.target_mode().unwrap(),
+            ExampleMode::Mode0 as Mode
+        );
+        assert_eq!(
+            tb.run().expect("sequence exeecution helper run failure"),
+            ModeCommandingResult::AwaitingSuccessCheck
+        );
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::AwaitingSuccessCheck
+        );
+        // These are not cleared, even if the execution helper is already IDLE. This is okay for
+        // now.
+        assert!(tb.execution_helper.awaiting_success_check());
+        tb.generic_checks_subsystem_md0(expected_req_id);
+        tb.execution_helper.confirm_sequence_done();
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::Idle
+        );
+
+        tb.check_run_is_no_op();
+    }
+
+    #[test]
+    fn test_sequence_execution_helper_with_partial_check() {
+        let mut tb = SequenceExecutorTestbench::new();
+        let mode0_table = tb.get_mode_table(ExampleMode::Mode0);
+        mode0_table.entries[0].entries[0].check_success = true;
+        let expected_req_id = 1;
+        tb.execution_helper
+            .load(ExampleMode::Mode0 as u32, expected_req_id, &tb.seq_table)
+            .unwrap();
+
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::Busy
+        );
+        assert!(!tb.execution_helper.awaiting_success_check());
+        assert_eq!(
+            tb.run().expect("sequence execution helper run failure"),
+            ModeCommandingResult::AwaitingSuccessCheck
+        );
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::AwaitingSuccessCheck
+        );
+        // These are not cleared, even if the execution helper is already IDLE. This is okay for
+        // now.
+        assert!(tb.execution_helper.awaiting_success_check());
+        tb.generic_checks_subsystem_md0(expected_req_id);
+        tb.execution_helper.confirm_sequence_done();
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::Idle
+        );
+        tb.check_run_is_no_op();
+    }
+
+    #[test]
+    fn test_sequence_execution_helper_multi_step_no_success_check() {
+        let mut tb = SequenceExecutorTestbench::new();
+        let expected_req_id = 1;
+        tb.execution_helper
+            .load(ExampleMode::Mode1 as u32, expected_req_id, &tb.seq_table)
+            .unwrap();
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::Busy
+        );
+        assert!(!tb.execution_helper.awaiting_success_check());
+        assert_eq!(
+            tb.execution_helper.target_mode().unwrap(),
+            ExampleMode::Mode1 as Mode
+        );
+        assert_eq!(
+            tb.run().expect("sequence execution helper run failure"),
+            ModeCommandingResult::StepDone
+        );
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::Busy
+        );
+        assert!(!tb.execution_helper.awaiting_success_check());
+        tb.generic_checks_subsystem_md1_step0(expected_req_id);
+        assert_eq!(tb.execution_helper.current_sequence_index().unwrap(), 1);
+
+        assert_eq!(
+            tb.run().expect("sequence execution helper run failure"),
+            ModeCommandingResult::Done
+        );
+        tb.generic_checks_subsystem_md1_step1(expected_req_id);
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::Idle
+        );
+        tb.check_run_is_no_op();
+    }
+
+    #[test]
+    fn test_sequence_execution_helper_multi_step_full_success_check() {
+        let mut tb = SequenceExecutorTestbench::new();
+        let expected_req_id = 1;
+        tb.execution_helper
+            .load(ExampleMode::Mode1 as u32, expected_req_id, &tb.seq_table)
+            .unwrap();
+        let mode1_table = tb.get_mode_table(ExampleMode::Mode1);
+        mode1_table.entries[0].entries[0].check_success = true;
+        mode1_table.entries[0].entries[1].check_success = true;
+        mode1_table.entries[1].entries[0].check_success = true;
+
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::Busy
+        );
+        assert!(!tb.execution_helper.awaiting_success_check());
+        assert_eq!(
+            tb.execution_helper.target_mode().unwrap(),
+            ExampleMode::Mode1 as Mode
+        );
+        assert_eq!(
+            tb.run().expect("sequence execution helper run failure"),
+            ModeCommandingResult::AwaitingSuccessCheck
+        );
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::AwaitingSuccessCheck
+        );
+        assert!(tb.execution_helper.awaiting_success_check());
+        tb.generic_checks_subsystem_md1_step0(expected_req_id);
+        assert_eq!(tb.execution_helper.current_sequence_index().unwrap(), 0);
+        tb.execution_helper.confirm_sequence_done();
+
+        assert_eq!(
+            tb.run().expect("sequence execution helper run failure"),
+            ModeCommandingResult::AwaitingSuccessCheck
+        );
+        assert_eq!(
+            tb.execution_helper.state(),
+            SequenceExecutionHelperState::AwaitingSuccessCheck
+        );
+        assert!(tb.execution_helper.awaiting_success_check());
+        assert_eq!(tb.execution_helper.current_sequence_index().unwrap(), 1);
+        tb.generic_checks_subsystem_md1_step1(expected_req_id);
     }
 
     // TODO: Test subsystem commanding helper
