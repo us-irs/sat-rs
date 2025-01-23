@@ -36,10 +36,10 @@ pub mod pus;
 pub mod queue;
 pub mod request;
 pub mod res_code;
-pub mod time;
-pub mod tmtc;
 #[cfg(feature = "alloc")]
 pub mod scheduling;
+pub mod time;
+pub mod tmtc;
 
 pub mod action;
 pub mod hk;
