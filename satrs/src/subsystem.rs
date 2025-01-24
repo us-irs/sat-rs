@@ -1,5 +1,5 @@
 use crate::{
-    mode::{Mode, ModeAndSubmode, ModeReply, ModeRequest, ModeRequestSender, UNKNOWN_MODE},
+    mode::{Mode, ModeAndSubmode, ModeReply, ModeRequest, ModeRequestSender, UNKNOWN_MODE_VAL},
     mode_tree::{
         ModeStoreProvider, ModeStoreVec, SequenceModeTables, SequenceTableMapTable,
         SequenceTablesMapValue, TargetModeTables, TargetNotInModeStoreError, TargetTablesMapValue,
@@ -21,12 +21,6 @@ pub enum SequenceExecutionHelperState {
     AwaitingSuccessCheck,
 }
 
-#[derive(Debug)]
-pub enum TargetKeepingResult {
-    Ok,
-    Violated { fallback_mode: Option<Mode> },
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum ModeCommandingResult {
     /// The commanding of all children is finished
@@ -38,7 +32,7 @@ pub enum ModeCommandingResult {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("Mode {0} does not exist")]
+#[error("mode {0} does not exist")]
 pub struct ModeDoesNotExistError(Mode);
 
 /// This sequence execution helper includes some boilerplate logic to
@@ -269,7 +263,7 @@ impl SequenceExecutionHelper {
     }
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub enum ModeTreeHelperState {
     #[default]
     Idle,
@@ -279,20 +273,14 @@ pub enum ModeTreeHelperState {
     ModeCommanding,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub enum SubsystemHelperResult {
     #[default]
     Idle,
-    /// Result of a target keeping operation
-    TargetKeeping(TargetKeepingResult),
+    /// Busy with target keeping.
+    TargetKeeping,
     /// Result of a mode commanding operation
     ModeCommanding(ModeCommandingResult),
-}
-
-impl From<TargetKeepingResult> for SubsystemHelperResult {
-    fn from(value: TargetKeepingResult) -> Self {
-        Self::TargetKeeping(value)
-    }
 }
 
 impl From<ModeCommandingResult> for SubsystemHelperResult {
@@ -307,6 +295,18 @@ pub enum ModeTreeHelperError {
     Message(#[from] GenericTargetedMessagingError),
     #[error("current mode {0} is not contained in target table")]
     CurrentModeNotInTargetTable(Mode),
+    /// Mode command has failed, for example while executing a mode table.
+    #[error("mode command failed")]
+    ModeCommmandFailure {
+        /// Table index of the sequence table entry which failed.
+        seq_table_index: Option<usize>,
+    },
+    /// Target mode keeping violation.
+    #[error("target keeping violation")]
+    TargetKeepingViolation {
+        /// Table index of the sequence table entry which failed.
+        fallback_mode: Option<Mode>,
+    },
 }
 
 /// This is a helper object which can be used by a subsystem component to execute mode sequences
@@ -315,10 +315,10 @@ pub enum ModeTreeHelperError {
 /// This helper object tries to compose as much data and state information as possible which is
 /// required for this process.
 pub struct SubsystemCommandingHelper {
-    /// Current mode of the owner subsystem.
-    pub current_mode: ModeAndSubmode,
     /// State of the helper.
-    pub state: ModeTreeHelperState,
+    state: ModeTreeHelperState,
+    /// Current mode of the owner subsystem.
+    current_mode: Mode,
     /// This data structure is used to track all mode children.
     pub children_mode_store: ModeStoreVec,
     /// This field is set when a mode sequence is executed. It is used to determine whether mode
@@ -339,7 +339,7 @@ pub struct SubsystemCommandingHelper {
 impl Default for SubsystemCommandingHelper {
     fn default() -> Self {
         Self {
-            current_mode: UNKNOWN_MODE,
+            current_mode: UNKNOWN_MODE_VAL,
             state: Default::default(),
             children_mode_store: Default::default(),
             active_request_id: None,
@@ -359,7 +359,7 @@ impl SubsystemCommandingHelper {
         sequence_tables: SequenceModeTables,
     ) -> Self {
         Self {
-            current_mode: UNKNOWN_MODE,
+            current_mode: UNKNOWN_MODE_VAL,
             state: ModeTreeHelperState::Idle,
             children_mode_store,
             active_request_id: None,
@@ -367,6 +367,30 @@ impl SubsystemCommandingHelper {
             sequence_tables,
             seq_exec_helper: Default::default(),
         }
+    }
+
+    pub fn state(&self) -> ModeTreeHelperState {
+        self.state
+    }
+
+    pub fn mode(&self) -> Mode {
+        self.current_mode
+    }
+
+    /// Retrieve the fallback mode for the current mode of the subsystem by trying to retrieve
+    /// it from the target table.
+    ///
+    /// If the current mode does not have a fallback mode, returns [None].
+    /// If the current mode is not inside the target table, returns a [ModeDoesNotExistError].
+    /// The fallback mode can and should be commanded when a target keeping violation was detected
+    /// or after self-commanding to the current mode has failed, which can happen after a failed
+    /// mode table execution.
+    pub fn fallback_mode(&self) -> Result<Option<Mode>, ModeDoesNotExistError> {
+        self.target_tables
+            .0
+            .get(&self.current_mode)
+            .ok_or(ModeDoesNotExistError(self.current_mode))
+            .map(|v| v.fallback_mode)
     }
 
     /// Add a mode child to the internal [Self::children_mode_store].
@@ -393,6 +417,7 @@ impl SubsystemCommandingHelper {
     ) -> Result<(), ModeDoesNotExistError> {
         self.seq_exec_helper
             .load(mode, request_id, &self.sequence_tables)?;
+        self.active_request_id = Some(request_id);
         self.state = ModeTreeHelperState::ModeCommanding;
         Ok(())
     }
@@ -419,16 +444,16 @@ impl SubsystemCommandingHelper {
         req_sender: &impl ModeRequestSender,
     ) -> Result<SubsystemHelperResult, ModeTreeHelperError> {
         if let Some(reply) = opt_reply {
-            self.handle_mode_reply(&reply);
+            self.handle_mode_reply(&reply)?;
         }
         match self.state {
             ModeTreeHelperState::Idle => Ok(SubsystemHelperResult::Idle),
             ModeTreeHelperState::TargetKeeping => {
                 // We check whether the current mode is modelled by a target table first.
-                if let Some(target_table) = self.target_tables.0.get(&self.current_mode.mode()) {
-                    return Ok(self.perform_target_keeping(target_table).into());
+                if let Some(target_table) = self.target_tables.0.get(&self.current_mode) {
+                    self.perform_target_keeping(target_table)?;
                 }
-                Ok(TargetKeepingResult::Ok.into())
+                Ok(SubsystemHelperResult::TargetKeeping)
             }
             ModeTreeHelperState::ModeCommanding => {
                 let result = self.seq_exec_helper.run(
@@ -441,8 +466,7 @@ impl SubsystemCommandingHelper {
                 if let ModeCommandingResult::Done = result {
                     self.state = ModeTreeHelperState::TargetKeeping;
                     self.active_request_id = None;
-                    self.current_mode =
-                        ModeAndSubmode::new(self.seq_exec_helper.target_mode().unwrap(), 0);
+                    self.current_mode = self.seq_exec_helper.target_mode().unwrap();
                 }
                 Ok(result.into())
             }
@@ -452,7 +476,7 @@ impl SubsystemCommandingHelper {
     pub fn perform_target_keeping(
         &self,
         target_table: &TargetTablesMapValue,
-    ) -> TargetKeepingResult {
+    ) -> Result<(), ModeTreeHelperError> {
         for entry in &target_table.entries {
             if !entry.monitor_state {
                 continue;
@@ -473,20 +497,23 @@ impl SubsystemCommandingHelper {
             });
             if target_mode_violated {
                 // Target keeping violated. Report violation and fallback mode to user.
-                return TargetKeepingResult::Violated {
+                return Err(ModeTreeHelperError::TargetKeepingViolation {
                     fallback_mode: target_table.fallback_mode,
-                };
+                });
             }
         }
-        TargetKeepingResult::Ok
+        Ok(())
     }
 
-    pub fn handle_mode_reply(&mut self, reply: &GenericMessage<ModeReply>) {
+    pub fn handle_mode_reply(
+        &mut self,
+        reply: &GenericMessage<ModeReply>,
+    ) -> Result<(), ModeTreeHelperError> {
         if !self.children_mode_store.has_component(reply.sender_id()) {
-            return;
+            return Ok(());
         }
         let mut generic_mode_reply_handler =
-            |sender_id, mode_and_submode: Option<ModeAndSubmode>| {
+            |sender_id, mode_and_submode: Option<ModeAndSubmode>, success: bool| {
                 // Tying the reply awaition to the request ID ensures that something like replies
                 // belonging to older requests do not interfere with the completion handling of
                 // the mode commanding. This is important for forced mode commands.
@@ -507,21 +534,29 @@ impl SubsystemCommandingHelper {
                 {
                     self.seq_exec_helper.confirm_sequence_done();
                 }
+                if !success && self.state == ModeTreeHelperState::ModeCommanding {
+                    // The user has to decide how to proceed.
+                    self.state = ModeTreeHelperState::Idle;
+                    return Err(ModeTreeHelperError::ModeCommmandFailure {
+                        seq_table_index: self.seq_exec_helper.current_sequence_index(),
+                    });
+                }
+                Ok(())
             };
         match reply.message {
             ModeReply::ModeInfo(mode_and_submode) => {
-                generic_mode_reply_handler(reply.sender_id(), Some(mode_and_submode));
+                generic_mode_reply_handler(reply.sender_id(), Some(mode_and_submode), true)
             }
             ModeReply::ModeReply(mode_and_submode) => {
-                generic_mode_reply_handler(reply.sender_id(), Some(mode_and_submode));
+                generic_mode_reply_handler(reply.sender_id(), Some(mode_and_submode), true)
             }
             ModeReply::CantReachMode(_) => {
-                generic_mode_reply_handler(reply.sender_id(), None);
+                generic_mode_reply_handler(reply.sender_id(), None, false)
             }
             ModeReply::WrongMode { reached, .. } => {
-                generic_mode_reply_handler(reply.sender_id(), Some(reached));
+                generic_mode_reply_handler(reply.sender_id(), Some(reached), true)
             }
-        };
+        }
     }
 
     pub fn update_child_mode(
@@ -540,22 +575,21 @@ impl SubsystemCommandingHelper {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use core::cell::RefCell;
     use std::collections::VecDeque;
 
     use crate::{
-        mode::{Mode, ModeAndSubmode, ModeRequest, ModeRequestSender, UNKNOWN_MODE},
+        mode::{Mode, ModeAndSubmode, ModeReply, ModeRequest, ModeRequestSender, UNKNOWN_MODE},
         mode_tree::{
             ModeStoreProvider, ModeStoreVec, SequenceModeTables, SequenceTableEntry,
-            SequenceTableMapTable, SequenceTablesMapValue,
+            SequenceTableMapTable, SequenceTablesMapValue, TargetModeTables,
         },
         queue::GenericTargetedMessagingError,
-        request::RequestId,
-        subsystem::{ModeCommandingResult, SequenceExecutionHelperState},
+        request::{GenericMessage, MessageMetadata, RequestId},
+        subsystem::{ModeCommandingResult, ModeTreeHelperState, SequenceExecutionHelperState},
         ComponentId,
     };
-
-    use super::SequenceExecutionHelper;
 
     #[derive(Debug)]
     pub enum ExampleTargetId {
@@ -605,36 +639,36 @@ mod tests {
     pub struct SequenceExecutorTestbench {
         pub sender: ModeReqSenderMock,
         pub mode_store: ModeStoreVec,
-        pub seq_table: SequenceModeTables,
+        pub seq_tables: SequenceModeTables,
         pub execution_helper: SequenceExecutionHelper,
     }
 
     impl SequenceExecutorTestbench {
         pub fn new() -> Self {
             let mode_store = create_default_mode_store();
-            let seq_table = create_simple_sample_seq_table(false, false);
+            let (seq_tables, _) = create_simple_sample_seq_tables();
             Self {
                 sender: ModeReqSenderMock::default(),
                 mode_store,
-                seq_table,
+                seq_tables,
                 execution_helper: SequenceExecutionHelper::new(),
             }
         }
 
         pub fn get_mode_table(&mut self, mode: ExampleMode) -> &mut SequenceTablesMapValue {
-            self.seq_table.0.get_mut(&(mode as Mode)).unwrap()
+            self.seq_tables.0.get_mut(&(mode as Mode)).unwrap()
         }
 
         pub fn run(&mut self) -> Result<ModeCommandingResult, GenericTargetedMessagingError> {
             self.execution_helper
-                .run(&self.seq_table, &self.sender, &mut self.mode_store)
+                .run(&self.seq_tables, &self.sender, &mut self.mode_store)
         }
 
         fn check_run_is_no_op(&mut self) {
             // Assure that no unexpected behaviour occurs.
             assert_eq!(
                 self.execution_helper
-                    .run(&self.seq_table, &self.sender, &mut self.mode_store)
+                    .run(&self.seq_tables, &self.sender, &mut self.mode_store)
                     .unwrap(),
                 ModeCommandingResult::Done
             );
@@ -702,7 +736,7 @@ mod tests {
             assert_eq!(
                 req_0.request,
                 ModeRequest::SetMode {
-                    mode_and_submode: SUBSYSTEM_MD0_TGT_0_MODE,
+                    mode_and_submode: SUBSYSTEM_MD0_TGT0_MODE,
                     forced: false
                 }
             );
@@ -711,7 +745,7 @@ mod tests {
             assert_eq!(
                 req_1.request,
                 ModeRequest::SetMode {
-                    mode_and_submode: SUBSYSTEM_MD0_TGT_1_MODE,
+                    mode_and_submode: SUBSYSTEM_MD0_TGT1_MODE,
                     forced: false
                 }
             );
@@ -726,28 +760,25 @@ mod tests {
         mode_store
     }
 
-    fn create_simple_sample_seq_table(
-        success_check_tgt0: bool,
-        success_check_tgt1: bool,
-    ) -> SequenceModeTables {
-        let mut table = SequenceModeTables::default();
+    fn create_simple_sample_seq_tables() -> (SequenceModeTables, TargetModeTables) {
+        let mut seq_tables = SequenceModeTables::default();
         // Mode 0 - One step command
         let mut table_val = SequenceTablesMapValue::new("MODE_0");
         let mut table_seq_0 = SequenceTableMapTable::new("MODE_0_SEQ_0");
         table_seq_0.add_entry(SequenceTableEntry::new(
             "TARGET_0",
             ExampleTargetId::Target0 as u64,
-            SUBSYSTEM_MD0_TGT_0_MODE,
-            success_check_tgt0,
+            SUBSYSTEM_MD0_TGT0_MODE,
+            false,
         ));
         table_seq_0.add_entry(SequenceTableEntry::new(
             "TARGET_1",
             ExampleTargetId::Target1 as u64,
-            SUBSYSTEM_MD0_TGT_1_MODE,
-            success_check_tgt1,
+            SUBSYSTEM_MD0_TGT1_MODE,
+            false,
         ));
         table_val.add_sequence_table(table_seq_0);
-        table.0.insert(ExampleMode::Mode0 as u32, table_val);
+        seq_tables.0.insert(ExampleMode::Mode0 as u32, table_val);
 
         // Mode 1 - Multi Step command
         let mut table_val = SequenceTablesMapValue::new("MODE_1");
@@ -773,13 +804,130 @@ mod tests {
             false,
         ));
         table_val.add_sequence_table(table_seq_1);
-        table.0.insert(ExampleMode::Mode1 as u32, table_val);
-        table
+        seq_tables.0.insert(ExampleMode::Mode1 as u32, table_val);
+
+        let mode_tables = TargetModeTables::default();
+        // TODO: Write mode tables.
+        (seq_tables, mode_tables)
     }
 
-    const SUBSYSTEM_MD0_TGT_0_MODE: ModeAndSubmode =
+    pub struct SubsystemHelperTestbench {
+        pub sender: ModeReqSenderMock,
+        pub helper: SubsystemCommandingHelper,
+    }
+
+    impl SubsystemHelperTestbench {
+        pub fn new() -> Self {
+            let (sequence_tables, target_tables) = create_simple_sample_seq_tables();
+            Self {
+                sender: ModeReqSenderMock::default(),
+                helper: SubsystemCommandingHelper::new(
+                    create_default_mode_store(),
+                    target_tables,
+                    sequence_tables,
+                ),
+            }
+        }
+        pub fn start_command_sequence(
+            &mut self,
+            mode: ExampleMode,
+            request_id: RequestId,
+        ) -> Result<(), ModeDoesNotExistError> {
+            self.helper.start_command_sequence(mode as Mode, request_id)
+        }
+
+        pub fn send_announce_mode_cmd_to_children(
+            &mut self,
+            request_id: RequestId,
+            recursive: bool,
+        ) -> Result<(), GenericTargetedMessagingError> {
+            self.helper
+                .send_announce_mode_cmd_to_children(request_id, &self.sender, recursive)
+        }
+
+        pub fn get_sequence_tables(&mut self, mode: ExampleMode) -> &mut SequenceTablesMapValue {
+            self.helper
+                .sequence_tables
+                .0
+                .get_mut(&(mode as Mode))
+                .unwrap()
+        }
+
+        pub fn state_machine(
+            &mut self,
+            opt_reply: Option<GenericMessage<ModeReply>>,
+        ) -> Result<SubsystemHelperResult, ModeTreeHelperError> {
+            self.helper.state_machine(opt_reply, &self.sender)
+        }
+
+        pub fn generic_checks_subsystem_md0(&mut self, expected_req_id: RequestId) {
+            assert_eq!(self.sender.requests.borrow().len(), 2);
+            let req0 = self.sender.requests.borrow_mut().pop_front().unwrap();
+            assert_eq!(req0.request_id, expected_req_id);
+            assert_eq!(req0.target_id, ExampleTargetId::Target0 as ComponentId);
+            assert_eq!(
+                req0.request,
+                ModeRequest::SetMode {
+                    mode_and_submode: SUBSYSTEM_MD0_TGT0_MODE,
+                    forced: false
+                }
+            );
+
+            let req1 = self.sender.requests.borrow_mut().pop_front().unwrap();
+            assert_eq!(req1.request_id, expected_req_id);
+            assert_eq!(req1.target_id, ExampleTargetId::Target1 as ComponentId);
+            assert_eq!(
+                req1.request,
+                ModeRequest::SetMode {
+                    mode_and_submode: SUBSYSTEM_MD0_TGT1_MODE,
+                    forced: false
+                }
+            );
+        }
+
+        pub fn generic_checks_subsystem_md1_step0(&mut self, expected_req_id: RequestId) {
+            assert_eq!(self.sender.requests.borrow().len(), 2);
+            let req0 = self.sender.requests.borrow_mut().pop_front().unwrap();
+            assert_eq!(req0.request_id, expected_req_id);
+            assert_eq!(req0.target_id, ExampleTargetId::Target0 as ComponentId);
+            assert_eq!(
+                req0.request,
+                ModeRequest::SetMode {
+                    mode_and_submode: SUBSYSTEM_MD1_ST0_TGT0_MODE,
+                    forced: false
+                }
+            );
+
+            let req1 = self.sender.requests.borrow_mut().pop_front().unwrap();
+            assert_eq!(req1.request_id, expected_req_id);
+            assert_eq!(req1.target_id, ExampleTargetId::Target1 as ComponentId);
+            assert_eq!(
+                req1.request,
+                ModeRequest::SetMode {
+                    mode_and_submode: SUBSYSTEM_MD1_ST0_TGT1_MODE,
+                    forced: false
+                }
+            );
+        }
+
+        pub fn generic_checks_subsystem_md1_step1(&mut self, expected_req_id: RequestId) {
+            assert_eq!(self.sender.requests.borrow().len(), 1);
+            let req0 = self.sender.requests.borrow_mut().pop_front().unwrap();
+            assert_eq!(req0.request_id, expected_req_id);
+            assert_eq!(req0.target_id, ExampleTargetId::Target2 as ComponentId);
+            assert_eq!(
+                req0.request,
+                ModeRequest::SetMode {
+                    mode_and_submode: SUBSYSTEM_MD1_ST1_TGT2_MODE,
+                    forced: false
+                }
+            );
+        }
+    }
+
+    const SUBSYSTEM_MD0_TGT0_MODE: ModeAndSubmode =
         ModeAndSubmode::new(ExampleMode::Mode0 as u32, 0);
-    const SUBSYSTEM_MD0_TGT_1_MODE: ModeAndSubmode =
+    const SUBSYSTEM_MD0_TGT1_MODE: ModeAndSubmode =
         ModeAndSubmode::new(ExampleMode::Mode1 as u32, 0);
 
     const SUBSYSTEM_MD1_ST0_TGT0_MODE: ModeAndSubmode =
@@ -803,7 +951,7 @@ mod tests {
         let mut tb = SequenceExecutorTestbench::new();
         let expected_req_id = 1;
         tb.execution_helper
-            .load(ExampleMode::Mode0 as u32, expected_req_id, &tb.seq_table)
+            .load(ExampleMode::Mode0 as u32, expected_req_id, &tb.seq_tables)
             .unwrap();
         assert_eq!(
             tb.execution_helper.state(),
@@ -815,9 +963,7 @@ mod tests {
             ExampleMode::Mode0 as Mode
         );
         assert_eq!(
-            tb.execution_helper
-                .run(&tb.seq_table, &tb.sender, &mut tb.mode_store)
-                .expect("sequence exeecution helper run failure"),
+            tb.run().expect("sequence exeecution helper run failure"),
             ModeCommandingResult::Done
         );
         assert_eq!(
@@ -837,7 +983,7 @@ mod tests {
         mode0_table.entries[0].entries[1].check_success = true;
         let expected_req_id = 1;
         tb.execution_helper
-            .load(ExampleMode::Mode0 as u32, expected_req_id, &tb.seq_table)
+            .load(ExampleMode::Mode0 as u32, expected_req_id, &tb.seq_tables)
             .unwrap();
 
         assert_eq!(
@@ -877,7 +1023,7 @@ mod tests {
         mode0_table.entries[0].entries[0].check_success = true;
         let expected_req_id = 1;
         tb.execution_helper
-            .load(ExampleMode::Mode0 as u32, expected_req_id, &tb.seq_table)
+            .load(ExampleMode::Mode0 as u32, expected_req_id, &tb.seq_tables)
             .unwrap();
 
         assert_eq!(
@@ -910,7 +1056,7 @@ mod tests {
         let mut tb = SequenceExecutorTestbench::new();
         let expected_req_id = 1;
         tb.execution_helper
-            .load(ExampleMode::Mode1 as u32, expected_req_id, &tb.seq_table)
+            .load(ExampleMode::Mode1 as u32, expected_req_id, &tb.seq_tables)
             .unwrap();
         assert_eq!(
             tb.execution_helper.state(),
@@ -950,7 +1096,7 @@ mod tests {
         let mut tb = SequenceExecutorTestbench::new();
         let expected_req_id = 1;
         tb.execution_helper
-            .load(ExampleMode::Mode1 as u32, expected_req_id, &tb.seq_table)
+            .load(ExampleMode::Mode1 as u32, expected_req_id, &tb.seq_tables)
             .unwrap();
         let mode1_table = tb.get_mode_table(ExampleMode::Mode1);
         mode1_table.entries[0].entries[0].check_success = true;
@@ -995,4 +1141,153 @@ mod tests {
     }
 
     // TODO: Test subsystem commanding helper
+    #[test]
+    fn test_subsystem_helper_basic_state() {
+        let tb = SubsystemHelperTestbench::new();
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::Idle);
+        assert!(tb.helper.active_request_id.is_none());
+        assert_eq!(tb.helper.mode(), UNKNOWN_MODE_VAL);
+    }
+
+    #[test]
+    fn test_subsystem_helper_announce_recursive() {
+        let mut tb = SubsystemHelperTestbench::new();
+        let expected_req_id = 1;
+        tb.send_announce_mode_cmd_to_children(expected_req_id, true)
+            .unwrap();
+        assert_eq!(tb.sender.requests.borrow().len(), 3);
+        let check_req = |req: ModeReqWrapper, target_id: ComponentId| {
+            assert_eq!(req.target_id, target_id);
+            assert_eq!(req.request_id, expected_req_id);
+            assert_eq!(req.request, ModeRequest::AnnounceModeRecursive);
+        };
+        let req0 = tb.sender.requests.borrow_mut().pop_front().unwrap();
+        check_req(req0, ExampleTargetId::Target0 as u64);
+        let req1 = tb.sender.requests.borrow_mut().pop_front().unwrap();
+        check_req(req1, ExampleTargetId::Target1 as u64);
+        let req2 = tb.sender.requests.borrow_mut().pop_front().unwrap();
+        check_req(req2, ExampleTargetId::Target2 as u64);
+    }
+
+    #[test]
+    fn test_subsystem_helper_announce() {
+        let mut tb = SubsystemHelperTestbench::new();
+        let expected_req_id = 1;
+        tb.send_announce_mode_cmd_to_children(expected_req_id, false)
+            .unwrap();
+        assert_eq!(tb.sender.requests.borrow().len(), 3);
+        let check_req = |req: ModeReqWrapper, target_id: ComponentId| {
+            assert_eq!(req.target_id, target_id);
+            assert_eq!(req.request_id, expected_req_id);
+            assert_eq!(req.request, ModeRequest::AnnounceMode);
+        };
+        let req0 = tb.sender.requests.borrow_mut().pop_front().unwrap();
+        check_req(req0, ExampleTargetId::Target0 as u64);
+        let req1 = tb.sender.requests.borrow_mut().pop_front().unwrap();
+        check_req(req1, ExampleTargetId::Target1 as u64);
+        let req2 = tb.sender.requests.borrow_mut().pop_front().unwrap();
+        check_req(req2, ExampleTargetId::Target2 as u64);
+    }
+
+    #[test]
+    fn test_subsystem_helper_cmd_mode0_no_success_checks() {
+        let mut tb = SubsystemHelperTestbench::new();
+        let expected_req_id = 1;
+        tb.start_command_sequence(ExampleMode::Mode0, expected_req_id)
+            .unwrap();
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
+        assert_eq!(tb.sender.requests.borrow().len(), 0);
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::Done)
+        );
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::TargetKeeping);
+        assert_eq!(tb.helper.mode(), ExampleMode::Mode0 as Mode);
+        tb.generic_checks_subsystem_md0(expected_req_id);
+        // FSM call should be a no-op.
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::TargetKeeping
+        );
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::TargetKeeping);
+        assert_eq!(tb.helper.mode(), ExampleMode::Mode0 as Mode);
+    }
+
+    #[test]
+    fn test_subsystem_helper_cmd_mode1_no_success_checks() {
+        let mut tb = SubsystemHelperTestbench::new();
+        let expected_req_id = 1;
+        tb.start_command_sequence(ExampleMode::Mode1, expected_req_id)
+            .unwrap();
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
+        assert_eq!(tb.sender.requests.borrow().len(), 0);
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::StepDone)
+        );
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
+        assert_eq!(tb.helper.mode(), UNKNOWN_MODE_VAL);
+        tb.generic_checks_subsystem_md1_step0(expected_req_id);
+        // Second commanding step.
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::Done)
+        );
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::TargetKeeping);
+        assert_eq!(tb.helper.mode(), ExampleMode::Mode1 as Mode);
+        tb.generic_checks_subsystem_md1_step1(expected_req_id);
+
+        // FSM call should be a no-op.
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::TargetKeeping
+        );
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::TargetKeeping);
+        assert_eq!(tb.helper.mode(), ExampleMode::Mode1 as Mode);
+    }
+
+    #[test]
+    fn test_subsystem_helper_cmd_mode0_with_success_checks() {
+        let mut tb = SubsystemHelperTestbench::new();
+        let expected_req_id = 1;
+        let seq_tables = tb.get_sequence_tables(ExampleMode::Mode0);
+        seq_tables.entries[0].entries[0].check_success = true;
+        seq_tables.entries[0].entries[1].check_success = true;
+        tb.start_command_sequence(ExampleMode::Mode0, expected_req_id)
+            .unwrap();
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
+        assert_eq!(tb.sender.requests.borrow().len(), 0);
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::AwaitingSuccessCheck)
+        );
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
+        assert_eq!(tb.helper.mode(), UNKNOWN_MODE_VAL);
+        tb.generic_checks_subsystem_md0(expected_req_id);
+        let mode_reply_ok_0 = GenericMessage::new(
+            MessageMetadata::new(expected_req_id, ExampleTargetId::Target0 as ComponentId),
+            ModeReply::ModeInfo(SUBSYSTEM_MD0_TGT0_MODE),
+        );
+        let mode_reply_ok_1 = GenericMessage::new(
+            MessageMetadata::new(expected_req_id, ExampleTargetId::Target1 as ComponentId),
+            ModeReply::ModeInfo(SUBSYSTEM_MD0_TGT1_MODE),
+        );
+        // One success reply still expected.
+        assert_eq!(
+            tb.state_machine(Some(mode_reply_ok_0)).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::AwaitingSuccessCheck)
+        );
+        assert_eq!(
+            tb.state_machine(Some(mode_reply_ok_1)).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::Done)
+        );
+
+        // FSM call should be a no-op.
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::TargetKeeping
+        );
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::TargetKeeping);
+        assert_eq!(tb.helper.mode(), ExampleMode::Mode0 as Mode);
+    }
 }

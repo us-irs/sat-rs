@@ -331,6 +331,24 @@ pub mod alloc_mod {
     #[derive(Debug, Default)]
     pub struct TargetModeTables(pub HashMap<Mode, TargetTablesMapValue>);
 
+    impl TargetModeTables {
+        pub fn name(&self, mode: Mode) -> Option<&'static str> {
+            self.0.get(&mode).map(|value| value.name)
+        }
+    }
+
+    impl SequenceModeTables {
+        pub fn name(&self, mode: Mode) -> Option<&'static str> {
+            self.0.get(&mode).map(|value| value.name)
+        }
+
+        pub fn name_of_sequence(&self, mode: Mode, seq_idx: usize) -> Option<&'static str> {
+            self.0
+                .get(&mode)
+                .map(|value| value.entries.get(seq_idx).map(|v| v.name))?
+        }
+    }
+
     /// This is the core data structure used to store mode sequence tables.
     ///
     /// A mode sequence table specifies which commands have to be sent in which order

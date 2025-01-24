@@ -15,7 +15,7 @@ use satrs::request::{MessageMetadata, RequestId};
 use satrs::res_code::ResultU16;
 use satrs::subsystem::{
     ModeCommandingResult, ModeDoesNotExistError, ModeTreeHelperError, ModeTreeHelperState,
-    SubsystemCommandingHelper, SubsystemHelperResult, TargetKeepingResult,
+    SubsystemCommandingHelper, SubsystemHelperResult,
 };
 use satrs::{
     mode::{ModeAndSubmode, ModeReply, ModeRequest},
@@ -301,32 +301,27 @@ impl AcsSubsystem {
         result: Result<SubsystemHelperResult, ModeTreeHelperError>,
     ) {
         match result {
-            Ok(result) => match result {
-                SubsystemHelperResult::Idle => (),
-                SubsystemHelperResult::TargetKeeping(target_keeping_result) => {
-                    match target_keeping_result {
-                        TargetKeepingResult::Ok => (),
-                        TargetKeepingResult::Violated { fallback_mode } => {
-                            if let Some(fallback_mode) = fallback_mode {
-                                self.subsystem_helper
-                                    .start_command_sequence(fallback_mode, 0)
-                                    .unwrap();
-                            }
-                        }
-                    }
+            Ok(result) => {
+                if let SubsystemHelperResult::ModeCommanding(ModeCommandingResult::Done) = result {
+                    self.handle_mode_reached(self.mode_requestor_info)
+                        .expect("mode reply handling failed");
                 }
-                SubsystemHelperResult::ModeCommanding(mode_commanding_result) => {
-                    if let ModeCommandingResult::Done = mode_commanding_result {
-                        self.handle_mode_reached(self.mode_requestor_info)
-                            .expect("mode reply handling failed");
-                    }
-                }
-            },
+            }
             Err(error) => match error {
                 ModeTreeHelperError::Message(_generic_targeted_messaging_error) => {
                     panic!("messaging error")
                 }
                 ModeTreeHelperError::CurrentModeNotInTargetTable(_) => panic!("mode not found"),
+                ModeTreeHelperError::ModeCommmandFailure { seq_table_index: _ } => {
+                    // TODO: Cache the command failure.
+                }
+                ModeTreeHelperError::TargetKeepingViolation { fallback_mode } => {
+                    if let Some(fallback_mode) = fallback_mode {
+                        self.subsystem_helper
+                            .start_command_sequence(fallback_mode, 0)
+                            .unwrap();
+                    }
+                }
             },
         }
     }
@@ -391,7 +386,7 @@ impl ModeChild for AcsSubsystem {
 
 impl ModeProvider for AcsSubsystem {
     fn mode_and_submode(&self) -> ModeAndSubmode {
-        self.subsystem_helper.current_mode
+        ModeAndSubmode::new(self.subsystem_helper.mode(), 0)
     }
 }
 
@@ -412,7 +407,7 @@ impl ModeRequestHandler for AcsSubsystem {
         mode_and_submode: ModeAndSubmode,
         forced: bool,
     ) -> Result<(), Self::Error> {
-        if !forced && self.subsystem_helper.state == ModeTreeHelperState::ModeCommanding {
+        if !forced && self.subsystem_helper.state() == ModeTreeHelperState::ModeCommanding {
             return Err(ModeError::Busy.into());
         }
         self.mode_requestor_info = Some(requestor);
@@ -428,7 +423,8 @@ impl ModeRequestHandler for AcsSubsystem {
     fn announce_mode(&self, requestor_info: Option<MessageMetadata>, recursive: bool) {
         println!(
             "TestAssembly: Announcing mode (recursively: {}): {:?}",
-            recursive, self.subsystem_helper.current_mode
+            recursive,
+            self.subsystem_helper.mode()
         );
         let request_id = requestor_info.map_or(0, |info| info.request_id());
         self.subsystem_helper
@@ -447,7 +443,7 @@ impl ModeRequestHandler for AcsSubsystem {
         if let Some(requestor) = requestor_info {
             self.send_mode_reply(
                 requestor,
-                ModeReply::ModeReply(self.subsystem_helper.current_mode),
+                ModeReply::ModeReply(ModeAndSubmode::new(self.subsystem_helper.mode(), 0)),
             )?;
         }
         Ok(())
@@ -1495,13 +1491,10 @@ fn command_safe_mode() {
     );
     assert!(tb.subsystem.subsystem_helper.active_request_id.is_none());
     assert_eq!(
-        tb.subsystem.subsystem_helper.state,
+        tb.subsystem.subsystem_helper.state(),
         ModeTreeHelperState::TargetKeeping
     );
-    assert_eq!(
-        tb.subsystem.subsystem_helper.current_mode,
-        ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
-    );
+    assert_eq!(tb.subsystem.subsystem_helper.mode(), AcsMode::SAFE as Mode,);
     assert_eq!(
         tb.subsystem.mode_reply_mock.num_of_received_mode_replies(),
         3
