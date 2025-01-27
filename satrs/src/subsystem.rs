@@ -35,6 +35,14 @@ pub enum ModeCommandingResult {
 #[error("mode {0} does not exist")]
 pub struct ModeDoesNotExistError(Mode);
 
+#[derive(Debug, thiserror::Error)]
+pub enum StartSequenceError {
+    #[error("mode {0} does not exist")]
+    ModeDoesNotExist(#[from] ModeDoesNotExistError),
+    #[error("invalid request ID")]
+    InvalidRequestId(RequestId),
+}
+
 /// This sequence execution helper includes some boilerplate logic to
 /// execute [SequenceModeTables].
 ///
@@ -184,6 +192,14 @@ impl SequenceExecutionHelper {
         self.state
     }
 
+    pub fn request_id(&self) -> Option<RequestId> {
+        self.request_id
+    }
+
+    pub fn set_request_id(&mut self, request_id: RequestId) {
+        self.request_id = Some(request_id);
+    }
+
     pub fn awaiting_success_check(&self) -> bool {
         self.state == SequenceExecutionHelperState::AwaitingSuccessCheck
     }
@@ -323,7 +339,7 @@ pub struct SubsystemCommandingHelper {
     pub children_mode_store: ModeStoreVec,
     /// This field is set when a mode sequence is executed. It is used to determine whether mode
     /// replies are relevant for reply awaition logic.
-    pub active_request_id: Option<RequestId>,
+    active_internal_request_id: Option<RequestId>,
     /// The primary data structure to keep the target state information for subsystem
     /// [modes][Mode]. it specifies the mode each child should have for a certain subsystem mode
     /// and is relevant for target keeping.
@@ -342,7 +358,7 @@ impl Default for SubsystemCommandingHelper {
             current_mode: UNKNOWN_MODE_VAL,
             state: Default::default(),
             children_mode_store: Default::default(),
-            active_request_id: None,
+            active_internal_request_id: None,
             target_tables: Default::default(),
             sequence_tables: Default::default(),
             seq_exec_helper: Default::default(),
@@ -362,7 +378,7 @@ impl SubsystemCommandingHelper {
             current_mode: UNKNOWN_MODE_VAL,
             state: ModeTreeHelperState::Idle,
             children_mode_store,
-            active_request_id: None,
+            active_internal_request_id: None,
             target_tables,
             sequence_tables,
             seq_exec_helper: Default::default(),
@@ -375,6 +391,20 @@ impl SubsystemCommandingHelper {
 
     pub fn mode(&self) -> Mode {
         self.current_mode
+    }
+
+    pub fn request_id(&self) -> Option<RequestId> {
+        self.active_internal_request_id.map(|v| v >> 8)
+    }
+
+    /// This returns the internal request ID, which is the regular [Self::request_id] specified
+    /// by the user shifter 8 to the right and then increment with the current sequence commanding
+    /// step. The value can still be retrieved because it might be required for reply verification.
+    ///
+    /// The state machine specifies this request ID for all mode commands related to the
+    /// current step of sequence commanding.
+    pub fn internal_request_id(&self) -> Option<RequestId> {
+        self.active_internal_request_id
     }
 
     /// Retrieve the fallback mode for the current mode of the subsystem by trying to retrieve
@@ -410,14 +440,26 @@ impl SubsystemCommandingHelper {
     }
 
     /// Starts a command sequence for a given [mode][Mode].
+    ///
+    /// # Arguments
+    ///
+    /// - `mode` - The mode to command
+    /// - `request_id` - Request ID associated with the command sequence. The value of this value
+    ///   should not be larger than the maximum possible value for 24 bits: (2 ^ 24) - 1 = 16777215
+    ///   because 8 bits are reserved for internal sequence index tracking.
     pub fn start_command_sequence(
         &mut self,
         mode: Mode,
         request_id: RequestId,
-    ) -> Result<(), ModeDoesNotExistError> {
+    ) -> Result<(), StartSequenceError> {
         self.seq_exec_helper
             .load(mode, request_id, &self.sequence_tables)?;
-        self.active_request_id = Some(request_id);
+        if request_id > 2_u32.pow(24) - 1 {
+            return Err(StartSequenceError::InvalidRequestId(request_id));
+        }
+        self.active_internal_request_id = Some(request_id << 8);
+        self.seq_exec_helper
+            .set_request_id(self.active_internal_request_id.unwrap());
         self.state = ModeTreeHelperState::ModeCommanding;
         Ok(())
     }
@@ -444,7 +486,17 @@ impl SubsystemCommandingHelper {
         req_sender: &impl ModeRequestSender,
     ) -> Result<SubsystemHelperResult, ModeTreeHelperError> {
         if let Some(reply) = opt_reply {
-            self.handle_mode_reply(&reply)?;
+            if self.handle_mode_reply(&reply)? {
+                if self.seq_exec_helper.state() == SequenceExecutionHelperState::Idle {
+                    self.transition_to_target_keeping();
+                    return Ok(SubsystemHelperResult::ModeCommanding(
+                        ModeCommandingResult::Done,
+                    ));
+                }
+                return Ok(SubsystemHelperResult::ModeCommanding(
+                    ModeCommandingResult::StepDone,
+                ));
+            }
         }
         match self.state {
             ModeTreeHelperState::Idle => Ok(SubsystemHelperResult::Idle),
@@ -461,19 +513,31 @@ impl SubsystemCommandingHelper {
                     req_sender,
                     &mut self.children_mode_store,
                 )?;
-                // By default, the helper will automatically transition into the target keeping
-                // mode after an executed sequence.
-                if let ModeCommandingResult::Done = result {
-                    self.state = ModeTreeHelperState::TargetKeeping;
-                    self.active_request_id = None;
-                    self.current_mode = self.seq_exec_helper.target_mode().unwrap();
+                match result {
+                    ModeCommandingResult::Done => {
+                        // By default, the helper will automatically transition into the target keeping
+                        // mode after an executed sequence.
+                        self.transition_to_target_keeping();
+                    }
+                    ModeCommandingResult::StepDone => {
+                        // Normally, this step is done after all replies were received, but if no
+                        // reply checking is required for a command sequence, the step would never
+                        // be performed, so this function needs to be called here as well.
+                        self.update_internal_req_id();
+                    }
+                    ModeCommandingResult::AwaitingSuccessCheck => (),
                 }
                 Ok(result.into())
             }
         }
     }
 
-    pub fn perform_target_keeping(
+    fn transition_to_target_keeping(&mut self) {
+        self.state = ModeTreeHelperState::TargetKeeping;
+        self.current_mode = self.seq_exec_helper.target_mode().unwrap();
+    }
+
+    fn perform_target_keeping(
         &self,
         target_table: &TargetTablesMapValue,
     ) -> Result<(), ModeTreeHelperError> {
@@ -505,22 +569,32 @@ impl SubsystemCommandingHelper {
         Ok(())
     }
 
-    pub fn handle_mode_reply(
+    fn update_internal_req_id(&mut self) {
+        let new_internal_req_id = self.request_id().unwrap() << 8
+            | self.seq_exec_helper.current_sequence_index().unwrap() as u32;
+        self.seq_exec_helper.set_request_id(new_internal_req_id);
+        self.active_internal_request_id = Some(new_internal_req_id);
+    }
+
+    // Handles a mode reply message and returns whether the reply completes a step of sequence
+    // commanding.
+    fn handle_mode_reply(
         &mut self,
         reply: &GenericMessage<ModeReply>,
-    ) -> Result<(), ModeTreeHelperError> {
+    ) -> Result<bool, ModeTreeHelperError> {
         if !self.children_mode_store.has_component(reply.sender_id()) {
-            return Ok(());
+            return Ok(false);
         }
         let mut generic_mode_reply_handler =
             |sender_id, mode_and_submode: Option<ModeAndSubmode>, success: bool| {
+                let mut partial_step_done = false;
                 // Tying the reply awaition to the request ID ensures that something like replies
                 // belonging to older requests do not interfere with the completion handling of
                 // the mode commanding. This is important for forced mode commands.
                 let mut handle_awaition = false;
                 if self.state == ModeTreeHelperState::ModeCommanding
-                    && self.active_request_id.is_some()
-                    && reply.request_id() == self.active_request_id.unwrap()
+                    && self.active_internal_request_id.is_some()
+                    && reply.request_id() == self.active_internal_request_id.unwrap()
                 {
                     handle_awaition = true;
                 }
@@ -530,9 +604,12 @@ impl SubsystemCommandingHelper {
                     handle_awaition,
                 );
                 if self.state == ModeTreeHelperState::ModeCommanding
+                    && handle_awaition
                     && !still_awating_replies.unwrap_or(false)
                 {
                     self.seq_exec_helper.confirm_sequence_done();
+                    self.update_internal_req_id();
+                    partial_step_done = true;
                 }
                 if !success && self.state == ModeTreeHelperState::ModeCommanding {
                     // The user has to decide how to proceed.
@@ -541,7 +618,7 @@ impl SubsystemCommandingHelper {
                         seq_table_index: self.seq_exec_helper.current_sequence_index(),
                     });
                 }
-                Ok(())
+                Ok(partial_step_done)
             };
         match reply.message {
             ModeReply::ModeInfo(mode_and_submode) => {
@@ -828,11 +905,12 @@ mod tests {
                 ),
             }
         }
+
         pub fn start_command_sequence(
             &mut self,
             mode: ExampleMode,
             request_id: RequestId,
-        ) -> Result<(), ModeDoesNotExistError> {
+        ) -> Result<(), StartSequenceError> {
             self.helper.start_command_sequence(mode as Mode, request_id)
         }
 
@@ -1145,8 +1223,9 @@ mod tests {
     fn test_subsystem_helper_basic_state() {
         let tb = SubsystemHelperTestbench::new();
         assert_eq!(tb.helper.state(), ModeTreeHelperState::Idle);
-        assert!(tb.helper.active_request_id.is_none());
+        assert!(tb.helper.active_internal_request_id.is_none());
         assert_eq!(tb.helper.mode(), UNKNOWN_MODE_VAL);
+        assert!(tb.helper.request_id().is_none());
     }
 
     #[test]
@@ -1195,6 +1274,7 @@ mod tests {
         let expected_req_id = 1;
         tb.start_command_sequence(ExampleMode::Mode0, expected_req_id)
             .unwrap();
+        assert_eq!(tb.helper.request_id().unwrap(), 1);
         assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
         assert_eq!(tb.sender.requests.borrow().len(), 0);
         assert_eq!(
@@ -1203,7 +1283,7 @@ mod tests {
         );
         assert_eq!(tb.helper.state(), ModeTreeHelperState::TargetKeeping);
         assert_eq!(tb.helper.mode(), ExampleMode::Mode0 as Mode);
-        tb.generic_checks_subsystem_md0(expected_req_id);
+        tb.generic_checks_subsystem_md0(tb.helper.internal_request_id().unwrap());
         // FSM call should be a no-op.
         assert_eq!(
             tb.state_machine(None).unwrap(),
@@ -1221,9 +1301,17 @@ mod tests {
             .unwrap();
         assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
         assert_eq!(tb.sender.requests.borrow().len(), 0);
+        // Need to cache this before it is incremented, because it is incremented
+        // immediately in the state machine (no reply checking)
+        let expected_req_id = tb.helper.internal_request_id().unwrap();
         assert_eq!(
             tb.state_machine(None).unwrap(),
             SubsystemHelperResult::ModeCommanding(ModeCommandingResult::StepDone)
+        );
+        // Assert that this was already incremented because no reply checking is necessary.
+        assert_eq!(
+            tb.helper.internal_request_id().unwrap(),
+            expected_req_id + 1
         );
         assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
         assert_eq!(tb.helper.mode(), UNKNOWN_MODE_VAL);
@@ -1235,7 +1323,7 @@ mod tests {
         );
         assert_eq!(tb.helper.state(), ModeTreeHelperState::TargetKeeping);
         assert_eq!(tb.helper.mode(), ExampleMode::Mode1 as Mode);
-        tb.generic_checks_subsystem_md1_step1(expected_req_id);
+        tb.generic_checks_subsystem_md1_step1(tb.helper.internal_request_id().unwrap());
 
         // FSM call should be a no-op.
         assert_eq!(
@@ -1263,13 +1351,19 @@ mod tests {
         );
         assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
         assert_eq!(tb.helper.mode(), UNKNOWN_MODE_VAL);
-        tb.generic_checks_subsystem_md0(expected_req_id);
+        tb.generic_checks_subsystem_md0(tb.helper.internal_request_id().unwrap());
         let mode_reply_ok_0 = GenericMessage::new(
-            MessageMetadata::new(expected_req_id, ExampleTargetId::Target0 as ComponentId),
+            MessageMetadata::new(
+                tb.helper.internal_request_id().unwrap(),
+                ExampleTargetId::Target0 as ComponentId,
+            ),
             ModeReply::ModeInfo(SUBSYSTEM_MD0_TGT0_MODE),
         );
         let mode_reply_ok_1 = GenericMessage::new(
-            MessageMetadata::new(expected_req_id, ExampleTargetId::Target1 as ComponentId),
+            MessageMetadata::new(
+                tb.helper.internal_request_id().unwrap(),
+                ExampleTargetId::Target1 as ComponentId,
+            ),
             ModeReply::ModeInfo(SUBSYSTEM_MD0_TGT1_MODE),
         );
         // One success reply still expected.
@@ -1289,5 +1383,206 @@ mod tests {
         );
         assert_eq!(tb.helper.state(), ModeTreeHelperState::TargetKeeping);
         assert_eq!(tb.helper.mode(), ExampleMode::Mode0 as Mode);
+    }
+
+    #[test]
+    fn test_subsystem_helper_cmd_mode1_with_success_checks() {
+        let mut tb = SubsystemHelperTestbench::new();
+        let expected_req_id = 1;
+        let seq_tables = tb.get_sequence_tables(ExampleMode::Mode1);
+        seq_tables.entries[0].entries[0].check_success = true;
+        seq_tables.entries[0].entries[1].check_success = true;
+        seq_tables.entries[1].entries[0].check_success = true;
+        tb.start_command_sequence(ExampleMode::Mode1, expected_req_id)
+            .unwrap();
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
+        assert_eq!(tb.sender.requests.borrow().len(), 0);
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::AwaitingSuccessCheck)
+        );
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
+        assert_eq!(tb.helper.mode(), UNKNOWN_MODE_VAL);
+        tb.generic_checks_subsystem_md1_step0(tb.helper.internal_request_id().unwrap());
+        let mode_reply_ok_0 = GenericMessage::new(
+            MessageMetadata::new(
+                tb.helper.internal_request_id().unwrap(),
+                ExampleTargetId::Target0 as ComponentId,
+            ),
+            ModeReply::ModeInfo(SUBSYSTEM_MD0_TGT0_MODE),
+        );
+        let mode_reply_ok_1 = GenericMessage::new(
+            MessageMetadata::new(
+                tb.helper.internal_request_id().unwrap(),
+                ExampleTargetId::Target1 as ComponentId,
+            ),
+            ModeReply::ModeInfo(SUBSYSTEM_MD0_TGT1_MODE),
+        );
+        // One success reply still expected.
+        assert_eq!(
+            tb.state_machine(Some(mode_reply_ok_0)).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::AwaitingSuccessCheck)
+        );
+        assert_eq!(
+            tb.state_machine(Some(mode_reply_ok_1)).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::StepDone)
+        );
+
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::AwaitingSuccessCheck)
+        );
+        let mode_reply_ok = GenericMessage::new(
+            MessageMetadata::new(
+                tb.helper.internal_request_id().unwrap(),
+                ExampleTargetId::Target2 as ComponentId,
+            ),
+            ModeReply::ModeInfo(SUBSYSTEM_MD1_ST1_TGT2_MODE),
+        );
+        assert_eq!(
+            tb.state_machine(Some(mode_reply_ok)).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::Done)
+        );
+
+        // FSM call should be a no-op.
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::TargetKeeping
+        );
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::TargetKeeping);
+        assert_eq!(tb.helper.mode(), ExampleMode::Mode1 as Mode);
+    }
+
+    #[test]
+    fn test_subsystem_helper_cmd_mode1_with_partial_success_checks_0() {
+        let mut tb = SubsystemHelperTestbench::new();
+        let expected_req_id = 1;
+        let seq_tables = tb.get_sequence_tables(ExampleMode::Mode1);
+        seq_tables.entries[0].entries[0].check_success = true;
+        seq_tables.entries[0].entries[1].check_success = false;
+        seq_tables.entries[1].entries[0].check_success = false;
+        tb.start_command_sequence(ExampleMode::Mode1, expected_req_id)
+            .unwrap();
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
+        assert_eq!(tb.sender.requests.borrow().len(), 0);
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::AwaitingSuccessCheck)
+        );
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
+        assert_eq!(tb.helper.mode(), UNKNOWN_MODE_VAL);
+        tb.generic_checks_subsystem_md1_step0(tb.helper.internal_request_id().unwrap());
+        let mode_reply_ok_0 = GenericMessage::new(
+            MessageMetadata::new(
+                tb.helper.internal_request_id().unwrap(),
+                ExampleTargetId::Target0 as ComponentId,
+            ),
+            ModeReply::ModeInfo(SUBSYSTEM_MD0_TGT0_MODE),
+        );
+        let mode_reply_ok_1 = GenericMessage::new(
+            MessageMetadata::new(
+                tb.helper.internal_request_id().unwrap(),
+                ExampleTargetId::Target1 as ComponentId,
+            ),
+            ModeReply::ModeInfo(SUBSYSTEM_MD0_TGT1_MODE),
+        );
+        // One success reply still expected.
+        assert_eq!(
+            tb.state_machine(Some(mode_reply_ok_1)).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::AwaitingSuccessCheck)
+        );
+        assert_eq!(
+            tb.state_machine(Some(mode_reply_ok_0)).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::StepDone)
+        );
+
+        // Inserting the reply makes no difference: This call completes the sequence commanding.
+        let mode_reply_ok = GenericMessage::new(
+            MessageMetadata::new(expected_req_id, ExampleTargetId::Target2 as ComponentId),
+            ModeReply::ModeInfo(SUBSYSTEM_MD1_ST1_TGT2_MODE),
+        );
+        assert_eq!(
+            tb.state_machine(Some(mode_reply_ok)).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::Done)
+        );
+        // The internal request ID is still cached.
+        tb.generic_checks_subsystem_md1_step1(tb.helper.internal_request_id().unwrap());
+
+        // FSM call should be a no-op.
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::TargetKeeping
+        );
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::TargetKeeping);
+        assert_eq!(tb.helper.mode(), ExampleMode::Mode1 as Mode);
+    }
+
+    #[test]
+    fn test_subsystem_helper_cmd_mode1_with_partial_success_checks_1() {
+        let mut tb = SubsystemHelperTestbench::new();
+        let expected_req_id = 1;
+        let seq_tables = tb.get_sequence_tables(ExampleMode::Mode1);
+        seq_tables.entries[0].entries[0].check_success = true;
+        seq_tables.entries[0].entries[1].check_success = false;
+        seq_tables.entries[1].entries[0].check_success = false;
+        tb.start_command_sequence(ExampleMode::Mode1, expected_req_id)
+            .unwrap();
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
+        assert_eq!(tb.sender.requests.borrow().len(), 0);
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::AwaitingSuccessCheck)
+        );
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::ModeCommanding);
+        assert_eq!(tb.helper.mode(), UNKNOWN_MODE_VAL);
+        tb.generic_checks_subsystem_md1_step0(tb.helper.internal_request_id().unwrap());
+        let mode_reply_ok_0 = GenericMessage::new(
+            MessageMetadata::new(
+                tb.helper.internal_request_id().unwrap(),
+                ExampleTargetId::Target0 as ComponentId,
+            ),
+            ModeReply::ModeInfo(SUBSYSTEM_MD0_TGT0_MODE),
+        );
+        let mode_reply_ok_1 = GenericMessage::new(
+            MessageMetadata::new(
+                tb.helper.internal_request_id().unwrap(),
+                ExampleTargetId::Target1 as ComponentId,
+            ),
+            ModeReply::ModeInfo(SUBSYSTEM_MD0_TGT1_MODE),
+        );
+        // This completes the step, so the next FSM call will perform the next step
+        // in sequence commanding.
+        assert_eq!(
+            tb.state_machine(Some(mode_reply_ok_0)).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::StepDone)
+        );
+        assert_eq!(
+            tb.state_machine(Some(mode_reply_ok_1)).unwrap(),
+            SubsystemHelperResult::ModeCommanding(ModeCommandingResult::Done)
+        );
+
+        // Inserting the reply makes no difference: Sequence command is done and target keeping
+        // is performed.
+        let mode_reply_ok = GenericMessage::new(
+            MessageMetadata::new(
+                tb.helper.internal_request_id().unwrap(),
+                ExampleTargetId::Target2 as ComponentId,
+            ),
+            ModeReply::ModeInfo(SUBSYSTEM_MD1_ST1_TGT2_MODE),
+        );
+        assert_eq!(
+            tb.state_machine(Some(mode_reply_ok)).unwrap(),
+            SubsystemHelperResult::TargetKeeping
+        );
+        // The internal request ID is still cached.
+        tb.generic_checks_subsystem_md1_step1(tb.helper.internal_request_id().unwrap());
+
+        // FSM call should be a no-op.
+        assert_eq!(
+            tb.state_machine(None).unwrap(),
+            SubsystemHelperResult::TargetKeeping
+        );
+        assert_eq!(tb.helper.state(), ModeTreeHelperState::TargetKeeping);
+        assert_eq!(tb.helper.mode(), ExampleMode::Mode1 as Mode);
     }
 }

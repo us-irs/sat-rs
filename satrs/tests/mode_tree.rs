@@ -14,7 +14,7 @@ use satrs::mode_tree::{SequenceTablesMapValue, TargetTablesMapValue};
 use satrs::request::{MessageMetadata, RequestId};
 use satrs::res_code::ResultU16;
 use satrs::subsystem::{
-    ModeCommandingResult, ModeDoesNotExistError, ModeTreeHelperError, ModeTreeHelperState,
+    ModeCommandingResult, ModeTreeHelperError, ModeTreeHelperState, StartSequenceError,
     SubsystemCommandingHelper, SubsystemHelperResult,
 };
 use satrs::{
@@ -394,8 +394,8 @@ impl ModeProvider for AcsSubsystem {
 pub enum SubsystemModeError {
     #[error("messaging error: {0:?}")]
     Mode(#[from] ModeError),
-    #[error("mode does not exist: {0}")]
-    ModeDoesNotExist(#[from] ModeDoesNotExistError),
+    #[error("start sequence error: {0}")]
+    StartError(#[from] StartSequenceError),
 }
 
 impl ModeRequestHandler for AcsSubsystem {
@@ -1452,44 +1452,50 @@ fn command_safe_mode() {
     );
 
     // Check function calls for subsystem
-    let generic_mock_check =
-        |mock: &mut ModeRequestHandlerMock, expected_mode_for_transition: ModeAndSubmode| {
-            assert_eq!(mock.start_transition_calls.borrow().len(), 1);
-            let start_transition_call = mock.start_transition_calls.borrow_mut().front().unwrap();
-            assert_eq!(start_transition_call.0.request_id(), request_id);
-            assert_eq!(start_transition_call.1, expected_mode_for_transition);
-            assert_eq!(mock.handle_mode_reached_calls.borrow().len(), 1);
+    let generic_mock_check = |mock: &mut ModeRequestHandlerMock,
+                              expected_mode_for_transition: ModeAndSubmode,
+                              expected_req_id: RequestId| {
+        assert_eq!(mock.start_transition_calls.borrow().len(), 1);
+        let start_transition_call = mock.start_transition_calls.borrow_mut().front().unwrap();
+        assert_eq!(start_transition_call.0.request_id(), expected_req_id);
+        assert_eq!(start_transition_call.1, expected_mode_for_transition);
+        assert_eq!(mock.handle_mode_reached_calls.borrow().len(), 1);
 
-            let handle_mode_reached_ref = mock.handle_mode_reached_calls.borrow();
-            let handle_mode_reached_call = handle_mode_reached_ref.front().unwrap();
+        let handle_mode_reached_ref = mock.handle_mode_reached_calls.borrow();
+        let handle_mode_reached_call = handle_mode_reached_ref.front().unwrap();
+        assert_eq!(
+            handle_mode_reached_call.as_ref().unwrap().request_id(),
+            expected_req_id
+        );
+        drop(handle_mode_reached_ref);
+
+        assert_eq!(mock.send_mode_reply_calls.borrow().len(), 1);
+        let mode_reply_call = *mock.send_mode_reply_calls.borrow_mut().front().unwrap();
+        assert_eq!(mode_reply_call.0.request_id(), expected_req_id);
+        if let ModeReply::ModeReply(mode_and_submode) = mode_reply_call.1 {
             assert_eq!(
-                handle_mode_reached_call.as_ref().unwrap().request_id(),
-                request_id
+                mode_and_submode, expected_mode_for_transition,
+                "unexpected mode for component {}",
+                mock.id
             );
-            drop(handle_mode_reached_ref);
+        } else {
+            panic!("Unexpected mode reply for component {}", mock.id);
+        }
+        // TODO: Check all mode replies
+        assert_eq!(mock.mode_messages_received(), 3);
+        mock.clear();
+    };
 
-            assert_eq!(mock.send_mode_reply_calls.borrow().len(), 1);
-            let mode_reply_call = *mock.send_mode_reply_calls.borrow_mut().front().unwrap();
-            assert_eq!(mode_reply_call.0.request_id(), request_id);
-            if let ModeReply::ModeReply(mode_and_submode) = mode_reply_call.1 {
-                assert_eq!(
-                    mode_and_submode, expected_mode_for_transition,
-                    "unexpected mode for component {}",
-                    mock.id
-                );
-            } else {
-                panic!("Unexpected mode reply for component {}", mock.id);
-            }
-            // TODO: Check all mode replies
-            assert_eq!(mock.mode_messages_received(), 3);
-            mock.clear();
-        };
-
+    let expected_req_id_for_children = tb.subsystem.subsystem_helper.internal_request_id().unwrap();
     generic_mock_check(
         &mut tb.subsystem.mode_req_mock,
         ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
+        request_id,
     );
-    assert!(tb.subsystem.subsystem_helper.active_request_id.is_none());
+    assert_eq!(
+        tb.subsystem.subsystem_helper.request_id().unwrap(),
+        request_id
+    );
     assert_eq!(
         tb.subsystem.subsystem_helper.state(),
         ModeTreeHelperState::TargetKeeping
@@ -1520,10 +1526,12 @@ fn command_safe_mode() {
     generic_mock_check(
         &mut tb.ctrl.mode_req_mock,
         ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
+        expected_req_id_for_children,
     );
     generic_mock_check(
         &mut tb.mgm_assy.mode_req_mock,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+        expected_req_id_for_children,
     );
     let mut expected_modes = HashMap::new();
     expected_modes.insert(
@@ -1542,6 +1550,7 @@ fn command_safe_mode() {
     generic_mock_check(
         &mut tb.mgt_manager.mode_req_mock,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+        expected_req_id_for_children,
     );
     let mut expected_modes = HashMap::new();
     expected_modes.insert(
@@ -1559,13 +1568,16 @@ fn command_safe_mode() {
     generic_mock_check(
         &mut tb.mgt_dev.mode_req_mock,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+        expected_req_id_for_children,
     );
     generic_mock_check(
         &mut tb.mgm_devs[0].mode_req_mock,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+        expected_req_id_for_children,
     );
     generic_mock_check(
         &mut tb.mgm_devs[1].mode_req_mock,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
+        expected_req_id_for_children,
     );
 }
