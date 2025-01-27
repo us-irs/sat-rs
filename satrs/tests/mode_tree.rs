@@ -214,10 +214,19 @@ impl ModeReplyHandlerMock {
 struct PusModeService {
     pub request_id_counter: Cell<u32>,
     pub mode_reply_mock: ModeReplyHandlerMock,
-    pub mode_node: ModeRequestorOneChildBoundedMpsc,
+    mode_node: ModeRequestorOneChildBoundedMpsc,
 }
 
 impl PusModeService {
+    pub fn new(init_req_count: u32, mode_node: ModeRequestorOneChildBoundedMpsc) -> Self {
+        Self {
+            request_id_counter: Cell::new(init_req_count),
+            mode_reply_mock: ModeReplyHandlerMock::new(
+                TestComponentId::PusModeService as ComponentId,
+            ),
+            mode_node,
+        }
+    }
     pub fn run(&mut self) {
         while let Some(reply) = self.mode_node.try_recv_mode_reply().unwrap() {
             self.mode_reply_mock.handle_mode_reply(&reply);
@@ -415,6 +424,7 @@ impl ModeRequestHandler for AcsSubsystem {
         self.mode_req_mock
             .start_transition(requestor, mode_and_submode, forced)
             .unwrap();
+        println!("subsystem: mode req with ID {}", requestor.request_id());
         self.subsystem_helper
             .start_command_sequence(mode_and_submode.mode(), requestor.request_id())?;
         Ok(())
@@ -475,6 +485,12 @@ impl ModeRequestHandler for AcsSubsystem {
             .send_mode_reply(requestor_info, reply)
             .map_err(ModeError::Messaging)?;
         Ok(())
+    }
+}
+
+impl AcsSubsystem {
+    fn internal_request_id(&self) -> Option<RequestId> {
+        self.subsystem_helper.internal_request_id()
     }
 }
 
@@ -1188,11 +1204,7 @@ impl TreeTestbench {
         let mut mgm_assy = MgmAssembly::new(mgm_assy_node);
         let mut acs_subsystem = AcsSubsystem::new(acs_subsystem_node);
         let mut acs_ctrl = AcsController::new(acs_ctrl_node);
-        let mut pus_service = PusModeService {
-            request_id_counter: Cell::new(0),
-            mode_node: mode_node_pus,
-            mode_reply_mock: ModeReplyHandlerMock::new(TestComponentId::PusModeService as u64),
-        };
+        let mut pus_service = PusModeService::new(1, mode_node_pus);
 
         // ACS subsystem tables
         let mut target_table_safe = TargetTablesMapValue::new("SAFE_TARGET_TBL", None);
@@ -1415,13 +1427,14 @@ fn command_safe_mode() {
     assert_eq!(tb.ctrl.mode_and_submode(), UNKNOWN_MODE);
     assert_eq!(tb.mgm_devs[0].mode_and_submode(), UNKNOWN_MODE);
     assert_eq!(tb.mgm_devs[1].mode_and_submode(), UNKNOWN_MODE);
-    tb.run();
     let request_id = tb
         .pus
         .send_mode_cmd(ModeAndSubmode::new(AcsMode::SAFE as u32, 0));
     tb.run();
     tb.run();
     tb.run();
+    let expected_req_id_not_ctrl = request_id << 8;
+    let expected_req_id_ctrl = (request_id << 8) + 1;
     assert_eq!(
         tb.ctrl.mode_and_submode(),
         ModeAndSubmode::new(AcsMode::SAFE as u32, 0)
@@ -1452,12 +1465,18 @@ fn command_safe_mode() {
     );
 
     // Check function calls for subsystem
-    let generic_mock_check = |mock: &mut ModeRequestHandlerMock,
+    let generic_mock_check = |ctx: &str,
+                              mock: &mut ModeRequestHandlerMock,
                               expected_mode_for_transition: ModeAndSubmode,
                               expected_req_id: RequestId| {
         assert_eq!(mock.start_transition_calls.borrow().len(), 1);
         let start_transition_call = mock.start_transition_calls.borrow_mut().front().unwrap();
-        assert_eq!(start_transition_call.0.request_id(), expected_req_id);
+        assert_eq!(
+            start_transition_call.0.request_id(),
+            expected_req_id,
+            "unexpected req ID for component {}",
+            ctx
+        );
         assert_eq!(start_transition_call.1, expected_mode_for_transition);
         assert_eq!(mock.handle_mode_reached_calls.borrow().len(), 1);
 
@@ -1486,8 +1505,8 @@ fn command_safe_mode() {
         mock.clear();
     };
 
-    let expected_req_id_for_children = tb.subsystem.subsystem_helper.internal_request_id().unwrap();
     generic_mock_check(
+        "subsystem",
         &mut tb.subsystem.mode_req_mock,
         ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
         request_id,
@@ -1500,7 +1519,7 @@ fn command_safe_mode() {
         tb.subsystem.subsystem_helper.state(),
         ModeTreeHelperState::TargetKeeping
     );
-    assert_eq!(tb.subsystem.subsystem_helper.mode(), AcsMode::SAFE as Mode,);
+    assert_eq!(tb.subsystem.subsystem_helper.mode(), AcsMode::SAFE as Mode);
     assert_eq!(
         tb.subsystem.mode_reply_mock.num_of_received_mode_replies(),
         3
@@ -1524,14 +1543,16 @@ fn command_safe_mode() {
     assert!(expected_modes.is_empty());
 
     generic_mock_check(
+        "ctrl",
         &mut tb.ctrl.mode_req_mock,
         ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
-        expected_req_id_for_children,
+        expected_req_id_ctrl,
     );
     generic_mock_check(
+        "mgm assy",
         &mut tb.mgm_assy.mode_req_mock,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
-        expected_req_id_for_children,
+        expected_req_id_not_ctrl,
     );
     let mut expected_modes = HashMap::new();
     expected_modes.insert(
@@ -1548,9 +1569,10 @@ fn command_safe_mode() {
     assert!(expected_modes.is_empty());
 
     generic_mock_check(
+        "mgt mgmt",
         &mut tb.mgt_manager.mode_req_mock,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
-        expected_req_id_for_children,
+        expected_req_id_not_ctrl,
     );
     let mut expected_modes = HashMap::new();
     expected_modes.insert(
@@ -1566,18 +1588,21 @@ fn command_safe_mode() {
     generic_mode_reply_checker(reply.0, reply.1, &mut expected_modes);
 
     generic_mock_check(
+        "mgt dev",
         &mut tb.mgt_dev.mode_req_mock,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
-        expected_req_id_for_children,
+        expected_req_id_not_ctrl,
     );
     generic_mock_check(
+        "mgm dev 0",
         &mut tb.mgm_devs[0].mode_req_mock,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
-        expected_req_id_for_children,
+        expected_req_id_not_ctrl,
     );
     generic_mock_check(
+        "mgm dev 1",
         &mut tb.mgm_devs[1].mode_req_mock,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
-        expected_req_id_for_children,
+        expected_req_id_not_ctrl,
     );
 }

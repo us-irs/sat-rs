@@ -452,14 +452,15 @@ impl SubsystemCommandingHelper {
         mode: Mode,
         request_id: RequestId,
     ) -> Result<(), StartSequenceError> {
-        self.seq_exec_helper
-            .load(mode, request_id, &self.sequence_tables)?;
         if request_id > 2_u32.pow(24) - 1 {
             return Err(StartSequenceError::InvalidRequestId(request_id));
         }
         self.active_internal_request_id = Some(request_id << 8);
-        self.seq_exec_helper
-            .set_request_id(self.active_internal_request_id.unwrap());
+        self.seq_exec_helper.load(
+            mode,
+            self.active_internal_request_id.unwrap(),
+            &self.sequence_tables,
+        )?;
         self.state = ModeTreeHelperState::ModeCommanding;
         Ok(())
     }
