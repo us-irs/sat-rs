@@ -18,10 +18,10 @@ use crate::{
 
 const WARNING_FOR_STALE_DATA: bool = false;
 
-const SIM_CTRL_REQ_WIRETAPPING: bool = true;
-const MGM_REQ_WIRETAPPING: bool = true;
-const PCDU_REQ_WIRETAPPING: bool = true;
-const MGT_REQ_WIRETAPPING: bool = true;
+const SIM_CTRL_REQ_WIRETAPPING: bool = false;
+const MGM_REQ_WIRETAPPING: bool = false;
+const PCDU_REQ_WIRETAPPING: bool = false;
+const MGT_REQ_WIRETAPPING: bool = false;
 
 pub struct ModelAddrWrapper {
     mgm_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
