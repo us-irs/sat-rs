@@ -31,9 +31,9 @@ version = "0.13"
 default-features = false
 
 [dependencies.cobs]
-git = "https://github.com/robamu/cobs.rs.git"
+git = "https://github.com/jamesmunns/cobs.rs.git"
 version = "0.2.3"
-branch = "all_features"
+branch = "main"
 default-features = false
 
 [dependencies.num-traits]

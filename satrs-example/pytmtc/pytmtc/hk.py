@@ -4,7 +4,7 @@ from spacepackets.ecss.pus_3_hk import Subservice
 from spacepackets.ecss import PusTm
 
 from pytmtc.common import AcsId, Apid
-from pytmtc.mgms import handle_mgm_hk_report
+from pytmtc.acs.mgms import handle_mgm_hk_report
 
 
 _LOGGER = logging.getLogger(__name__)

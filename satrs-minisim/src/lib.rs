@@ -1,4 +1,4 @@
-use asynchronix::time::MonotonicTime;
+use nexosim::time::MonotonicTime;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 

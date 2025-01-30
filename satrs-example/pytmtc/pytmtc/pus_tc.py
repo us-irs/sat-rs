@@ -17,8 +17,9 @@ from tmtccmd.tmtc import (
 )
 from tmtccmd.pus.s11_tc_sched import create_time_tagged_cmd
 
+from pytmtc.acs import create_acs_node
 from pytmtc.common import Apid
-from pytmtc.mgms import create_mgm_cmds
+from pytmtc.acs.mgms import create_mgm_cmds
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,7 +68,6 @@ class TcHandler(TcHandlerBase):
 
 
 def create_cmd_definition_tree() -> CmdTreeNode:
-
     root_node = CmdTreeNode.root_node()
 
     hk_node = CmdTreeNode("hk", "Housekeeping Node", hide_children_for_print=True)
@@ -101,15 +101,7 @@ def create_cmd_definition_tree() -> CmdTreeNode:
         )
     )
     root_node.add_child(scheduler_node)
-
-    acs_node = CmdTreeNode("acs", "ACS Subsystem Node")
-    mgm_node = CmdTreeNode("mgms", "MGM devices node")
-    mgm_node.add_child(mode_node)
-    mgm_node.add_child(hk_node)
-
-    acs_node.add_child(mgm_node)
-    root_node.add_child(acs_node)
-
+    root_node.add_child(create_acs_node(mode_node, hk_node))
     return root_node
 
 

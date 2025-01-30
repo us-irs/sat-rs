@@ -1,8 +1,8 @@
 use acs::{MagnetometerModel, MagnetorquerModel};
-use asynchronix::simulation::{Mailbox, SimInit};
-use asynchronix::time::{MonotonicTime, SystemClock};
-use controller::SimController;
+use controller::{ModelAddrWrapper, SimController};
 use eps::PcduModel;
+use nexosim::simulation::{Mailbox, SimInit};
+use nexosim::time::{MonotonicTime, SystemClock};
 use satrs_minisim::udp::SIM_CTRL_PORT;
 use satrs_minisim::{SimReply, SimRequest};
 use std::sync::mpsc;
@@ -63,19 +63,20 @@ fn create_sim_controller(
     } else {
         SimInit::new()
     };
-    let simulation = sim_init
-        .add_model(mgm_model, mgm_mailbox)
-        .add_model(pcdu_model, pcdu_mailbox)
-        .add_model(mgt_model, mgt_mailbox)
-        .init(start_time);
+    let addrs = ModelAddrWrapper::new(mgm_addr, pcdu_addr, mgt_addr);
+    let (simulation, scheduler) = sim_init
+        .add_model(mgm_model, mgm_mailbox, "MGM model")
+        .add_model(pcdu_model, pcdu_mailbox, "PCDU model")
+        .add_model(mgt_model, mgt_mailbox, "MGT model")
+        .init(start_time)
+        .unwrap();
     SimController::new(
         sys_clock,
         request_receiver,
         reply_sender,
         simulation,
-        mgm_addr,
-        pcdu_addr,
-        mgt_addr,
+        scheduler,
+        addrs,
     )
 }
 

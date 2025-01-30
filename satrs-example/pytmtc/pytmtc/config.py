@@ -12,7 +12,7 @@ from pytmtc.pus_tc import create_cmd_definition_tree
 
 class SatrsConfigHook(HookBase):
     def __init__(self, json_cfg_path: str):
-        super().__init__(json_cfg_path=json_cfg_path)
+        super().__init__(json_cfg_path)
 
     def get_communication_interface(self, com_if_key: str) -> Optional[ComInterface]:
         from tmtccmd.config.com import (

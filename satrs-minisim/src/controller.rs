@@ -1,7 +1,7 @@
 use std::{sync::mpsc, time::Duration};
 
-use asynchronix::{
-    simulation::{Address, Simulation},
+use nexosim::{
+    simulation::{Address, Scheduler, Simulation},
     time::{Clock, MonotonicTime, SystemClock},
 };
 use satrs_minisim::{
@@ -23,35 +23,52 @@ const MGM_REQ_WIRETAPPING: bool = false;
 const PCDU_REQ_WIRETAPPING: bool = false;
 const MGT_REQ_WIRETAPPING: bool = false;
 
+pub struct ModelAddrWrapper {
+    mgm_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
+    pcdu_addr: Address<PcduModel>,
+    mgt_addr: Address<MagnetorquerModel>,
+}
+
 // The simulation controller processes requests and drives the simulation.
+#[allow(dead_code)]
 pub struct SimController {
     pub sys_clock: SystemClock,
     pub request_receiver: mpsc::Receiver<SimRequest>,
     pub reply_sender: mpsc::Sender<SimReply>,
     pub simulation: Simulation,
-    pub mgm_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
-    pub pcdu_addr: Address<PcduModel>,
-    pub mgt_addr: Address<MagnetorquerModel>,
+    pub scheduler: Scheduler,
+    pub addr_wrapper: ModelAddrWrapper,
 }
 
+impl ModelAddrWrapper {
+    pub fn new(
+        mgm_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
+        pcdu_addr: Address<PcduModel>,
+        mgt_addr: Address<MagnetorquerModel>,
+    ) -> Self {
+        Self {
+            mgm_addr,
+            pcdu_addr,
+            mgt_addr,
+        }
+    }
+}
 impl SimController {
     pub fn new(
         sys_clock: SystemClock,
         request_receiver: mpsc::Receiver<SimRequest>,
         reply_sender: mpsc::Sender<SimReply>,
         simulation: Simulation,
-        mgm_addr: Address<MagnetometerModel<MgmLis3MdlReply>>,
-        pcdu_addr: Address<PcduModel>,
-        mgt_addr: Address<MagnetorquerModel>,
+        scheduler: Scheduler,
+        addr_wrapper: ModelAddrWrapper,
     ) -> Self {
         Self {
             sys_clock,
             request_receiver,
             reply_sender,
             simulation,
-            mgm_addr,
-            pcdu_addr,
-            mgt_addr,
+            scheduler,
+            addr_wrapper,
         }
     }
 
@@ -62,7 +79,7 @@ impl SimController {
             // Check for UDP requests every millisecond. Shift the simulator ahead here to prevent
             // replies lying in the past.
             t += Duration::from_millis(udp_polling_interval_ms);
-            self.sys_clock.synchronize(t);
+            let _synch_status = self.sys_clock.synchronize(t);
             self.handle_sim_requests(t_old);
             self.simulation
                 .step_until(t)
@@ -118,11 +135,13 @@ impl SimController {
         }
         match mgm_request {
             MgmRequestLis3Mdl::RequestSensorData => {
-                self.simulation.send_event(
-                    MagnetometerModel::send_sensor_values,
-                    (),
-                    &self.mgm_addr,
-                );
+                self.simulation
+                    .process_event(
+                        MagnetometerModel::send_sensor_values,
+                        (),
+                        &self.addr_wrapper.mgm_addr,
+                    )
+                    .expect("event execution error for mgm");
             }
         }
         Ok(())
@@ -136,14 +155,21 @@ impl SimController {
         match pcdu_request {
             PcduRequest::RequestSwitchInfo => {
                 self.simulation
-                    .send_event(PcduModel::request_switch_info, (), &self.pcdu_addr);
+                    .process_event(
+                        PcduModel::request_switch_info,
+                        (),
+                        &self.addr_wrapper.pcdu_addr,
+                    )
+                    .unwrap();
             }
             PcduRequest::SwitchDevice { switch, state } => {
-                self.simulation.send_event(
-                    PcduModel::switch_device,
-                    (switch, state),
-                    &self.pcdu_addr,
-                );
+                self.simulation
+                    .process_event(
+                        PcduModel::switch_device,
+                        (switch, state),
+                        &self.addr_wrapper.pcdu_addr,
+                    )
+                    .unwrap();
             }
         }
         Ok(())
@@ -155,17 +181,23 @@ impl SimController {
             log::info!("received MGT request: {:?}", mgt_request);
         }
         match mgt_request {
-            MgtRequest::ApplyTorque { duration, dipole } => self.simulation.send_event(
-                MagnetorquerModel::apply_torque,
-                (duration, dipole),
-                &self.mgt_addr,
-            ),
-            MgtRequest::RequestHk => self.simulation.send_event(
-                MagnetorquerModel::request_housekeeping_data,
-                (),
-                &self.mgt_addr,
-            ),
-        }
+            MgtRequest::ApplyTorque { duration, dipole } => self
+                .simulation
+                .process_event(
+                    MagnetorquerModel::apply_torque,
+                    (duration, dipole),
+                    &self.addr_wrapper.mgt_addr,
+                )
+                .unwrap(),
+            MgtRequest::RequestHk => self
+                .simulation
+                .process_event(
+                    MagnetorquerModel::request_housekeeping_data,
+                    (),
+                    &self.addr_wrapper.mgt_addr,
+                )
+                .unwrap(),
+        };
         Ok(())
     }
 
