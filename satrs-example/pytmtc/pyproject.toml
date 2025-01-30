@@ -12,7 +12,7 @@ authors = [
   {name = "Robin Mueller", email = "robin.mueller.m@gmail.com"},
 ]
 dependencies = [
-    "tmtccmd~=8.0",
+    "tmtccmd~=8.1",
     "pydantic~=2.7"
 ]
 

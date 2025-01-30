@@ -1,8 +1,8 @@
 use std::{sync::mpsc, time::Duration};
 
-use asynchronix::{
-    model::{Model, Output},
-    time::Scheduler,
+use nexosim::{
+    model::{Context, Model},
+    ports::Output,
 };
 use satrs::power::SwitchStateBinary;
 use satrs_minisim::{
@@ -29,14 +29,13 @@ impl PcduModel {
         }
     }
 
-    pub async fn request_switch_info(&mut self, _: (), scheduler: &Scheduler<Self>) {
-        scheduler
-            .schedule_event(
-                Duration::from_millis(SWITCH_INFO_DELAY_MS),
-                Self::send_switch_info,
-                (),
-            )
-            .expect("requesting switch info failed");
+    pub async fn request_switch_info(&mut self, _: (), cx: &mut Context<Self>) {
+        cx.schedule_event(
+            Duration::from_millis(SWITCH_INFO_DELAY_MS),
+            Self::send_switch_info,
+            (),
+        )
+        .expect("requesting switch info failed");
     }
 
     pub fn send_switch_info(&mut self) {

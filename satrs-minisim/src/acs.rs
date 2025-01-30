@@ -1,8 +1,8 @@
 use std::{f32::consts::PI, sync::mpsc, time::Duration};
 
-use asynchronix::{
-    model::{Model, Output},
-    time::Scheduler,
+use nexosim::{
+    model::{Context, Model},
+    ports::Output,
 };
 use satrs::power::SwitchStateBinary;
 use satrs_minisim::{
@@ -55,7 +55,7 @@ impl<ReplyProvider: MgmReplyProvider> MagnetometerModel<ReplyProvider> {
         self.switch_state = switch_state;
     }
 
-    pub async fn send_sensor_values(&mut self, _: (), scheduler: &Scheduler<Self>) {
+    pub async fn send_sensor_values(&mut self, _: (), scheduler: &mut Context<Self>) {
         self.reply_sender
             .send(ReplyProvider::create_mgm_reply(MgmReplyCommon {
                 switch_state: self.switch_state,
@@ -114,11 +114,11 @@ impl MagnetorquerModel {
     pub async fn apply_torque(
         &mut self,
         duration_and_dipole: (Duration, MgtDipole),
-        scheduler: &Scheduler<Self>,
+        cx: &mut Context<Self>,
     ) {
         self.torque_dipole = duration_and_dipole.1;
         self.torquing = true;
-        if scheduler
+        if cx
             .schedule_event(duration_and_dipole.0, Self::clear_torque, ())
             .is_err()
         {
@@ -138,12 +138,11 @@ impl MagnetorquerModel {
         self.generate_magnetic_field(()).await;
     }
 
-    pub async fn request_housekeeping_data(&mut self, _: (), scheduler: &Scheduler<Self>) {
+    pub async fn request_housekeeping_data(&mut self, _: (), cx: &mut Context<Self>) {
         if self.switch_state != SwitchStateBinary::On {
             return;
         }
-        scheduler
-            .schedule_event(Duration::from_millis(15), Self::send_housekeeping_data, ())
+        cx.schedule_event(Duration::from_millis(15), Self::send_housekeeping_data, ())
             .expect("requesting housekeeping data failed")
     }
 

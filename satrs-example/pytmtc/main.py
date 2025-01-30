@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Example client for the sat-rs example application"""
+
 import logging
 import sys
 import time
