@@ -22,12 +22,11 @@ version = "2"
 features = ["thumbv7-backend"]
 
 [dependencies.rtic-monotonics]
-version = "1"
+version = "2"
 features = ["cortex-m-systick"]
 
 [dependencies.cobs]
-git = "https://github.com/robamu/cobs.rs.git"
-branch = "all_features"
+version = "0.3"
 default-features = false
 
 [dependencies.stm32f3xx-hal]
