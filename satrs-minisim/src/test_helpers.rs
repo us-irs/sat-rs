@@ -1,7 +1,10 @@
 use delegate::delegate;
-use std::{sync::mpsc, time::Duration};
+use std::sync::mpsc;
 
-use asynchronix::time::MonotonicTime;
+use nexosim::{
+    simulation::ExecutionError,
+    time::{Deadline, MonotonicTime},
+};
 use satrs_minisim::{SimReply, SimRequest};
 
 use crate::{controller::SimController, create_sim_controller, ThreadingModel};
@@ -35,8 +38,8 @@ impl SimTestbench {
             pub fn handle_sim_requests(&mut self, old_timestamp: MonotonicTime);
         }
         to self.sim_controller.simulation {
-            pub fn step(&mut self);
-            pub fn step_by(&mut self, duration: Duration);
+            pub fn step(&mut self) -> Result<(), ExecutionError>;
+            pub fn step_until(&mut self, duration: impl Deadline) -> Result<(), ExecutionError>;
         }
     }
 
