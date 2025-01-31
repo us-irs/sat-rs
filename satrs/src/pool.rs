@@ -378,27 +378,71 @@ pub struct SubpoolConfig {
 #[cfg(feature = "heapless")]
 pub mod heapless_mod {
     use super::*;
+    use core::cell::UnsafeCell;
+    use core::sync::atomic::{AtomicBool, Ordering};
 
     #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     #[cfg_attr(feature = "defmt", derive(defmt::Format))]
     pub struct PoolIsFull;
 
+    #[derive(Debug)]
+    pub struct UnsafeCellBufWrapper<T> {
+        val: UnsafeCell<T>,
+        once: AtomicBool
+    }
+    // `Sync` is required because `UnsafeCell` is not `Sync` by default.
+    // This is safe as long as access is manually synchronized.
+    unsafe impl<T> Sync for UnsafeCellBufWrapper<T> {}
+
+    impl<T: Sync> UnsafeCellBufWrapper<T> {
+        /// Creates a new wrapper around an arbitrary value which should be [Sync].
+        pub const fn new(v: T) -> Self {
+            unsafe { Self::new_unchecked(v) }
+        }
+    }
+
+    impl<T> UnsafeCellBufWrapper<T> {
+        /// Creates a new wrapper around a buffer.
+        ///
+        /// # Safety
+        ///
+        /// Currently, the [Sync] trait is implemented for all T and ignores the usual [Sync] bound
+        /// on T. This API should only be called for declaring byte buffers statically or if T is
+        /// known to be [Sync]. You can use [new] to let the compiler do the [Sync] check.
+        pub const unsafe fn new_unchecked(v: T) -> Self {
+            Self { val: UnsafeCell::new(v), once: AtomicBool::new(false) }
+        }
+
+        /// Retrieves a mutable reference to the internal value once.
+        ///
+        /// All subsequent calls return None.
+        pub fn get_mut(&self) -> Option<&mut T> {
+            if self.once.load(Ordering::Relaxed) {
+                return None;
+            }
+            // Safety: We ensure that this is only done once with an [AtomicBool].
+            let mut_ref = unsafe { &mut *self.val.get() };
+            self.once.store(true, Ordering::Relaxed);
+            Some(mut_ref)
+        }
+    }
+
     /// Helper macro to generate static buffers for the [crate::pool::StaticHeaplessMemoryPool].
     #[macro_export]
     macro_rules! static_subpool {
         ($pool_name: ident, $sizes_list_name: ident, $num_blocks: expr, $block_size: expr) => {
-            static mut $pool_name: core::mem::MaybeUninit<[u8; $num_blocks * $block_size]> =
-                core::mem::MaybeUninit::new([0; $num_blocks * $block_size]);
-            static mut $sizes_list_name: core::mem::MaybeUninit<[usize; $num_blocks]> =
-                core::mem::MaybeUninit::new([$crate::pool::STORE_FREE; $num_blocks]);
+            static $pool_name: UnsafeCellBufWrapper<[u8; $num_blocks * $block_size]> =
+                UnsafeCellBufWrapper::new([0; $num_blocks * $block_size]);
+            static $sizes_list_name: UnsafeCellBufWrapper<[usize; $num_blocks]> =
+                UnsafeCellBufWrapper::new([$crate::pool::STORE_FREE; $num_blocks]);
         };
         ($pool_name: ident, $sizes_list_name: ident, $num_blocks: expr, $block_size: expr, $meta_data: meta) => {
             #[$meta_data]
-            static mut $pool_name: core::mem::MaybeUninit<[u8; $num_blocks * $block_size]> =
-                core::mem::MaybeUninit::new([0; $num_blocks * $block_size]);
+            static $pool_name: UnsafeCellBufWrapper<[u8; $num_blocks * $block_size]> =
+                UnsafeCellBufWrapper::new([0; $num_blocks * $block_size]);
             #[$meta_data]
-            static mut $sizes_list_name: core::mem::MaybeUninit<[usize; $num_blocks]> =
-                core::mem::MaybeUninit::new([$crate::pool::STORE_FREE; $num_blocks]);
+            static $sizes_list_name: UnsafeCellBufWrapper<[usize; $num_blocks]> =
+                UnsafeCellBufWrapper::new([$crate::pool::STORE_FREE; $num_blocks]);
         };
     }
 
@@ -435,17 +479,17 @@ pub mod heapless_mod {
     ///
     /// let mut mem_pool: StaticHeaplessMemoryPool<2> = StaticHeaplessMemoryPool::new(true);
     /// mem_pool.grow(
-    ///     unsafe { SUBPOOL_SMALL.assume_init_mut() },
-    ///     unsafe { SUBPOOL_SMALL_SIZES.assume_init_mut() },
+    ///     SUBPOOL_SMALL.get_mut().unwrap(),
+    ///     SUBPOOL_SMALL_SIZES.get_mut().unwrap(),
     ///     SUBPOOL_SMALL_NUM_BLOCKS,
     ///     false
-    /// );
+    /// ).unwrap();
     /// mem_pool.grow(
-    ///     unsafe { SUBPOOL_LARGE.assume_init_mut() },
-    ///     unsafe { SUBPOOL_LARGE_SIZES.assume_init_mut() },
+    ///     SUBPOOL_LARGE.get_mut().unwrap(),
+    ///     SUBPOOL_LARGE_SIZES.get_mut().unwrap(),
     ///     SUBPOOL_LARGE_NUM_BLOCKS,
     ///     false
-    /// );
+    /// ).unwrap();
     ///
     /// let mut read_buf: [u8; 16] = [0; 16];
     /// let mut addr;
@@ -522,12 +566,14 @@ pub mod heapless_mod {
             num_blocks: NumBlocks,
             set_sizes_list_to_all_free: bool,
         ) -> Result<(), PoolIsFull> {
-            assert!(
-                (subpool_memory.len() % num_blocks as usize) == 0,
+            assert_eq!(
+                (subpool_memory.len() % num_blocks as usize),
+                0,
                 "pool slice length must be multiple of number of blocks"
             );
-            assert!(
-                num_blocks as usize == sizes_list.len(),
+            assert_eq!(
+                num_blocks as usize,
+                sizes_list.len(),
                 "used block size list slice must be of same length as number of blocks"
             );
             let subpool_config = SubpoolConfig {
@@ -1584,21 +1630,28 @@ mod tests {
     mod heapless_tests {
         use super::*;
         use crate::static_subpool;
-        use core::ptr::addr_of_mut;
+        use std::cell::UnsafeCell;
+        use std::sync::Mutex;
 
         const SUBPOOL_1_BLOCK_SIZE: usize = 4;
         const SUBPOOL_1_NUM_ELEMENTS: u16 = 4;
-        static mut SUBPOOL_1: [u8; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE] =
-            [0; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE];
-        static mut SUBPOOL_1_SIZES: [usize; SUBPOOL_1_NUM_ELEMENTS as usize] =
-            [STORE_FREE; SUBPOOL_1_NUM_ELEMENTS as usize];
+
+        static SUBPOOL_1: UnsafeCellBufWrapper<
+            [u8; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE],
+        > = UnsafeCellBufWrapper::new([0; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE]);
+
+        static SUBPOOL_1_SIZES: Mutex<UnsafeCell<[usize; SUBPOOL_1_NUM_ELEMENTS as usize]>> =
+            Mutex::new(UnsafeCell::new(
+                [STORE_FREE; SUBPOOL_1_NUM_ELEMENTS as usize],
+            ));
 
         const SUBPOOL_2_NUM_ELEMENTS: u16 = 2;
         const SUBPOOL_2_BLOCK_SIZE: usize = 8;
-        static mut SUBPOOL_2: [u8; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE] =
-            [0; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE];
-        static mut SUBPOOL_2_SIZES: [usize; SUBPOOL_2_NUM_ELEMENTS as usize] =
-            [STORE_FREE; SUBPOOL_2_NUM_ELEMENTS as usize];
+        static SUBPOOL_2: UnsafeCellBufWrapper<
+            [u8; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE],
+        > = UnsafeCellBufWrapper::new([0; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE]);
+        static SUBPOOL_2_SIZES: UnsafeCellBufWrapper<[usize; SUBPOOL_2_NUM_ELEMENTS as usize]> =
+            UnsafeCellBufWrapper::new([STORE_FREE; SUBPOOL_2_NUM_ELEMENTS as usize]);
 
         const SUBPOOL_3_NUM_ELEMENTS: u16 = 1;
         const SUBPOOL_3_BLOCK_SIZE: usize = 16;
@@ -1641,24 +1694,24 @@ mod tests {
                 StaticHeaplessMemoryPool::new(false);
             assert!(heapless_pool
                 .grow(
-                    unsafe { &mut *addr_of_mut!(SUBPOOL_1) },
-                    unsafe { &mut *addr_of_mut!(SUBPOOL_1_SIZES) },
+                    SUBPOOL_1.get_mut().unwrap(),
+                    unsafe { &mut *SUBPOOL_1_SIZES.lock().unwrap().get() },
                     SUBPOOL_1_NUM_ELEMENTS,
                     true
                 )
                 .is_ok());
             assert!(heapless_pool
                 .grow(
-                    unsafe { &mut *addr_of_mut!(SUBPOOL_2) },
-                    unsafe { &mut *addr_of_mut!(SUBPOOL_2_SIZES) },
+                     SUBPOOL_2.get_mut().unwrap(),
+                    SUBPOOL_2_SIZES.get_mut().unwrap(),
                     SUBPOOL_2_NUM_ELEMENTS,
                     true
                 )
                 .is_ok());
             assert!(heapless_pool
                 .grow(
-                    unsafe { SUBPOOL_3.assume_init_mut() },
-                    unsafe { SUBPOOL_3_SIZES.assume_init_mut() },
+                    SUBPOOL_3.get_mut().unwrap(),
+                    SUBPOOL_3_SIZES.get_mut().unwrap(),
                     SUBPOOL_3_NUM_ELEMENTS,
                     true
                 )
@@ -1780,16 +1833,16 @@ mod tests {
                 StaticHeaplessMemoryPool::new(true);
             assert!(heapless_pool
                 .grow(
-                    unsafe { &mut *addr_of_mut!(SUBPOOL_2) },
-                    unsafe { &mut *addr_of_mut!(SUBPOOL_2_SIZES) },
+                    SUBPOOL_2.get_mut().unwrap(),
+                    SUBPOOL_2_SIZES.get_mut().unwrap(),
                     SUBPOOL_2_NUM_ELEMENTS,
                     true
                 )
                 .is_ok());
             assert!(heapless_pool
                 .grow(
-                    unsafe { SUBPOOL_4.assume_init_mut() },
-                    unsafe { SUBPOOL_4_SIZES.assume_init_mut() },
+                    SUBPOOL_4.get_mut().unwrap(),
+                    SUBPOOL_4_SIZES.get_mut().unwrap(),
                     SUBPOOL_4_NUM_ELEMENTS,
                     true
                 )
@@ -1803,16 +1856,16 @@ mod tests {
                 StaticHeaplessMemoryPool::new(true);
             assert!(heapless_pool
                 .grow(
-                    unsafe { SUBPOOL_5.assume_init_mut() },
-                    unsafe { SUBPOOL_5_SIZES.assume_init_mut() },
+                    SUBPOOL_5.get_mut().unwrap(),
+                    SUBPOOL_5_SIZES.get_mut().unwrap(),
                     SUBPOOL_5_NUM_ELEMENTS,
                     true
                 )
                 .is_ok());
             assert!(heapless_pool
                 .grow(
-                    unsafe { SUBPOOL_3.assume_init_mut() },
-                    unsafe { SUBPOOL_3_SIZES.assume_init_mut() },
+                    SUBPOOL_3.get_mut().unwrap(),
+                    SUBPOOL_3_SIZES.get_mut().unwrap(),
                     SUBPOOL_3_NUM_ELEMENTS,
                     true
                 )
@@ -1826,24 +1879,24 @@ mod tests {
                 StaticHeaplessMemoryPool::new(true);
             assert!(heapless_pool
                 .grow(
-                    unsafe { SUBPOOL_5.assume_init_mut() },
-                    unsafe { SUBPOOL_5_SIZES.assume_init_mut() },
+                    SUBPOOL_5.get_mut().unwrap(),
+                    SUBPOOL_5_SIZES.get_mut().unwrap(),
                     SUBPOOL_5_NUM_ELEMENTS,
                     true
                 )
                 .is_ok());
             assert!(heapless_pool
                 .grow(
-                    unsafe { SUBPOOL_6.assume_init_mut() },
-                    unsafe { SUBPOOL_6_SIZES.assume_init_mut() },
+                    SUBPOOL_6.get_mut().unwrap(),
+                    SUBPOOL_6_SIZES.get_mut().unwrap(),
                     SUBPOOL_6_NUM_ELEMENTS,
                     true
                 )
                 .is_ok());
             assert!(heapless_pool
                 .grow(
-                    unsafe { SUBPOOL_3.assume_init_mut() },
-                    unsafe { SUBPOOL_3_SIZES.assume_init_mut() },
+                    SUBPOOL_3.get_mut().unwrap(),
+                    SUBPOOL_3_SIZES.get_mut().unwrap(),
                     SUBPOOL_3_NUM_ELEMENTS,
                     true
                 )
@@ -1857,24 +1910,24 @@ mod tests {
                 StaticHeaplessMemoryPool::new(true);
             assert!(heapless_pool
                 .grow(
-                    unsafe { SUBPOOL_5.assume_init_mut() },
-                    unsafe { SUBPOOL_5_SIZES.assume_init_mut() },
+                    SUBPOOL_5.get_mut().unwrap(),
+                    SUBPOOL_5_SIZES.get_mut().unwrap(),
                     SUBPOOL_5_NUM_ELEMENTS,
                     true
                 )
                 .is_ok());
             assert!(heapless_pool
                 .grow(
-                    unsafe { SUBPOOL_6.assume_init_mut() },
-                    unsafe { SUBPOOL_6_SIZES.assume_init_mut() },
+                    SUBPOOL_6.get_mut().unwrap(),
+                    SUBPOOL_6_SIZES.get_mut().unwrap(),
                     SUBPOOL_6_NUM_ELEMENTS,
                     true
                 )
                 .is_ok());
             assert!(heapless_pool
                 .grow(
-                    unsafe { SUBPOOL_3.assume_init_mut() },
-                    unsafe { SUBPOOL_3_SIZES.assume_init_mut() },
+                    SUBPOOL_3.get_mut().unwrap(),
+                    SUBPOOL_3_SIZES.get_mut().unwrap(),
                     SUBPOOL_3_NUM_ELEMENTS,
                     true
                 )
