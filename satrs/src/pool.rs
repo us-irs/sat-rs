@@ -388,7 +388,7 @@ pub mod heapless_mod {
     #[derive(Debug)]
     pub struct UnsafeCellBufWrapper<T> {
         val: UnsafeCell<T>,
-        once: AtomicBool
+        once: AtomicBool,
     }
     // `Sync` is required because `UnsafeCell` is not `Sync` by default.
     // This is safe as long as access is manually synchronized.
@@ -410,7 +410,10 @@ pub mod heapless_mod {
         /// on T. This API should only be called for declaring byte buffers statically or if T is
         /// known to be [Sync]. You can use [new] to let the compiler do the [Sync] check.
         pub const unsafe fn new_unchecked(v: T) -> Self {
-            Self { val: UnsafeCell::new(v), once: AtomicBool::new(false) }
+            Self {
+                val: UnsafeCell::new(v),
+                once: AtomicBool::new(false),
+            }
         }
 
         /// Retrieves a mutable reference to the internal value once.
@@ -431,18 +434,18 @@ pub mod heapless_mod {
     #[macro_export]
     macro_rules! static_subpool {
         ($pool_name: ident, $sizes_list_name: ident, $num_blocks: expr, $block_size: expr) => {
-            static $pool_name: UnsafeCellBufWrapper<[u8; $num_blocks * $block_size]> =
-                UnsafeCellBufWrapper::new([0; $num_blocks * $block_size]);
+            static $pool_name: satrs::pool::UnsafeCellBufWrapper<[u8; $num_blocks * $block_size]> =
+                satrs::pool::UnsafeCellBufWrapper::new([0; $num_blocks * $block_size]);
             static $sizes_list_name: UnsafeCellBufWrapper<[usize; $num_blocks]> =
-                UnsafeCellBufWrapper::new([$crate::pool::STORE_FREE; $num_blocks]);
+                satrs::pool::UnsafeCellBufWrapper::new([$crate::pool::STORE_FREE; $num_blocks]);
         };
         ($pool_name: ident, $sizes_list_name: ident, $num_blocks: expr, $block_size: expr, $meta_data: meta) => {
             #[$meta_data]
-            static $pool_name: UnsafeCellBufWrapper<[u8; $num_blocks * $block_size]> =
-                UnsafeCellBufWrapper::new([0; $num_blocks * $block_size]);
+            static $pool_name: satrs::pool::UnsafeCellBufWrapper<[u8; $num_blocks * $block_size]> =
+                satrs::pool::UnsafeCellBufWrapper::new([0; $num_blocks * $block_size]);
             #[$meta_data]
-            static $sizes_list_name: UnsafeCellBufWrapper<[usize; $num_blocks]> =
-                UnsafeCellBufWrapper::new([$crate::pool::STORE_FREE; $num_blocks]);
+            static $sizes_list_name: satrs::pool::UnsafeCellBufWrapper<[usize; $num_blocks]> =
+                satrs::pool::UnsafeCellBufWrapper::new([$crate::pool::STORE_FREE; $num_blocks]);
         };
     }
 
@@ -1702,7 +1705,7 @@ mod tests {
                 .is_ok());
             assert!(heapless_pool
                 .grow(
-                     SUBPOOL_2.get_mut().unwrap(),
+                    SUBPOOL_2.get_mut().unwrap(),
                     SUBPOOL_2_SIZES.get_mut().unwrap(),
                     SUBPOOL_2_NUM_ELEMENTS,
                     true
