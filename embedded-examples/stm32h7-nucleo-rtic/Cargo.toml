@@ -21,11 +21,11 @@ defmt-brtt = { version = "0.1", default-features = false, features = ["rtt"] }
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 cortex-m-semihosting = "0.5.0"
 stm32h7xx-hal = { version="0.16", features= ["stm32h743v", "ethernet"] }
-embedded-alloc = "0.5"
+embedded-alloc = "0.6"
 rtic-sync = { version = "1", features = ["defmt-03"] }
 
 [dependencies.smoltcp]
-version = "0.11.0"
+version = "0.11"
 default-features = false
 features = ["medium-ethernet", "proto-ipv4", "socket-raw", "socket-dhcpv4", "socket-udp", "defmt"]
 
@@ -34,7 +34,7 @@ version = "2"
 features = ["thumbv7-backend"]
 
 [dependencies.rtic-monotonics]
-version = "1"
+version = "2"
 features = ["cortex-m-systick"]
 
 [dependencies.satrs]

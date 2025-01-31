@@ -3,8 +3,8 @@
 extern crate alloc;
 
 use rtic::app;
-use rtic_monotonics::systick::Systick;
-use rtic_monotonics::Monotonic;
+use rtic_monotonics::fugit::TimerInstantU32;
+use rtic_monotonics::systick::prelude::*;
 use satrs::pool::{PoolAddr, PoolProvider, StaticHeaplessMemoryPool};
 use satrs::static_subpool;
 // global logger + panicking-behavior + memory layout
@@ -13,7 +13,7 @@ use smoltcp::socket::udp::UdpMetadata;
 use smoltcp::socket::{dhcpv4, udp};
 
 use core::mem::MaybeUninit;
-use embedded_alloc::Heap;
+use embedded_alloc::LlffHeap as Heap;
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet, SocketStorage};
 use smoltcp::wire::{HardwareAddress, IpAddress, IpCidr};
 use stm32h7xx_hal::ethernet;
@@ -31,6 +31,8 @@ pub type TcSourceRx = rtic_sync::channel::Receiver<'static, PoolAddr, TC_SOURCE_
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
+
+systick_monotonic!(Mono, 1000);
 
 // We place the memory pool buffers inside the larger AXISRAM.
 pub const SUBPOOL_SMALL_NUM_BLOCKS: u16 = 32;
@@ -72,7 +74,9 @@ impl Net {
         let mut iface = Interface::new(
             config,
             &mut ethdev,
-            smoltcp::time::Instant::from_millis((Systick::now() - Systick::ZERO).to_millis()),
+            smoltcp::time::Instant::from_millis(
+                (Mono::now() - TimerInstantU32::<1000>::from_ticks(0)).to_millis(),
+            ),
         );
         // Create sockets
         let dhcp_socket = dhcpv4::Socket::new();
@@ -91,7 +95,7 @@ impl Net {
     /// Polls on the ethernet interface. You should refer to the smoltcp
     /// documentation for poll() to understand how to call poll efficiently
     pub fn poll<'a>(&mut self, sockets: &'a mut SocketSet) -> bool {
-        let uptime = Systick::now() - Systick::ZERO;
+        let uptime = Mono::now() - TimerInstantU32::<1000>::from_ticks(0);
         let timestamp = smoltcp::time::Instant::from_millis(uptime.to_millis());
 
         self.iface.poll(timestamp, &mut self.ethdev, sockets)
@@ -203,8 +207,7 @@ mod app {
     use core::ptr::addr_of_mut;
 
     use super::*;
-    use rtic_monotonics::systick::fugit::MillisDurationU32;
-    use rtic_monotonics::systick::Systick;
+    use rtic_monotonics::fugit::MillisDurationU32;
     use satrs::spacepackets::ecss::tc::PusTcReader;
     use stm32h7xx_hal::ethernet::{EthernetMAC, PHY};
     use stm32h7xx_hal::gpio::{Output, Pin};
@@ -256,12 +259,7 @@ mod app {
             .freeze(pwrcfg, &cx.device.SYSCFG);
 
         // Initialize the systick interrupt & obtain the token to prove that we did
-        let systick_mono_token = rtic_monotonics::create_systick_token!();
-        Systick::start(
-            cx.core.SYST,
-            ccdr.clocks.sys_ck().to_Hz(),
-            systick_mono_token,
-        );
+        Mono::start(cx.core.SYST, ccdr.clocks.sys_ck().to_Hz());
 
         // Those are used in the smoltcp of the stm32h7xx-hal , I am not fully sure what they are
         // good for.
@@ -377,24 +375,24 @@ mod app {
 
         shared_pool
             .grow(
-                unsafe { SUBPOOL_SMALL.assume_init_mut() },
-                unsafe { SUBPOOL_SMALL_SIZES.assume_init_mut() },
+                SUBPOOL_SMALL.get_mut().unwrap(),
+                SUBPOOL_SMALL_SIZES.get_mut().unwrap(),
                 SUBPOOL_SMALL_NUM_BLOCKS,
                 true,
             )
             .expect("growing heapless memory pool failed");
         shared_pool
             .grow(
-                unsafe { SUBPOOL_MEDIUM.assume_init_mut() },
-                unsafe { SUBPOOL_MEDIUM_SIZES.assume_init_mut() },
+                SUBPOOL_MEDIUM.get_mut().unwrap(),
+                SUBPOOL_MEDIUM_SIZES.get_mut().unwrap(),
                 SUBPOOL_MEDIUM_NUM_BLOCKS,
                 true,
             )
             .expect("growing heapless memory pool failed");
         shared_pool
             .grow(
-                unsafe { SUBPOOL_LARGE.assume_init_mut() },
-                unsafe { SUBPOOL_LARGE_SIZES.assume_init_mut() },
+                SUBPOOL_LARGE.get_mut().unwrap(),
+                SUBPOOL_LARGE_SIZES.get_mut().unwrap(),
                 SUBPOOL_LARGE_NUM_BLOCKS,
                 true,
             )
@@ -403,7 +401,7 @@ mod app {
         // Set up global allocator. Use AXISRAM for the heap.
         #[link_section = ".axisram"]
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
-        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
+        unsafe { HEAP.init(&raw mut HEAP_MEM as usize, HEAP_SIZE) }
 
         eth_link_check::spawn().expect("eth link check failed");
         blinky::spawn().expect("spawning blink task failed");
@@ -435,7 +433,7 @@ mod app {
             leds.led1.toggle();
             leds.led2.toggle();
             let current_blink_freq = cx.shared.blink_freq.lock(|current| *current);
-            Systick::delay(current_blink_freq).await;
+            Mono::delay(current_blink_freq).await;
         }
     }
 
@@ -457,7 +455,7 @@ mod app {
                 cx.shared.eth_link_up.lock(|link_up| *link_up = false);
                 defmt::info!("Ethernet link down");
             }
-            Systick::delay(100.millis()).await;
+            Mono::delay(100.millis()).await;
         }
     }
 
@@ -483,7 +481,7 @@ mod app {
                     cx.local.udp.poll(sockets, pool);
                 })
             });
-            Systick::delay(40.millis()).await;
+            Mono::delay(40.millis()).await;
         }
     }
 

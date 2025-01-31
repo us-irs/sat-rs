@@ -15,8 +15,8 @@ use rtic::app;
 
 use heapless::{mpmc::Q8, Vec};
 #[allow(unused_imports)]
-use rtic_monotonics::systick::fugit::{MillisDurationU32, TimerInstantU32};
-use rtic_monotonics::systick::ExtU32;
+use rtic_monotonics::fugit::{MillisDurationU32, TimerInstantU32};
+use rtic_monotonics::systick::prelude::*;
 use satrs::seq_count::SequenceCountProviderCore;
 use satrs::spacepackets::{ecss::PusPacket, ecss::WritablePusPacket};
 use stm32f3xx_hal::dma::dma1;
@@ -245,8 +245,6 @@ pub fn convert_pus_tc_to_request(
 mod app {
     use super::*;
     use core::slice::Iter;
-    use rtic_monotonics::systick::Systick;
-    use rtic_monotonics::Monotonic;
     use satrs::pus::verification::{TcStateStarted, VerificationReportCreator};
     use satrs::spacepackets::{ecss::tc::PusTcReader, time::cds::P_FIELD_BASE};
     #[allow(unused_imports)]
@@ -258,6 +256,8 @@ mod app {
     use stm32f3xx_hal::Switch;
     #[allow(dead_code)]
     type SerialType = Serial<USART2, (PA2<AF7<PushPull>>, PA3<AF7<PushPull>>)>;
+
+    systick_monotonic!(Mono, 1000);
 
     #[shared]
     struct Shared {
@@ -279,8 +279,7 @@ mod app {
         let mut rcc = cx.device.RCC.constrain();
 
         // Initialize the systick interrupt & obtain the token to prove that we did
-        let systick_mono_token = rtic_monotonics::create_systick_token!();
-        Systick::start(cx.core.SYST, 8_000_000, systick_mono_token);
+        Mono::start(cx.core.SYST, 8_000_000);
 
         let mut flash = cx.device.FLASH.constrain();
         let clocks = rcc
@@ -394,7 +393,7 @@ mod app {
                 }
             }
             let current_blink_freq = cx.shared.blink_freq.lock(|current| *current);
-            Systick::delay(current_blink_freq).await;
+            Mono::delay(current_blink_freq).await;
         }
     }
 
@@ -412,15 +411,14 @@ mod app {
             if is_idle {
                 let last_completed = cx.shared.tx_shared.lock(|shared| shared.last_completed);
                 if let Some(last_completed) = last_completed {
-                    let elapsed_ms = (Systick::now() - last_completed).to_millis();
+                    let elapsed_ms = (Mono::now() - last_completed).to_millis();
                     if elapsed_ms < MIN_DELAY_BETWEEN_TX_PACKETS_MS {
-                        Systick::delay((MIN_DELAY_BETWEEN_TX_PACKETS_MS - elapsed_ms).millis())
-                            .await;
+                        Mono::delay((MIN_DELAY_BETWEEN_TX_PACKETS_MS - elapsed_ms).millis()).await;
                     }
                 }
             } else {
                 // Check for completion after 1 ms
-                Systick::delay(1.millis()).await;
+                Mono::delay(1.millis()).await;
                 continue;
             }
             if let Some(vec) = TM_REQUESTS.dequeue() {
@@ -459,11 +457,11 @@ mod app {
                         UartTxState::Transmitting(_) => (),
                     });
                 // Check for completion after 1 ms
-                Systick::delay(1.millis()).await;
+                Mono::delay(1.millis()).await;
                 continue;
             }
             // Nothing to do, and we are idle.
-            Systick::delay(TX_HANDLER_FREQ_MS.millis()).await;
+            Mono::delay(TX_HANDLER_FREQ_MS.millis()).await;
         }
     }
 
@@ -657,7 +655,7 @@ mod app {
                         tx_shared.state = UartTxState::Idle(Some(TxIdle { tx, dma_channel }));
                         // We cache the last completed time to ensure that there is a minimum delay between consecutive
                         // transferred packets.
-                        tx_shared.last_completed = Some(Systick::now());
+                        tx_shared.last_completed = Some(Mono::now());
                     }
                 }
             });

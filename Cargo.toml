@@ -10,5 +10,5 @@ members = [
 
 exclude = [
     "embedded-examples/stm32f3-disco-rtic",
-    "embedded-examples/stm32h7-rtic",
+    "embedded-examples/stm32h7-nucleo-rtic",
 ]
