@@ -91,7 +91,7 @@ pub(crate) mod tests {
             .send_request(request)
             .expect("sending MGM switch request failed");
         sim_testbench.handle_sim_requests_time_agnostic();
-        sim_testbench.step();
+        sim_testbench.step().unwrap();
     }
 
     #[allow(dead_code)]
@@ -112,7 +112,7 @@ pub(crate) mod tests {
             .send_request(request)
             .expect("sending MGM request failed");
         sim_testbench.handle_sim_requests_time_agnostic();
-        sim_testbench.step();
+        sim_testbench.step().unwrap();
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());
         let sim_reply = sim_reply.unwrap();
@@ -142,12 +142,12 @@ pub(crate) mod tests {
             .send_request(request)
             .expect("sending MGM request failed");
         sim_testbench.handle_sim_requests_time_agnostic();
-        sim_testbench.step_by(Duration::from_millis(1));
+        sim_testbench.step_until(Duration::from_millis(1)).unwrap();
 
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_none());
         // Reply takes 20ms
-        sim_testbench.step_by(Duration::from_millis(25));
+        sim_testbench.step_until(Duration::from_millis(25)).unwrap();
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());
         let sim_reply = sim_reply.unwrap();

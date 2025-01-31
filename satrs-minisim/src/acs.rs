@@ -199,7 +199,7 @@ pub mod tests {
             .send_request(request)
             .expect("sending MGM request failed");
         sim_testbench.handle_sim_requests_time_agnostic();
-        sim_testbench.step();
+        sim_testbench.step().unwrap();
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());
         let sim_reply = sim_reply.unwrap();
@@ -222,21 +222,21 @@ pub mod tests {
             .send_request(request)
             .expect("sending MGM request failed");
         sim_testbench.handle_sim_requests_time_agnostic();
-        sim_testbench.step();
+        sim_testbench.step().unwrap();
         let mut sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_some());
         let mut sim_reply = sim_reply_res.unwrap();
         assert_eq!(sim_reply.component(), SimComponent::MgmLis3Mdl);
         let first_reply = MgmLis3MdlReply::from_sim_message(&sim_reply)
             .expect("failed to deserialize MGM sensor values");
-        sim_testbench.step_by(Duration::from_millis(50));
+        sim_testbench.step_until(Duration::from_millis(50)).unwrap();
 
         request = SimRequest::new_with_epoch_time(MgmRequestLis3Mdl::RequestSensorData);
         sim_testbench
             .send_request(request)
             .expect("sending MGM request failed");
         sim_testbench.handle_sim_requests_time_agnostic();
-        sim_testbench.step();
+        sim_testbench.step().unwrap();
         sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_some());
         sim_reply = sim_reply_res.unwrap();
@@ -271,7 +271,7 @@ pub mod tests {
             .send_request(request)
             .expect("sending MGM request failed");
         sim_testbench.handle_sim_requests_time_agnostic();
-        sim_testbench.step();
+        sim_testbench.step().unwrap();
         let sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_none());
     }
@@ -286,7 +286,7 @@ pub mod tests {
             .send_request(request)
             .expect("sending MGM request failed");
         sim_testbench.handle_sim_requests_time_agnostic();
-        sim_testbench.step();
+        sim_testbench.step().unwrap();
         let sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_some());
         let sim_reply = sim_reply_res.unwrap();
@@ -307,7 +307,7 @@ pub mod tests {
             .send_request(request)
             .expect("sending MGM request failed");
         sim_testbench.handle_sim_requests_time_agnostic();
-        sim_testbench.step();
+        sim_testbench.step().unwrap();
         let sim_reply_res = sim_testbench.try_receive_next_reply();
         assert!(sim_reply_res.is_some());
         let sim_reply = sim_reply_res.unwrap();
@@ -338,7 +338,7 @@ pub mod tests {
             .send_request(request)
             .expect("sending MGM request failed");
         sim_testbench.handle_sim_requests_time_agnostic();
-        sim_testbench.step_by(Duration::from_millis(5));
+        sim_testbench.step_until(Duration::from_millis(5)).unwrap();
 
         check_mgt_hk(
             &mut sim_testbench,
@@ -347,7 +347,9 @@ pub mod tests {
                 torquing: true,
             },
         );
-        sim_testbench.step_by(Duration::from_millis(100));
+        sim_testbench
+            .step_until(Duration::from_millis(100))
+            .unwrap();
         check_mgt_hk(
             &mut sim_testbench,
             MgtHkSet {

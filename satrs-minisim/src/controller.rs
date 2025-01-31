@@ -231,7 +231,7 @@ mod tests {
             .send_request(request)
             .expect("sending sim ctrl request failed");
         sim_testbench.handle_sim_requests_time_agnostic();
-        sim_testbench.step();
+        sim_testbench.step().unwrap();
         let sim_reply = sim_testbench.try_receive_next_reply();
         assert!(sim_reply.is_some());
         let sim_reply = sim_reply.unwrap();
