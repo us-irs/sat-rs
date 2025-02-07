@@ -13,79 +13,29 @@ keywords = ["no-std", "space", "aerospace"]
 categories = ["aerospace", "aerospace::space-protocols", "no-std", "hardware-support", "embedded"]
 
 [dependencies]
+satrs-shared = ">=0.1.3, <=0.2"
 delegate = ">0.7, <=0.13"
 paste = "1"
 derive-new = ">=0.6, <=0.7"
 smallvec = "1"
 crc = "3"
+num_enum = { version = ">0.5, <=0.7", default-features = false }
+spacepackets = { version = "0.13", default-features = false }
+cobs = { version = "0.3", default-features = false }
+num-traits = { version = "0.2", default-features = false }
+thiserror = { version = "2", default-features = false }
 
-[dependencies.satrs-shared]
-version = ">=0.1.3, <=0.2"
-
-[dependencies.num_enum]
-version = ">0.5, <=0.7"
-default-features = false
-
-[dependencies.spacepackets]
-version = "0.13"
-default-features = false
-
-[dependencies.cobs]
-version = "0.3"
-default-features = false
-
-[dependencies.num-traits]
-version = "0.2"
-default-features = false
-
-[dependencies.dyn-clone]
-version = "1"
-optional = true
-
-[dependencies.hashbrown]
-version = ">=0.14, <=0.15"
-optional = true
-
-[dependencies.heapless]
-version = "0.8"
-optional = true
-
-[dependencies.downcast-rs]
-version = "2"
-default-features = false
-optional = true
-
-[dependencies.bus]
-version = "2.2"
-optional = true
-
-[dependencies.crossbeam-channel]
-version= "0.5"
-default-features = false
-optional = true
-
-[dependencies.thiserror]
-version = "2"
-default-features = false
-
-[dependencies.serde]
-version = "1"
-default-features = false
-optional = true
-
-[dependencies.socket2]
-version = "0.5.4"
-features = ["all"]
-optional = true
-
-[dependencies.mio]
-version = "1"
-features = ["os-poll", "net"]
-optional = true
-
-[dependencies.defmt]
-version = "0.3"
-optional = true
+hashbrown = { version = ">=0.14, <=0.15", optional = true }
+static_cell = { version = "2", optional = true }
+dyn-clone = { version = "1", optional = true }
+heapless = { version = "0.8", optional = true }
+downcast-rs = { version = "2", default-features = false, optional = true }
+bus = { version = "2.2", optional = true }
+crossbeam-channel = { version = "0.5", default-features = false, optional = true }
+serde = { version = "1", default-features = false, optional = true }
+socket2 = { version = "0.5", features = ["all"], optional = true }
+mio = { version = "1", features = ["os-poll", "net"], optional = true }
+defmt = { version = "0.3", optional = true }
 
 [dev-dependencies]
 serde = "1"
@@ -121,7 +71,7 @@ alloc = [
 ]
 serde = ["dep:serde", "spacepackets/serde", "satrs-shared/serde"]
 crossbeam = ["crossbeam-channel"]
-heapless = ["dep:heapless"]
+heapless = ["dep:heapless", "static_cell"]
 defmt = ["dep:defmt", "spacepackets/defmt"]
 test_util = []
 
