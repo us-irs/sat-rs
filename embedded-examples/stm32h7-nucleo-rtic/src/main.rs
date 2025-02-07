@@ -3,7 +3,6 @@
 extern crate alloc;
 
 use rtic::app;
-use rtic_monotonics::fugit::TimerInstantU32;
 use rtic_monotonics::systick::prelude::*;
 use satrs::pool::{PoolAddr, PoolProvider, StaticHeaplessMemoryPool};
 use satrs::static_subpool;
@@ -74,9 +73,7 @@ impl Net {
         let mut iface = Interface::new(
             config,
             &mut ethdev,
-            smoltcp::time::Instant::from_millis(
-                (Mono::now() - TimerInstantU32::<1000>::from_ticks(0)).to_millis(),
-            ),
+            smoltcp::time::Instant::from_millis(Mono::now().duration_since_epoch().to_millis()),
         );
         // Create sockets
         let dhcp_socket = dhcpv4::Socket::new();
@@ -95,7 +92,7 @@ impl Net {
     /// Polls on the ethernet interface. You should refer to the smoltcp
     /// documentation for poll() to understand how to call poll efficiently
     pub fn poll<'a>(&mut self, sockets: &'a mut SocketSet) -> bool {
-        let uptime = Mono::now() - TimerInstantU32::<1000>::from_ticks(0);
+        let uptime = Mono::now().duration_since_epoch();
         let timestamp = smoltcp::time::Instant::from_millis(uptime.to_millis());
 
         self.iface.poll(timestamp, &mut self.ethdev, sockets)
