@@ -22,14 +22,21 @@ extern crate downcast_rs;
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
+pub mod action;
+#[cfg(feature = "alloc")]
+pub mod dev_mgmt;
 pub mod encoding;
 pub mod event_man;
 pub mod events;
 #[cfg(feature = "std")]
 pub mod executable;
 pub mod hal;
+pub mod health;
+pub mod hk;
+pub mod mode;
 #[cfg(feature = "std")]
 pub mod mode_tree;
+pub mod params;
 pub mod pool;
 pub mod power;
 pub mod pus;
@@ -38,13 +45,10 @@ pub mod request;
 pub mod res_code;
 #[cfg(feature = "alloc")]
 pub mod scheduling;
+#[cfg(feature = "alloc")]
+pub mod subsystem;
 pub mod time;
 pub mod tmtc;
-
-pub mod action;
-pub mod hk;
-pub mod mode;
-pub mod params;
 
 pub use spacepackets;
 

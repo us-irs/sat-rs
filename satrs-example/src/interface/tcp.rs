@@ -1,18 +1,19 @@
 use std::time::Duration;
 use std::{
     collections::{HashSet, VecDeque},
-    fmt::Debug,
-    marker::PhantomData,
     sync::{Arc, Mutex},
 };
 
 use log::{info, warn};
+use satrs::tmtc::StoreAndSendError;
 use satrs::{
     encoding::ccsds::{SpValidity, SpacePacketValidator},
     hal::std::tcp_server::{HandledConnectionHandler, ServerConfig, TcpSpacepacketsServer},
     spacepackets::{CcsdsPacket, PacketId},
-    tmtc::{PacketSenderRaw, PacketSource},
+    tmtc::PacketSource,
 };
+
+use crate::tmtc::sender::TmTcSender;
 
 #[derive(Default)]
 pub struct ConnectionFinishedHandler {}
@@ -111,31 +112,23 @@ pub type TcpServer<ReceivesTc, SendError> = TcpSpacepacketsServer<
     SendError,
 >;
 
-pub struct TcpTask<TcSender: PacketSenderRaw<Error = SendError>, SendError: Debug + 'static>(
-    pub TcpServer<TcSender, SendError>,
-    PhantomData<SendError>,
-);
+pub struct TcpTask(pub TcpServer<TmTcSender, StoreAndSendError>);
 
-impl<TcSender: PacketSenderRaw<Error = SendError>, SendError: Debug + 'static>
-    TcpTask<TcSender, SendError>
-{
+impl TcpTask {
     pub fn new(
         cfg: ServerConfig,
         tm_source: SyncTcpTmSource,
-        tc_sender: TcSender,
+        tc_sender: TmTcSender,
         valid_ids: HashSet<PacketId>,
     ) -> Result<Self, std::io::Error> {
-        Ok(Self(
-            TcpSpacepacketsServer::new(
-                cfg,
-                tm_source,
-                tc_sender,
-                SimplePacketValidator { valid_ids },
-                ConnectionFinishedHandler::default(),
-                None,
-            )?,
-            PhantomData,
-        ))
+        Ok(Self(TcpSpacepacketsServer::new(
+            cfg,
+            tm_source,
+            tc_sender,
+            SimplePacketValidator { valid_ids },
+            ConnectionFinishedHandler::default(),
+            None,
+        )?))
     }
 
     pub fn periodic_operation(&mut self) {

@@ -11,7 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo check --release
+      - run: cargo check
+      # Check example with static pool configuration
+      - run: cargo check -p satrs-example --no-default-features
 
   test:
     name: Run Tests
@@ -37,7 +39,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: "armv7-unknown-linux-gnueabihf, thumbv7em-none-eabihf"
-      - run: cargo check -p satrs --release --target=${{matrix.target}} --no-default-features
+      - run: cargo check -p satrs --target=${{matrix.target}} --no-default-features
 
   fmt:
     name: Check formatting

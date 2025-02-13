@@ -1,28 +1,26 @@
 use derive_new::new;
 use satrs::hk::{CollectionIntervalFactor, HkRequest, HkRequestVariant, UniqueId};
-use satrs::pool::SharedStaticMemoryPool;
 use satrs::pus::verification::{
     FailParams, TcStateAccepted, TcStateStarted, VerificationReporter,
     VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
     ActivePusRequestStd, ActiveRequestProvider, DefaultActiveRequestMap, EcssTcAndToken,
-    EcssTcInMemConverter, EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTmSender,
-    EcssTmtcError, GenericConversionError, MpscTcReceiver, MpscTmAsVecSender,
+    EcssTcInMemConverter, EcssTmSender, EcssTmtcError, GenericConversionError, MpscTcReceiver,
     PusPacketHandlingError, PusReplyHandler, PusServiceHelper, PusTcToRequestConverter,
 };
 use satrs::request::{GenericMessage, UniqueApidTargetId};
 use satrs::res_code::ResultU16;
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{hk, PusPacket, PusServiceId};
-use satrs::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
-use satrs_example::config::components::PUS_HK_SERVICE;
+use satrs_example::config::pus::PUS_HK_SERVICE;
 use satrs_example::config::{hk_err, tmtc_err};
 use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::pus::{create_verification_reporter, generic_pus_request_timeout_handler};
 use crate::requests::GenericRequestRouter;
+use crate::tmtc::sender::TmTcSender;
 
 use super::{HandlingStatus, PusTargetedRequestService, TargetedPusService};
 
@@ -242,20 +240,20 @@ impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for HkRequestConver
     }
 }
 
-pub fn create_hk_service_static(
-    tm_sender: PacketSenderWithSharedPool,
-    tc_pool: SharedStaticMemoryPool,
+pub fn create_hk_service(
+    tm_sender: TmTcSender,
+    tc_in_mem_converter: EcssTcInMemConverter,
     pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
     request_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<HkReply>>,
-) -> HkServiceWrapper<PacketSenderWithSharedPool, EcssTcInSharedStoreConverter> {
+) -> HkServiceWrapper {
     let pus_3_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
             PUS_HK_SERVICE.id(),
             pus_hk_rx,
             tm_sender,
             create_verification_reporter(PUS_HK_SERVICE.id(), PUS_HK_SERVICE.apid),
-            EcssTcInSharedStoreConverter::new(tc_pool, 2048),
+            tc_in_mem_converter,
         ),
         HkRequestConverter::default(),
         DefaultActiveRequestMap::default(),
@@ -268,36 +266,9 @@ pub fn create_hk_service_static(
     }
 }
 
-pub fn create_hk_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<PacketAsVec>,
-    pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
-    request_router: GenericRequestRouter,
-    reply_receiver: mpsc::Receiver<GenericMessage<HkReply>>,
-) -> HkServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {
-    let pus_3_handler = PusTargetedRequestService::new(
-        PusServiceHelper::new(
-            PUS_HK_SERVICE.id(),
-            pus_hk_rx,
-            tm_funnel_tx,
-            create_verification_reporter(PUS_HK_SERVICE.id(), PUS_HK_SERVICE.apid),
-            EcssTcInVecConverter::default(),
-        ),
-        HkRequestConverter::default(),
-        DefaultActiveRequestMap::default(),
-        HkReplyHandler::default(),
-        request_router,
-        reply_receiver,
-    );
-    HkServiceWrapper {
-        service: pus_3_handler,
-    }
-}
-
-pub struct HkServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> {
+pub struct HkServiceWrapper {
     pub(crate) service: PusTargetedRequestService<
         MpscTcReceiver,
-        TmSender,
-        TcInMemConverter,
         VerificationReporter,
         HkRequestConverter,
         HkReplyHandler,
@@ -308,9 +279,7 @@ pub struct HkServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMe
     >,
 }
 
-impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> TargetedPusService
-    for HkServiceWrapper<TmSender, TcInMemConverter>
-{
+impl TargetedPusService for HkServiceWrapper {
     const SERVICE_ID: u8 = PusServiceId::Housekeeping as u8;
     const SERVICE_STR: &'static str = "housekeeping";
 

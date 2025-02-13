@@ -1,11 +1,9 @@
 use satrs::{
     pool::PoolProvider,
     pus::HandlingStatus,
-    tmtc::{PacketAsVec, PacketInPool, PacketSenderWithSharedPool, SharedPacketPool},
+    tmtc::{PacketAsVec, PacketInPool, SharedPacketPool},
 };
 use std::sync::mpsc::{self, TryRecvError};
-
-use satrs::pus::MpscTmAsVecSender;
 
 use crate::pus::PusTcDistributor;
 
@@ -14,14 +12,15 @@ pub struct TcSourceTaskStatic {
     shared_tc_pool: SharedPacketPool,
     tc_receiver: mpsc::Receiver<PacketInPool>,
     tc_buf: [u8; 4096],
-    pus_distributor: PusTcDistributor<PacketSenderWithSharedPool>,
+    pus_distributor: PusTcDistributor,
 }
 
+#[allow(dead_code)]
 impl TcSourceTaskStatic {
     pub fn new(
         shared_tc_pool: SharedPacketPool,
         tc_receiver: mpsc::Receiver<PacketInPool>,
-        pus_receiver: PusTcDistributor<PacketSenderWithSharedPool>,
+        pus_receiver: PusTcDistributor,
     ) -> Self {
         Self {
             shared_tc_pool,
@@ -67,14 +66,12 @@ impl TcSourceTaskStatic {
 // TC source components where the heap is the backing memory of the received telecommands.
 pub struct TcSourceTaskDynamic {
     pub tc_receiver: mpsc::Receiver<PacketAsVec>,
-    pus_distributor: PusTcDistributor<MpscTmAsVecSender>,
+    pus_distributor: PusTcDistributor,
 }
 
+#[allow(dead_code)]
 impl TcSourceTaskDynamic {
-    pub fn new(
-        tc_receiver: mpsc::Receiver<PacketAsVec>,
-        pus_receiver: PusTcDistributor<MpscTmAsVecSender>,
-    ) -> Self {
+    pub fn new(tc_receiver: mpsc::Receiver<PacketAsVec>, pus_receiver: PusTcDistributor) -> Self {
         Self {
             tc_receiver,
             pus_distributor: pus_receiver,
@@ -102,6 +99,21 @@ impl TcSourceTaskDynamic {
                     HandlingStatus::Empty
                 }
             },
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub enum TcSourceTask {
+    Static(TcSourceTaskStatic),
+    Heap(TcSourceTaskDynamic),
+}
+
+impl TcSourceTask {
+    pub fn periodic_operation(&mut self) {
+        match self {
+            TcSourceTask::Static(task) => task.periodic_operation(),
+            TcSourceTask::Heap(task) => task.periodic_operation(),
         }
     }
 }

@@ -31,11 +31,15 @@ fn create_sim_controller(
     request_receiver: mpsc::Receiver<SimRequest>,
 ) -> SimController {
     // Instantiate models and their mailboxes.
-    let mgm_model =
+    let mgm_0_model =
+        MagnetometerModel::new_for_lis3mdl(Duration::from_millis(50), reply_sender.clone());
+    let mgm_1_model =
         MagnetometerModel::new_for_lis3mdl(Duration::from_millis(50), reply_sender.clone());
 
-    let mgm_mailbox = Mailbox::new();
-    let mgm_addr = mgm_mailbox.address();
+    let mgm_0_mailbox = Mailbox::new();
+    let mgm_0_addr = mgm_0_mailbox.address();
+    let mgm_1_mailbox = Mailbox::new();
+    let mgm_1_addr = mgm_1_mailbox.address();
     let pcdu_mailbox = Mailbox::new();
     let pcdu_addr = pcdu_mailbox.address();
     let mgt_mailbox = Mailbox::new();
@@ -43,8 +47,11 @@ fn create_sim_controller(
 
     let mut pcdu_model = PcduModel::new(reply_sender.clone());
     pcdu_model
-        .mgm_switch
-        .connect(MagnetometerModel::switch_device, &mgm_addr);
+        .mgm_0_switch
+        .connect(MagnetometerModel::switch_device, &mgm_0_addr);
+    pcdu_model
+        .mgm_1_switch
+        .connect(MagnetometerModel::switch_device, &mgm_1_addr);
 
     let mut mgt_model = MagnetorquerModel::new(reply_sender.clone());
     // Input connections.
@@ -52,9 +59,14 @@ fn create_sim_controller(
         .mgt_switch
         .connect(MagnetorquerModel::switch_device, &mgt_addr);
     // Output connections.
-    mgt_model
-        .gen_magnetic_field
-        .connect(MagnetometerModel::apply_external_magnetic_field, &mgm_addr);
+    mgt_model.gen_magnetic_field.connect(
+        MagnetometerModel::apply_external_magnetic_field,
+        &mgm_0_addr,
+    );
+    mgt_model.gen_magnetic_field.connect(
+        MagnetometerModel::apply_external_magnetic_field,
+        &mgm_1_addr,
+    );
 
     // Instantiate the simulator
     let sys_clock = SystemClock::from_system_time(start_time, SystemTime::now());
@@ -63,9 +75,10 @@ fn create_sim_controller(
     } else {
         SimInit::new()
     };
-    let addrs = ModelAddrWrapper::new(mgm_addr, pcdu_addr, mgt_addr);
+    let addrs = ModelAddrWrapper::new(mgm_0_addr, mgm_1_addr, pcdu_addr, mgt_addr);
     let (simulation, scheduler) = sim_init
-        .add_model(mgm_model, mgm_mailbox, "MGM model")
+        .add_model(mgm_0_model, mgm_0_mailbox, "MGM 0 model")
+        .add_model(mgm_1_model, mgm_1_mailbox, "MGM 1 model")
         .add_model(pcdu_model, pcdu_mailbox, "PCDU model")
         .add_model(mgt_model, mgt_mailbox, "MGT model")
         .init(start_time)

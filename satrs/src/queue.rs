@@ -1,6 +1,3 @@
-use core::fmt::{Display, Formatter};
-#[cfg(feature = "std")]
-use std::error::Error;
 #[cfg(feature = "std")]
 use std::sync::mpsc;
 
@@ -10,89 +7,31 @@ use crate::ComponentId;
 pub type ChannelId = u32;
 
 /// Generic error type for sending something via a message queue.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GenericSendError {
+    #[error("rx side has disconnected")]
     RxDisconnected,
+    #[error("queue with max capacity of {0:?} is full")]
     QueueFull(Option<u32>),
+    #[error("target queue with ID {0} does not exist")]
     TargetDoesNotExist(ComponentId),
 }
 
-impl Display for GenericSendError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            GenericSendError::RxDisconnected => {
-                write!(f, "rx side has disconnected")
-            }
-            GenericSendError::QueueFull(max_cap) => {
-                write!(f, "queue with max capacity of {max_cap:?} is full")
-            }
-            GenericSendError::TargetDoesNotExist(target) => {
-                write!(f, "target queue with ID {target} does not exist")
-            }
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl Error for GenericSendError {}
-
 /// Generic error type for sending something via a message queue.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GenericReceiveError {
+    #[error("nothing to receive")]
     Empty,
+    #[error("tx side with id {0:?} has disconnected")]
     TxDisconnected(Option<ComponentId>),
 }
 
-impl Display for GenericReceiveError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::TxDisconnected(channel_id) => {
-                write!(f, "tx side with id {channel_id:?} has disconnected")
-            }
-            Self::Empty => {
-                write!(f, "nothing to receive")
-            }
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl Error for GenericReceiveError {}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum GenericTargetedMessagingError {
-    Send(GenericSendError),
-    Receive(GenericReceiveError),
-}
-impl From<GenericSendError> for GenericTargetedMessagingError {
-    fn from(value: GenericSendError) -> Self {
-        Self::Send(value)
-    }
-}
-
-impl From<GenericReceiveError> for GenericTargetedMessagingError {
-    fn from(value: GenericReceiveError) -> Self {
-        Self::Receive(value)
-    }
-}
-
-impl Display for GenericTargetedMessagingError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Send(err) => write!(f, "generic targeted messaging error: {}", err),
-            Self::Receive(err) => write!(f, "generic targeted messaging error: {}", err),
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl Error for GenericTargetedMessagingError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            GenericTargetedMessagingError::Send(send) => Some(send),
-            GenericTargetedMessagingError::Receive(receive) => Some(receive),
-        }
-    }
+    #[error("generic targeted messaging send error: {0}")]
+    Send(#[from] GenericSendError),
+    #[error("generic targeted messaging receive error: {0}")]
+    Receive(#[from] GenericReceiveError),
 }
 
 #[cfg(feature = "std")]

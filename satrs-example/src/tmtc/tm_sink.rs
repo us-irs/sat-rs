@@ -89,6 +89,7 @@ pub struct TmSinkStatic {
     tm_server_tx: mpsc::SyncSender<PacketInPool>,
 }
 
+#[allow(dead_code)]
 impl TmSinkStatic {
     pub fn new(
         shared_tm_store: SharedPacketPool,
@@ -132,14 +133,15 @@ impl TmSinkStatic {
 pub struct TmSinkDynamic {
     common: TmFunnelCommon,
     tm_funnel_rx: mpsc::Receiver<PacketAsVec>,
-    tm_server_tx: mpsc::Sender<PacketAsVec>,
+    tm_server_tx: mpsc::SyncSender<PacketAsVec>,
 }
 
+#[allow(dead_code)]
 impl TmSinkDynamic {
     pub fn new(
         sync_tm_tcp_source: SyncTcpTmSource,
         tm_funnel_rx: mpsc::Receiver<PacketAsVec>,
-        tm_server_tx: mpsc::Sender<PacketAsVec>,
+        tm_server_tx: mpsc::SyncSender<PacketAsVec>,
     ) -> Self {
         Self {
             common: TmFunnelCommon::new(sync_tm_tcp_source),
@@ -159,6 +161,21 @@ impl TmSinkDynamic {
             self.tm_server_tx
                 .send(tm)
                 .expect("Sending TM to server failed");
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub enum TmSink {
+    Static(TmSinkStatic),
+    Heap(TmSinkDynamic),
+}
+
+impl TmSink {
+    pub fn operation(&mut self) {
+        match self {
+            TmSink::Static(static_sink) => static_sink.operation(),
+            TmSink::Heap(dynamic_sink) => dynamic_sink.operation(),
         }
     }
 }

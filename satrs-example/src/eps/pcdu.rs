@@ -8,15 +8,22 @@ use derive_new::new;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use satrs::{
     hk::{HkRequest, HkRequestVariant},
-    mode::{ModeAndSubmode, ModeError, ModeProvider, ModeReply, ModeRequestHandler},
+    mode::{
+        ModeAndSubmode, ModeError, ModeProvider, ModeReply, ModeRequestHandler,
+        ModeRequestHandlerMpscBounded,
+    },
+    mode_tree::{ModeChild, ModeNode},
     power::SwitchRequest,
     pus::{EcssTmSender, PusTmVariant},
-    queue::{GenericSendError, GenericTargetedMessagingError},
+    queue::GenericSendError,
     request::{GenericMessage, MessageMetadata, UniqueApidTargetId},
     spacepackets::ByteConversionError,
 };
 use satrs_example::{
-    config::components::{NO_SENDER, PUS_MODE_SERVICE},
+    config::{
+        components::{NO_SENDER, PCDU_HANDLER},
+        pus::PUS_MODE_SERVICE,
+    },
     DeviceMode, TimestampHelper,
 };
 use satrs_minisim::{
@@ -28,10 +35,10 @@ use satrs_minisim::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    acs::mgm::MpscModeLeafInterface,
     hk::PusHkHelper,
     pus::hk::{HkReply, HkReplyVariant},
     requests::CompositeRequest,
+    tmtc::sender::TmTcSender,
 };
 
 pub trait SerialInterface {
@@ -200,14 +207,14 @@ pub type SharedSwitchSet = Arc<Mutex<SwitchSet>>;
 /// Example PCDU device handler.
 #[derive(new)]
 #[allow(clippy::too_many_arguments)]
-pub struct PcduHandler<ComInterface: SerialInterface, TmSender: EcssTmSender> {
+pub struct PcduHandler<ComInterface: SerialInterface> {
     id: UniqueApidTargetId,
     dev_str: &'static str,
-    mode_interface: MpscModeLeafInterface,
+    mode_node: ModeRequestHandlerMpscBounded,
     composite_request_rx: mpsc::Receiver<GenericMessage<CompositeRequest>>,
-    hk_reply_tx: mpsc::Sender<GenericMessage<HkReply>>,
+    hk_reply_tx: mpsc::SyncSender<GenericMessage<HkReply>>,
     switch_request_rx: mpsc::Receiver<GenericMessage<SwitchRequest>>,
-    tm_sender: TmSender,
+    tm_sender: TmTcSender,
     pub com_interface: ComInterface,
     shared_switch_map: Arc<Mutex<SwitchSet>>,
     #[new(value = "PusHkHelper::new(id)")]
@@ -220,7 +227,7 @@ pub struct PcduHandler<ComInterface: SerialInterface, TmSender: EcssTmSender> {
     tm_buf: [u8; 256],
 }
 
-impl<ComInterface: SerialInterface, TmSender: EcssTmSender> PcduHandler<ComInterface, TmSender> {
+impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
     pub fn periodic_operation(&mut self, op_code: OpCode) {
         match op_code {
             OpCode::RegularOp => {
@@ -324,25 +331,30 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> PcduHandler<ComInter
     pub fn handle_mode_requests(&mut self) {
         loop {
             // TODO: Only allow one set mode request per cycle?
-            match self.mode_interface.request_rx.try_recv() {
-                Ok(msg) => {
-                    let result = self.handle_mode_request(msg);
-                    // TODO: Trigger event?
-                    if result.is_err() {
-                        log::warn!(
-                            "{}: mode request failed with error {:?}",
-                            self.dev_str,
-                            result.err().unwrap()
-                        );
-                    }
-                }
-                Err(e) => {
-                    if e != mpsc::TryRecvError::Empty {
-                        log::warn!("{}: failed to receive mode request: {:?}", self.dev_str, e);
+            match self.mode_node.try_recv_mode_request() {
+                Ok(opt_msg) => {
+                    if let Some(msg) = opt_msg {
+                        let result = self.handle_mode_request(msg);
+                        // TODO: Trigger event?
+                        if result.is_err() {
+                            log::warn!(
+                                "{}: mode request failed with error {:?}",
+                                self.dev_str,
+                                result.err().unwrap()
+                            );
+                        }
                     } else {
                         break;
                     }
                 }
+                Err(e) => match e {
+                    satrs::queue::GenericReceiveError::Empty => {
+                        break;
+                    }
+                    satrs::queue::GenericReceiveError::TxDisconnected(_) => {
+                        log::warn!("{}: failed to receive mode request: {:?}", self.dev_str, e);
+                    }
+                },
             }
         }
     }
@@ -396,22 +408,19 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> PcduHandler<ComInter
     }
 }
 
-impl<ComInterface: SerialInterface, TmSender: EcssTmSender> ModeProvider
-    for PcduHandler<ComInterface, TmSender>
-{
+impl<ComInterface: SerialInterface> ModeProvider for PcduHandler<ComInterface> {
     fn mode_and_submode(&self) -> ModeAndSubmode {
         self.mode_and_submode
     }
 }
 
-impl<ComInterface: SerialInterface, TmSender: EcssTmSender> ModeRequestHandler
-    for PcduHandler<ComInterface, TmSender>
-{
+impl<ComInterface: SerialInterface> ModeRequestHandler for PcduHandler<ComInterface> {
     type Error = ModeError;
     fn start_transition(
         &mut self,
         requestor: MessageMetadata,
         mode_and_submode: ModeAndSubmode,
+        _forced: bool,
     ) -> Result<(), satrs::mode::ModeError> {
         log::info!(
             "{}: transitioning to mode {:?}",
@@ -466,10 +475,9 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> ModeRequestHandler
                 requestor.sender_id()
             );
         }
-        self.mode_interface
-            .reply_to_pus_tx
-            .send(GenericMessage::new(requestor, reply))
-            .map_err(|_| GenericTargetedMessagingError::Send(GenericSendError::RxDisconnected))?;
+        self.mode_node
+            .send_mode_reply(requestor, reply)
+            .map_err(|_| GenericSendError::RxDisconnected)?;
         Ok(())
     }
 
@@ -482,6 +490,20 @@ impl<ComInterface: SerialInterface, TmSender: EcssTmSender> ModeRequestHandler
     }
 }
 
+impl<ComInterface: SerialInterface> ModeNode for PcduHandler<ComInterface> {
+    fn id(&self) -> satrs::ComponentId {
+        PCDU_HANDLER.into()
+    }
+}
+
+impl<ComInterface: SerialInterface> ModeChild for PcduHandler<ComInterface> {
+    type Sender = mpsc::SyncSender<GenericMessage<ModeReply>>;
+
+    fn add_mode_parent(&mut self, id: satrs::ComponentId, reply_sender: Self::Sender) {
+        self.mode_node.add_message_target(id, reply_sender);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
@@ -489,7 +511,10 @@ mod tests {
     use satrs::{
         mode::ModeRequest, power::SwitchStateBinary, request::GenericMessage, tmtc::PacketAsVec,
     };
-    use satrs_example::config::components::{Apid, MGM_HANDLER_0};
+    use satrs_example::config::{
+        acs::MGM_HANDLER_0,
+        components::{Apid, EPS_SUBSYSTEM, PCDU_HANDLER},
+    };
     use satrs_minisim::eps::SwitchMapBinary;
 
     use super::*;
@@ -530,31 +555,41 @@ mod tests {
     }
 
     pub struct PcduTestbench {
-        pub mode_request_tx: mpsc::Sender<GenericMessage<ModeRequest>>,
+        pub mode_request_tx: mpsc::SyncSender<GenericMessage<ModeRequest>>,
         pub mode_reply_rx_to_pus: mpsc::Receiver<GenericMessage<ModeReply>>,
         pub mode_reply_rx_to_parent: mpsc::Receiver<GenericMessage<ModeReply>>,
         pub composite_request_tx: mpsc::Sender<GenericMessage<CompositeRequest>>,
         pub hk_reply_rx: mpsc::Receiver<GenericMessage<HkReply>>,
         pub tm_rx: mpsc::Receiver<PacketAsVec>,
         pub switch_request_tx: mpsc::Sender<GenericMessage<SwitchRequest>>,
-        pub handler: PcduHandler<SerialInterfaceTest, mpsc::Sender<PacketAsVec>>,
+        pub handler: PcduHandler<SerialInterfaceTest>,
     }
 
     impl PcduTestbench {
         pub fn new() -> Self {
-            let (mode_request_tx, mode_request_rx) = mpsc::channel();
-            let (mode_reply_tx_to_pus, mode_reply_rx_to_pus) = mpsc::channel();
+            let (mode_request_tx, mode_request_rx) = mpsc::sync_channel(5);
+            let (mode_reply_tx_to_pus, mode_reply_rx_to_pus) = mpsc::sync_channel(5);
             let (mode_reply_tx_to_parent, mode_reply_rx_to_parent) = mpsc::sync_channel(5);
-            let mode_interface = MpscModeLeafInterface {
-                request_rx: mode_request_rx,
-                reply_to_pus_tx: mode_reply_tx_to_pus,
-                reply_to_parent_tx: mode_reply_tx_to_parent,
-            };
+            let mode_node =
+                ModeRequestHandlerMpscBounded::new(PCDU_HANDLER.into(), mode_request_rx);
             let (composite_request_tx, composite_request_rx) = mpsc::channel();
-            let (hk_reply_tx, hk_reply_rx) = mpsc::channel();
-            let (tm_tx, tm_rx) = mpsc::channel::<PacketAsVec>();
+            let (hk_reply_tx, hk_reply_rx) = mpsc::sync_channel(10);
+            let (tm_tx, tm_rx) = mpsc::sync_channel::<PacketAsVec>(5);
             let (switch_request_tx, switch_reqest_rx) = mpsc::channel();
             let shared_switch_map = Arc::new(Mutex::new(SwitchSet::default()));
+            let mut handler = PcduHandler::new(
+                UniqueApidTargetId::new(Apid::Eps as u16, 0),
+                "TEST_PCDU",
+                mode_node,
+                composite_request_rx,
+                hk_reply_tx,
+                switch_reqest_rx,
+                TmTcSender::Heap(tm_tx.clone()),
+                SerialInterfaceTest::default(),
+                shared_switch_map,
+            );
+            handler.add_mode_parent(EPS_SUBSYSTEM.into(), mode_reply_tx_to_parent);
+            handler.add_mode_parent(PUS_MODE_SERVICE.into(), mode_reply_tx_to_pus);
             Self {
                 mode_request_tx,
                 mode_reply_rx_to_pus,
@@ -563,17 +598,7 @@ mod tests {
                 hk_reply_rx,
                 tm_rx,
                 switch_request_tx,
-                handler: PcduHandler::new(
-                    UniqueApidTargetId::new(Apid::Eps as u16, 0),
-                    "TEST_PCDU",
-                    mode_interface,
-                    composite_request_rx,
-                    hk_reply_tx,
-                    switch_reqest_rx,
-                    tm_tx,
-                    SerialInterfaceTest::default(),
-                    shared_switch_map,
-                ),
+                handler,
             }
         }
 
@@ -660,7 +685,10 @@ mod tests {
             .mode_request_tx
             .send(GenericMessage::new(
                 MessageMetadata::new(0, PUS_MODE_SERVICE.id()),
-                ModeRequest::SetMode(ModeAndSubmode::new(DeviceMode::Normal as u32, 0)),
+                ModeRequest::SetMode {
+                    mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
+                    forced: false,
+                },
             ))
             .expect("failed to send mode request");
         let switch_map_shared = testbench.handler.shared_switch_map.lock().unwrap();
@@ -692,7 +720,10 @@ mod tests {
             .mode_request_tx
             .send(GenericMessage::new(
                 MessageMetadata::new(0, PUS_MODE_SERVICE.id()),
-                ModeRequest::SetMode(ModeAndSubmode::new(DeviceMode::Normal as u32, 0)),
+                ModeRequest::SetMode {
+                    mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
+                    forced: false,
+                },
             ))
             .expect("failed to send mode request");
         testbench

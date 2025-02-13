@@ -135,6 +135,33 @@ pub mod components {
         Eps = 6,
     }
 
+    #[derive(Copy, Clone, PartialEq, Eq)]
+    pub enum EpsId {
+        Pcdu = 0,
+        Subsystem = 1,
+    }
+
+    #[derive(Copy, Clone, PartialEq, Eq)]
+    pub enum TmtcId {
+        UdpServer = 0,
+        TcpServer = 1,
+    }
+
+    pub const EPS_SUBSYSTEM: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::Eps as u16, EpsId::Subsystem as u32);
+    pub const PCDU_HANDLER: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::Eps as u16, EpsId::Pcdu as u32);
+    pub const UDP_SERVER: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::Tmtc as u16, TmtcId::UdpServer as u32);
+    pub const TCP_SERVER: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::Tmtc as u16, TmtcId::TcpServer as u32);
+    pub const NO_SENDER: ComponentId = ComponentId::MAX;
+}
+
+pub mod pus {
+    use super::components::Apid;
+    use satrs::request::UniqueApidTargetId;
+
     // Component IDs for components with the PUS APID.
     #[derive(Copy, Clone, PartialEq, Eq)]
     pub enum PusId {
@@ -145,23 +172,6 @@ pub mod components {
         PusMode = 4,
         PusHk = 5,
     }
-
-    #[derive(Copy, Clone, PartialEq, Eq)]
-    pub enum AcsId {
-        Mgm0 = 0,
-    }
-
-    #[derive(Copy, Clone, PartialEq, Eq)]
-    pub enum EpsId {
-        Pcdu = 0,
-    }
-
-    #[derive(Copy, Clone, PartialEq, Eq)]
-    pub enum TmtcId {
-        UdpServer = 0,
-        TcpServer = 1,
-    }
-
     pub const PUS_ACTION_SERVICE: UniqueApidTargetId =
         UniqueApidTargetId::new(Apid::GenericPus as u16, PusId::PusAction as u32);
     pub const PUS_EVENT_MANAGEMENT: UniqueApidTargetId =
@@ -176,15 +186,26 @@ pub mod components {
         UniqueApidTargetId::new(Apid::GenericPus as u16, PusId::PusHk as u32);
     pub const PUS_SCHED_SERVICE: UniqueApidTargetId =
         UniqueApidTargetId::new(Apid::Sched as u16, 0);
+}
+
+pub mod acs {
+    use super::components::Apid;
+    use satrs::request::UniqueApidTargetId;
+
+    #[derive(Copy, Clone, PartialEq, Eq)]
+    pub enum AcsId {
+        Subsystem = 1,
+        Assembly = 2,
+        Mgm0 = 3,
+        Mgm1 = 4,
+    }
+
+    pub const MGM_ASSEMBLY: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::Acs as u16, AcsId::Assembly as u32);
     pub const MGM_HANDLER_0: UniqueApidTargetId =
         UniqueApidTargetId::new(Apid::Acs as u16, AcsId::Mgm0 as u32);
-    pub const PCDU_HANDLER: UniqueApidTargetId =
-        UniqueApidTargetId::new(Apid::Eps as u16, EpsId::Pcdu as u32);
-    pub const UDP_SERVER: UniqueApidTargetId =
-        UniqueApidTargetId::new(Apid::Tmtc as u16, TmtcId::UdpServer as u32);
-    pub const TCP_SERVER: UniqueApidTargetId =
-        UniqueApidTargetId::new(Apid::Tmtc as u16, TmtcId::TcpServer as u32);
-    pub const NO_SENDER: ComponentId = ComponentId::MAX;
+    pub const MGM_HANDLER_1: UniqueApidTargetId =
+        UniqueApidTargetId::new(Apid::Acs as u16, AcsId::Mgm0 as u32);
 }
 
 pub mod pool {

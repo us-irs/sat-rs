@@ -14,7 +14,7 @@ use satrs::request::{GenericMessage, MessageMetadata, UniqueApidTargetId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusPacket;
 use satrs::ComponentId;
-use satrs_example::config::components::PUS_ROUTING_SERVICE;
+use satrs_example::config::pus::PUS_ROUTING_SERVICE;
 use satrs_example::config::tmtc_err;
 
 #[derive(Clone, Debug)]

@@ -14,7 +14,7 @@ You can run the application using `cargo run`.
 
 # Features
 
-The example has the `dyn_tmtc` feature which is enabled by default. With this feature enabled,
+The example has the `heap_tmtc` feature which is enabled by default. With this feature enabled,
 TMTC packets are exchanged using the heap as the backing memory instead of pre-allocated static
 stores.
 

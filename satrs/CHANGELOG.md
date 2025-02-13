@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+`spacepackets` v0.13
+
 ## Changed
 
 - Renamed `StaticPoolConfig::new` to `StaticPoolConfig::new_from_subpool_cfg_tuples`. The new
@@ -20,6 +22,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 - `StaticHeaplessMemoryPool` which can be grown with user-provided static buffers.
 - Scheduling table for systems with a standard runtime
+- Mode Tree Feature which allows building a network of mode components which can send mode
+  messages to each other.
+- Added first helper features like the `SubsystemExecutionHelper` and the
+  `SubsystemCommandingHelper` which allows to build subsystem components. Subsystem components
+  are able to execute mode sequences and perform target keeping based on a declarative table
+  format.
+- Added `DevManagerCommandingHelper` which performs some of the boilerplate logik required
+  by Assembly and Device Management components. This includes forwarding mode requests and
+  handling mode replies.
+- First basic health module with `HealthState`s and the `HealthTableProvider` trait. These
+  components are important for any FDIR components which get added in the future.
 
 # [v0.2.1] 2024-05-19
 

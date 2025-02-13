@@ -39,7 +39,10 @@ class EventU32:
 
 
 class AcsId(enum.IntEnum):
-    MGM_0 = 0
+    SUBSYSTEM = 1
+    MGM_ASSEMBLY = 2
+    MGM_0 = 3
+    MGM_1 = 4
 
 
 class AcsHkIds(enum.IntEnum):

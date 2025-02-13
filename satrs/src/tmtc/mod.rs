@@ -14,6 +14,7 @@ use crate::{
 };
 #[cfg(feature = "std")]
 pub use alloc_mod::*;
+use core::fmt::Debug;
 #[cfg(feature = "alloc")]
 use downcast_rs::{impl_downcast, Downcast};
 use spacepackets::{
@@ -170,7 +171,7 @@ where
 }
 
 /// Helper trait for any generic (static) store which allows storing raw or CCSDS packets.
-pub trait CcsdsPacketPool {
+pub trait CcsdsPacketPool: Debug {
     fn add_ccsds_tc(&mut self, _: &SpHeader, tc_raw: &[u8]) -> Result<PoolAddr, PoolError> {
         self.add_raw_tc(tc_raw)
     }
@@ -190,7 +191,7 @@ pub trait PusTmPool {
 }
 
 /// Generic trait for any sender component able to send packets stored inside a pool structure.
-pub trait PacketInPoolSender: Send {
+pub trait PacketInPoolSender: Debug + Send {
     fn send_packet(
         &self,
         sender_id: ComponentId,
@@ -235,7 +236,7 @@ pub mod std_mod {
 
     /// Newtype wrapper around the [SharedStaticMemoryPool] to enable extension helper traits on
     /// top of the regular shared memory pool API.
-    #[derive(Clone)]
+    #[derive(Debug, Clone)]
     pub struct SharedPacketPool(pub SharedStaticMemoryPool);
 
     impl SharedPacketPool {
@@ -287,7 +288,6 @@ pub mod std_mod {
         }
     }
 
-    #[cfg(feature = "std")]
     impl PacketSenderRaw for mpsc::Sender<PacketAsVec> {
         type Error = GenericSendError;
 
@@ -297,7 +297,6 @@ pub mod std_mod {
         }
     }
 
-    #[cfg(feature = "std")]
     impl PacketSenderRaw for mpsc::SyncSender<PacketAsVec> {
         type Error = GenericSendError;
 
@@ -362,7 +361,7 @@ pub mod std_mod {
 
     /// This is the primary structure used to send packets stored in a dedicated memory pool
     /// structure.
-    #[derive(Clone)]
+    #[derive(Debug, Clone)]
     pub struct PacketSenderWithSharedPool<
         Sender: PacketInPoolSender = mpsc::SyncSender<PacketInPool>,
         PacketPool: CcsdsPacketPool = SharedPacketPool,

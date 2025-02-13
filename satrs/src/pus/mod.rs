@@ -947,7 +947,7 @@ pub mod std_mod {
         }
     }
 
-    pub trait EcssTcInMemConverter {
+    pub trait EcssTcInMemConversionProvider {
         fn cache(&mut self, possible_packet: &TcInMemory) -> Result<(), PusTcFromMemError>;
 
         fn tc_slice_raw(&self) -> &[u8];
@@ -980,7 +980,7 @@ pub mod std_mod {
         pub pus_tc_raw: Option<Vec<u8>>,
     }
 
-    impl EcssTcInMemConverter for EcssTcInVecConverter {
+    impl EcssTcInMemConversionProvider for EcssTcInVecConverter {
         fn cache(&mut self, tc_in_memory: &TcInMemory) -> Result<(), PusTcFromMemError> {
             self.pus_tc_raw = None;
             match tc_in_memory {
@@ -1011,24 +1011,25 @@ pub mod std_mod {
     /// [SharedStaticMemoryPool] structure. This is useful if run-time allocation for these
     /// packets should be avoided. Please note that this structure is not able to convert TCs which
     /// are stored as a `Vec<u8>`.
-    pub struct EcssTcInSharedStoreConverter {
+    #[derive(Clone)]
+    pub struct EcssTcInSharedPoolConverter {
         sender_id: Option<ComponentId>,
-        shared_tc_store: SharedStaticMemoryPool,
+        shared_tc_pool: SharedStaticMemoryPool,
         pus_buf: Vec<u8>,
     }
 
-    impl EcssTcInSharedStoreConverter {
+    impl EcssTcInSharedPoolConverter {
         pub fn new(shared_tc_store: SharedStaticMemoryPool, max_expected_tc_size: usize) -> Self {
             Self {
                 sender_id: None,
-                shared_tc_store,
+                shared_tc_pool: shared_tc_store,
                 pus_buf: alloc::vec![0; max_expected_tc_size],
             }
         }
 
         pub fn copy_tc_to_buf(&mut self, addr: PoolAddr) -> Result<(), PusTcFromMemError> {
             // Keep locked section as short as possible.
-            let mut tc_pool = self.shared_tc_store.write().map_err(|_| {
+            let mut tc_pool = self.shared_tc_pool.write().map_err(|_| {
                 PusTcFromMemError::EcssTmtc(EcssTmtcError::Store(PoolError::LockError))
             })?;
             let tc_size = tc_pool.len_of_data(&addr).map_err(EcssTmtcError::Store)?;
@@ -1048,7 +1049,7 @@ pub mod std_mod {
         }
     }
 
-    impl EcssTcInMemConverter for EcssTcInSharedStoreConverter {
+    impl EcssTcInMemConversionProvider for EcssTcInSharedPoolConverter {
         fn cache(&mut self, tc_in_memory: &TcInMemory) -> Result<(), PusTcFromMemError> {
             match tc_in_memory {
                 super::TcInMemory::Pool(packet_in_pool) => {
@@ -1068,6 +1069,44 @@ pub mod std_mod {
 
         fn sender_id(&self) -> Option<ComponentId> {
             self.sender_id
+        }
+    }
+
+    // TODO: alloc feature flag?
+    #[derive(Clone)]
+    pub enum EcssTcInMemConverter {
+        Static(EcssTcInSharedPoolConverter),
+        Heap(EcssTcInVecConverter),
+    }
+
+    impl EcssTcInMemConverter {
+        pub fn new_static(static_store_converter: EcssTcInSharedPoolConverter) -> Self {
+            EcssTcInMemConverter::Static(static_store_converter)
+        }
+
+        pub fn new_heap(heap_converter: EcssTcInVecConverter) -> Self {
+            EcssTcInMemConverter::Heap(heap_converter)
+        }
+    }
+
+    impl EcssTcInMemConversionProvider for EcssTcInMemConverter {
+        fn cache(&mut self, tc_in_memory: &TcInMemory) -> Result<(), PusTcFromMemError> {
+            match self {
+                EcssTcInMemConverter::Static(converter) => converter.cache(tc_in_memory),
+                EcssTcInMemConverter::Heap(converter) => converter.cache(tc_in_memory),
+            }
+        }
+        fn tc_slice_raw(&self) -> &[u8] {
+            match self {
+                EcssTcInMemConverter::Static(converter) => converter.tc_slice_raw(),
+                EcssTcInMemConverter::Heap(converter) => converter.tc_slice_raw(),
+            }
+        }
+        fn sender_id(&self) -> Option<ComponentId> {
+            match self {
+                EcssTcInMemConverter::Static(converter) => converter.sender_id(),
+                EcssTcInMemConverter::Heap(converter) => converter.sender_id(),
+            }
         }
     }
 
@@ -1094,7 +1133,7 @@ pub mod std_mod {
     pub struct PusServiceHelper<
         TcReceiver: EcssTcReceiver,
         TmSender: EcssTmSender,
-        TcInMemConverter: EcssTcInMemConverter,
+        TcInMemConverter: EcssTcInMemConversionProvider,
         VerificationReporter: VerificationReportingProvider,
     > {
         pub common: PusServiceBase<TcReceiver, TmSender, VerificationReporter>,
@@ -1104,7 +1143,7 @@ pub mod std_mod {
     impl<
             TcReceiver: EcssTcReceiver,
             TmSender: EcssTmSender,
-            TcInMemConverter: EcssTcInMemConverter,
+            TcInMemConverter: EcssTcInMemConversionProvider,
             VerificationReporter: VerificationReportingProvider,
         > PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
     {
@@ -1221,8 +1260,9 @@ pub(crate) fn source_buffer_large_enough(
 
 #[cfg(any(feature = "test_util", test))]
 pub mod test_util {
-    use crate::request::UniqueApidTargetId;
     use spacepackets::ecss::{tc::PusTcCreator, tm::PusTmReader};
+
+    use crate::request::UniqueApidTargetId;
 
     use super::{
         verification::{self, TcStateAccepted, VerificationToken},
@@ -1232,6 +1272,7 @@ pub mod test_util {
     pub const TEST_APID: u16 = 0x101;
     pub const TEST_UNIQUE_ID_0: u32 = 0x05;
     pub const TEST_UNIQUE_ID_1: u32 = 0x06;
+
     pub const TEST_COMPONENT_ID_0: UniqueApidTargetId =
         UniqueApidTargetId::new(TEST_APID, TEST_UNIQUE_ID_0);
     pub const TEST_COMPONENT_ID_1: UniqueApidTargetId =
@@ -1268,13 +1309,12 @@ pub mod tests {
     use spacepackets::ecss::tm::{GenericPusTmSecondaryHeader, PusTmCreator, PusTmReader};
     use spacepackets::ecss::{PusPacket, WritablePusPacket};
     use spacepackets::CcsdsPacket;
+    use test_util::{TEST_APID, TEST_COMPONENT_ID_0};
 
     use crate::pool::{PoolProvider, SharedStaticMemoryPool, StaticMemoryPool, StaticPoolConfig};
     use crate::pus::verification::{RequestId, VerificationReporter};
     use crate::tmtc::{PacketAsVec, PacketInPool, PacketSenderWithSharedPool, SharedPacketPool};
     use crate::ComponentId;
-
-    use super::test_util::{TEST_APID, TEST_COMPONENT_ID_0};
 
     use super::verification::test_util::TestVerificationReporter;
     use super::verification::{
@@ -1346,7 +1386,7 @@ pub mod tests {
     pub type PusServiceHelperStatic = PusServiceHelper<
         MpscTcReceiver,
         PacketSenderWithSharedPool,
-        EcssTcInSharedStoreConverter,
+        EcssTcInSharedPoolConverter,
         VerificationReporter,
     >;
 
@@ -1373,8 +1413,7 @@ pub mod tests {
                 VerificationReporter::new(TEST_COMPONENT_ID_0.id(), &verif_cfg);
             let test_srv_tm_sender =
                 PacketSenderWithSharedPool::new(tm_tx, shared_tm_pool_wrapper.clone());
-            let in_store_converter =
-                EcssTcInSharedStoreConverter::new(shared_tc_pool.clone(), 2048);
+            let in_store_converter = EcssTcInSharedPoolConverter::new(shared_tc_pool.clone(), 2048);
             (
                 Self {
                     pus_buf: RefCell::new([0; 2048]),

@@ -2,28 +2,28 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::pus::create_verification_reporter;
+use crate::tmtc::sender::TmTcSender;
 use log::info;
 use satrs::pool::{PoolProvider, StaticMemoryPool};
 use satrs::pus::scheduler::{PusScheduler, TcInfo};
 use satrs::pus::scheduler_srv::PusSchedServiceHandler;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
-    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcInMemConverter,
-    EcssTcInSharedStoreConverter, EcssTcInVecConverter, EcssTmSender, MpscTcReceiver,
-    MpscTmAsVecSender, PartialPusHandlingError, PusServiceHelper,
+    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcInMemConverter, MpscTcReceiver,
+    PartialPusHandlingError, PusServiceHelper,
 };
 use satrs::spacepackets::ecss::PusServiceId;
 use satrs::tmtc::{PacketAsVec, PacketInPool, PacketSenderWithSharedPool};
 use satrs::ComponentId;
-use satrs_example::config::components::PUS_SCHED_SERVICE;
+use satrs_example::config::pus::PUS_SCHED_SERVICE;
 
 use super::{DirectPusService, HandlingStatus};
 
-pub trait TcReleaser {
+pub trait TcReleaseProvider {
     fn release(&mut self, sender_id: ComponentId, enabled: bool, info: &TcInfo, tc: &[u8]) -> bool;
 }
 
-impl TcReleaser for PacketSenderWithSharedPool {
+impl TcReleaseProvider for PacketSenderWithSharedPool {
     fn release(
         &mut self,
         sender_id: ComponentId,
@@ -48,7 +48,7 @@ impl TcReleaser for PacketSenderWithSharedPool {
     }
 }
 
-impl TcReleaser for mpsc::Sender<PacketAsVec> {
+impl TcReleaseProvider for mpsc::SyncSender<PacketAsVec> {
     fn release(
         &mut self,
         sender_id: ComponentId,
@@ -65,23 +65,35 @@ impl TcReleaser for mpsc::Sender<PacketAsVec> {
     }
 }
 
-pub struct SchedulingServiceWrapper<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
-{
+#[allow(dead_code)]
+pub enum TcReleaser {
+    Static(PacketSenderWithSharedPool),
+    Heap(mpsc::SyncSender<PacketAsVec>),
+}
+
+impl TcReleaseProvider for TcReleaser {
+    fn release(&mut self, sender_id: ComponentId, enabled: bool, info: &TcInfo, tc: &[u8]) -> bool {
+        match self {
+            TcReleaser::Static(sender) => sender.release(sender_id, enabled, info, tc),
+            TcReleaser::Heap(sender) => sender.release(sender_id, enabled, info, tc),
+        }
+    }
+}
+
+pub struct SchedulingServiceWrapper {
     pub pus_11_handler: PusSchedServiceHandler<
         MpscTcReceiver,
-        TmSender,
-        TcInMemConverter,
+        TmTcSender,
+        EcssTcInMemConverter,
         VerificationReporter,
         PusScheduler,
     >,
     pub sched_tc_pool: StaticMemoryPool,
     pub releaser_buf: [u8; 4096],
-    pub tc_releaser: Box<dyn TcReleaser + Send>,
+    pub tc_releaser: TcReleaser,
 }
 
-impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> DirectPusService
-    for SchedulingServiceWrapper<TmSender, TcInMemConverter>
-{
+impl DirectPusService for SchedulingServiceWrapper {
     const SERVICE_ID: u8 = PusServiceId::Verification as u8;
 
     const SERVICE_STR: &'static str = "verification";
@@ -134,9 +146,7 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter> DirectPusSe
     }
 }
 
-impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
-    SchedulingServiceWrapper<TmSender, TcInMemConverter>
-{
+impl SchedulingServiceWrapper {
     pub fn release_tcs(&mut self) {
         let id = self.pus_11_handler.service_helper.id();
         let releaser = |enabled: bool, info: &TcInfo, tc: &[u8]| -> bool {
@@ -162,12 +172,13 @@ impl<TmSender: EcssTmSender, TcInMemConverter: EcssTcInMemConverter>
     }
 }
 
-pub fn create_scheduler_service_static(
-    tm_sender: PacketSenderWithSharedPool,
-    tc_releaser: PacketSenderWithSharedPool,
+pub fn create_scheduler_service(
+    tm_sender: TmTcSender,
+    tc_in_mem_converter: EcssTcInMemConverter,
+    tc_releaser: TcReleaser,
     pus_sched_rx: mpsc::Receiver<EcssTcAndToken>,
     sched_tc_pool: StaticMemoryPool,
-) -> SchedulingServiceWrapper<PacketSenderWithSharedPool, EcssTcInSharedStoreConverter> {
+) -> SchedulingServiceWrapper {
     let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
         .expect("Creating PUS Scheduler failed");
     let pus_11_handler = PusSchedServiceHandler::new(
@@ -176,7 +187,7 @@ pub fn create_scheduler_service_static(
             pus_sched_rx,
             tm_sender,
             create_verification_reporter(PUS_SCHED_SERVICE.id(), PUS_SCHED_SERVICE.apid),
-            EcssTcInSharedStoreConverter::new(tc_releaser.shared_packet_store().0.clone(), 2048),
+            tc_in_mem_converter,
         ),
         scheduler,
     );
@@ -184,34 +195,6 @@ pub fn create_scheduler_service_static(
         pus_11_handler,
         sched_tc_pool,
         releaser_buf: [0; 4096],
-        tc_releaser: Box::new(tc_releaser),
-    }
-}
-
-pub fn create_scheduler_service_dynamic(
-    tm_funnel_tx: mpsc::Sender<PacketAsVec>,
-    tc_source_sender: mpsc::Sender<PacketAsVec>,
-    pus_sched_rx: mpsc::Receiver<EcssTcAndToken>,
-    sched_tc_pool: StaticMemoryPool,
-) -> SchedulingServiceWrapper<MpscTmAsVecSender, EcssTcInVecConverter> {
-    //let sched_srv_receiver =
-    //MpscTcReceiver::new(PUS_SCHED_SERVICE.raw(), "PUS_11_TC_RECV", pus_sched_rx);
-    let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
-        .expect("Creating PUS Scheduler failed");
-    let pus_11_handler = PusSchedServiceHandler::new(
-        PusServiceHelper::new(
-            PUS_SCHED_SERVICE.id(),
-            pus_sched_rx,
-            tm_funnel_tx,
-            create_verification_reporter(PUS_SCHED_SERVICE.id(), PUS_SCHED_SERVICE.apid),
-            EcssTcInVecConverter::default(),
-        ),
-        scheduler,
-    );
-    SchedulingServiceWrapper {
-        pus_11_handler,
-        sched_tc_pool,
-        releaser_buf: [0; 4096],
-        tc_releaser: Box::new(tc_source_sender),
+        tc_releaser,
     }
 }

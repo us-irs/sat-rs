@@ -9,14 +9,14 @@ use std::sync::mpsc::Sender;
 
 use super::verification::VerificationReportingProvider;
 use super::{
-    EcssTcInMemConverter, EcssTcReceiver, EcssTmSender, GenericConversionError,
+    EcssTcInMemConversionProvider, EcssTcReceiver, EcssTmSender, GenericConversionError,
     GenericRoutingError, HandlingStatus, PusServiceHelper,
 };
 
 pub struct PusEventServiceHandler<
     TcReceiver: EcssTcReceiver,
     TmSender: EcssTmSender,
-    TcInMemConverter: EcssTcInMemConverter,
+    TcInMemConverter: EcssTcInMemConversionProvider,
     VerificationReporter: VerificationReportingProvider,
 > {
     pub service_helper:
@@ -27,7 +27,7 @@ pub struct PusEventServiceHandler<
 impl<
         TcReceiver: EcssTcReceiver,
         TmSender: EcssTmSender,
-        TcInMemConverter: EcssTcInMemConverter,
+        TcInMemConverter: EcssTcInMemConversionProvider,
         VerificationReporter: VerificationReportingProvider,
     > PusEventServiceHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
@@ -170,7 +170,7 @@ mod tests {
             event_man::EventRequestWithToken,
             tests::PusServiceHandlerWithSharedStoreCommon,
             verification::{TcStateAccepted, VerificationToken},
-            DirectPusPacketHandlerResult, EcssTcInSharedStoreConverter, PusPacketHandlingError,
+            DirectPusPacketHandlerResult, EcssTcInSharedPoolConverter, PusPacketHandlingError,
         },
     };
 
@@ -183,7 +183,7 @@ mod tests {
         handler: PusEventServiceHandler<
             MpscTcReceiver,
             PacketSenderWithSharedPool,
-            EcssTcInSharedStoreConverter,
+            EcssTcInSharedPoolConverter,
             VerificationReporter,
         >,
     }
