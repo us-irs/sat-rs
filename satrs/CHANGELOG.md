@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.3.0-alpha.0] 2025-02-18
+
 `spacepackets` v0.13
 
 ## Changed

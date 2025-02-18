@@ -121,10 +121,10 @@ impl SequenceExecutionHelper {
     ///   example by checking [mode replies][ModeReply] received by the children components, and
     ///   then calling [Self::confirm_sequence_done] to advance to the sequence or complete the
     ///   sequence.
-    /// * [ModeCommandingResult::CommandingDone] - The sequence is done. The user can load a new
+    /// * [ModeCommandingResult::Done] - The sequence is done. The user can load a new
     ///   sequence now without overwriting the last one. The sequence executor is in
     ///   [SequenceExecutionHelperState::Idle] again.
-    /// * [ModeCommandingResult::CommandingStepDone] - The sequence has advanced one step. The user
+    /// * [ModeCommandingResult::StepDone] - The sequence has advanced one step. The user
     ///   can now call [Self::run] again to immediately execute the next step in the sequence.
     ///
     /// Generally, periodic execution of the [Self::run] method should be performed while
