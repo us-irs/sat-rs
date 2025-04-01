@@ -11,8 +11,8 @@ use satrs::pus::{
 };
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{PusPacket, PusServiceId};
-use satrs_example::config::pus::PUS_TEST_SERVICE;
 use satrs_example::config::{tmtc_err, TEST_EVENT};
+use satrs_example::ids::generic_pus::PUS_TEST;
 use std::sync::mpsc;
 
 use super::{DirectPusService, HandlingStatus};
@@ -24,10 +24,10 @@ pub fn create_test_service(
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
 ) -> TestCustomServiceWrapper {
     let pus17_handler = PusService17TestHandler::new(PusServiceHelper::new(
-        PUS_TEST_SERVICE.id(),
+        PUS_TEST.id(),
         pus_test_rx,
         tm_sender,
-        create_verification_reporter(PUS_TEST_SERVICE.id(), PUS_TEST_SERVICE.apid),
+        create_verification_reporter(PUS_TEST.id(), PUS_TEST.apid),
         tc_in_mem_converter,
     ));
     TestCustomServiceWrapper {
@@ -100,7 +100,7 @@ impl DirectPusService for TestCustomServiceWrapper {
                 if subservice == 128 {
                     info!("generating test event");
                     self.event_tx
-                        .send(EventMessage::new(PUS_TEST_SERVICE.id(), TEST_EVENT.into()))
+                        .send(EventMessage::new(PUS_TEST.id(), TEST_EVENT.into()))
                         .expect("Sending test event failed");
                     match self.handler.service_helper.verif_reporter().start_success(
                         self.handler.service_helper.tm_sender(),

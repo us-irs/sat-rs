@@ -1,6 +1,6 @@
 use derive_new::new;
 use satrs::mode_tree::{ModeNode, ModeParent};
-use satrs_example::config::pus::PUS_MODE_SERVICE;
+use satrs_example::ids;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -217,15 +217,18 @@ pub fn create_mode_service(
 ) -> ModeServiceWrapper {
     let mode_request_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
-            PUS_MODE_SERVICE.id(),
+            ids::generic_pus::PUS_MODE.id(),
             pus_action_rx,
             tm_sender,
-            create_verification_reporter(PUS_MODE_SERVICE.id(), PUS_MODE_SERVICE.apid),
+            create_verification_reporter(
+                ids::generic_pus::PUS_MODE.id(),
+                ids::generic_pus::PUS_MODE.apid,
+            ),
             tc_in_mem_converter,
         ),
         ModeRequestConverter::default(),
         DefaultActiveRequestMap::default(),
-        ModeReplyHandler::new(PUS_MODE_SERVICE.id()),
+        ModeReplyHandler::new(ids::generic_pus::PUS_MODE.id()),
         mode_router,
         reply_receiver,
     );
