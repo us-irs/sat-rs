@@ -15,7 +15,7 @@ use satrs::pus::{
 use satrs::spacepackets::ecss::PusServiceId;
 use satrs::tmtc::{PacketAsVec, PacketInPool, PacketSenderWithSharedPool};
 use satrs::ComponentId;
-use satrs_example::config::pus::PUS_SCHED_SERVICE;
+use satrs_example::ids::sched::PUS_SCHED;
 
 use super::{DirectPusService, HandlingStatus};
 
@@ -183,10 +183,10 @@ pub fn create_scheduler_service(
         .expect("Creating PUS Scheduler failed");
     let pus_11_handler = PusSchedServiceHandler::new(
         PusServiceHelper::new(
-            PUS_SCHED_SERVICE.id(),
+            PUS_SCHED.id(),
             pus_sched_rx,
             tm_sender,
-            create_verification_reporter(PUS_SCHED_SERVICE.id(), PUS_SCHED_SERVICE.apid),
+            create_verification_reporter(PUS_SCHED.id(), PUS_SCHED.apid),
             tc_in_mem_converter,
         ),
         scheduler,

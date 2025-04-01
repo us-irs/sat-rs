@@ -2,7 +2,7 @@ use derive_new::new;
 use satrs::hk::{HkRequest, HkRequestVariant};
 use satrs::mode_tree::{ModeChild, ModeNode};
 use satrs::power::{PowerSwitchInfo, PowerSwitcherCommandSender};
-use satrs_example::config::pus::PUS_MODE_SERVICE;
+use satrs_example::ids::generic_pus::PUS_MODE;
 use satrs_example::{DeviceMode, TimestampHelper};
 use satrs_minisim::acs::lis3mdl::{
     MgmLis3MdlReply, MgmLis3RawValues, FIELD_LSB_PER_GAUSS_4_SENS, GAUSS_TO_MICROTESLA_FACTOR,
@@ -417,7 +417,7 @@ impl<
             if requestor.sender_id() == NO_SENDER {
                 return Ok(());
             }
-            if requestor.sender_id() != PUS_MODE_SERVICE.id() {
+            if requestor.sender_id() != PUS_MODE.id() {
                 log::warn!(
                     "can not send back mode reply to sender {:x}",
                     requestor.sender_id()
@@ -434,7 +434,7 @@ impl<
         requestor: MessageMetadata,
         reply: ModeReply,
     ) -> Result<(), Self::Error> {
-        if requestor.sender_id() != PUS_MODE_SERVICE.id() {
+        if requestor.sender_id() != PUS_MODE.id() {
             log::warn!(
                 "can not send back mode reply to sender {}",
                 requestor.sender_id()
@@ -492,7 +492,7 @@ mod tests {
         tmtc::PacketAsVec,
         ComponentId,
     };
-    use satrs_example::config::{acs::MGM_ASSEMBLY, components::Apid};
+    use satrs_example::ids::{acs::ASSEMBLY, Apid};
     use satrs_minisim::acs::lis3mdl::MgmLis3RawValues;
 
     use crate::{eps::TestSwitchHelper, pus::hk::HkReply, requests::CompositeRequest};
@@ -538,7 +538,7 @@ mod tests {
 
     impl ModeNode for MgmAssemblyMock {
         fn id(&self) -> satrs::ComponentId {
-            PUS_MODE_SERVICE.into()
+            PUS_MODE.into()
         }
     }
 
@@ -557,7 +557,7 @@ mod tests {
 
     impl ModeNode for PusMock {
         fn id(&self) -> satrs::ComponentId {
-            PUS_MODE_SERVICE.into()
+            PUS_MODE.into()
         }
     }
 
@@ -592,8 +592,8 @@ mod tests {
                 TestSpiInterface::default(),
                 shared_mgm_set,
             );
-            handler.add_mode_parent(PUS_MODE_SERVICE.into(), reply_tx_to_pus);
-            handler.add_mode_parent(MGM_ASSEMBLY.into(), reply_tx_to_parent);
+            handler.add_mode_parent(PUS_MODE.into(), reply_tx_to_pus);
+            handler.add_mode_parent(ASSEMBLY.into(), reply_tx_to_parent);
             Self {
                 mode_request_tx: request_tx,
                 mode_reply_rx_to_pus: reply_rx_to_pus,
@@ -631,7 +631,7 @@ mod tests {
         testbench
             .mode_request_tx
             .send(GenericMessage::new(
-                MessageMetadata::new(0, PUS_MODE_SERVICE.id()),
+                MessageMetadata::new(0, PUS_MODE.id()),
                 ModeRequest::SetMode {
                     mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
                     forced: false,
@@ -692,7 +692,7 @@ mod tests {
         testbench
             .mode_request_tx
             .send(GenericMessage::new(
-                MessageMetadata::new(0, PUS_MODE_SERVICE.id()),
+                MessageMetadata::new(0, PUS_MODE.id()),
                 ModeRequest::SetMode {
                     mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
                     forced: false,

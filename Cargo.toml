@@ -5,7 +5,7 @@ members = [
     "satrs-mib",
     "satrs-example",
     "satrs-minisim",
-    "satrs-shared",
+    "satrs-shared", "satrs-gen",
 ]
 
 exclude = [

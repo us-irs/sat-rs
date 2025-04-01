@@ -13,8 +13,8 @@ use satrs::request::{GenericMessage, UniqueApidTargetId};
 use satrs::res_code::ResultU16;
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{hk, PusPacket, PusServiceId};
-use satrs_example::config::pus::PUS_HK_SERVICE;
 use satrs_example::config::{hk_err, tmtc_err};
+use satrs_example::ids::generic_pus::PUS_HK;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -249,10 +249,10 @@ pub fn create_hk_service(
 ) -> HkServiceWrapper {
     let pus_3_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
-            PUS_HK_SERVICE.id(),
+            PUS_HK.id(),
             pus_hk_rx,
             tm_sender,
-            create_verification_reporter(PUS_HK_SERVICE.id(), PUS_HK_SERVICE.apid),
+            create_verification_reporter(PUS_HK.id(), PUS_HK.apid),
             tc_in_mem_converter,
         ),
         HkRequestConverter::default(),

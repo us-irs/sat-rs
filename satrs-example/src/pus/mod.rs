@@ -18,8 +18,8 @@ use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{PusPacket, PusServiceId};
 use satrs::tmtc::{PacketAsVec, PacketInPool};
 use satrs::ComponentId;
-use satrs_example::config::pus::PUS_ROUTING_SERVICE;
 use satrs_example::config::{tmtc_err, CustomPusServiceId};
+use satrs_example::ids::generic_pus::PUS_ROUTING;
 use satrs_example::TimestampHelper;
 use std::fmt::Debug;
 use std::sync::mpsc;
@@ -62,12 +62,9 @@ pub struct PusTcDistributor {
 impl PusTcDistributor {
     pub fn new(tm_sender: TmTcSender, pus_router: PusTcMpscRouter) -> Self {
         Self {
-            id: PUS_ROUTING_SERVICE.raw(),
+            id: PUS_ROUTING.raw(),
             tm_sender,
-            verif_reporter: create_verification_reporter(
-                PUS_ROUTING_SERVICE.id(),
-                PUS_ROUTING_SERVICE.apid,
-            ),
+            verif_reporter: create_verification_reporter(PUS_ROUTING.id(), PUS_ROUTING.apid),
             pus_router,
             stamp_helper: TimestampHelper::default(),
         }

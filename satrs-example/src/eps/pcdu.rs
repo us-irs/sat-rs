@@ -20,10 +20,8 @@ use satrs::{
     spacepackets::ByteConversionError,
 };
 use satrs_example::{
-    config::{
-        components::{NO_SENDER, PCDU_HANDLER},
-        pus::PUS_MODE_SERVICE,
-    },
+    config::components::NO_SENDER,
+    ids::{eps::PCDU, generic_pus::PUS_MODE},
     DeviceMode, TimestampHelper,
 };
 use satrs_minisim::{
@@ -452,7 +450,7 @@ impl<ComInterface: SerialInterface> ModeRequestHandler for PcduHandler<ComInterf
             if requestor.sender_id() == NO_SENDER {
                 return Ok(());
             }
-            if requestor.sender_id() != PUS_MODE_SERVICE.id() {
+            if requestor.sender_id() != PUS_MODE.id() {
                 log::warn!(
                     "can not send back mode reply to sender {}",
                     requestor.sender_id()
@@ -469,7 +467,7 @@ impl<ComInterface: SerialInterface> ModeRequestHandler for PcduHandler<ComInterf
         requestor: MessageMetadata,
         reply: ModeReply,
     ) -> Result<(), Self::Error> {
-        if requestor.sender_id() != PUS_MODE_SERVICE.id() {
+        if requestor.sender_id() != PUS_MODE.id() {
             log::warn!(
                 "can not send back mode reply to sender {}",
                 requestor.sender_id()
@@ -492,7 +490,7 @@ impl<ComInterface: SerialInterface> ModeRequestHandler for PcduHandler<ComInterf
 
 impl<ComInterface: SerialInterface> ModeNode for PcduHandler<ComInterface> {
     fn id(&self) -> satrs::ComponentId {
-        PCDU_HANDLER.into()
+        PCDU.into()
     }
 }
 
@@ -511,10 +509,7 @@ mod tests {
     use satrs::{
         mode::ModeRequest, power::SwitchStateBinary, request::GenericMessage, tmtc::PacketAsVec,
     };
-    use satrs_example::config::{
-        acs::MGM_HANDLER_0,
-        components::{Apid, EPS_SUBSYSTEM, PCDU_HANDLER},
-    };
+    use satrs_example::ids::{self, Apid};
     use satrs_minisim::eps::SwitchMapBinary;
 
     use super::*;
@@ -570,8 +565,7 @@ mod tests {
             let (mode_request_tx, mode_request_rx) = mpsc::sync_channel(5);
             let (mode_reply_tx_to_pus, mode_reply_rx_to_pus) = mpsc::sync_channel(5);
             let (mode_reply_tx_to_parent, mode_reply_rx_to_parent) = mpsc::sync_channel(5);
-            let mode_node =
-                ModeRequestHandlerMpscBounded::new(PCDU_HANDLER.into(), mode_request_rx);
+            let mode_node = ModeRequestHandlerMpscBounded::new(PCDU.into(), mode_request_rx);
             let (composite_request_tx, composite_request_rx) = mpsc::channel();
             let (hk_reply_tx, hk_reply_rx) = mpsc::sync_channel(10);
             let (tm_tx, tm_rx) = mpsc::sync_channel::<PacketAsVec>(5);
@@ -588,8 +582,8 @@ mod tests {
                 SerialInterfaceTest::default(),
                 shared_switch_map,
             );
-            handler.add_mode_parent(EPS_SUBSYSTEM.into(), mode_reply_tx_to_parent);
-            handler.add_mode_parent(PUS_MODE_SERVICE.into(), mode_reply_tx_to_pus);
+            handler.add_mode_parent(ids::eps::SUBSYSTEM.into(), mode_reply_tx_to_parent);
+            handler.add_mode_parent(PUS_MODE.into(), mode_reply_tx_to_pus);
             Self {
                 mode_request_tx,
                 mode_reply_rx_to_pus,
@@ -684,7 +678,7 @@ mod tests {
         testbench
             .mode_request_tx
             .send(GenericMessage::new(
-                MessageMetadata::new(0, PUS_MODE_SERVICE.id()),
+                MessageMetadata::new(0, PUS_MODE.id()),
                 ModeRequest::SetMode {
                     mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
                     forced: false,
@@ -719,7 +713,7 @@ mod tests {
         testbench
             .mode_request_tx
             .send(GenericMessage::new(
-                MessageMetadata::new(0, PUS_MODE_SERVICE.id()),
+                MessageMetadata::new(0, PUS_MODE.id()),
                 ModeRequest::SetMode {
                     mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
                     forced: false,
@@ -729,7 +723,7 @@ mod tests {
         testbench
             .switch_request_tx
             .send(GenericMessage::new(
-                MessageMetadata::new(0, MGM_HANDLER_0.id()),
+                MessageMetadata::new(0, ids::acs::MGM0.id()),
                 SwitchRequest::new(0, SwitchStateBinary::On),
             ))
             .expect("failed to send switch request");

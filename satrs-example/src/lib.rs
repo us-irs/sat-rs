@@ -1,6 +1,7 @@
 use satrs::spacepackets::time::{cds::CdsTime, TimeWriter};
 
 pub mod config;
+pub mod ids;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum DeviceMode {

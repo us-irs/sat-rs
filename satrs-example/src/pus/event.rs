@@ -10,7 +10,7 @@ use satrs::pus::{
     PartialPusHandlingError, PusServiceHelper,
 };
 use satrs::spacepackets::ecss::PusServiceId;
-use satrs_example::config::pus::PUS_EVENT_MANAGEMENT;
+use satrs_example::ids::generic_pus::PUS_EVENT_MANAGEMENT;
 
 use super::{DirectPusService, HandlingStatus};
 

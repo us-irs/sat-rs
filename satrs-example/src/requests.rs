@@ -14,8 +14,8 @@ use satrs::request::{GenericMessage, MessageMetadata, UniqueApidTargetId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusPacket;
 use satrs::ComponentId;
-use satrs_example::config::pus::PUS_ROUTING_SERVICE;
 use satrs_example::config::tmtc_err;
+use satrs_example::ids;
 
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -37,7 +37,7 @@ pub struct GenericRequestRouter {
 impl Default for GenericRequestRouter {
     fn default() -> Self {
         Self {
-            id: PUS_ROUTING_SERVICE.raw(),
+            id: ids::generic_pus::PUS_ROUTING.raw(),
             composite_router_map: Default::default(),
             mode_router_map: Default::default(),
         }
