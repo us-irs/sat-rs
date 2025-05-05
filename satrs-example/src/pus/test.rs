@@ -90,7 +90,7 @@ impl DirectPusService for TestCustomServiceWrapper {
                 );
             }
             DirectPusPacketHandlerResult::CustomSubservice(subservice, token) => {
-                let (tc, _) = PusTcReader::new(
+                let tc = PusTcReader::new(
                     self.handler
                         .service_helper
                         .tc_in_mem_converter

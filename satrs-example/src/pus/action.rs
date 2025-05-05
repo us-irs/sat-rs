@@ -367,7 +367,7 @@ mod tests {
             if let Err(mpsc::TryRecvError::Empty) = packet {
             } else {
                 let tm = packet.unwrap();
-                let unexpected_tm = PusTmReader::new(&tm.packet, 7).unwrap().0;
+                let unexpected_tm = PusTmReader::new(&tm.packet, 7).unwrap();
                 panic!("unexpected TM packet {unexpected_tm:?}");
             }
         }
@@ -410,7 +410,11 @@ mod tests {
 
         pub fn add_tc(&mut self, tc: &PusTcCreator) {
             self.request_id = Some(verification::RequestId::new(tc).into());
-            let token = self.service.service_helper.verif_reporter_mut().add_tc(tc);
+            let token = self
+                .service
+                .service_helper
+                .verif_reporter_mut()
+                .start_verification(tc);
             let accepted_token = self
                 .service
                 .service_helper

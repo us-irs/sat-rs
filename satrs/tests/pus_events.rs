@@ -107,9 +107,9 @@ fn test_threaded_usage() {
                 Ok(event_tm) => {
                     let tm = PusTmReader::new(event_tm.packet.as_slice(), 7)
                         .expect("Deserializing TM failed");
-                    assert_eq!(tm.0.service(), 5);
-                    assert_eq!(tm.0.subservice(), 1);
-                    let src_data = tm.0.source_data();
+                    assert_eq!(tm.service(), 5);
+                    assert_eq!(tm.subservice(), 1);
+                    let src_data = tm.source_data();
                     assert!(!src_data.is_empty());
                     assert_eq!(src_data.len(), 4);
                     let event =
@@ -137,9 +137,9 @@ fn test_threaded_usage() {
                 Ok(event_tm) => {
                     let tm = PusTmReader::new(event_tm.packet.as_slice(), 7)
                         .expect("Deserializing TM failed");
-                    assert_eq!(tm.0.service(), 5);
-                    assert_eq!(tm.0.subservice(), 2);
-                    let src_data = tm.0.source_data();
+                    assert_eq!(tm.service(), 5);
+                    assert_eq!(tm.subservice(), 2);
+                    let src_data = tm.source_data();
                     assert!(!src_data.is_empty());
                     assert_eq!(src_data.len(), 12);
                     let event =

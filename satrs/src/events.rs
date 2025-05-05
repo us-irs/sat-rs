@@ -312,11 +312,11 @@ impl EventU32 {
     /// # Parameter
     ///
     /// * `severity`: Each event has a [severity][Severity]. The raw value of the severity will
-    ///        be stored inside the uppermost 2 bits of the raw event ID
+    ///   be stored inside the uppermost 2 bits of the raw event ID
     /// * `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
-    ///        next 14 bits after the severity. Therefore, the size is limited by dec 16383 hex 0x3FFF.
+    ///   next 14 bits after the severity. Therefore, the size is limited by dec 16383 hex 0x3FFF.
     /// * `unique_id`: Each event has a unique 16 bit ID occupying the last 16 bits of the
-    ///       raw event ID
+    ///   raw event ID
     pub fn new_checked(
         severity: Severity,
         group_id: <Self as GenericEvent>::GroupId,
@@ -486,11 +486,11 @@ impl EventU16 {
     /// # Parameter
     ///
     /// * `severity`: Each event has a [severity][Severity]. The raw value of the severity will
-    ///        be stored inside the uppermost 2 bits of the raw event ID
+    ///   be stored inside the uppermost 2 bits of the raw event ID
     /// * `group_id`: Related events can be grouped using a group ID. The group ID will occupy the
-    ///        next 6 bits after the severity. Therefore, the size is limited by dec 63 hex 0x3F.
+    ///   next 6 bits after the severity. Therefore, the size is limited by dec 63 hex 0x3F.
     /// * `unique_id`: Each event has a unique 8 bit ID occupying the last 8 bits of the
-    ///       raw event ID
+    ///   raw event ID
     pub fn new_checked(
         severity: Severity,
         group_id: <Self as GenericEvent>::GroupId,

@@ -309,8 +309,12 @@ mod tests {
     }
 
     impl PusTestHarness for Pus11HandlerWithStoreTester {
-        fn init_verification(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted> {
-            let init_token = self.handler.service_helper.verif_reporter_mut().add_tc(tc);
+        fn start_verification(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted> {
+            let init_token = self
+                .handler
+                .service_helper
+                .verif_reporter_mut()
+                .start_verification(tc);
             self.handler
                 .service_helper
                 .verif_reporter()
@@ -383,7 +387,7 @@ mod tests {
         let reply_header = SpHeader::new_for_unseg_tm(TEST_APID, 0, 0);
         let tc_header = PusTcSecondaryHeader::new_simple(11, subservice as u8);
         let enable_scheduling = PusTcCreator::new(reply_header, tc_header, &[0; 7], true);
-        let token = test_harness.init_verification(&enable_scheduling);
+        let token = test_harness.start_verification(&enable_scheduling);
         test_harness.send_tc(&token, &enable_scheduling);
 
         let request_id = token.request_id();
@@ -445,7 +449,7 @@ mod tests {
             &sched_app_data[..written_len],
             true,
         );
-        let token = test_harness.init_verification(&enable_scheduling);
+        let token = test_harness.start_verification(&enable_scheduling);
         test_harness.send_tc(&token, &enable_scheduling);
 
         let request_id = token.request_id();

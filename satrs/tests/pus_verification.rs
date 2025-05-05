@@ -89,9 +89,9 @@ pub mod crossbeam_test {
                 let pg = tc_guard.read_with_guard(tc_addr);
                 tc_len = pg.read(&mut tc_buf).unwrap();
             }
-            let (_tc, _) = PusTcReader::new(&tc_buf[0..tc_len]).unwrap();
+            let _tc = PusTcReader::new(&tc_buf[0..tc_len]).unwrap();
 
-            let token = reporter_with_sender_0.add_tc_with_req_id(req_id_0);
+            let token = reporter_with_sender_0.start_verification_with_req_id(req_id_0);
             let accepted_token = reporter_with_sender_0
                 .acceptance_success(&sender, token, &FIXED_STAMP)
                 .expect("Acceptance success failed");
@@ -125,8 +125,8 @@ pub mod crossbeam_test {
                 let pg = tc_guard.read_with_guard(tc_addr);
                 tc_len = pg.read(&mut tc_buf).unwrap();
             }
-            let (tc, _) = PusTcReader::new(&tc_buf[0..tc_len]).unwrap();
-            let token = reporter_with_sender_1.add_tc(&tc);
+            let tc = PusTcReader::new(&tc_buf[0..tc_len]).unwrap();
+            let token = reporter_with_sender_1.start_verification(&tc);
             let accepted_token = reporter_with_sender_1
                 .acceptance_success(&sender_1, token, &FIXED_STAMP)
                 .expect("Acceptance success failed");
@@ -156,7 +156,7 @@ pub mod crossbeam_test {
                         .read(&mut tm_buf)
                         .expect("Error reading TM slice");
                 }
-                let (pus_tm, _) =
+                let pus_tm =
                     PusTmReader::new(&tm_buf[0..tm_len], 7).expect("Error reading verification TM");
                 let req_id =
                     RequestId::from_bytes(&pus_tm.source_data()[0..RequestId::SIZE_AS_BYTES])

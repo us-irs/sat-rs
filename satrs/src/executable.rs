@@ -39,9 +39,9 @@ pub trait ExecutableWithType: Executable {
 ///
 /// * `executable`: Executable task
 /// * `task_freq`: Optional frequency of task. Required for periodic and fixed cycle tasks.
-///    If [None] is passed, no sleeping will be performed.
+///   If [None] is passed, no sleeping will be performed.
 /// * `op_code`: Operation code which is passed to the executable task
-///    [operation call][Executable::periodic_op]
+///   [operation call][Executable::periodic_op]
 /// * `termination`: Optional termination handler which can cancel threads with a broadcast
 pub fn exec_sched_single<
     T: ExecutableWithType<Error = E> + Send + 'static + ?Sized,

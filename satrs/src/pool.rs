@@ -770,11 +770,11 @@ mod alloc_mod {
     /// # Parameters
     ///
     /// * `cfg` - Vector of tuples which represent a subpool. The first entry in the tuple specifies
-    ///     the number of memory blocks in the subpool, the second entry the size of the blocks
+    ///   the number of memory blocks in the subpool, the second entry the size of the blocks
     /// * `spill_to_higher_subpools` - Specifies whether data will be spilled to higher subpools
-    ///     if the next fitting subpool is full. This is useful to ensure the pool remains useful
-    ///     for all data sizes as long as possible. However, an undesirable side-effect might be
-    ///     the chocking of larger subpools by underdimensioned smaller subpools.
+    ///   if the next fitting subpool is full. This is useful to ensure the pool remains useful
+    ///   for all data sizes as long as possible. However, an undesirable side-effect might be
+    ///   the chocking of larger subpools by underdimensioned smaller subpools.
     #[derive(Debug, Clone)]
     pub struct StaticPoolConfig {
         cfg: Vec<SubpoolConfig>,

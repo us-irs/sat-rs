@@ -162,7 +162,7 @@ pub trait SenderMapProvider<
 ///  * `ListenerMap`: [ListenerMapProvider] which maps listener keys to channel IDs.
 ///  * `EventSender`: [EventSendProvider] contained within the sender map which sends the events.
 ///  * `Event`: The event type. This type must implement the [GenericEvent]. Currently only [EventU32]
-///     and [EventU16] are supported.
+///    and [EventU16] are supported.
 ///  * `ParamProvider`: Auxiliary data which is sent with the event to provide optional context
 ///    information
 pub struct EventManager<

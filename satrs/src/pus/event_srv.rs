@@ -199,8 +199,12 @@ mod tests {
     }
 
     impl PusTestHarness for Pus5HandlerWithStoreTester {
-        fn init_verification(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted> {
-            let init_token = self.handler.service_helper.verif_reporter_mut().add_tc(tc);
+        fn start_verification(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted> {
+            let init_token = self
+                .handler
+                .service_helper
+                .verif_reporter_mut()
+                .start_verification(tc);
             self.handler
                 .service_helper
                 .verif_reporter()
@@ -245,7 +249,7 @@ mod tests {
             .write_to_be_bytes(&mut app_data)
             .expect("writing test event failed");
         let ping_tc = PusTcCreator::new(sp_header, sec_header, &app_data, true);
-        let token = test_harness.init_verification(&ping_tc);
+        let token = test_harness.start_verification(&ping_tc);
         test_harness.send_tc(&token, &ping_tc);
         let request_id = token.request_id();
         test_harness.handle_one_tc().unwrap();
@@ -306,7 +310,7 @@ mod tests {
         let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(5, 200);
         let ping_tc = PusTcCreator::new_no_app_data(sp_header, sec_header, true);
-        let token = test_harness.init_verification(&ping_tc);
+        let token = test_harness.start_verification(&ping_tc);
         test_harness.send_tc(&token, &ping_tc);
         let result = test_harness.handle_one_tc();
         assert!(result.is_ok());
@@ -326,7 +330,7 @@ mod tests {
         let sec_header =
             PusTcSecondaryHeader::new_simple(5, Subservice::TcEnableEventGeneration as u8);
         let ping_tc = PusTcCreator::new(sp_header, sec_header, &[0, 1, 2], true);
-        let token = test_harness.init_verification(&ping_tc);
+        let token = test_harness.start_verification(&ping_tc);
         test_harness.send_tc(&token, &ping_tc);
         let result = test_harness.handle_one_tc();
         assert!(result.is_err());

@@ -47,7 +47,7 @@
 //!     tc_header,
 //!     true
 //! );
-//! let init_token = reporter.add_tc(&pus_tc_0);
+//! let init_token = reporter.start_verification(&pus_tc_0);
 //!
 //! // Complete success sequence for a telecommand
 //! let accepted_token = reporter.acceptance_success(&sender, init_token, &EMPTY_STAMP).unwrap();
@@ -65,8 +65,7 @@
 //!         let store_guard = rg.read_with_guard(tm_in_store.store_addr);
 //!         tm_len = store_guard.read(&mut tm_buf).expect("Error reading TM slice");
 //!     }
-//!     let (pus_tm, _) = PusTmReader::new(&tm_buf[0..tm_len], 7)
-//!        .expect("Error reading verification TM");
+//!     let pus_tm = PusTmReader::new(&tm_buf[0..tm_len], 7).expect("Error reading verification TM");
 //!     if packet_idx == 0 {
 //!         assert_eq!(pus_tm.subservice(), 1);
 //!     } else if packet_idx == 1 {
@@ -228,7 +227,7 @@ pub struct VerificationToken<STATE> {
 }
 
 impl<STATE> VerificationToken<STATE> {
-    fn new(req_id: RequestId) -> VerificationToken<TcStateNone> {
+    pub fn new(req_id: RequestId) -> VerificationToken<TcStateNone> {
         VerificationToken {
             state: PhantomData,
             request_id: req_id,
@@ -408,14 +407,10 @@ pub trait VerificationReportingProvider {
     fn set_apid(&mut self, apid: Apid);
     fn apid(&self) -> Apid;
 
-    fn add_tc(
-        &mut self,
+    fn start_verification(
+        &self,
         pus_tc: &(impl CcsdsPacket + IsPusTelecommand),
-    ) -> VerificationToken<TcStateNone> {
-        self.add_tc_with_req_id(RequestId::new(pus_tc))
-    }
-
-    fn add_tc_with_req_id(&mut self, req_id: RequestId) -> VerificationToken<TcStateNone>;
+    ) -> VerificationToken<TcStateNone>;
 
     fn acceptance_success(
         &self,
@@ -482,7 +477,7 @@ pub trait VerificationReportingProvider {
 /// the buffer passed to the API exposes by this struct will be used to serialize the source data.
 /// This buffer may not be re-used to serialize the whole telemetry because that would overwrite
 /// the source data itself.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct VerificationReportCreator {
     pub dest_id: u16,
     apid: u16,
@@ -518,17 +513,8 @@ impl VerificationReportCreator {
 
     /// Initialize verification handling by passing a TC reference. This returns a token required
     /// to call the acceptance functions
-    pub fn add_tc(
-        &mut self,
-        pus_tc: &(impl CcsdsPacket + IsPusTelecommand),
-    ) -> VerificationToken<TcStateNone> {
-        self.add_tc_with_req_id(RequestId::new(pus_tc))
-    }
-
-    /// Same as [Self::add_tc] but pass a request ID instead of the direct telecommand.
-    /// This can be useful if the executing thread does not have full access to the telecommand.
-    pub fn add_tc_with_req_id(&mut self, req_id: RequestId) -> VerificationToken<TcStateNone> {
-        VerificationToken::<TcStateNone>::new(req_id)
+    pub fn read_request_id_from_tc(pus_tc: &(impl CcsdsPacket + IsPusTelecommand)) -> RequestId {
+        RequestId::new(pus_tc)
     }
 
     fn success_verification_no_step<'time, 'src_data>(
@@ -962,12 +948,26 @@ pub mod alloc_mod {
             }
         }
 
+        pub fn start_verification(
+            &self,
+            pus_tc: &(impl CcsdsPacket + IsPusTelecommand),
+        ) -> VerificationToken<TcStateNone> {
+            VerificationToken::<TcStateNone>::new(
+                VerificationReportCreator::read_request_id_from_tc(pus_tc),
+            )
+        }
+
+        pub fn start_verification_with_req_id(
+            &self,
+            request_id: RequestId,
+        ) -> VerificationToken<TcStateNone> {
+            VerificationToken::<TcStateNone>::new(request_id)
+        }
+
         delegate!(
             to self.reporter_creator {
                 pub fn set_apid(&mut self, apid: u16) -> bool;
                 pub fn apid(&self) -> u16;
-                pub fn add_tc(&mut self, pus_tc: &(impl CcsdsPacket + IsPusTelecommand)) -> VerificationToken<TcStateNone>;
-                pub fn add_tc_with_req_id(&mut self, req_id: RequestId) -> VerificationToken<TcStateNone>;
                 pub fn dest_id(&self) -> u16;
                 pub fn set_dest_id(&mut self, dest_id: u16);
             }
@@ -985,10 +985,15 @@ pub mod alloc_mod {
             to self.reporter_creator {
                 fn set_apid(&mut self, apid: Apid);
                 fn apid(&self) -> Apid;
-                fn add_tc(&mut self, pus_tc: &(impl CcsdsPacket + IsPusTelecommand)) -> VerificationToken<TcStateNone>;
-                fn add_tc_with_req_id(&mut self, req_id: RequestId) -> VerificationToken<TcStateNone>;
             }
         );
+
+        fn start_verification(
+            &self,
+            pus_tc: &(impl CcsdsPacket + IsPusTelecommand),
+        ) -> VerificationToken<TcStateNone> {
+            VerificationToken::<TcStateNone>::new(RequestId::new(pus_tc))
+        }
 
         fn owner_id(&self) -> ComponentId {
             self.owner_id
@@ -1351,20 +1356,21 @@ pub mod test_util {
     }
 
     impl VerificationReportingProvider for TestVerificationReporter {
+        fn start_verification(
+            &self,
+            pus_tc: &(impl CcsdsPacket + IsPusTelecommand),
+        ) -> VerificationToken<TcStateNone> {
+            let request_id = RequestId::new(pus_tc);
+            self.report_queue
+                .borrow_mut()
+                .push_back((request_id, VerificationReportInfo::Added));
+            VerificationToken::<TcStateNone>::new(RequestId::new(pus_tc))
+        }
+
         fn set_apid(&mut self, _apid: Apid) {}
 
         fn apid(&self) -> Apid {
             0
-        }
-
-        fn add_tc_with_req_id(&mut self, req_id: RequestId) -> VerificationToken<TcStateNone> {
-            self.report_queue
-                .borrow_mut()
-                .push_back((req_id, VerificationReportInfo::Added));
-            VerificationToken {
-                state: PhantomData,
-                request_id: req_id,
-            }
         }
 
         fn acceptance_success(
@@ -1823,13 +1829,14 @@ pub mod tests {
             }
         }
 
+        pub fn start_verification(&self) -> VerificationToken<TcStateNone> {
+            let tc_reader = PusTcReader::new(&self.tc).unwrap();
+            self.reporter.start_verification(&tc_reader)
+        }
+
         #[allow(dead_code)]
         fn set_dest_id(&mut self, dest_id: u16) {
             self.reporter.set_dest_id(dest_id);
-        }
-
-        fn init(&mut self) -> VerificationToken<TcStateNone> {
-            self.reporter.add_tc(&PusTcReader::new(&self.tc).unwrap().0)
         }
 
         fn acceptance_success(
@@ -1909,7 +1916,7 @@ pub mod tests {
                 additional_data: None,
             };
             let mut service_queue = self.sender.service_queue.borrow_mut();
-            assert!(service_queue.len() >= 1);
+            assert!(!service_queue.is_empty());
             let info = service_queue.pop_front().unwrap();
             assert_eq!(info, cmp_info);
         }
@@ -2081,8 +2088,8 @@ pub mod tests {
 
     #[test]
     fn test_basic_acceptance_success() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
-        let token = testbench.init();
+        let testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
+        let token = testbench.start_verification();
         testbench
             .acceptance_success(token, &EMPTY_STAMP)
             .expect("sending acceptance success failed");
@@ -2092,7 +2099,7 @@ pub mod tests {
     #[test]
     fn test_basic_acceptance_failure() {
         let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
-        let init_token = testbench.init();
+        let init_token = testbench.start_verification();
         let timestamp = [1, 2, 3, 4, 5, 6, 7];
         let fail_code = EcssEnumU16::new(2);
         let fail_params = FailParams::new_no_fail_data(timestamp.as_slice(), &fail_code);
@@ -2105,7 +2112,7 @@ pub mod tests {
     #[test]
     fn test_basic_acceptance_failure_with_helper() {
         let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
-        let init_token = testbench.init();
+        let init_token = testbench.start_verification();
         let timestamp = [1, 2, 3, 4, 5, 6, 7];
         let fail_code = EcssEnumU16::new(2);
         let fail_params = FailParams::new_no_fail_data(timestamp.as_slice(), &fail_code);
@@ -2117,8 +2124,8 @@ pub mod tests {
 
     #[test]
     fn test_acceptance_fail_data_too_large() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 8);
-        let init_token = testbench.init();
+        let testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 8);
+        let init_token = testbench.start_verification();
         let stamp_buf = [1, 2, 3, 4, 5, 6, 7];
         let fail_code = EcssEnumU16::new(2);
         let fail_data: [u8; 16] = [0; 16];
@@ -2149,13 +2156,13 @@ pub mod tests {
 
     #[test]
     fn test_basic_acceptance_failure_with_fail_data() {
-        let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
+        let testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
         let fail_code = EcssEnumU8::new(10);
         let fail_data = EcssEnumU32::new(12);
         let mut fail_data_raw = [0; 4];
         fail_data.write_to_be_bytes(&mut fail_data_raw).unwrap();
         let fail_params = FailParams::new(&EMPTY_STAMP, &fail_code, fail_data_raw.as_slice());
-        let init_token = testbench.init();
+        let init_token = testbench.start_verification();
         testbench
             .acceptance_failure(init_token, fail_params)
             .expect("sending acceptance failure failed");
@@ -2173,7 +2180,7 @@ pub mod tests {
     #[test]
     fn test_start_failure() {
         let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
-        let init_token = testbench.init();
+        let init_token = testbench.start_verification();
         let fail_code = EcssEnumU8::new(22);
         let fail_data: i32 = -12;
         let mut fail_data_raw = [0; 4];
@@ -2192,7 +2199,7 @@ pub mod tests {
     #[test]
     fn test_start_failure_with_helper() {
         let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
-        let token = testbench.init();
+        let token = testbench.start_verification();
         let fail_code = EcssEnumU8::new(22);
         let fail_data: i32 = -12;
         let mut fail_data_raw = [0; 4];
@@ -2211,7 +2218,7 @@ pub mod tests {
     #[test]
     fn test_steps_success() {
         let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
-        let token = testbench.init();
+        let token = testbench.start_verification();
         let accepted_token = testbench
             .acceptance_success(token, &EMPTY_STAMP)
             .expect("acceptance  failed");
@@ -2234,7 +2241,7 @@ pub mod tests {
     #[test]
     fn test_step_failure() {
         let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
-        let token = testbench.init();
+        let token = testbench.start_verification();
         let fail_code = EcssEnumU32::new(0x1020);
         let fail_data: f32 = -22.3232;
         let mut fail_data_raw = [0; 4];
@@ -2268,7 +2275,7 @@ pub mod tests {
     #[test]
     fn test_completion_failure() {
         let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
-        let token = testbench.init();
+        let token = testbench.start_verification();
         let fail_code = EcssEnumU32::new(0x1020);
         let fail_params = FailParams::new_no_fail_data(&EMPTY_STAMP, &fail_code);
 
@@ -2291,7 +2298,7 @@ pub mod tests {
     fn test_complete_success_sequence() {
         let mut testbench =
             VerificationReporterTestbench::new(TEST_COMPONENT_ID_0.id(), create_generic_ping(), 16);
-        let token = testbench.init();
+        let token = testbench.start_verification();
         let accepted_token = testbench
             .acceptance_success(token, &EMPTY_STAMP)
             .expect("Sending acceptance success failed");
@@ -2313,7 +2320,7 @@ pub mod tests {
             create_generic_ping(),
             SequenceCounterHook::default(),
         );
-        let token = testbench.init();
+        let token = testbench.start_verification();
         let accepted_token = testbench
             .acceptance_success(token, &EMPTY_STAMP)
             .expect("Sending acceptance success failed");
@@ -2331,7 +2338,7 @@ pub mod tests {
     #[test]
     fn test_completion_failure_helper_string_param() {
         let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 32);
-        let token = testbench.init();
+        let token = testbench.start_verification();
         let accepted_token = testbench
             .acceptance_success(token, &EMPTY_STAMP)
             .expect("Sending acceptance success failed");
@@ -2358,7 +2365,7 @@ pub mod tests {
     #[test]
     fn test_step_failure_helper_string_param() {
         let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 32);
-        let token = testbench.init();
+        let token = testbench.start_verification();
         let accepted_token = testbench
             .acceptance_success(token, &EMPTY_STAMP)
             .expect("Sending acceptance success failed");

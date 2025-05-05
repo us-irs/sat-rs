@@ -292,10 +292,10 @@ pub trait PusSchedulerProvider {
         pool: &mut (impl PoolProvider + ?Sized),
     ) -> Result<TcInfo, ScheduleError> {
         let check_tc = PusTcReader::new(tc)?;
-        if PusPacket::service(&check_tc.0) == 11 && PusPacket::subservice(&check_tc.0) == 4 {
+        if PusPacket::service(&check_tc) == 11 && PusPacket::subservice(&check_tc) == 4 {
             return Err(ScheduleError::NestedScheduledTc);
         }
-        let req_id = RequestId::from_tc(&check_tc.0);
+        let req_id = RequestId::from_tc(&check_tc);
 
         match pool.add(tc) {
             Ok(addr) => {
@@ -411,10 +411,10 @@ pub mod alloc_mod {
         ///
         /// * `init_current_time` - The time to initialize the scheduler with.
         /// * `time_margin` - This time margin is used when inserting new telecommands into the
-        ///      schedule. If the release time of a new telecommand is earlier than the time margin
-        ///      added to the current time, it will not be inserted into the schedule.
+        ///   schedule. If the release time of a new telecommand is earlier than the time margin
+        ///   added to the current time, it will not be inserted into the schedule.
         /// * `tc_buf_size` - Buffer for temporary storage of telecommand packets. This buffer
-        ///      should be large enough to accomodate the largest expected TC packets.
+        ///   should be large enough to accomodate the largest expected TC packets.
         pub fn new(init_current_time: UnixTime, time_margin: Duration) -> Self {
             PusScheduler {
                 tc_map: Default::default(),
@@ -480,10 +480,10 @@ pub mod alloc_mod {
             pool: &mut (impl PoolProvider + ?Sized),
         ) -> Result<TcInfo, ScheduleError> {
             let check_tc = PusTcReader::new(tc)?;
-            if PusPacket::service(&check_tc.0) == 11 && PusPacket::subservice(&check_tc.0) == 4 {
+            if PusPacket::service(&check_tc) == 11 && PusPacket::subservice(&check_tc) == 4 {
                 return Err(ScheduleError::NestedScheduledTc);
             }
-            let req_id = RequestId::from_tc(&check_tc.0);
+            let req_id = RequestId::from_tc(&check_tc);
 
             match pool.add(tc) {
                 Ok(addr) => {
@@ -683,10 +683,10 @@ pub mod alloc_mod {
         /// # Arguments
         ///
         /// * `releaser` - Closure where the first argument is whether the scheduler is enabled and
-        ///     the second argument is the telecommand information also containing the store
-        ///     address. This closure should return whether the command should be deleted. Please
-        ///     note that returning false might lead to memory leaks if the TC is not cleared from
-        ///     the store in some other way.
+        ///   the second argument is the telecommand information also containing the store
+        ///   address. This closure should return whether the command should be deleted. Please
+        ///   note that returning false might lead to memory leaks if the TC is not cleared from
+        ///   the store in some other way.
         /// * `tc_store` - The holding store of the telecommands.
         /// * `tc_buf` - Buffer to hold each telecommand being released.
         pub fn release_telecommands_with_buffer<R: FnMut(bool, &TcInfo, &[u8]) -> bool>(
@@ -1313,7 +1313,7 @@ mod tests {
         let mut read_buf: [u8; 64] = [0; 64];
         pool.read(&tc_info_0.addr(), &mut read_buf).unwrap();
         let check_tc = PusTcReader::new(&read_buf).expect("incorrect Pus tc raw data");
-        assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, &[]));
+        assert_eq!(check_tc, base_ping_tc_simple_ctor(0, &[]));
 
         assert_eq!(scheduler.num_scheduled_telecommands(), 1);
 
@@ -1335,8 +1335,8 @@ mod tests {
 
         let read_len = pool.read(&addr_vec[0], &mut read_buf).unwrap();
         let check_tc = PusTcReader::new(&read_buf).expect("incorrect Pus tc raw data");
-        assert_eq!(read_len, check_tc.1);
-        assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, &[]));
+        assert_eq!(read_len, check_tc.total_len());
+        assert_eq!(check_tc, base_ping_tc_simple_ctor(0, &[]));
     }
 
     #[test]
@@ -1362,8 +1362,8 @@ mod tests {
 
         let read_len = pool.read(&info.addr, &mut buf).unwrap();
         let check_tc = PusTcReader::new(&buf).expect("incorrect Pus tc raw data");
-        assert_eq!(read_len, check_tc.1);
-        assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, &[]));
+        assert_eq!(read_len, check_tc.total_len());
+        assert_eq!(check_tc, base_ping_tc_simple_ctor(0, &[]));
 
         assert_eq!(scheduler.num_scheduled_telecommands(), 1);
 
@@ -1387,8 +1387,8 @@ mod tests {
 
         let read_len = pool.read(&addr_vec[0], &mut buf).unwrap();
         let check_tc = PusTcReader::new(&buf).expect("incorrect PUS tc raw data");
-        assert_eq!(read_len, check_tc.1);
-        assert_eq!(check_tc.0, base_ping_tc_simple_ctor(0, &[]));
+        assert_eq!(read_len, check_tc.total_len());
+        assert_eq!(check_tc, base_ping_tc_simple_ctor(0, &[]));
     }
 
     #[test]
@@ -2031,7 +2031,7 @@ mod tests {
         assert_eq!(n, 1);
         let time_reader = cds::CdsTime::from_bytes_with_u16_days(&buf[2..2 + 7]).unwrap();
         assert_eq!(time_reader, time_writer);
-        let pus_tc_reader = PusTcReader::new(&buf[9..]).unwrap().0;
+        let pus_tc_reader = PusTcReader::new(&buf[9..]).unwrap();
         assert_eq!(pus_tc_reader, ping_tc);
     }
 

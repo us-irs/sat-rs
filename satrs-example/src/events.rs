@@ -281,9 +281,7 @@ mod tests {
             .try_recv()
             .expect("failed to receive TM packet");
         assert_eq!(tm_packet.sender_id, PUS_EVENT_MANAGEMENT.id());
-        let tm_reader = PusTmReader::new(&tm_packet.packet, 7)
-            .expect("failed to create TM reader")
-            .0;
+        let tm_reader = PusTmReader::new(&tm_packet.packet, 7).expect("failed to create TM reader");
         assert_eq!(tm_reader.apid(), TEST_CREATOR_ID.apid);
         assert_eq!(tm_reader.user_data().len(), 4);
         let event_read_back = EventU32::from_be_bytes(tm_reader.user_data().try_into().unwrap());
