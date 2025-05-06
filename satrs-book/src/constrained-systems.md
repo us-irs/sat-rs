@@ -3,20 +3,20 @@
 Software for space systems oftentimes has different requirements than the software for host
 systems or servers. Currently, most space systems are considered embedded systems.
 
-For these systems, the computation power and the available heap are the most important resources
-which are constrained. This might make completeley heap based memory management schemes which
+For these systems, the computation power and the available heap are important resources
+which are also constrained. This might make completeley heap based memory management schemes which
 are oftentimes used on host and server based systems unfeasable. Still, completely forbidding
 heap allocations might make software development unnecessarilly difficult, especially in a
 time where the OBSW might be running on Linux based systems with hundreds of MBs of RAM.
 
-A useful pattern used commonly in space systems is to limit heap allocations to program
+A useful pattern commonly used in space systems is to limit heap allocations to program
 initialization time and avoid frequent run-time allocations. This prevents issues like
 running out of memory (something even Rust can not protect from) or heap fragmentation on systems
 without a MMU.
 
 # Using pre-allocated pool structures
 
-A huge candidate for heap allocations is the TMTC and  handling. TC, TMs and IPC data are all
+A candidate for heap allocations is the TMTC and  handling. TC, TMs and IPC data are all
 candidates where the data size might vary greatly. The regular solution for host systems
 might be to send around this data as a `Vec<u8>` until it is dropped. `sat-rs` provides
 another solution to avoid run-time allocations by offering pre-allocated static
