@@ -4,5 +4,5 @@
 sat-rs
 ======
 
-This crate contains the primary components of the sat-rs framework.
+This crate contains the primary components of the sat-rs library collection.
 You can find more information on the [homepage](https://egit.irs.uni-stuttgart.de/rust/sat-rs).
