@@ -29,7 +29,7 @@ fn main() {
         let res = client.recv(&mut buf);
         match res {
             Ok(_len) => {
-                let (pus_tm, size) = PusTmReader::new(&buf, 7).expect("Parsing PUS TM failed");
+                let pus_tm = PusTmReader::new(&buf, 7).expect("Parsing PUS TM failed");
                 if pus_tm.service() == 17 && pus_tm.subservice() == 2 {
                     println!("Received PUS Ping Reply TM[17,2]")
                 } else if pus_tm.service() == 1 {

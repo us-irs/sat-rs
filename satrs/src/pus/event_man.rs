@@ -409,7 +409,7 @@ mod tests {
         assert!(res.event_was_enabled);
         assert!(res.params_were_propagated);
         let event_tm = event_rx.try_recv().expect("no event received");
-        let (tm, _) = PusTmReader::new(&event_tm.packet, 7).expect("reading TM failed");
+        let tm = PusTmReader::new(&event_tm.packet, 7).expect("reading TM failed");
         assert_eq!(tm.service(), 5);
         assert_eq!(tm.subservice(), Subservice::TmInfoReport as u8);
         assert_eq!(tm.user_data().len(), 4 + param_data.len());
@@ -437,7 +437,7 @@ mod tests {
         assert!(res.event_was_enabled);
         assert!(res.params_were_propagated);
         let event_tm = event_rx.try_recv().expect("no event received");
-        let (tm, _) = PusTmReader::new(&event_tm.packet, 7).expect("reading TM failed");
+        let tm = PusTmReader::new(&event_tm.packet, 7).expect("reading TM failed");
         assert_eq!(tm.service(), 5);
         assert_eq!(tm.subservice(), Subservice::TmInfoReport as u8);
         assert_eq!(tm.user_data().len(), 4 + param_data.len());

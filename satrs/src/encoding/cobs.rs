@@ -24,8 +24,8 @@ use cobs::{decode_in_place, encode, max_encoding_length};
 /// assert!(encode_packet_with_cobs(&INVERTED_PACKET, &mut encoding_buf, &mut current_idx));
 /// assert_eq!(encoding_buf[0], 0);
 /// let dec_report = decode_in_place_report(&mut encoding_buf[1..]).expect("decoding failed");
-/// assert_eq!(encoding_buf[1 + dec_report.src_used], 0);
-/// assert_eq!(dec_report.dst_used, 5);
+/// assert_eq!(encoding_buf[1 + dec_report.parsed_size()], 0);
+/// assert_eq!(dec_report.frame_size(), 5);
 /// assert_eq!(current_idx, 16);
 /// ```
 pub fn encode_packet_with_cobs(

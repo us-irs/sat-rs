@@ -25,22 +25,22 @@ pub use crate::hal::std::tcp_spacepackets_server::{SpacepacketsTmSender, TcpSpac
 ///
 /// * `addr` - Address of the TCP server.
 /// * `inner_loop_delay` - If a client connects for a longer period, but no TC is received or
-///     no TM needs to be sent, the TCP server will delay for the specified amount of time
-///     to reduce CPU load.
+///   no TM needs to be sent, the TCP server will delay for the specified amount of time
+///   to reduce CPU load.
 /// * `tm_buffer_size` - Size of the TM buffer used to read TM from the [PacketSource] and
-///     encoding of that data. This buffer should at large enough to hold the maximum expected
-///     TM size read from the packet source.
+///   encoding of that data. This buffer should at large enough to hold the maximum expected
+///   TM size read from the packet source.
 /// * `tc_buffer_size` - Size of the TC buffer used to read encoded telecommands sent from
-///     the client. It is recommended to make this buffer larger to allow reading multiple
-///     consecutive packets as well, for example by using common buffer sizes like 4096 or 8192
-///     byte. The buffer should at the very least be large enough to hold the maximum expected
-///     telecommand size.
+///   the client. It is recommended to make this buffer larger to allow reading multiple
+///   consecutive packets as well, for example by using common buffer sizes like 4096 or 8192
+///   byte. The buffer should at the very least be large enough to hold the maximum expected
+///   telecommand size.
 /// * `reuse_addr` - Can be used to set the `SO_REUSEADDR` option on the raw socket. This is
-///     especially useful if the address and port are static for the server. Set to false by
-///     default.
+///   especially useful if the address and port are static for the server. Set to false by
+///   default.
 /// * `reuse_port` - Can be used to set the `SO_REUSEPORT` option on the raw socket. This is
-///     especially useful if the address and port are static for the server. Set to false by
-///     default.
+///   especially useful if the address and port are static for the server. Set to false by
+///   default.
 #[derive(Debug, Copy, Clone)]
 pub struct ServerConfig {
     pub id: ComponentId,
@@ -211,12 +211,12 @@ impl<
     ///
     /// * `cfg` - Configuration of the server.
     /// * `tc_parser` - Parser which extracts telecommands from the raw bytestream received from
-    ///    the client.
+    ///   the client.
     /// * `tm_sender` - Sends back telemetry to the client using the specified TM source.
     /// * `tm_source` - Generic TM source used by the server to pull telemetry packets which are
-    ///     then sent back to the client.
+    ///   then sent back to the client.
     /// * `tc_sender` - Any received telecommand which was decoded successfully will be forwarded
-    ///     using this TC sender.
+    ///   using this TC sender.
     /// * `stop_signal` - Can be used to stop the server even if a connection is ongoing.
     pub fn new(
         cfg: ServerConfig,

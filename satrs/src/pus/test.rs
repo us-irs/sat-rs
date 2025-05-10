@@ -180,8 +180,12 @@ mod tests {
     }
 
     impl PusTestHarness for Pus17HandlerWithStoreTester {
-        fn init_verification(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted> {
-            let init_token = self.handler.service_helper.verif_reporter_mut().add_tc(tc);
+        fn start_verification(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted> {
+            let init_token = self
+                .handler
+                .service_helper
+                .verif_reporter_mut()
+                .start_verification(tc);
             self.handler
                 .service_helper
                 .verif_reporter()
@@ -238,8 +242,12 @@ mod tests {
     }
 
     impl PusTestHarness for Pus17HandlerWithVecTester {
-        fn init_verification(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted> {
-            let init_token = self.handler.service_helper.verif_reporter_mut().add_tc(tc);
+        fn start_verification(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted> {
+            let init_token = self
+                .handler
+                .service_helper
+                .verif_reporter_mut()
+                .start_verification(tc);
             self.handler
                 .service_helper
                 .verif_reporter()
@@ -279,7 +287,7 @@ mod tests {
         let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
         let ping_tc = PusTcCreator::new_no_app_data(sp_header, sec_header, true);
-        let token = test_harness.init_verification(&ping_tc);
+        let token = test_harness.start_verification(&ping_tc);
         test_harness.send_tc(&token, &ping_tc);
         let request_id = token.request_id();
         let result = test_harness.handle_one_tc();
@@ -334,7 +342,7 @@ mod tests {
         let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(3, 1);
         let ping_tc = PusTcCreator::new_no_app_data(sp_header, sec_header, true);
-        let token = test_harness.init_verification(&ping_tc);
+        let token = test_harness.start_verification(&ping_tc);
         test_harness.send_tc(&token, &ping_tc);
         let result = test_harness.handle_one_tc();
         assert!(result.is_err());
@@ -355,7 +363,7 @@ mod tests {
         let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(17, 200);
         let ping_tc = PusTcCreator::new_no_app_data(sp_header, sec_header, true);
-        let token = test_harness.init_verification(&ping_tc);
+        let token = test_harness.start_verification(&ping_tc);
         test_harness.send_tc(&token, &ping_tc);
         let result = test_harness.handle_one_tc();
         assert!(result.is_ok());

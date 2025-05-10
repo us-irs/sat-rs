@@ -150,9 +150,9 @@ impl<
     ///
     /// * `cfg` - Configuration of the server.
     /// * `tm_source` - Generic TM source used by the server to pull telemetry packets which are
-    ///     then sent back to the client.
+    ///   then sent back to the client.
     /// * `tc_receiver` - Any received telecommands which were decoded successfully will be
-    ///     forwarded to this TC receiver.
+    ///   forwarded to this TC receiver.
     pub fn new(
         cfg: ServerConfig,
         tm_source: TmSource,
@@ -377,13 +377,13 @@ mod tests {
                 current_idx += 1;
                 let mut dec_report = cobs::decode_in_place_report(&mut read_buf[current_idx..])
                     .expect("COBS decoding failed");
-                assert_eq!(dec_report.dst_used, 5);
+                assert_eq!(dec_report.frame_size(), 5);
                 // Skip first sentinel byte.
                 assert_eq!(
                     &read_buf[current_idx..current_idx + INVERTED_PACKET.len()],
                     &INVERTED_PACKET
                 );
-                current_idx += dec_report.src_used;
+                current_idx += dec_report.parsed_size();
                 // End sentinel.
                 assert_eq!(read_buf[current_idx], 0, "invalid sentinel end byte");
                 current_idx += 1;
@@ -393,13 +393,13 @@ mod tests {
                 current_idx += 1;
                 dec_report = cobs::decode_in_place_report(&mut read_buf[current_idx..])
                     .expect("COBS decoding failed");
-                assert_eq!(dec_report.dst_used, 5);
+                assert_eq!(dec_report.frame_size(), 5);
                 // Skip first sentinel byte.
                 assert_eq!(
                     &read_buf[current_idx..current_idx + SIMPLE_PACKET.len()],
                     &SIMPLE_PACKET
                 );
-                current_idx += dec_report.src_used;
+                current_idx += dec_report.parsed_size();
                 // End sentinel.
                 assert_eq!(read_buf[current_idx], 0);
                 break;

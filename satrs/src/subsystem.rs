@@ -136,7 +136,7 @@ impl SequenceExecutionHelper {
     ///   with [Self::load]
     /// * `sender` - The sender to send mode requests to the components
     /// * `children_mode_store` - The mode store vector to keep track of the mode states of
-    ///    children components
+    ///   children components
     pub fn run(
         &mut self,
         table: &SequenceModeTables,

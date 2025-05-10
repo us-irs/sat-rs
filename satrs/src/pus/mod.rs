@@ -959,15 +959,11 @@ pub mod std_mod {
             possible_packet: &TcInMemory,
         ) -> Result<PusTcReader<'_>, PusTcFromMemError> {
             self.cache(possible_packet)?;
-            Ok(PusTcReader::new(self.tc_slice_raw())
-                .map_err(EcssTmtcError::Pus)?
-                .0)
+            Ok(PusTcReader::new(self.tc_slice_raw()).map_err(EcssTmtcError::Pus)?)
         }
 
         fn convert(&self) -> Result<PusTcReader<'_>, PusTcFromMemError> {
-            Ok(PusTcReader::new(self.tc_slice_raw())
-                .map_err(EcssTmtcError::Pus)?
-                .0)
+            Ok(PusTcReader::new(self.tc_slice_raw()).map_err(EcssTmtcError::Pus)?)
         }
     }
 
@@ -1279,7 +1275,7 @@ pub mod test_util {
         UniqueApidTargetId::new(TEST_APID, TEST_UNIQUE_ID_1);
 
     pub trait PusTestHarness {
-        fn init_verification(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted>;
+        fn start_verification(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted>;
         fn send_tc(&self, token: &VerificationToken<TcStateAccepted>, tc: &PusTcCreator);
         fn read_next_tm(&mut self) -> PusTmReader<'_>;
         fn check_no_tm_available(&self) -> bool;
@@ -1459,7 +1455,7 @@ pub mod tests {
             let tm_pool = self.tm_pool.0.read().unwrap();
             let tm_raw = tm_pool.read_as_vec(&tm_in_pool.store_addr).unwrap();
             self.tm_buf[0..tm_raw.len()].copy_from_slice(&tm_raw);
-            PusTmReader::new(&self.tm_buf, 7).unwrap().0
+            PusTmReader::new(&self.tm_buf, 7).unwrap()
         }
 
         pub fn check_no_tm_available(&self) -> bool {
@@ -1476,7 +1472,7 @@ pub mod tests {
             let tm_in_pool = next_msg.unwrap();
             let tm_pool = self.tm_pool.0.read().unwrap();
             let tm_raw = tm_pool.read_as_vec(&tm_in_pool.store_addr).unwrap();
-            let tm = PusTmReader::new(&tm_raw, 7).unwrap().0;
+            let tm = PusTmReader::new(&tm_raw, 7).unwrap();
             assert_eq!(PusPacket::service(&tm), 1);
             assert_eq!(PusPacket::subservice(&tm), subservice);
             assert_eq!(tm.apid(), TEST_APID);
@@ -1584,9 +1580,7 @@ pub mod tests {
             let next_msg = self.tm_receiver.try_recv();
             assert!(next_msg.is_ok());
             self.current_tm = Some(next_msg.unwrap().packet);
-            PusTmReader::new(self.current_tm.as_ref().unwrap(), 7)
-                .unwrap()
-                .0
+            PusTmReader::new(self.current_tm.as_ref().unwrap(), 7).unwrap()
         }
 
         pub fn check_no_tm_available(&self) -> bool {
@@ -1601,7 +1595,7 @@ pub mod tests {
             let next_msg = self.tm_receiver.try_recv();
             assert!(next_msg.is_ok());
             let next_msg = next_msg.unwrap();
-            let tm = PusTmReader::new(next_msg.packet.as_slice(), 7).unwrap().0;
+            let tm = PusTmReader::new(next_msg.packet.as_slice(), 7).unwrap();
             assert_eq!(PusPacket::service(&tm), 1);
             assert_eq!(PusPacket::subservice(&tm), subservice);
             assert_eq!(tm.apid(), TEST_APID);

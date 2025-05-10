@@ -109,8 +109,8 @@ impl PusTcDistributor {
             // TODO: Shouldn't this be an error?
             return Ok(HandlingStatus::HandledOne);
         }
-        let pus_tc = pus_tc_result.unwrap().0;
-        let init_token = self.verif_reporter.add_tc(&pus_tc);
+        let pus_tc = pus_tc_result.unwrap();
+        let init_token = self.verif_reporter.start_verification(&pus_tc);
         self.stamp_helper.update_from_now();
         let accepted_token = self
             .verif_reporter
@@ -599,7 +599,7 @@ pub(crate) mod tests {
         ) -> (verification::RequestId, ActivePusRequestStd) {
             let sp_header = SpHeader::new_from_apid(apid);
             let sec_header_dummy = PusTcSecondaryHeader::new_simple(0, 0);
-            let init = self.verif_reporter.add_tc(&PusTcCreator::new(
+            let init = self.verif_reporter.start_verification(&PusTcCreator::new(
                 sp_header,
                 sec_header_dummy,
                 &[],
@@ -706,7 +706,7 @@ pub(crate) mod tests {
         }
 
         pub fn add_tc(&mut self, tc: &PusTcCreator) -> VerificationToken<TcStateAccepted> {
-            let token = self.verif_reporter.add_tc(tc);
+            let token = self.verif_reporter.start_verification(tc);
             self.current_request_id = Some(verification::RequestId::new(tc));
             self.current_packet = Some(tc.to_vec().unwrap());
             self.verif_reporter
@@ -734,7 +734,7 @@ pub(crate) mod tests {
             let tc_reader = PusTcReader::new(&current_packet).unwrap();
             let (active_info, request) = self.converter.convert(
                 token,
-                &tc_reader.0,
+                &tc_reader,
                 &self.dummy_sender,
                 &self.verif_reporter,
                 time_stamp,

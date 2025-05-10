@@ -120,15 +120,15 @@ impl<
     ///
     /// * `cfg` - Configuration of the server.
     /// * `tm_source` - Generic TM source used by the server to pull telemetry packets which are
-    ///     then sent back to the client.
+    ///   then sent back to the client.
     /// * `tc_sender` - Any received telecommands which were decoded successfully will be
-    ///     forwarded using this [PacketSenderRaw].
+    ///   forwarded using this [PacketSenderRaw].
     /// * `validator` - Used to determine the space packets relevant for further processing and
-    ///    to detect broken space packets.
+    ///   to detect broken space packets.
     /// * `handled_connection_hook` - Called to notify the user about a succesfully handled
-    ///    connection.
+    ///   connection.
     /// * `stop_signal` - Can be used to shut down the TCP server even for longer running
-    ///    connections.
+    ///   connections.
     pub fn new(
         cfg: ServerConfig,
         tm_source: TmSource,
