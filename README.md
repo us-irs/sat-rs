@@ -38,7 +38,7 @@ This project currently contains following crates:
    Example of a simple example on-board software using various sat-rs components which can be run
    on a host computer or on any system with a standard runtime like a Raspberry Pi.
 * [`satrs-minisim`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-minisim):
-   Mini-Simulator based on [asynchronix](https://github.com/asynchronics/asynchronix) which
+   Mini-Simulator based on [nexosim](https://github.com/asynchronics/nexosim) which
    simulates some physical devices for the `satrs-example` application device handlers.
 * [`satrs-mib`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-mib):
    Components to build a mission information base from the on-board software directly.
