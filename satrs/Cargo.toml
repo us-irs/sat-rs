@@ -14,7 +14,7 @@ categories = ["aerospace", "aerospace::space-protocols", "no-std", "hardware-sup
 
 [dependencies]
 satrs-shared = { version = "0.2.2", path = "../satrs-shared" }
-spacepackets = { version = ">=0.14, <=0.15", default-features = false }
+spacepackets = { version = ">=0.14, <=0.15", git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git", default-features = false }
 
 delegate = ">0.7, <=0.13"
 paste = "1"
