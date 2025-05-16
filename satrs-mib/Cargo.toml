@@ -24,6 +24,7 @@ optional = true
 
 [dependencies.satrs-shared]
 version = "0.2.2"
+path = "../satrs-shared"
 features = ["serde"]
 
 [dependencies.satrs-mib-codegen]

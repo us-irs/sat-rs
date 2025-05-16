@@ -22,12 +22,13 @@ version = "1"
 optional = true
 
 [dependencies.spacepackets]
-version = "0.14"
+version = ">=0.14, <=0.15"
 default-features = false
 
 [features]
 serde = ["dep:serde", "spacepackets/serde"]
 defmt = ["dep:defmt", "spacepackets/defmt"]
+alloc = ["spacepackets/alloc"]
 
 [package.metadata.docs.rs]
 all-features = true
