@@ -11,7 +11,9 @@ use crate::pus::PusTcDistributor;
 pub struct TcSourceTaskStatic {
     shared_tc_pool: SharedPacketPool,
     tc_receiver: mpsc::Receiver<PacketInPool>,
-    tc_buf: [u8; 4096],
+    /// We allocate this buffer from the heap to avoid a clippy warning on large enum variant
+    /// differences.
+    tc_buf: Box<[u8; 4096]>,
     pus_distributor: PusTcDistributor,
 }
 
@@ -25,7 +27,7 @@ impl TcSourceTaskStatic {
         Self {
             shared_tc_pool,
             tc_receiver,
-            tc_buf: [0; 4096],
+            tc_buf: Box::new([0; 4096]),
             pus_distributor: pus_receiver,
         }
     }
@@ -44,11 +46,11 @@ impl TcSourceTaskStatic {
                     .0
                     .read()
                     .expect("locking tc pool failed");
-                pool.read(&packet_in_pool.store_addr, &mut self.tc_buf)
+                pool.read(&packet_in_pool.store_addr, self.tc_buf.as_mut_slice())
                     .expect("reading pool failed");
                 drop(pool);
                 self.pus_distributor
-                    .handle_tc_packet_in_store(packet_in_pool, &self.tc_buf)
+                    .handle_tc_packet_in_store(packet_in_pool, self.tc_buf.as_slice())
                     .ok();
                 HandlingStatus::HandledOne
             }
