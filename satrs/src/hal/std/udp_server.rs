@@ -129,7 +129,6 @@ mod tests {
     use crate::ComponentId;
     use core::cell::RefCell;
     use spacepackets::ecss::tc::PusTcCreator;
-    use spacepackets::ecss::WritablePusPacket;
     use spacepackets::SpHeader;
     use std::collections::VecDeque;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
