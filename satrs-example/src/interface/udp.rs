@@ -119,7 +119,8 @@ mod tests {
         },
         ComponentId,
     };
-    use satrs_example::config::{components, OBSW_SERVER_ADDR};
+    use satrs_example::config::OBSW_SERVER_ADDR;
+    use satrs_example::ids;
 
     use crate::tmtc::sender::{MockSender, TmTcSender};
 
@@ -175,7 +176,7 @@ mod tests {
             udp_tc_server,
             tm_handler,
         };
-        let sph = SpHeader::new_for_unseg_tc(components::Apid::GenericPus as u16, 0, 0);
+        let sph = SpHeader::new_for_unseg_tc(ids::Apid::GenericPus as u16, 0, 0);
         let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true)
             .to_vec()
             .unwrap();

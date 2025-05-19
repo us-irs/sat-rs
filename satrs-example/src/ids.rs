@@ -15,15 +15,15 @@ pub mod acs {
     #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub enum Id {
         Subsystem = 1,
-        Assembly = 2,
+        MgmAssembly = 2,
         Mgm0 = 3,
         Mgm1 = 4,
     }
 
     pub const SUBSYSTEM: super::UniqueApidTargetId =
         super::UniqueApidTargetId::new(super::Apid::Acs as u16, Id::Subsystem as u32);
-    pub const ASSEMBLY: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Acs as u16, Id::Assembly as u32);
+    pub const MGM_ASSEMBLY: super::UniqueApidTargetId =
+        super::UniqueApidTargetId::new(super::Apid::Acs as u16, Id::MgmAssembly as u32);
     pub const MGM0: super::UniqueApidTargetId =
         super::UniqueApidTargetId::new(super::Apid::Acs as u16, Id::Mgm0 as u32);
     pub const MGM1: super::UniqueApidTargetId =

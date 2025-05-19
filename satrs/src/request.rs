@@ -39,7 +39,7 @@ impl UniqueApidTargetId {
         }
     }
 
-    pub fn raw(&self) -> ComponentId {
+    pub const fn raw(&self) -> ComponentId {
         ((self.apid as u64) << 32) | (self.unique_id as u64)
     }
 

@@ -400,6 +400,7 @@ impl<
     }
 
     fn announce_mode(&self, _requestor_info: Option<MessageMetadata>, _recursive: bool) {
+        // TODO: Event
         log::info!(
             "{} announcing mode: {:?}",
             self.dev_str,
@@ -492,7 +493,7 @@ mod tests {
         tmtc::PacketAsVec,
         ComponentId,
     };
-    use satrs_example::ids::{acs::ASSEMBLY, Apid};
+    use satrs_example::ids::{acs::MGM_ASSEMBLY, Apid};
     use satrs_minisim::acs::lis3mdl::MgmLis3RawValues;
 
     use crate::{eps::TestSwitchHelper, pus::hk::HkReply, requests::CompositeRequest};
@@ -593,7 +594,7 @@ mod tests {
                 shared_mgm_set,
             );
             handler.add_mode_parent(PUS_MODE.into(), reply_tx_to_pus);
-            handler.add_mode_parent(ASSEMBLY.into(), reply_tx_to_parent);
+            handler.add_mode_parent(MGM_ASSEMBLY.into(), reply_tx_to_parent);
             Self {
                 mode_request_tx: request_tx,
                 mode_reply_rx_to_pus: reply_rx_to_pus,

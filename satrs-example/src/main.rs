@@ -5,7 +5,10 @@ use std::{
     time::Duration,
 };
 
-use acs::mgm::{MgmHandlerLis3Mdl, SpiDummyInterface, SpiSimInterface, SpiSimInterfaceWrapper};
+use acs::{
+    assembly::MgmAssembly,
+    mgm::{MgmHandlerLis3Mdl, SpiDummyInterface, SpiSimInterface, SpiSimInterfaceWrapper},
+};
 use eps::{
     pcdu::{PcduHandler, SerialInterfaceDummy, SerialInterfaceToSim, SerialSimInterfaceWrapper},
     PowerSwitchHelper,
@@ -31,7 +34,10 @@ use pus::{
 use requests::GenericRequestRouter;
 use satrs::{
     hal::std::{tcp_server::ServerConfig, udp_server::UdpTcServer},
-    mode::{Mode, ModeAndSubmode, ModeRequest, ModeRequestHandlerMpscBounded},
+    mode::{
+        Mode, ModeAndSubmode, ModeRequest, ModeRequestHandlerMpscBounded,
+        ModeRequestorAndHandlerMpscBounded,
+    },
     mode_tree::connect_mode_nodes,
     pus::{event_man::EventRequestWithToken, EcssTcInMemConverter, HandlingStatus},
     request::{GenericMessage, MessageMetadata},
@@ -303,6 +309,15 @@ fn main() {
     let (switch_request_tx, switch_request_rx) = mpsc::sync_channel(20);
     let switch_helper = PowerSwitchHelper::new(switch_request_tx, shared_switch_set.clone());
 
+    let (mgm_assy_mode_req_tx, mgm_assy_mode_req_rx) = mpsc::sync_channel(20);
+    let (mgm_assy_mode_reply_tx, mgm_assy_mode_reply_rx) = mpsc::sync_channel(20);
+    let mgm_assembly_mode_node = ModeRequestorAndHandlerMpscBounded::new(
+        MgmAssembly::id(),
+        mgm_assy_mode_req_rx,
+        mgm_assy_mode_reply_rx,
+    );
+    let mut mgm_assembly = MgmAssembly::new(mgm_assembly_mode_node);
+
     let shared_mgm_0_set = Arc::default();
     let shared_mgm_1_set = Arc::default();
     let mgm_0_mode_node = ModeRequestHandlerMpscBounded::new(MGM0.into(), mgm_0_handler_mode_rx);
@@ -363,6 +378,19 @@ fn main() {
         mgm_1_handler_mode_tx,
         &mut mgm_1_handler,
         pus_mode_reply_tx.clone(),
+    );
+    // Connect assembly to device handlers.
+    connect_mode_nodes(
+        &mut mgm_assembly,
+        mgm_assy_mode_req_tx.clone(),
+        &mut mgm_1_handler,
+        mgm_assy_mode_reply_tx.clone(),
+    );
+    connect_mode_nodes(
+        &mut mgm_assembly,
+        mgm_assy_mode_req_tx,
+        &mut mgm_1_handler,
+        mgm_assy_mode_reply_tx,
     );
 
     let pcdu_serial_interface = if let Some(sim_client) = opt_sim_client.as_mut() {
@@ -455,6 +483,7 @@ fn main() {
     let jh_aocs = thread::Builder::new()
         .name("sat-rs aocs".to_string())
         .spawn(move || loop {
+            mgm_assembly.periodic_operation();
             mgm_0_handler.periodic_operation();
             mgm_1_handler.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_AOCS));
