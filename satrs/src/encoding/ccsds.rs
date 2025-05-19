@@ -90,8 +90,8 @@ pub fn parse_buffer_for_ccsds_space_packets<SendError>(
 #[cfg(test)]
 mod tests {
     use spacepackets::{
-        ecss::{tc::PusTcCreator, WritablePusPacket},
-        CcsdsPacket, PacketId, PacketSequenceCtrl, PacketType, SequenceFlags, SpHeader,
+        ecss::tc::PusTcCreator, CcsdsPacket, PacketId, PacketSequenceCtrl, PacketType,
+        SequenceFlags, SpHeader,
     };
 
     use crate::{encoding::tests::TcCacher, ComponentId};

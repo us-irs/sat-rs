@@ -46,8 +46,8 @@ pub mod crossbeam_test {
         let sender =
             PacketSenderWithSharedPool::new_with_shared_packet_pool(tx.clone(), &shared_tm_pool);
         let sender_1 = sender.clone();
-        let mut reporter_with_sender_0 = VerificationReporter::new(TEST_COMPONENT_ID_0.id(), &cfg);
-        let mut reporter_with_sender_1 = reporter_with_sender_0.clone();
+        let reporter_with_sender_0 = VerificationReporter::new(TEST_COMPONENT_ID_0.id(), &cfg);
+        let reporter_with_sender_1 = reporter_with_sender_0.clone();
         // For test purposes, we retrieve the request ID from the TCs and pass them to the receiver
         // tread.
         let req_id_0;
