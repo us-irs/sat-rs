@@ -597,7 +597,7 @@ impl SubsystemCommandingHelper {
     }
 
     fn update_internal_req_id(&mut self) {
-        let new_internal_req_id = self.request_id().unwrap() << 8
+        let new_internal_req_id = (self.request_id().unwrap() << 8)
             | self.seq_exec_helper.current_sequence_index().unwrap() as u32;
         self.seq_exec_helper.set_request_id(new_internal_req_id);
         self.active_internal_request_id = Some(new_internal_req_id);

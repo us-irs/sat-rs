@@ -16,8 +16,9 @@ use satrs::pus::{
 use satrs::request::{GenericMessage, UniqueApidTargetId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{EcssEnumU16, PusPacket, PusServiceId};
-use satrs_example::config::pus::PUS_ACTION_SERVICE;
 use satrs_example::config::tmtc_err;
+use satrs_example::ids;
+use satrs_example::ids::generic_pus::PUS_ACTION;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -214,10 +215,10 @@ pub fn create_action_service(
 ) -> ActionServiceWrapper {
     let action_request_handler = PusTargetedRequestService::new(
         PusServiceHelper::new(
-            PUS_ACTION_SERVICE.id(),
+            ids::generic_pus::PUS_ACTION.id(),
             pus_action_rx,
             tm_sender,
-            create_verification_reporter(PUS_ACTION_SERVICE.id(), PUS_ACTION_SERVICE.apid),
+            create_verification_reporter(PUS_ACTION.id(), PUS_ACTION.apid),
             tc_in_mem_converter,
         ),
         ActionRequestConverter::default(),

@@ -16,7 +16,7 @@ use satrs::{
     },
     spacepackets::time::cds::CdsTime,
 };
-use satrs_example::config::pus::PUS_EVENT_MANAGEMENT;
+use satrs_example::ids::generic_pus::PUS_EVENT_MANAGEMENT;
 
 use crate::update_time;
 

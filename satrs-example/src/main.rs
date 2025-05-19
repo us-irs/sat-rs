@@ -39,11 +39,15 @@ use satrs::{
 };
 use satrs_example::{
     config::{
-        acs::{MGM_HANDLER_0, MGM_HANDLER_1},
-        components::{NO_SENDER, PCDU_HANDLER, TCP_SERVER, UDP_SERVER},
+        components::NO_SENDER,
         pool::create_sched_tc_pool,
         tasks::{FREQ_MS_AOCS, FREQ_MS_PUS_STACK, FREQ_MS_UDP_TMTC, SIM_CLIENT_IDLE_DELAY_MS},
         OBSW_SERVER_ADDR, PACKET_ID_VALIDATOR, SERVER_PORT,
+    },
+    ids::{
+        acs::*,
+        eps::*,
+        tmtc::{TCP_SERVER, UDP_SERVER},
     },
     DeviceMode,
 };
@@ -124,13 +128,13 @@ fn main() {
     let mut request_map = GenericRequestRouter::default();
     request_map
         .composite_router_map
-        .insert(MGM_HANDLER_0.id(), mgm_0_handler_composite_tx);
+        .insert(MGM0.id(), mgm_0_handler_composite_tx);
     request_map
         .composite_router_map
-        .insert(MGM_HANDLER_0.id(), mgm_1_handler_composite_tx);
+        .insert(MGM1.id(), mgm_1_handler_composite_tx);
     request_map
         .composite_router_map
-        .insert(PCDU_HANDLER.id(), pcdu_handler_composite_tx);
+        .insert(PCDU.id(), pcdu_handler_composite_tx);
 
     // This helper structure is used by all telecommand providers which need to send telecommands
     // to the TC source.
@@ -301,10 +305,8 @@ fn main() {
 
     let shared_mgm_0_set = Arc::default();
     let shared_mgm_1_set = Arc::default();
-    let mgm_0_mode_node =
-        ModeRequestHandlerMpscBounded::new(MGM_HANDLER_0.into(), mgm_0_handler_mode_rx);
-    let mgm_1_mode_node =
-        ModeRequestHandlerMpscBounded::new(MGM_HANDLER_1.into(), mgm_1_handler_mode_rx);
+    let mgm_0_mode_node = ModeRequestHandlerMpscBounded::new(MGM0.into(), mgm_0_handler_mode_rx);
+    let mgm_1_mode_node = ModeRequestHandlerMpscBounded::new(MGM1.into(), mgm_1_handler_mode_rx);
     let (mgm_0_spi_interface, mgm_1_spi_interface) =
         if let Some(sim_client) = opt_sim_client.as_mut() {
             sim_client
@@ -328,7 +330,7 @@ fn main() {
             )
         };
     let mut mgm_0_handler = MgmHandlerLis3Mdl::new(
-        MGM_HANDLER_0,
+        MGM0,
         "MGM_0",
         mgm_0_mode_node,
         mgm_0_handler_composite_rx,
@@ -339,7 +341,7 @@ fn main() {
         shared_mgm_0_set,
     );
     let mut mgm_1_handler = MgmHandlerLis3Mdl::new(
-        MGM_HANDLER_1,
+        MGM1,
         "MGM_1",
         mgm_1_mode_node,
         mgm_1_handler_composite_rx,
@@ -372,10 +374,9 @@ fn main() {
     } else {
         SerialSimInterfaceWrapper::Dummy(SerialInterfaceDummy::default())
     };
-    let pcdu_mode_node =
-        ModeRequestHandlerMpscBounded::new(PCDU_HANDLER.into(), pcdu_handler_mode_rx);
+    let pcdu_mode_node = ModeRequestHandlerMpscBounded::new(PCDU.into(), pcdu_handler_mode_rx);
     let mut pcdu_handler = PcduHandler::new(
-        PCDU_HANDLER,
+        PCDU,
         "PCDU",
         pcdu_mode_node,
         pcdu_handler_composite_rx,
