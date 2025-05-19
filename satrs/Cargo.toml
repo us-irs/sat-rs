@@ -67,7 +67,7 @@ alloc = [
     "dyn-clone",
     "downcast-rs"
 ]
-serde = ["dep:serde", "spacepackets/serde", "spacepackets/serde"]
+serde = ["dep:serde", "spacepackets/serde", "satrs-shared/serde"]
 crossbeam = ["crossbeam-channel"]
 heapless = ["dep:heapless", "static_cell"]
 defmt = ["dep:defmt", "spacepackets/defmt"]

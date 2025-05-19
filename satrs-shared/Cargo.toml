@@ -26,7 +26,6 @@ optional = true
 [features]
 serde = ["dep:serde", "spacepackets/serde"]
 defmt = ["dep:defmt", "spacepackets/defmt"]
-alloc = ["spacepackets/alloc"]
 
 [package.metadata.docs.rs]
 all-features = true
