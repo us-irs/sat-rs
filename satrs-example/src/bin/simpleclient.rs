@@ -1,7 +1,6 @@
 use satrs::pus::verification::RequestId;
 use satrs::spacepackets::ecss::tc::PusTcCreator;
 use satrs::spacepackets::ecss::tm::PusTmReader;
-use satrs::spacepackets::ecss::WritablePusPacket as _;
 use satrs::{spacepackets::ecss::PusPacket, spacepackets::SpHeader};
 use satrs_example::config::{OBSW_SERVER_ADDR, SERVER_PORT};
 use std::net::{IpAddr, SocketAddr, UdpSocket};
