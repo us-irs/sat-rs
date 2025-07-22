@@ -102,7 +102,7 @@ impl PusTcDistributor {
                 sender_id,
                 pus_tc_result.unwrap_err()
             );
-            log::warn!("raw data: {:x?}", raw_tc);
+            log::warn!("raw data: {raw_tc:x?}");
             // TODO: Shouldn't this be an error?
             return Ok(HandlingStatus::HandledOne);
         }

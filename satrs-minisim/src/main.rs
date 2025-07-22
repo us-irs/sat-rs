@@ -130,7 +130,7 @@ fn main() {
     let mut udp_server =
         SimUdpServer::new(SIM_CTRL_PORT, request_sender, reply_receiver, 200, None)
             .expect("could not create UDP request server");
-    log::info!("starting UDP server on port {}", SIM_CTRL_PORT);
+    log::info!("starting UDP server on port {SIM_CTRL_PORT}");
     // This thread manages the simulator UDP server.
     let udp_tc_thread = thread::spawn(move || {
         udp_server.run();
