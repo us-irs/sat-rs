@@ -61,6 +61,8 @@ Each project has its own `CHANGELOG.md`.
    packet protocol implementations. This repository is re-exported in the
    [`satrs`](https://egit.irs.uni-stuttgart.de/rust/satrs/src/branch/main/satrs)
    crate.
+ * [`cfdp`](https://egit.irs.uni-stuttgart.de/rust/cfdp): CCSDS File Delivery Protocol
+   (CFDP) high-level library components.
 
 # Flight Heritage
 
