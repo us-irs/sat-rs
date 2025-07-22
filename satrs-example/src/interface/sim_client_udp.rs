@@ -24,7 +24,7 @@ pub fn create_sim_client(sim_request_rx: mpsc::Receiver<SimRequest>) -> Option<S
             return Some(sim_client);
         }
         Err(e) => {
-            log::warn!("sim client creation error: {}", e);
+            log::warn!("sim client creation error: {e}");
         }
     }
     None
@@ -116,7 +116,7 @@ impl SimClientUdp {
                         .udp_client
                         .send_to(request_json.as_bytes(), self.simulator_addr)
                     {
-                        log::error!("error sending data to UDP SIM server: {}", e);
+                        log::error!("error sending data to UDP SIM server: {e}");
                         break;
                     } else {
                         no_sim_requests_handled = false;
@@ -151,7 +151,7 @@ impl SimClientUdp {
                             }
                         }
                         Err(e) => {
-                            log::warn!("failed to deserialize SIM reply: {}", e);
+                            log::warn!("failed to deserialize SIM reply: {e}");
                         }
                     }
                 }
@@ -161,7 +161,7 @@ impl SimClientUdp {
                     {
                         break;
                     }
-                    log::error!("error receiving data from UDP SIM server: {}", e);
+                    log::error!("error receiving data from UDP SIM server: {e}");
                     break;
                 }
             }

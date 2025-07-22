@@ -401,7 +401,7 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
                 }
             }
         }) {
-            log::warn!("receiving PCDU replies failed: {:?}", e);
+            log::warn!("receiving PCDU replies failed: {e:?}");
         }
     }
 }

@@ -31,7 +31,7 @@ impl SpacePacketValidator for SimplePacketValidator {
         if self.valid_ids.contains(&sp_header.packet_id()) {
             return SpValidity::Valid;
         }
-        log::warn!("ignoring space packet with header {:?}", sp_header);
+        log::warn!("ignoring space packet with header {sp_header:?}");
         // We could perform a CRC check.. but lets keep this simple and assume that TCP ensures
         // data integrity.
         SpValidity::Skip

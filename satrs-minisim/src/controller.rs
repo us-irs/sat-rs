@@ -120,7 +120,7 @@ impl SimController {
     fn handle_ctrl_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
         let sim_ctrl_request = SimCtrlRequest::from_sim_message(request)?;
         if SIM_CTRL_REQ_WIRETAPPING {
-            log::info!("received sim ctrl request: {:?}", sim_ctrl_request);
+            log::info!("received sim ctrl request: {sim_ctrl_request:?}");
         }
         match sim_ctrl_request {
             SimCtrlRequest::Ping => {
@@ -139,7 +139,7 @@ impl SimController {
     ) -> Result<(), SimRequestError> {
         let mgm_request = MgmRequestLis3Mdl::from_sim_message(request)?;
         if MGM_REQ_WIRETAPPING {
-            log::info!("received MGM request: {:?}", mgm_request);
+            log::info!("received MGM request: {mgm_request:?}");
         }
         match mgm_request {
             MgmRequestLis3Mdl::RequestSensorData => {
@@ -160,7 +160,7 @@ impl SimController {
     fn handle_pcdu_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
         let pcdu_request = PcduRequest::from_sim_message(request)?;
         if PCDU_REQ_WIRETAPPING {
-            log::info!("received PCDU request: {:?}", pcdu_request);
+            log::info!("received PCDU request: {pcdu_request:?}");
         }
         match pcdu_request {
             PcduRequest::RequestSwitchInfo => {
@@ -188,7 +188,7 @@ impl SimController {
     fn handle_mgt_request(&mut self, request: &SimRequest) -> Result<(), SimRequestError> {
         let mgt_request = MgtRequest::from_sim_message(request)?;
         if MGT_REQ_WIRETAPPING {
-            log::info!("received MGT request: {:?}", mgt_request);
+            log::info!("received MGT request: {mgt_request:?}");
         }
         match mgt_request {
             MgtRequest::ApplyTorque { duration, dipole } => self

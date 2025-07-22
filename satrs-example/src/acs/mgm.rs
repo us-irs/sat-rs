@@ -83,7 +83,7 @@ impl SpiInterface for SpiSimInterface {
             .sim_request_tx
             .send(SimRequest::new_with_epoch_time(mgm_sensor_request))
         {
-            log::error!("failed to send MGM LIS3 request: {}", e);
+            log::error!("failed to send MGM LIS3 request: {e}");
         }
         match self.sim_reply_rx.recv_timeout(Duration::from_millis(50)) {
             Ok(sim_reply) => {
@@ -97,7 +97,7 @@ impl SpiInterface for SpiSimInterface {
                     .copy_from_slice(&sim_reply_lis3.raw.z.to_le_bytes());
             }
             Err(e) => {
-                log::warn!("MGM LIS3 SIM reply timeout: {}", e);
+                log::warn!("MGM LIS3 SIM reply timeout: {e}");
             }
         }
         Ok(())
