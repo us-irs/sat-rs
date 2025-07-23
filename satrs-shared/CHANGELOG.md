@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.2.3] 2025-07-22
+
+`spacepackets` range v0.14 to v0.15
+
 # [v0.2.2] 2025-05-10
 
 - Bump to `spacepackests` v0.14
@@ -46,5 +50,6 @@ Allow `spacepackets` range starting with v0.10 and v0.11.
 
 Initial release.
 
-[unreleased]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-shared-v0.2.2...HEAD
+[unreleased]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-shared-v0.2.3...HEAD
+[v0.2.3]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-shared-v0.2.1...satrs-shared-v0.2.3
 [v0.2.2]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-shared-v0.2.1...satrs-shared-v0.2.2
