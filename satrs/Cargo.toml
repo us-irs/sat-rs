@@ -1,6 +1,6 @@
 [package]
 name = "satrs"
-version = "0.3.0-alpha.1"
+version = "0.3.0-alpha.2"
 edition = "2021"
 rust-version = "1.82.0"
 authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
@@ -13,7 +13,7 @@ keywords = ["no-std", "space", "aerospace"]
 categories = ["aerospace", "aerospace::space-protocols", "no-std", "hardware-support", "embedded"]
 
 [dependencies]
-satrs-shared = { version = "0.2.2", path = "../satrs-shared" }
+satrs-shared = { version = "0.2", path = "../satrs-shared" }
 spacepackets = { version = ">=0.14, <=0.15", default-features = false }
 
 delegate = ">0.7, <=0.13"

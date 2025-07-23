@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.3.0-alpha.2] 2025-07-22
+
+`satrs-shared` update
+
 # [v0.3.0-alpha.1] 2025-07-22
 
 `spacepackets` range v0.14 to v0.15
@@ -203,6 +207,7 @@ docs-rs hotfix
 
 Initial release.
 
-[unreleased]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-v0.3.0-alpha.1...HEAD
+[unreleased]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-v0.3.0-alpha.2...HEAD
+[v0.3.0-alpha.2]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-v0.3.0-alpha.1...satrs-v0.3.0-alpha.2
 [v0.3.0-alpha.1]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-v0.3.0-alpha.0...satrs-v0.3.0-alpha.1
 [v0.3.0-alpha.0]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-v0.2.1...satrs-v0.3.0-alpha.0
