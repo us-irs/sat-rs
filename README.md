@@ -4,6 +4,7 @@
 [![sat-rs book](https://img.shields.io/badge/sat--rs-book-darkgreen?style=flat)](https://robamu.github.io/sat-rs/book/)
 [![Crates.io](https://img.shields.io/crates/v/satrs)](https://crates.io/crates/satrs)
 [![docs.rs](https://img.shields.io/docsrs/satrs)](https://docs.rs/satrs)
+[![matrix chat](https://img.shields.io/matrix/sat-rs%3Amatrix.org)](https://matrix.to/#/#sat-rs:matrix.org)
 
 sat-rs
 =========
