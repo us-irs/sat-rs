@@ -340,8 +340,8 @@ pub fn generate_insert_telecommand_app_data(
 pub mod alloc_mod {
     use alloc::{
         collections::{
-            btree_map::{Entry, Range},
             BTreeMap,
+            btree_map::{Entry, Range},
         },
         vec::Vec,
     };
@@ -855,9 +855,9 @@ mod tests {
         PoolAddr, PoolError, PoolProvider, StaticMemoryPool, StaticPoolAddr, StaticPoolConfig,
     };
     use alloc::collections::btree_map::Range;
-    use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::WritablePusPacket;
-    use spacepackets::time::{cds, TimeWriter, UnixTime};
+    use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
+    use spacepackets::time::{TimeWriter, UnixTime, cds};
     use spacepackets::{PacketId, PacketSequenceCtrl, PacketType, SequenceFlags, SpHeader};
     use std::time::Duration;
     use std::vec::Vec;

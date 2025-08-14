@@ -2,6 +2,7 @@
 //!
 //! This module contains structures to make working with the PUS C standard easier.
 //! The satrs-example application contains various usage examples of these components.
+use crate::ComponentId;
 use crate::pool::{PoolAddr, PoolError};
 use crate::pus::verification::{TcStateAccepted, TcStateToken, VerificationToken};
 use crate::queue::{GenericReceiveError, GenericSendError};
@@ -9,19 +10,18 @@ use crate::request::{GenericMessage, MessageMetadata, RequestId};
 #[cfg(feature = "alloc")]
 use crate::tmtc::PacketAsVec;
 use crate::tmtc::PacketInPool;
-use crate::ComponentId;
 use core::fmt::{Display, Formatter};
 use core::time::Duration;
 #[cfg(feature = "alloc")]
-use downcast_rs::{impl_downcast, Downcast};
+use downcast_rs::{Downcast, impl_downcast};
 #[cfg(feature = "alloc")]
 use dyn_clone::DynClone;
 #[cfg(feature = "std")]
 use std::error::Error;
 
+use spacepackets::ecss::PusError;
 use spacepackets::ecss::tc::{PusTcCreator, PusTcReader};
 use spacepackets::ecss::tm::PusTmCreator;
-use spacepackets::ecss::PusError;
 use spacepackets::{ByteConversionError, SpHeader};
 
 pub mod action;
@@ -659,18 +659,18 @@ pub mod alloc_mod {
 #[cfg(feature = "std")]
 pub mod std_mod {
     use super::*;
+    use crate::ComponentId;
     use crate::pool::{
         PoolAddr, PoolError, PoolProvider, PoolProviderWithGuards, SharedStaticMemoryPool,
     };
     use crate::pus::verification::{TcStateAccepted, VerificationToken};
     use crate::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
-    use crate::ComponentId;
     use alloc::vec::Vec;
     use core::time::Duration;
-    use spacepackets::ecss::tc::PusTcReader;
-    use spacepackets::ecss::WritablePusPacket;
-    use spacepackets::time::StdTimestampError;
     use spacepackets::ByteConversionError;
+    use spacepackets::ecss::WritablePusPacket;
+    use spacepackets::ecss::tc::PusTcReader;
+    use spacepackets::time::StdTimestampError;
     use std::string::String;
     use std::sync::mpsc;
     use std::sync::mpsc::TryRecvError;
@@ -1137,11 +1137,11 @@ pub mod std_mod {
     }
 
     impl<
-            TcReceiver: EcssTcReceiver,
-            TmSender: EcssTmSender,
-            TcInMemConverter: EcssTcInMemConversionProvider,
-            VerificationReporter: VerificationReportingProvider,
-        > PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
+        TcReceiver: EcssTcReceiver,
+        TmSender: EcssTmSender,
+        TcInMemConverter: EcssTcInMemConversionProvider,
+        VerificationReporter: VerificationReportingProvider,
+    > PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
     {
         pub fn new(
             id: ComponentId,
@@ -1261,8 +1261,8 @@ pub mod test_util {
     use crate::request::UniqueApidTargetId;
 
     use super::{
-        verification::{self, TcStateAccepted, VerificationToken},
         DirectPusPacketHandlerResult, PusPacketHandlingError,
+        verification::{self, TcStateAccepted, VerificationToken},
     };
 
     pub const TEST_APID: u16 = 0x101;
@@ -1288,7 +1288,7 @@ pub mod test_util {
 
     pub trait SimplePusPacketHandler {
         fn handle_one_tc(&mut self)
-            -> Result<DirectPusPacketHandlerResult, PusPacketHandlingError>;
+        -> Result<DirectPusPacketHandlerResult, PusPacketHandlingError>;
     }
 }
 
@@ -1296,21 +1296,21 @@ pub mod test_util {
 pub mod tests {
     use core::cell::RefCell;
     use std::sync::mpsc::TryRecvError;
-    use std::sync::{mpsc, RwLock};
+    use std::sync::{RwLock, mpsc};
 
     use alloc::collections::VecDeque;
     use alloc::vec::Vec;
     use satrs_shared::res_code::ResultU16;
+    use spacepackets::CcsdsPacket;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader};
     use spacepackets::ecss::tm::{GenericPusTmSecondaryHeader, PusTmCreator, PusTmReader};
     use spacepackets::ecss::{PusPacket, WritablePusPacket};
-    use spacepackets::CcsdsPacket;
     use test_util::{TEST_APID, TEST_COMPONENT_ID_0};
 
+    use crate::ComponentId;
     use crate::pool::{PoolProvider, SharedStaticMemoryPool, StaticMemoryPool, StaticPoolConfig};
     use crate::pus::verification::{RequestId, VerificationReporter};
     use crate::tmtc::{PacketAsVec, PacketInPool, PacketSenderWithSharedPool, SharedPacketPool};
-    use crate::ComponentId;
 
     use super::verification::test_util::TestVerificationReporter;
     use super::verification::{

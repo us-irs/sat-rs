@@ -9,20 +9,20 @@
 //! They only need to send the received and generated data to these objects.
 use crate::queue::GenericSendError;
 use crate::{
-    pool::{PoolAddr, PoolError},
     ComponentId,
+    pool::{PoolAddr, PoolError},
 };
 #[cfg(feature = "std")]
 pub use alloc_mod::*;
 use core::fmt::Debug;
 #[cfg(feature = "alloc")]
-use downcast_rs::{impl_downcast, Downcast};
+use downcast_rs::{Downcast, impl_downcast};
 use spacepackets::{
+    SpHeader,
     ecss::{
         tc::PusTcReader,
         tm::{PusTmCreator, PusTmReader},
     },
-    SpHeader,
 };
 #[cfg(feature = "std")]
 use std::sync::mpsc;

@@ -11,8 +11,8 @@ use std::io::{self, Read};
 use std::net::SocketAddr;
 use std::thread;
 
-use crate::tmtc::{PacketSenderRaw, PacketSource};
 use crate::ComponentId;
+use crate::tmtc::{PacketSenderRaw, PacketSource};
 use thiserror::Error;
 
 // Re-export the TMTC in COBS server.
@@ -187,14 +187,14 @@ pub struct TcpTmtcGenericServer<
 }
 
 impl<
-        TmSource: PacketSource<Error = TmError>,
-        TcSender: PacketSenderRaw<Error = TcSendError>,
-        TmSender: TcpTmSender<TmError, TcSendError>,
-        TcParser: TcpTcParser<TmError, TcSendError>,
-        HandledConnection: HandledConnectionHandler,
-        TmError: 'static,
-        TcSendError: 'static,
-    >
+    TmSource: PacketSource<Error = TmError>,
+    TcSender: PacketSenderRaw<Error = TcSendError>,
+    TmSender: TcpTmSender<TmError, TcSendError>,
+    TcParser: TcpTcParser<TmError, TcSendError>,
+    HandledConnection: HandledConnectionHandler,
+    TmError: 'static,
+    TcSendError: 'static,
+>
     TcpTmtcGenericServer<
         TmSource,
         TcSender,

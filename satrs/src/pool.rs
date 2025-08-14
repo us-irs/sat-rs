@@ -250,7 +250,7 @@ pub trait PoolProvider {
     /// call the user-provided closure and pass a mutable reference to the memory block
     /// to the closure. This allows the user to modify the memory block.
     fn modify<U: FnMut(&mut [u8])>(&mut self, addr: &PoolAddr, updater: U)
-        -> Result<(), PoolError>;
+    -> Result<(), PoolError>;
 
     /// The provider should copy the data from the memory block to the user-provided buffer if
     /// it exists.
@@ -281,7 +281,7 @@ pub trait PoolProviderWithGuards: PoolProvider {
     /// This can prevent memory leaks. Users can read the data and release the guard
     /// if the data in the store is valid for further processing. If the data is faulty, no
     /// manual deletion is necessary when returning from a processing function prematurely.
-    fn read_with_guard(&mut self, addr: PoolAddr) -> PoolGuard<Self>;
+    fn read_with_guard(&mut self, addr: PoolAddr) -> PoolGuard<'_, Self>;
 
     /// This function behaves like [PoolProvider::modify], but consumes the provided
     /// address and returns a RAII conformant guard object.
@@ -291,7 +291,7 @@ pub trait PoolProviderWithGuards: PoolProvider {
     /// This can prevent memory leaks. Users can read (and modify) the data and release the guard
     /// if the data in the store is valid for further processing. If the data is faulty, no
     /// manual deletion is necessary when returning from a processing function prematurely.
-    fn modify_with_guard(&mut self, addr: PoolAddr) -> PoolRwGuard<Self>;
+    fn modify_with_guard(&mut self, addr: PoolAddr) -> PoolRwGuard<'_, Self>;
 }
 
 pub struct PoolGuard<'a, MemProvider: PoolProvider + ?Sized> {
@@ -510,11 +510,11 @@ pub mod heapless_mod {
         ///
         /// * `subpool_memory` - Static memory for a particular subpool to store the actual data.
         /// * `sizes_list` - Static sizes list structure to store the size of the data which is
-        ///    actually stored.
+        ///   actually stored.
         /// * `num_blocks ` - The number of memory blocks inside the subpool.
         /// * `set_sizes_list_to_all_free` - If this is set to true, the method will take care
-        ///    of setting all values in the sizes list to [super::STORE_FREE]. This does not have
-        ///    to be done if the user initializes the sizes list to that value themselves.
+        ///   of setting all values in the sizes list to [super::STORE_FREE]. This does not have
+        ///   to be done if the user initializes the sizes list to that value themselves.
         pub fn grow(
             &mut self,
             subpool_memory: &'static mut [u8],
@@ -602,7 +602,7 @@ pub mod heapless_mod {
                 if i < start_at_subpool as usize {
                     continue;
                 }
-                if pool_cfg.block_size as usize >= req_size {
+                if pool_cfg.block_size >= req_size {
                     return Ok(i as u16);
                 }
             }
@@ -638,7 +638,7 @@ pub mod heapless_mod {
 
         fn raw_pos(&self, addr: &StaticPoolAddr) -> Option<usize> {
             let (pool_cfg, _) = self.pool.get(addr.pool_idx as usize)?;
-            Some(addr.packet_idx as usize * pool_cfg.block_size as usize)
+            Some(addr.packet_idx as usize * pool_cfg.block_size)
         }
     }
 
@@ -707,7 +707,7 @@ pub mod heapless_mod {
             let subpool_cfg = self.pool.get(addr.pool_idx as usize).unwrap().0;
             let raw_pos = self.raw_pos(&addr).unwrap();
             let block = &mut self.pool.get_mut(addr.pool_idx as usize).unwrap().1
-                [raw_pos..raw_pos + subpool_cfg.block_size as usize];
+                [raw_pos..raw_pos + subpool_cfg.block_size];
             let size_list = self.sizes_lists.get_mut(addr.pool_idx as usize).unwrap();
             size_list[addr.packet_idx as usize] = STORE_FREE;
             block.fill(0);
@@ -742,11 +742,11 @@ pub mod heapless_mod {
     impl<const MAX_NUM_SUBPOOLS: usize> PoolProviderWithGuards
         for StaticHeaplessMemoryPool<MAX_NUM_SUBPOOLS>
     {
-        fn modify_with_guard(&mut self, addr: PoolAddr) -> PoolRwGuard<Self> {
+        fn modify_with_guard(&mut self, addr: PoolAddr) -> PoolRwGuard<'_, Self> {
             PoolRwGuard::new(self, addr)
         }
 
-        fn read_with_guard(&mut self, addr: PoolAddr) -> PoolGuard<Self> {
+        fn read_with_guard(&mut self, addr: PoolAddr) -> PoolGuard<'_, Self> {
             PoolGuard::new(self, addr)
         }
     }
@@ -1058,11 +1058,11 @@ mod alloc_mod {
     }
 
     impl PoolProviderWithGuards for StaticMemoryPool {
-        fn modify_with_guard(&mut self, addr: PoolAddr) -> PoolRwGuard<Self> {
+        fn modify_with_guard(&mut self, addr: PoolAddr) -> PoolRwGuard<'_, Self> {
             PoolRwGuard::new(self, addr)
         }
 
-        fn read_with_guard(&mut self, addr: PoolAddr) -> PoolGuard<Self> {
+        fn read_with_guard(&mut self, addr: PoolAddr) -> PoolGuard<'_, Self> {
             PoolGuard::new(self, addr)
         }
     }
@@ -1307,9 +1307,11 @@ mod tests {
         let addr = pool_provider.add(&test_buf).expect("Adding data failed");
         let read_guard = PoolGuard::new(pool_provider, addr);
         drop(read_guard);
-        assert!(!pool_provider
-            .has_element_at(&addr)
-            .expect("Invalid address"));
+        assert!(
+            !pool_provider
+                .has_element_at(&addr)
+                .expect("Invalid address")
+        );
     }
 
     fn generic_test_pool_guard_deletion(pool_provider: &mut impl PoolProviderWithGuards) {
@@ -1317,9 +1319,11 @@ mod tests {
         let addr = pool_provider.add(&test_buf).expect("Adding data failed");
         let read_guard = pool_provider.read_with_guard(addr);
         drop(read_guard);
-        assert!(!pool_provider
-            .has_element_at(&addr)
-            .expect("Invalid address"));
+        assert!(
+            !pool_provider
+                .has_element_at(&addr)
+                .expect("Invalid address")
+        );
     }
 
     fn generic_test_pool_guard_with_release(pool_provider: &mut impl PoolProviderWithGuards) {
@@ -1328,9 +1332,11 @@ mod tests {
         let mut read_guard = PoolGuard::new(pool_provider, addr);
         read_guard.release();
         drop(read_guard);
-        assert!(pool_provider
-            .has_element_at(&addr)
-            .expect("Invalid address"));
+        assert!(
+            pool_provider
+                .has_element_at(&addr)
+                .expect("Invalid address")
+        );
     }
 
     fn generic_test_pool_modify_guard_man_creation(
@@ -1341,9 +1347,11 @@ mod tests {
         let mut rw_guard = PoolRwGuard::new(pool_provider, addr);
         rw_guard.update(&mut |_| {}).expect("modify failed");
         drop(rw_guard);
-        assert!(!pool_provider
-            .has_element_at(&addr)
-            .expect("Invalid address"));
+        assert!(
+            !pool_provider
+                .has_element_at(&addr)
+                .expect("Invalid address")
+        );
     }
 
     fn generic_test_pool_modify_guard(pool_provider: &mut impl PoolProviderWithGuards) {
@@ -1352,9 +1360,11 @@ mod tests {
         let mut rw_guard = pool_provider.modify_with_guard(addr);
         rw_guard.update(&mut |_| {}).expect("modify failed");
         drop(rw_guard);
-        assert!(!pool_provider
-            .has_element_at(&addr)
-            .expect("Invalid address"));
+        assert!(
+            !pool_provider
+                .has_element_at(&addr)
+                .expect("Invalid address")
+        );
     }
 
     fn generic_modify_pool_index_above_0(pool_provider: &mut impl PoolProvider) {
@@ -1654,30 +1664,36 @@ mod tests {
         fn small_heapless_pool() -> StaticHeaplessMemoryPool<3> {
             let mut heapless_pool: StaticHeaplessMemoryPool<3> =
                 StaticHeaplessMemoryPool::new(false);
-            assert!(heapless_pool
-                .grow(
-                    SUBPOOL_1.take(),
-                    unsafe { &mut *SUBPOOL_1_SIZES.lock().unwrap().get() },
-                    SUBPOOL_1_NUM_ELEMENTS,
-                    true
-                )
-                .is_ok());
-            assert!(heapless_pool
-                .grow(
-                    SUBPOOL_2.take(),
-                    SUBPOOL_2_SIZES.take(),
-                    SUBPOOL_2_NUM_ELEMENTS,
-                    true
-                )
-                .is_ok());
-            assert!(heapless_pool
-                .grow(
-                    SUBPOOL_3.take(),
-                    SUBPOOL_3_SIZES.take(),
-                    SUBPOOL_3_NUM_ELEMENTS,
-                    true
-                )
-                .is_ok());
+            assert!(
+                heapless_pool
+                    .grow(
+                        SUBPOOL_1.take(),
+                        unsafe { &mut *SUBPOOL_1_SIZES.lock().unwrap().get() },
+                        SUBPOOL_1_NUM_ELEMENTS,
+                        true
+                    )
+                    .is_ok()
+            );
+            assert!(
+                heapless_pool
+                    .grow(
+                        SUBPOOL_2.take(),
+                        SUBPOOL_2_SIZES.take(),
+                        SUBPOOL_2_NUM_ELEMENTS,
+                        true
+                    )
+                    .is_ok()
+            );
+            assert!(
+                heapless_pool
+                    .grow(
+                        SUBPOOL_3.take(),
+                        SUBPOOL_3_SIZES.take(),
+                        SUBPOOL_3_NUM_ELEMENTS,
+                        true
+                    )
+                    .is_ok()
+            );
             heapless_pool
         }
 
@@ -1793,22 +1809,26 @@ mod tests {
         fn test_spills_to_higher_subpools() {
             let mut heapless_pool: StaticHeaplessMemoryPool<2> =
                 StaticHeaplessMemoryPool::new(true);
-            assert!(heapless_pool
-                .grow(
-                    SUBPOOL_2.take(),
-                    SUBPOOL_2_SIZES.take(),
-                    SUBPOOL_2_NUM_ELEMENTS,
-                    true
-                )
-                .is_ok());
-            assert!(heapless_pool
-                .grow(
-                    SUBPOOL_4.take(),
-                    SUBPOOL_4_SIZES.take(),
-                    SUBPOOL_4_NUM_ELEMENTS,
-                    true
-                )
-                .is_ok());
+            assert!(
+                heapless_pool
+                    .grow(
+                        SUBPOOL_2.take(),
+                        SUBPOOL_2_SIZES.take(),
+                        SUBPOOL_2_NUM_ELEMENTS,
+                        true
+                    )
+                    .is_ok()
+            );
+            assert!(
+                heapless_pool
+                    .grow(
+                        SUBPOOL_4.take(),
+                        SUBPOOL_4_SIZES.take(),
+                        SUBPOOL_4_NUM_ELEMENTS,
+                        true
+                    )
+                    .is_ok()
+            );
             generic_test_spills_to_higher_subpools(&mut heapless_pool);
         }
 
@@ -1816,22 +1836,26 @@ mod tests {
         fn test_spillage_fails_as_well() {
             let mut heapless_pool: StaticHeaplessMemoryPool<2> =
                 StaticHeaplessMemoryPool::new(true);
-            assert!(heapless_pool
-                .grow(
-                    SUBPOOL_5.take(),
-                    SUBPOOL_5_SIZES.take(),
-                    SUBPOOL_5_NUM_ELEMENTS,
-                    true
-                )
-                .is_ok());
-            assert!(heapless_pool
-                .grow(
-                    SUBPOOL_3.take(),
-                    SUBPOOL_3_SIZES.take(),
-                    SUBPOOL_3_NUM_ELEMENTS,
-                    true
-                )
-                .is_ok());
+            assert!(
+                heapless_pool
+                    .grow(
+                        SUBPOOL_5.take(),
+                        SUBPOOL_5_SIZES.take(),
+                        SUBPOOL_5_NUM_ELEMENTS,
+                        true
+                    )
+                    .is_ok()
+            );
+            assert!(
+                heapless_pool
+                    .grow(
+                        SUBPOOL_3.take(),
+                        SUBPOOL_3_SIZES.take(),
+                        SUBPOOL_3_NUM_ELEMENTS,
+                        true
+                    )
+                    .is_ok()
+            );
             generic_test_spillage_fails_as_well(&mut heapless_pool);
         }
 
@@ -1839,30 +1863,36 @@ mod tests {
         fn test_spillage_works_across_multiple_subpools() {
             let mut heapless_pool: StaticHeaplessMemoryPool<3> =
                 StaticHeaplessMemoryPool::new(true);
-            assert!(heapless_pool
-                .grow(
-                    SUBPOOL_5.take(),
-                    SUBPOOL_5_SIZES.take(),
-                    SUBPOOL_5_NUM_ELEMENTS,
-                    true
-                )
-                .is_ok());
-            assert!(heapless_pool
-                .grow(
-                    SUBPOOL_6.take(),
-                    SUBPOOL_6_SIZES.take(),
-                    SUBPOOL_6_NUM_ELEMENTS,
-                    true
-                )
-                .is_ok());
-            assert!(heapless_pool
-                .grow(
-                    SUBPOOL_3.take(),
-                    SUBPOOL_3_SIZES.take(),
-                    SUBPOOL_3_NUM_ELEMENTS,
-                    true
-                )
-                .is_ok());
+            assert!(
+                heapless_pool
+                    .grow(
+                        SUBPOOL_5.take(),
+                        SUBPOOL_5_SIZES.take(),
+                        SUBPOOL_5_NUM_ELEMENTS,
+                        true
+                    )
+                    .is_ok()
+            );
+            assert!(
+                heapless_pool
+                    .grow(
+                        SUBPOOL_6.take(),
+                        SUBPOOL_6_SIZES.take(),
+                        SUBPOOL_6_NUM_ELEMENTS,
+                        true
+                    )
+                    .is_ok()
+            );
+            assert!(
+                heapless_pool
+                    .grow(
+                        SUBPOOL_3.take(),
+                        SUBPOOL_3_SIZES.take(),
+                        SUBPOOL_3_NUM_ELEMENTS,
+                        true
+                    )
+                    .is_ok()
+            );
             generic_test_spillage_works_across_multiple_subpools(&mut heapless_pool);
         }
 
@@ -1870,30 +1900,36 @@ mod tests {
         fn test_spillage_fails_across_multiple_subpools() {
             let mut heapless_pool: StaticHeaplessMemoryPool<3> =
                 StaticHeaplessMemoryPool::new(true);
-            assert!(heapless_pool
-                .grow(
-                    SUBPOOL_5.take(),
-                    SUBPOOL_5_SIZES.take(),
-                    SUBPOOL_5_NUM_ELEMENTS,
-                    true
-                )
-                .is_ok());
-            assert!(heapless_pool
-                .grow(
-                    SUBPOOL_6.take(),
-                    SUBPOOL_6_SIZES.take(),
-                    SUBPOOL_6_NUM_ELEMENTS,
-                    true
-                )
-                .is_ok());
-            assert!(heapless_pool
-                .grow(
-                    SUBPOOL_3.take(),
-                    SUBPOOL_3_SIZES.take(),
-                    SUBPOOL_3_NUM_ELEMENTS,
-                    true
-                )
-                .is_ok());
+            assert!(
+                heapless_pool
+                    .grow(
+                        SUBPOOL_5.take(),
+                        SUBPOOL_5_SIZES.take(),
+                        SUBPOOL_5_NUM_ELEMENTS,
+                        true
+                    )
+                    .is_ok()
+            );
+            assert!(
+                heapless_pool
+                    .grow(
+                        SUBPOOL_6.take(),
+                        SUBPOOL_6_SIZES.take(),
+                        SUBPOOL_6_NUM_ELEMENTS,
+                        true
+                    )
+                    .is_ok()
+            );
+            assert!(
+                heapless_pool
+                    .grow(
+                        SUBPOOL_3.take(),
+                        SUBPOOL_3_SIZES.take(),
+                        SUBPOOL_3_NUM_ELEMENTS,
+                        true
+                    )
+                    .is_ok()
+            );
             generic_test_spillage_fails_across_multiple_subpools(&mut heapless_pool);
         }
     }

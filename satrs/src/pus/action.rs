@@ -65,13 +65,13 @@ impl GenericActionReplyPus {
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
     use crate::{
+        ComponentId,
         action::ActionRequest,
         queue::{GenericReceiveError, GenericSendError},
         request::{
             GenericMessage, MessageReceiverProvider, MessageSenderAndReceiver,
             MessageSenderProvider, MessageSenderStoreProvider, RequestId,
         },
-        ComponentId,
     };
 
     use super::ActionReplyPus;
@@ -81,10 +81,10 @@ pub mod alloc_mod {
         MessageSenderAndReceiver<ActionReplyPus, ActionRequest, Sender, Receiver, ReplySenderStore>;
 
     impl<
-            Sender: MessageSenderProvider<ActionReplyPus>,
-            Receiver: MessageReceiverProvider<ActionRequest>,
-            ReplySender: MessageSenderStoreProvider<ActionReplyPus, Sender>,
-        > ActionRequestHandlerInterface<Sender, Receiver, ReplySender>
+        Sender: MessageSenderProvider<ActionReplyPus>,
+        Receiver: MessageReceiverProvider<ActionRequest>,
+        ReplySender: MessageSenderStoreProvider<ActionReplyPus, Sender>,
+    > ActionRequestHandlerInterface<Sender, Receiver, ReplySender>
     {
         pub fn try_recv_action_request(
             &self,
@@ -114,10 +114,10 @@ pub mod alloc_mod {
         >;
 
     impl<
-            Sender: MessageSenderProvider<ActionRequest>,
-            Receiver: MessageReceiverProvider<ActionReplyPus>,
-            RequestSenderStore: MessageSenderStoreProvider<ActionRequest, Sender>,
-        > ActionRequestorInterface<Sender, Receiver, RequestSenderStore>
+        Sender: MessageSenderProvider<ActionRequest>,
+        Receiver: MessageReceiverProvider<ActionReplyPus>,
+        RequestSenderStore: MessageSenderStoreProvider<ActionRequest, Sender>,
+    > ActionRequestorInterface<Sender, Receiver, RequestSenderStore>
     {
         pub fn try_recv_action_reply(
             &self,
@@ -141,12 +141,12 @@ pub mod std_mod {
     use std::sync::mpsc;
 
     use crate::{
+        ComponentId,
         pus::{
-            verification::{self, TcStateToken},
             ActivePusRequestStd, ActiveRequestProvider, DefaultActiveRequestMap,
+            verification::{self, TcStateToken},
         },
         request::{MessageSenderMap, OneMessageSender},
-        ComponentId,
     };
 
     use super::*;

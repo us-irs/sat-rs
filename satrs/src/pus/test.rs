@@ -2,9 +2,9 @@ use crate::pus::{
     DirectPusPacketHandlerResult, PartialPusHandlingError, PusPacketHandlingError, PusTmVariant,
 };
 use crate::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
-use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
-use spacepackets::ecss::PusPacket;
 use spacepackets::SpHeader;
+use spacepackets::ecss::PusPacket;
+use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
 use std::sync::mpsc;
 
 use super::verification::{VerificationReporter, VerificationReportingProvider};
@@ -27,11 +27,11 @@ pub struct PusService17TestHandler<
 }
 
 impl<
-        TcReceiver: EcssTcReceiver,
-        TmSender: EcssTmSender,
-        TcInMemConverter: EcssTcInMemConversionProvider,
-        VerificationReporter: VerificationReportingProvider,
-    > PusService17TestHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
+    TcReceiver: EcssTcReceiver,
+    TmSender: EcssTmSender,
+    TcInMemConverter: EcssTcInMemConversionProvider,
+    VerificationReporter: VerificationReportingProvider,
+> PusService17TestHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
     pub fn new(
         service_helper: PusServiceHelper<
@@ -134,6 +134,7 @@ pub type PusService17TestHandlerStaticWithBoundedMpsc = PusService17TestHandler<
 
 #[cfg(test)]
 mod tests {
+    use crate::ComponentId;
     use crate::pus::test_util::{PusTestHarness, SimplePusPacketHandler, TEST_APID};
     use crate::pus::tests::{
         PusServiceHandlerWithSharedStoreCommon, PusServiceHandlerWithVecCommon,
@@ -148,13 +149,12 @@ mod tests {
         PartialPusHandlingError, PusPacketHandlingError,
     };
     use crate::tmtc::PacketSenderWithSharedPool;
-    use crate::ComponentId;
     use delegate::delegate;
+    use spacepackets::SpHeader;
+    use spacepackets::ecss::PusPacket;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTmReader;
-    use spacepackets::ecss::PusPacket;
-    use spacepackets::time::{cds, TimeWriter};
-    use spacepackets::SpHeader;
+    use spacepackets::time::{TimeWriter, cds};
 
     use super::PusService17TestHandler;
 

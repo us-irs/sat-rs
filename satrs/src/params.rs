@@ -47,10 +47,10 @@ use crate::pool::PoolAddr;
 use core::fmt::Debug;
 use core::mem::size_of;
 use paste::paste;
-use spacepackets::ecss::{EcssEnumU16, EcssEnumU32, EcssEnumU64, EcssEnumU8};
+use spacepackets::ByteConversionError;
+use spacepackets::ecss::{EcssEnumU8, EcssEnumU16, EcssEnumU32, EcssEnumU64};
 pub use spacepackets::util::ToBeBytes;
 use spacepackets::util::UnsignedEnum;
-use spacepackets::ByteConversionError;
 
 #[cfg(feature = "alloc")]
 use alloc::string::{String, ToString};

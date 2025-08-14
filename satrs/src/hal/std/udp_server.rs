@@ -1,6 +1,6 @@
 //! Generic UDP TC server.
-use crate::tmtc::PacketSenderRaw;
 use crate::ComponentId;
+use crate::tmtc::PacketSenderRaw;
 use core::fmt::Debug;
 use std::io::{self, ErrorKind};
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
@@ -105,7 +105,7 @@ impl<TcSender: PacketSenderRaw<Error = SendError>, SendError: Debug + 'static>
                     Err(ReceiveResult::NothingReceived)
                 } else {
                     Err(e.into())
-                }
+                };
             }
         };
         let (num_bytes, from) = res;
@@ -123,13 +123,13 @@ impl<TcSender: PacketSenderRaw<Error = SendError>, SendError: Debug + 'static>
 
 #[cfg(test)]
 mod tests {
+    use crate::ComponentId;
     use crate::hal::std::udp_server::{ReceiveResult, UdpTcServer};
     use crate::queue::GenericSendError;
     use crate::tmtc::PacketSenderRaw;
-    use crate::ComponentId;
     use core::cell::RefCell;
-    use spacepackets::ecss::tc::PusTcCreator;
     use spacepackets::SpHeader;
+    use spacepackets::ecss::tc::PusTcCreator;
     use std::collections::VecDeque;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
     use std::vec::Vec;

@@ -136,7 +136,7 @@ pub trait ListenerMapProvider {
     #[cfg(feature = "alloc")]
     fn get_listeners(&self) -> alloc::vec::Vec<ListenerKey>;
     fn contains_listener(&self, key: &ListenerKey) -> bool;
-    fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<ComponentId>>;
+    fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<'_, ComponentId>>;
     fn add_listener(&mut self, key: ListenerKey, listener_id: ComponentId) -> bool;
     fn remove_duplicates(&mut self, key: &ListenerKey);
 }
@@ -198,13 +198,13 @@ pub enum EventRoutingError {
 }
 
 impl<
-        EventReceiver: EventReceiveProvider<Event, ParamProvider>,
-        SenderMap: SenderMapProvider<EventSender, Event, ParamProvider>,
-        ListenerMap: ListenerMapProvider,
-        EventSender: EventSendProvider<Event, ParamProvider>,
-        Event: GenericEvent + Copy,
-        ParamProvider: Debug,
-    > EventManager<EventReceiver, SenderMap, ListenerMap, EventSender, Event, ParamProvider>
+    EventReceiver: EventReceiveProvider<Event, ParamProvider>,
+    SenderMap: SenderMapProvider<EventSender, Event, ParamProvider>,
+    ListenerMap: ListenerMapProvider,
+    EventSender: EventSendProvider<Event, ParamProvider>,
+    Event: GenericEvent + Copy,
+    ParamProvider: Debug,
+> EventManager<EventReceiver, SenderMap, ListenerMap, EventSender, Event, ParamProvider>
 {
     pub fn remove_duplicates(&mut self, key: &ListenerKey) {
         self.listener_map.remove_duplicates(key)
@@ -229,13 +229,13 @@ impl<
     }
 }
 impl<
-        EventReceiver: EventReceiveProvider<Event, ParamProvider>,
-        SenderMap: SenderMapProvider<EventSenderMap, Event, ParamProvider>,
-        ListenerMap: ListenerMapProvider,
-        EventSenderMap: EventSendProvider<Event, ParamProvider>,
-        Event: GenericEvent + Copy,
-        ParamProvider: Debug,
-    > EventManager<EventReceiver, SenderMap, ListenerMap, EventSenderMap, Event, ParamProvider>
+    EventReceiver: EventReceiveProvider<Event, ParamProvider>,
+    SenderMap: SenderMapProvider<EventSenderMap, Event, ParamProvider>,
+    ListenerMap: ListenerMapProvider,
+    EventSenderMap: EventSendProvider<Event, ParamProvider>,
+    Event: GenericEvent + Copy,
+    ParamProvider: Debug,
+> EventManager<EventReceiver, SenderMap, ListenerMap, EventSenderMap, Event, ParamProvider>
 {
     pub fn new_with_custom_maps(
         event_receiver: EventReceiver,
@@ -267,13 +267,13 @@ impl<
 }
 
 impl<
-        EventReceiver: EventReceiveProvider<Event, ParamProvider>,
-        SenderMap: SenderMapProvider<EventSenderMap, Event, ParamProvider>,
-        ListenerMap: ListenerMapProvider,
-        EventSenderMap: EventSendProvider<Event, ParamProvider, Error = GenericSendError>,
-        Event: GenericEvent + Copy,
-        ParamProvider: Clone + Debug,
-    > EventManager<EventReceiver, SenderMap, ListenerMap, EventSenderMap, Event, ParamProvider>
+    EventReceiver: EventReceiveProvider<Event, ParamProvider>,
+    SenderMap: SenderMapProvider<EventSenderMap, Event, ParamProvider>,
+    ListenerMap: ListenerMapProvider,
+    EventSenderMap: EventSendProvider<Event, ParamProvider, Error = GenericSendError>,
+    Event: GenericEvent + Copy,
+    ParamProvider: Clone + Debug,
+> EventManager<EventReceiver, SenderMap, ListenerMap, EventSenderMap, Event, ParamProvider>
 {
     /// This function will use the cached event receiver and try to receive one event.
     /// If an event was received, it will try to route that event to all subscribed event listeners.
@@ -355,11 +355,11 @@ pub mod alloc_mod {
     >;
 
     impl<
-            EventReceiver: EventReceiveProvider<Event, ParamProvider>,
-            EventSender: EventSendProvider<Event, ParamProvider>,
-            Event: GenericEvent + Copy,
-            ParamProvider: 'static + Debug,
-        >
+        EventReceiver: EventReceiveProvider<Event, ParamProvider>,
+        EventSender: EventSendProvider<Event, ParamProvider>,
+        Event: GenericEvent + Copy,
+        ParamProvider: 'static + Debug,
+    >
         EventManager<
             EventReceiver,
             DefaultSenderMap<EventSender, Event, ParamProvider>,
@@ -402,7 +402,7 @@ pub mod alloc_mod {
             self.listeners.contains_key(key)
         }
 
-        fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<ComponentId>> {
+        fn get_listener_ids(&self, key: &ListenerKey) -> Option<Iter<'_, ComponentId>> {
             self.listeners.get(key).map(|vec| vec.iter())
         }
 
@@ -437,10 +437,10 @@ pub mod alloc_mod {
     }
 
     impl<
-            EventSender: EventSendProvider<Event, ParamProvider>,
-            Event: GenericEvent,
-            ParamProvider: Debug,
-        > Default for DefaultSenderMap<EventSender, Event, ParamProvider>
+        EventSender: EventSendProvider<Event, ParamProvider>,
+        Event: GenericEvent,
+        ParamProvider: Debug,
+    > Default for DefaultSenderMap<EventSender, Event, ParamProvider>
     {
         fn default() -> Self {
             Self {
@@ -451,10 +451,10 @@ pub mod alloc_mod {
     }
 
     impl<
-            EventSender: EventSendProvider<Event, ParamProvider>,
-            Event: GenericEvent,
-            ParamProvider: Debug,
-        > SenderMapProvider<EventSender, Event, ParamProvider>
+        EventSender: EventSendProvider<Event, ParamProvider>,
+        Event: GenericEvent,
+        ParamProvider: Debug,
+    > SenderMapProvider<EventSender, Event, ParamProvider>
         for DefaultSenderMap<EventSender, Event, ParamProvider>
     {
         fn contains_send_event_provider(&self, id: &ComponentId) -> bool {

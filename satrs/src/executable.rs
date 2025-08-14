@@ -55,33 +55,35 @@ pub fn exec_sched_single<
     let mut cycle_count = 0;
     thread::Builder::new()
         .name(String::from(executable.task_name()))
-        .spawn(move || loop {
-            if let Some(ref mut terminator) = termination {
-                match terminator.try_recv() {
-                    Ok(_) | Err(TryRecvError::Disconnected) => {
-                        return Ok(OpResult::Ok);
-                    }
-                    Err(TryRecvError::Empty) => (),
-                }
-            }
-            match executable.exec_type() {
-                ExecutionType::OneShot => {
-                    executable.periodic_op(op_code)?;
-                    return Ok(OpResult::Ok);
-                }
-                ExecutionType::Infinite => {
-                    executable.periodic_op(op_code)?;
-                }
-                ExecutionType::Cycles(cycles) => {
-                    executable.periodic_op(op_code)?;
-                    cycle_count += 1;
-                    if cycle_count == cycles {
-                        return Ok(OpResult::Ok);
+        .spawn(move || {
+            loop {
+                if let Some(ref mut terminator) = termination {
+                    match terminator.try_recv() {
+                        Ok(_) | Err(TryRecvError::Disconnected) => {
+                            return Ok(OpResult::Ok);
+                        }
+                        Err(TryRecvError::Empty) => (),
                     }
                 }
-            }
-            if let Some(freq) = task_freq {
-                thread::sleep(freq);
+                match executable.exec_type() {
+                    ExecutionType::OneShot => {
+                        executable.periodic_op(op_code)?;
+                        return Ok(OpResult::Ok);
+                    }
+                    ExecutionType::Infinite => {
+                        executable.periodic_op(op_code)?;
+                    }
+                    ExecutionType::Cycles(cycles) => {
+                        executable.periodic_op(op_code)?;
+                        cycle_count += 1;
+                        if cycle_count == cycles {
+                            return Ok(OpResult::Ok);
+                        }
+                    }
+                }
+                if let Some(freq) = task_freq {
+                    thread::sleep(freq);
+                }
             }
         })
 }
@@ -110,51 +112,53 @@ pub fn exec_sched_multi<
 
     thread::Builder::new()
         .name(String::from(task_name))
-        .spawn(move || loop {
-            if let Some(ref mut terminator) = termination {
-                match terminator.try_recv() {
-                    Ok(_) | Err(TryRecvError::Disconnected) => {
-                        removal_flags.iter_mut().for_each(|x| *x = true);
+        .spawn(move || {
+            loop {
+                if let Some(ref mut terminator) = termination {
+                    match terminator.try_recv() {
+                        Ok(_) | Err(TryRecvError::Disconnected) => {
+                            removal_flags.iter_mut().for_each(|x| *x = true);
+                        }
+                        Err(TryRecvError::Empty) => (),
                     }
-                    Err(TryRecvError::Empty) => (),
                 }
-            }
-            for (idx, executable) in executable_vec.iter_mut().enumerate() {
-                match executable.exec_type() {
-                    ExecutionType::OneShot => {
-                        executable.periodic_op(op_code)?;
-                        removal_flags[idx] = true;
-                    }
-                    ExecutionType::Infinite => {
-                        executable.periodic_op(op_code)?;
-                    }
-                    ExecutionType::Cycles(cycles) => {
-                        executable.periodic_op(op_code)?;
-                        cycle_counts[idx] += 1;
-                        if cycle_counts[idx] == cycles {
+                for (idx, executable) in executable_vec.iter_mut().enumerate() {
+                    match executable.exec_type() {
+                        ExecutionType::OneShot => {
+                            executable.periodic_op(op_code)?;
                             removal_flags[idx] = true;
+                        }
+                        ExecutionType::Infinite => {
+                            executable.periodic_op(op_code)?;
+                        }
+                        ExecutionType::Cycles(cycles) => {
+                            executable.periodic_op(op_code)?;
+                            cycle_counts[idx] += 1;
+                            if cycle_counts[idx] == cycles {
+                                removal_flags[idx] = true;
+                            }
                         }
                     }
                 }
+                let mut removal_iter = removal_flags.iter();
+                executable_vec.retain(|_| !*removal_iter.next().unwrap());
+                removal_iter = removal_flags.iter();
+                cycle_counts.retain(|_| !*removal_iter.next().unwrap());
+                removal_flags.retain(|&i| !i);
+                if executable_vec.is_empty() {
+                    return Ok(OpResult::Ok);
+                }
+                let freq = task_freq.unwrap_or_else(|| panic!("No task frequency specified"));
+                thread::sleep(freq);
             }
-            let mut removal_iter = removal_flags.iter();
-            executable_vec.retain(|_| !*removal_iter.next().unwrap());
-            removal_iter = removal_flags.iter();
-            cycle_counts.retain(|_| !*removal_iter.next().unwrap());
-            removal_flags.retain(|&i| !i);
-            if executable_vec.is_empty() {
-                return Ok(OpResult::Ok);
-            }
-            let freq = task_freq.unwrap_or_else(|| panic!("No task frequency specified"));
-            thread::sleep(freq);
         })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        exec_sched_multi, exec_sched_single, Executable, ExecutableWithType, ExecutionType,
-        OpResult,
+        Executable, ExecutableWithType, ExecutionType, OpResult, exec_sched_multi,
+        exec_sched_single,
     };
     use bus::Bus;
     use std::boxed::Box;

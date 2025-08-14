@@ -1,4 +1,4 @@
-use crate::{tmtc::PacketSenderRaw, ComponentId};
+use crate::{ComponentId, tmtc::PacketSenderRaw};
 use cobs::{decode_in_place, encode, max_encoding_length};
 
 /// This function encodes the given packet with COBS and also wraps the encoded packet with
@@ -104,8 +104,8 @@ pub(crate) mod tests {
     use cobs::encode;
 
     use crate::{
-        encoding::tests::{encode_simple_packet, TcCacher, INVERTED_PACKET, SIMPLE_PACKET},
         ComponentId,
+        encoding::tests::{INVERTED_PACKET, SIMPLE_PACKET, TcCacher, encode_simple_packet},
     };
 
     use super::parse_buffer_for_cobs_encoded_packets;

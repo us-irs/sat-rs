@@ -1,6 +1,6 @@
 use spacepackets::{CcsdsPacket, SpHeader};
 
-use crate::{tmtc::PacketSenderRaw, ComponentId};
+use crate::{ComponentId, tmtc::PacketSenderRaw};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SpValidity {
@@ -90,13 +90,13 @@ pub fn parse_buffer_for_ccsds_space_packets<SendError>(
 #[cfg(test)]
 mod tests {
     use spacepackets::{
-        ecss::tc::PusTcCreator, CcsdsPacket, PacketId, PacketSequenceCtrl, PacketType,
-        SequenceFlags, SpHeader,
+        CcsdsPacket, PacketId, PacketSequenceCtrl, PacketType, SequenceFlags, SpHeader,
+        ecss::tc::PusTcCreator,
     };
 
-    use crate::{encoding::tests::TcCacher, ComponentId};
+    use crate::{ComponentId, encoding::tests::TcCacher};
 
-    use super::{parse_buffer_for_ccsds_space_packets, SpValidity, SpacePacketValidator};
+    use super::{SpValidity, SpacePacketValidator, parse_buffer_for_ccsds_space_packets};
 
     const PARSER_ID: ComponentId = 0x05;
     const TEST_APID_0: u16 = 0x02;

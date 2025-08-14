@@ -3,8 +3,8 @@ use crate::pus::event_man::{EventRequest, EventRequestWithToken};
 use crate::pus::verification::TcStateToken;
 use crate::pus::{DirectPusPacketHandlerResult, PartialPusHandlingError, PusPacketHandlingError};
 use crate::queue::GenericSendError;
-use spacepackets::ecss::event::Subservice;
 use spacepackets::ecss::PusPacket;
+use spacepackets::ecss::event::Subservice;
 use std::sync::mpsc::Sender;
 
 use super::verification::VerificationReportingProvider;
@@ -25,11 +25,11 @@ pub struct PusEventServiceHandler<
 }
 
 impl<
-        TcReceiver: EcssTcReceiver,
-        TmSender: EcssTmSender,
-        TcInMemConverter: EcssTcInMemConversionProvider,
-        VerificationReporter: VerificationReportingProvider,
-    > PusEventServiceHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
+    TcReceiver: EcssTcReceiver,
+    TmSender: EcssTmSender,
+    TcInMemConverter: EcssTcInMemConversionProvider,
+    VerificationReporter: VerificationReportingProvider,
+> PusEventServiceHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {
     pub fn new(
         service_helper: PusServiceHelper<
@@ -122,7 +122,7 @@ impl<
             | Subservice::TmHighSeverityReport => {
                 return Err(PusPacketHandlingError::RequestConversion(
                     GenericConversionError::WrongService(tc.subservice()),
-                ))
+                ));
             }
             Subservice::TcEnableEventGeneration => {
                 handle_enable_disable_request(true)?;
@@ -146,14 +146,14 @@ impl<
 mod tests {
     use delegate::delegate;
     use spacepackets::ecss::event::Subservice;
-    use spacepackets::time::{cds, TimeWriter};
+    use spacepackets::time::{TimeWriter, cds};
     use spacepackets::util::UnsignedEnum;
     use spacepackets::{
+        SpHeader,
         ecss::{
             tc::{PusTcCreator, PusTcSecondaryHeader},
             tm::PusTmReader,
         },
-        SpHeader,
     };
     use std::sync::mpsc::{self, Sender};
 
@@ -167,10 +167,10 @@ mod tests {
     use crate::{
         events::EventU32,
         pus::{
+            DirectPusPacketHandlerResult, EcssTcInSharedPoolConverter, PusPacketHandlingError,
             event_man::EventRequestWithToken,
             tests::PusServiceHandlerWithSharedStoreCommon,
             verification::{TcStateAccepted, VerificationToken},
-            DirectPusPacketHandlerResult, EcssTcInSharedPoolConverter, PusPacketHandlingError,
         },
     };
 

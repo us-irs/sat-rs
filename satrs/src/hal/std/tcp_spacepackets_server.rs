@@ -5,9 +5,9 @@ use mio::net::{TcpListener, TcpStream};
 use std::{io::Write, net::SocketAddr};
 
 use crate::{
+    ComponentId,
     encoding::{ccsds::SpacePacketValidator, parse_buffer_for_ccsds_space_packets},
     tmtc::{PacketSenderRaw, PacketSource},
-    ComponentId,
 };
 
 use super::tcp_server::{
@@ -107,13 +107,13 @@ pub struct TcpSpacepacketsServer<
 }
 
 impl<
-        TmSource: PacketSource<Error = TmError>,
-        TcSender: PacketSenderRaw<Error = TcError>,
-        Validator: SpacePacketValidator,
-        HandledConnection: HandledConnectionHandler,
-        TmError: 'static,
-        TcError: 'static,
-    > TcpSpacepacketsServer<TmSource, TcSender, Validator, HandledConnection, TmError, TcError>
+    TmSource: PacketSource<Error = TmError>,
+    TcSender: PacketSenderRaw<Error = TcError>,
+    Validator: SpacePacketValidator,
+    HandledConnection: HandledConnectionHandler,
+    TmError: 'static,
+    TcError: 'static,
+> TcpSpacepacketsServer<TmSource, TcSender, Validator, HandledConnection, TmError, TcError>
 {
     ///
     /// ## Parameter
@@ -185,19 +185,19 @@ mod tests {
     use alloc::sync::Arc;
     use hashbrown::HashSet;
     use spacepackets::{
-        ecss::{tc::PusTcCreator, WritablePusPacket},
         CcsdsPacket, PacketId, SpHeader,
+        ecss::{WritablePusPacket, tc::PusTcCreator},
     };
 
     use crate::{
+        ComponentId,
         encoding::ccsds::{SpValidity, SpacePacketValidator},
         hal::std::tcp_server::{
-            tests::{ConnectionFinishedHandler, SyncTmSource},
             ConnectionResult, ServerConfig,
+            tests::{ConnectionFinishedHandler, SyncTmSource},
         },
         queue::GenericSendError,
         tmtc::PacketAsVec,
-        ComponentId,
     };
 
     use super::TcpSpacepacketsServer;

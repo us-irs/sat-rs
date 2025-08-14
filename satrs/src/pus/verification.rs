@@ -81,7 +81,7 @@
 //! for the verification module contains examples how this module could be used in a more complex
 //! context involving multiple threads
 use crate::params::{Params, WritableToBeBytes};
-use crate::pus::{source_buffer_large_enough, EcssTmSender, EcssTmtcError};
+use crate::pus::{EcssTmSender, EcssTmtcError, source_buffer_large_enough};
 use core::fmt::{Debug, Display, Formatter};
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
@@ -90,11 +90,11 @@ use core::mem::size_of;
 use delegate::delegate;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use spacepackets::ecss::EcssEnumeration;
 use spacepackets::ecss::tc::IsPusTelecommand;
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
-use spacepackets::ecss::EcssEnumeration;
 use spacepackets::{ByteConversionError, CcsdsPacket, PacketId, PacketSequenceCtrl};
-use spacepackets::{SpHeader, MAX_APID};
+use spacepackets::{MAX_APID, SpHeader};
 
 pub use spacepackets::ecss::verification::*;
 pub use spacepackets::seq_count::SeqCountProviderSimple;
@@ -102,8 +102,8 @@ pub use spacepackets::seq_count::SeqCountProviderSimple;
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
 
-use crate::request::Apid;
 use crate::ComponentId;
+use crate::request::Apid;
 
 /// This is a request identifier as specified in 5.4.11.2 c. of the PUS standard.
 ///
@@ -1686,39 +1686,39 @@ pub mod test_util {
 
 #[cfg(test)]
 pub mod tests {
+    use crate::ComponentId;
     use crate::params::Params;
     use crate::pool::{SharedStaticMemoryPool, StaticMemoryPool, StaticPoolConfig};
     use crate::pus::test_util::{TEST_APID, TEST_COMPONENT_ID_0};
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
-        handle_step_failure_with_generic_params, EcssTmSender, EcssTmtcError, FailParams,
-        FailParamsWithStep, RequestId, TcStateNone, VerificationReporter, VerificationReporterCfg,
-        VerificationToken,
+        EcssTmSender, EcssTmtcError, FailParams, FailParamsWithStep, RequestId, TcStateNone,
+        VerificationReporter, VerificationReporterCfg, VerificationToken,
+        handle_step_failure_with_generic_params,
     };
     use crate::pus::{ChannelWithId, PusTmVariant};
     use crate::request::MessageMetadata;
     use crate::spacepackets::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProvider};
     use crate::tmtc::{PacketSenderWithSharedPool, SharedPacketPool};
-    use crate::ComponentId;
     use alloc::format;
     use alloc::string::ToString;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::{
-        EcssEnumU16, EcssEnumU32, EcssEnumU8, EcssEnumeration, PusError, PusPacket,
+        EcssEnumU8, EcssEnumU16, EcssEnumU32, EcssEnumeration, PusError, PusPacket,
         WritablePusPacket,
     };
     use spacepackets::util::UnsignedEnum;
     use spacepackets::{ByteConversionError, SpHeader};
     use std::cell::RefCell;
     use std::collections::VecDeque;
-    use std::sync::{mpsc, RwLock};
+    use std::sync::{RwLock, mpsc};
     use std::vec;
     use std::vec::Vec;
 
     use super::{
-        handle_completion_failure_with_generic_params, DummyVerificationHook, FailParamHelper,
-        SeqCountProviderSimple, TcStateAccepted, TcStateStarted, VerificationHookProvider,
-        VerificationReportingProvider, WasAtLeastAccepted,
+        DummyVerificationHook, FailParamHelper, SeqCountProviderSimple, TcStateAccepted,
+        TcStateStarted, VerificationHookProvider, VerificationReportingProvider,
+        WasAtLeastAccepted, handle_completion_failure_with_generic_params,
     };
 
     fn is_send<T: Send>(_: &T) {}

@@ -17,12 +17,13 @@ use core::{
 use std::{
     io::{Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
-    sync::{mpsc, Mutex},
+    sync::{Mutex, mpsc},
     thread,
 };
 
 use hashbrown::HashSet;
 use satrs::{
+    ComponentId,
     encoding::{
         ccsds::{SpValidity, SpacePacketValidator},
         cobs::encode_packet_with_cobs,
@@ -32,11 +33,10 @@ use satrs::{
         TcpSpacepacketsServer, TcpTmtcInCobsServer,
     },
     tmtc::PacketSource,
-    ComponentId,
 };
 use spacepackets::{
-    ecss::{tc::PusTcCreator, WritablePusPacket},
     CcsdsPacket, PacketId, SpHeader,
+    ecss::{WritablePusPacket, tc::PusTcCreator},
 };
 use std::{collections::VecDeque, sync::Arc, vec::Vec};
 

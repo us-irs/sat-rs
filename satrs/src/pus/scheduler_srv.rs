@@ -9,7 +9,7 @@ use crate::pool::PoolProvider;
 use crate::pus::PusPacketHandlingError;
 use crate::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use alloc::string::ToString;
-use spacepackets::ecss::{scheduling, PusPacket};
+use spacepackets::ecss::{PusPacket, scheduling};
 use spacepackets::time::cds::CdsTime;
 use std::sync::mpsc;
 
@@ -34,13 +34,12 @@ pub struct PusSchedServiceHandler<
 }
 
 impl<
-        TcReceiver: EcssTcReceiver,
-        TmSender: EcssTmSender,
-        TcInMemConverter: EcssTcInMemConversionProvider,
-        VerificationReporter: VerificationReportingProvider,
-        Scheduler: PusSchedulerProvider,
-    >
-    PusSchedServiceHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter, Scheduler>
+    TcReceiver: EcssTcReceiver,
+    TmSender: EcssTmSender,
+    TcInMemConverter: EcssTcInMemConversionProvider,
+    VerificationReporter: VerificationReportingProvider,
+    Scheduler: PusSchedulerProvider,
+> PusSchedServiceHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter, Scheduler>
 {
     pub fn new(
         service_helper: PusServiceHelper<
@@ -102,11 +101,12 @@ impl<
                     }
                 };
                 self.scheduler.enable();
-
-                if self.scheduler.is_enabled() && opt_started_token.is_some() {
+                if self.scheduler.is_enabled()
+                    && let Some(started_token) = opt_started_token
+                {
                     if let Err(e) = self.service_helper.verif_reporter().completion_success(
                         &self.service_helper.common.tm_sender,
-                        opt_started_token.unwrap(),
+                        started_token,
                         time_stamp,
                     ) {
                         error_callback(&PartialPusHandlingError::Verification(e));
@@ -131,10 +131,12 @@ impl<
                 };
 
                 self.scheduler.disable();
-                if !self.scheduler.is_enabled() && opt_started_token.is_some() {
+                if !self.scheduler.is_enabled()
+                    && let Some(started_token) = opt_started_token
+                {
                     if let Err(e) = self.service_helper.verif_reporter().completion_success(
                         &self.service_helper.common.tm_sender,
-                        opt_started_token.unwrap(),
+                        started_token,
                         time_stamp,
                     ) {
                         error_callback(&PartialPusHandlingError::Verification(e));
@@ -249,21 +251,21 @@ mod tests {
     use crate::pus::test_util::{PusTestHarness, TEST_APID};
     use crate::pus::verification::{VerificationReporter, VerificationReportingProvider};
 
+    use crate::pus::{DirectPusPacketHandlerResult, MpscTcReceiver, PusPacketHandlingError};
     use crate::pus::{
+        EcssTcInSharedPoolConverter,
         scheduler::{self, PusSchedulerProvider, TcInfo},
         tests::PusServiceHandlerWithSharedStoreCommon,
         verification::{RequestId, TcStateAccepted, VerificationToken},
-        EcssTcInSharedPoolConverter,
     };
-    use crate::pus::{DirectPusPacketHandlerResult, MpscTcReceiver, PusPacketHandlingError};
     use crate::tmtc::PacketSenderWithSharedPool;
     use alloc::collections::VecDeque;
     use delegate::delegate;
+    use spacepackets::SpHeader;
+    use spacepackets::ecss::WritablePusPacket;
     use spacepackets::ecss::scheduling::Subservice;
     use spacepackets::ecss::tc::PusTcSecondaryHeader;
-    use spacepackets::ecss::WritablePusPacket;
     use spacepackets::time::TimeWriter;
-    use spacepackets::SpHeader;
     use spacepackets::{
         ecss::{tc::PusTcCreator, tm::PusTmReader},
         time::cds,

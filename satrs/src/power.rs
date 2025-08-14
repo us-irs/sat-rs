@@ -190,7 +190,7 @@ mod tests {
 
     use std::sync::mpsc::{self, TryRecvError};
 
-    use crate::{queue::GenericSendError, request::GenericMessage, ComponentId};
+    use crate::{ComponentId, queue::GenericSendError, request::GenericMessage};
 
     use super::*;
 

@@ -1,4 +1,5 @@
 use crate::{
+    ComponentId,
     health::{HealthState, HealthTableProvider},
     mode::{Mode, ModeAndSubmode, ModeReply, ModeRequest, ModeRequestSender, UNKNOWN_MODE_VAL},
     mode_tree::{
@@ -7,7 +8,6 @@ use crate::{
     },
     queue::GenericTargetedMessagingError,
     request::{GenericMessage, RequestId},
-    ComponentId,
 };
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -252,10 +252,10 @@ impl SequenceExecutionHelper {
             Ok(ModeCommandingResult::AwaitingSuccessCheck)
         } else if seq_table_value.entries.len() - 1 == sequence_idx {
             self.state = SequenceExecutionHelperState::Idle;
-            return Ok(ModeCommandingResult::Done);
+            Ok(ModeCommandingResult::Done)
         } else {
             self.current_sequence_index = Some(sequence_idx + 1);
-            return Ok(ModeCommandingResult::StepDone);
+            Ok(ModeCommandingResult::StepDone)
         }
     }
 
@@ -682,9 +682,10 @@ mod tests {
     use super::*;
 
     use crate::{
+        ComponentId,
         mode::{
-            tests::{ModeReqSenderMock, ModeReqWrapper},
             Mode, ModeAndSubmode, ModeReply, ModeRequest, UNKNOWN_MODE,
+            tests::{ModeReqSenderMock, ModeReqWrapper},
         },
         mode_tree::{
             ModeStoreProvider, ModeStoreVec, SequenceModeTables, SequenceTableEntry,
@@ -693,7 +694,6 @@ mod tests {
         queue::GenericTargetedMessagingError,
         request::{GenericMessage, MessageMetadata, RequestId},
         subsystem::{ModeCommandingResult, ModeTreeHelperState, SequenceExecutionHelperState},
-        ComponentId,
     };
 
     #[derive(Debug)]
