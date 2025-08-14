@@ -13,10 +13,10 @@ use crate::encoding::parse_buffer_for_cobs_encoded_packets;
 use crate::tmtc::PacketSenderRaw;
 use crate::tmtc::PacketSource;
 
+use crate::ComponentId;
 use crate::hal::std::tcp_server::{
     ConnectionResult, ServerConfig, TcpTcParser, TcpTmSender, TcpTmtcError, TcpTmtcGenericServer,
 };
-use crate::ComponentId;
 
 use super::tcp_server::HandledConnectionHandler;
 use super::tcp_server::HandledConnectionInfo;
@@ -136,12 +136,12 @@ pub struct TcpTmtcInCobsServer<
 }
 
 impl<
-        TmSource: PacketSource<Error = TmError>,
-        TcReceiver: PacketSenderRaw<Error = TcError>,
-        HandledConnection: HandledConnectionHandler,
-        TmError: 'static,
-        TcError: 'static,
-    > TcpTmtcInCobsServer<TmSource, TcReceiver, HandledConnection, TmError, TcError>
+    TmSource: PacketSource<Error = TmError>,
+    TcReceiver: PacketSenderRaw<Error = TcError>,
+    HandledConnection: HandledConnectionHandler,
+    TmError: 'static,
+    TcError: 'static,
+> TcpTmtcInCobsServer<TmSource, TcReceiver, HandledConnection, TmError, TcError>
 {
     /// Create a new TCP TMTC server which exchanges TMTC packets encoded with
     /// [COBS protocol](https://en.wikipedia.org/wiki/Consistent_Overhead_Byte_Stuffing).
@@ -206,14 +206,14 @@ mod tests {
     };
 
     use crate::{
+        ComponentId,
         encoding::tests::{INVERTED_PACKET, SIMPLE_PACKET},
         hal::std::tcp_server::{
-            tests::{ConnectionFinishedHandler, SyncTmSource},
             ConnectionResult, ServerConfig,
+            tests::{ConnectionFinishedHandler, SyncTmSource},
         },
         queue::GenericSendError,
         tmtc::PacketAsVec,
-        ComponentId,
     };
     use alloc::sync::Arc;
     use cobs::encode;
@@ -435,17 +435,19 @@ mod tests {
             generic_tmtc_server(&auto_port_addr, tc_sender.clone(), tm_source, None);
         let start = Instant::now();
         // Call the connection handler in separate thread, does block.
-        let thread_jh = thread::spawn(move || loop {
-            let result = tcp_server.handle_all_connections(Some(Duration::from_millis(20)));
-            if result.is_err() {
-                panic!("handling connection failed: {:?}", result.unwrap_err());
-            }
-            let result = result.unwrap();
-            if result == ConnectionResult::AcceptTimeout {
-                break;
-            }
-            if Instant::now() - start > Duration::from_millis(100) {
-                panic!("regular stop signal handling failed");
+        let thread_jh = thread::spawn(move || {
+            loop {
+                let result = tcp_server.handle_all_connections(Some(Duration::from_millis(20)));
+                if result.is_err() {
+                    panic!("handling connection failed: {:?}", result.unwrap_err());
+                }
+                let result = result.unwrap();
+                if result == ConnectionResult::AcceptTimeout {
+                    break;
+                }
+                if Instant::now() - start > Duration::from_millis(100) {
+                    panic!("regular stop signal handling failed");
+                }
             }
         });
         thread_jh.join().expect("thread join failed");
@@ -469,20 +471,22 @@ mod tests {
         let stop_signal_copy = stop_signal.clone();
         let start = Instant::now();
         // Call the connection handler in separate thread, does block.
-        let thread_jh = thread::spawn(move || loop {
-            let result = tcp_server.handle_all_connections(Some(Duration::from_millis(20)));
-            if result.is_err() {
-                panic!("handling connection failed: {:?}", result.unwrap_err());
-            }
-            let result = result.unwrap();
-            if result == ConnectionResult::AcceptTimeout {
-                panic!("unexpected accept timeout");
-            }
-            if stop_signal_copy.load(Ordering::Relaxed) {
-                break;
-            }
-            if Instant::now() - start > Duration::from_millis(100) {
-                panic!("regular stop signal handling failed");
+        let thread_jh = thread::spawn(move || {
+            loop {
+                let result = tcp_server.handle_all_connections(Some(Duration::from_millis(20)));
+                if result.is_err() {
+                    panic!("handling connection failed: {:?}", result.unwrap_err());
+                }
+                let result = result.unwrap();
+                if result == ConnectionResult::AcceptTimeout {
+                    panic!("unexpected accept timeout");
+                }
+                if stop_signal_copy.load(Ordering::Relaxed) {
+                    break;
+                }
+                if Instant::now() - start > Duration::from_millis(100) {
+                    panic!("regular stop signal handling failed");
+                }
             }
         });
         // We connect but do not do anything.

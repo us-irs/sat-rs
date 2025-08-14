@@ -11,11 +11,11 @@ pub use alloc_mod::*;
 pub use std_mod::*;
 
 use crate::{
+    ComponentId,
     queue::{GenericReceiveError, GenericSendError},
     request::{
         GenericMessage, MessageMetadata, MessageReceiverProvider, MessageReceiverWithId, RequestId,
     },
-    ComponentId,
 };
 
 pub type Mode = u32;
@@ -257,7 +257,7 @@ pub trait ModeRequestHandler: ModeProvider {
 
 pub trait ModeReplyReceiver {
     fn try_recv_mode_reply(&self)
-        -> Result<Option<GenericMessage<ModeReply>>, GenericReceiveError>;
+    -> Result<Option<GenericMessage<ModeReply>>, GenericReceiveError>;
 }
 
 impl<R: MessageReceiverProvider<ModeReply>> ModeReplyReceiver
@@ -309,12 +309,11 @@ pub mod alloc_mod {
     }
 
     impl<
-            From,
-            Sender: MessageSenderProvider<ModeReply>,
-            Receiver: MessageReceiverProvider<From>,
-            SenderStore: MessageSenderStoreProvider<ModeReply, Sender>,
-        > ModeReplySender
-        for MessageSenderAndReceiver<ModeReply, From, Sender, Receiver, SenderStore>
+        From,
+        Sender: MessageSenderProvider<ModeReply>,
+        Receiver: MessageReceiverProvider<From>,
+        SenderStore: MessageSenderStoreProvider<ModeReply, Sender>,
+    > ModeReplySender for MessageSenderAndReceiver<ModeReply, From, Sender, Receiver, SenderStore>
     {
         fn local_channel_id(&self) -> ComponentId {
             self.local_channel_id_generic()
@@ -334,12 +333,11 @@ pub mod alloc_mod {
     }
 
     impl<
-            To,
-            Sender: MessageSenderProvider<To>,
-            Receiver: MessageReceiverProvider<ModeReply>,
-            SenderStore: MessageSenderStoreProvider<To, Sender>,
-        > ModeReplyReceiver
-        for MessageSenderAndReceiver<To, ModeReply, Sender, Receiver, SenderStore>
+        To,
+        Sender: MessageSenderProvider<To>,
+        Receiver: MessageReceiverProvider<ModeReply>,
+        SenderStore: MessageSenderStoreProvider<To, Sender>,
+    > ModeReplyReceiver for MessageSenderAndReceiver<To, ModeReply, Sender, Receiver, SenderStore>
     {
         fn try_recv_mode_reply(
             &self,
@@ -349,15 +347,15 @@ pub mod alloc_mod {
     }
 
     impl<
-            Request,
-            ReqSender: MessageSenderProvider<Request>,
-            ReqReceiver: MessageReceiverProvider<Request>,
-            ReqSenderStore: MessageSenderStoreProvider<Request, ReqSender>,
-            Reply,
-            ReplySender: MessageSenderProvider<Reply>,
-            ReplyReceiver: MessageReceiverProvider<Reply>,
-            ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
-        >
+        Request,
+        ReqSender: MessageSenderProvider<Request>,
+        ReqReceiver: MessageReceiverProvider<Request>,
+        ReqSenderStore: MessageSenderStoreProvider<Request, ReqSender>,
+        Reply,
+        ReplySender: MessageSenderProvider<Reply>,
+        ReplyReceiver: MessageReceiverProvider<Reply>,
+        ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
+    >
         RequestAndReplySenderAndReceiver<
             Request,
             ReqSender,
@@ -376,14 +374,14 @@ pub mod alloc_mod {
     }
 
     impl<
-            Request,
-            ReqSender: MessageSenderProvider<Request>,
-            ReqReceiver: MessageReceiverProvider<Request>,
-            ReqSenderStore: MessageSenderStoreProvider<Request, ReqSender>,
-            ReplySender: MessageSenderProvider<ModeReply>,
-            ReplyReceiver: MessageReceiverProvider<ModeReply>,
-            ReplySenderStore: MessageSenderStoreProvider<ModeReply, ReplySender>,
-        > ModeReplySender
+        Request,
+        ReqSender: MessageSenderProvider<Request>,
+        ReqReceiver: MessageReceiverProvider<Request>,
+        ReqSenderStore: MessageSenderStoreProvider<Request, ReqSender>,
+        ReplySender: MessageSenderProvider<ModeReply>,
+        ReplyReceiver: MessageReceiverProvider<ModeReply>,
+        ReplySenderStore: MessageSenderStoreProvider<ModeReply, ReplySender>,
+    > ModeReplySender
         for RequestAndReplySenderAndReceiver<
             Request,
             ReqSender,
@@ -413,14 +411,14 @@ pub mod alloc_mod {
     }
 
     impl<
-            Request,
-            ReqSender: MessageSenderProvider<Request>,
-            ReqReceiver: MessageReceiverProvider<Request>,
-            ReqSenderStore: MessageSenderStoreProvider<Request, ReqSender>,
-            ReplySender: MessageSenderProvider<ModeReply>,
-            ReplyReceiver: MessageReceiverProvider<ModeReply>,
-            ReplySenderStore: MessageSenderStoreProvider<ModeReply, ReplySender>,
-        > ModeReplyReceiver
+        Request,
+        ReqSender: MessageSenderProvider<Request>,
+        ReqReceiver: MessageReceiverProvider<Request>,
+        ReqSenderStore: MessageSenderStoreProvider<Request, ReqSender>,
+        ReplySender: MessageSenderProvider<ModeReply>,
+        ReplyReceiver: MessageReceiverProvider<ModeReply>,
+        ReplySenderStore: MessageSenderStoreProvider<ModeReply, ReplySender>,
+    > ModeReplyReceiver
         for RequestAndReplySenderAndReceiver<
             Request,
             ReqSender,
@@ -444,10 +442,10 @@ pub mod alloc_mod {
         MessageSenderAndReceiver<ModeReply, ModeRequest, Sender, Receiver, ReplySenderStore>;
 
     impl<
-            Sender: MessageSenderProvider<ModeReply>,
-            Receiver: MessageReceiverProvider<ModeRequest>,
-            ReplySenderStore: MessageSenderStoreProvider<ModeReply, Sender>,
-        > ModeRequestHandlerInterface<Sender, Receiver, ReplySenderStore>
+        Sender: MessageSenderProvider<ModeReply>,
+        Receiver: MessageReceiverProvider<ModeRequest>,
+        ReplySenderStore: MessageSenderStoreProvider<ModeReply, Sender>,
+    > ModeRequestHandlerInterface<Sender, Receiver, ReplySenderStore>
     {
         pub fn try_recv_mode_request(
             &self,
@@ -474,10 +472,10 @@ pub mod alloc_mod {
         MessageSenderAndReceiver<ModeRequest, ModeReply, Sender, Receiver, RequestSenderStore>;
 
     impl<
-            Sender: MessageSenderProvider<ModeRequest>,
-            Receiver: MessageReceiverProvider<ModeReply>,
-            RequestSenderStore: MessageSenderStoreProvider<ModeRequest, Sender>,
-        > ModeRequestorInterface<Sender, Receiver, RequestSenderStore>
+        Sender: MessageSenderProvider<ModeRequest>,
+        Receiver: MessageReceiverProvider<ModeReply>,
+        RequestSenderStore: MessageSenderStoreProvider<ModeRequest, Sender>,
+    > ModeRequestorInterface<Sender, Receiver, RequestSenderStore>
     {
         pub fn try_recv_mode_reply(
             &self,
@@ -531,11 +529,11 @@ pub mod alloc_mod {
     }
 
     impl<
-            To,
-            Sender: MessageSenderProvider<To>,
-            Receiver: MessageReceiverProvider<ModeRequest>,
-            SenderStore: MessageSenderStoreProvider<To, Sender>,
-        > ModeRequestReceiver
+        To,
+        Sender: MessageSenderProvider<To>,
+        Receiver: MessageReceiverProvider<ModeRequest>,
+        SenderStore: MessageSenderStoreProvider<To, Sender>,
+    > ModeRequestReceiver
         for MessageSenderAndReceiver<To, ModeRequest, Sender, Receiver, SenderStore>
     {
         fn try_recv_mode_request(
@@ -546,11 +544,11 @@ pub mod alloc_mod {
     }
 
     impl<
-            From,
-            Sender: MessageSenderProvider<ModeRequest>,
-            Receiver: MessageReceiverProvider<From>,
-            SenderStore: MessageSenderStoreProvider<ModeRequest, Sender>,
-        > ModeRequestSender
+        From,
+        Sender: MessageSenderProvider<ModeRequest>,
+        Receiver: MessageReceiverProvider<From>,
+        SenderStore: MessageSenderStoreProvider<ModeRequest, Sender>,
+    > ModeRequestSender
         for MessageSenderAndReceiver<ModeRequest, From, Sender, Receiver, SenderStore>
     {
         fn local_channel_id(&self) -> ComponentId {
@@ -572,14 +570,14 @@ pub mod alloc_mod {
     }
 
     impl<
-            ReqSender: MessageSenderProvider<ModeRequest>,
-            ReqReceiver: MessageReceiverProvider<ModeRequest>,
-            ReqSenderStore: MessageSenderStoreProvider<ModeRequest, ReqSender>,
-            Reply,
-            ReplySender: MessageSenderProvider<Reply>,
-            ReplyReceiver: MessageReceiverProvider<Reply>,
-            ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
-        >
+        ReqSender: MessageSenderProvider<ModeRequest>,
+        ReqReceiver: MessageReceiverProvider<ModeRequest>,
+        ReqSenderStore: MessageSenderStoreProvider<ModeRequest, ReqSender>,
+        Reply,
+        ReplySender: MessageSenderProvider<Reply>,
+        ReplyReceiver: MessageReceiverProvider<Reply>,
+        ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
+    >
         RequestAndReplySenderAndReceiver<
             ModeRequest,
             ReqSender,
@@ -598,14 +596,14 @@ pub mod alloc_mod {
     }
 
     impl<
-            ReqSender: MessageSenderProvider<ModeRequest>,
-            ReqReceiver: MessageReceiverProvider<ModeRequest>,
-            ReqSenderStore: MessageSenderStoreProvider<ModeRequest, ReqSender>,
-            Reply,
-            ReplySender: MessageSenderProvider<Reply>,
-            ReplyReceiver: MessageReceiverProvider<Reply>,
-            ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
-        > ModeRequestSender
+        ReqSender: MessageSenderProvider<ModeRequest>,
+        ReqReceiver: MessageReceiverProvider<ModeRequest>,
+        ReqSenderStore: MessageSenderStoreProvider<ModeRequest, ReqSender>,
+        Reply,
+        ReplySender: MessageSenderProvider<Reply>,
+        ReplyReceiver: MessageReceiverProvider<Reply>,
+        ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
+    > ModeRequestSender
         for RequestAndReplySenderAndReceiver<
             ModeRequest,
             ReqSender,
@@ -636,14 +634,14 @@ pub mod alloc_mod {
     }
 
     impl<
-            ReqSender: MessageSenderProvider<ModeRequest>,
-            ReqReceiver: MessageReceiverProvider<ModeRequest>,
-            ReqSenderStore: MessageSenderStoreProvider<ModeRequest, ReqSender>,
-            Reply,
-            ReplySender: MessageSenderProvider<Reply>,
-            ReplyReceiver: MessageReceiverProvider<Reply>,
-            ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
-        > ModeRequestReceiver
+        ReqSender: MessageSenderProvider<ModeRequest>,
+        ReqReceiver: MessageReceiverProvider<ModeRequest>,
+        ReqSenderStore: MessageSenderStoreProvider<ModeRequest, ReqSender>,
+        Reply,
+        ReplySender: MessageSenderProvider<Reply>,
+        ReplyReceiver: MessageReceiverProvider<Reply>,
+        ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
+    > ModeRequestReceiver
         for RequestAndReplySenderAndReceiver<
             ModeRequest,
             ReqSender,
@@ -726,7 +724,7 @@ pub(crate) mod tests {
     use core::cell::RefCell;
     use std::collections::VecDeque;
 
-    use crate::{request::RequestId, ComponentId};
+    use crate::{ComponentId, request::RequestId};
 
     use super::*;
 

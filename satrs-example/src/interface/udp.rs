@@ -15,6 +15,7 @@ pub trait UdpTmHandler {
     fn send_tm_to_udp_client(&mut self, socket: &UdpSocket, recv_addr: &SocketAddr);
 }
 
+#[allow(dead_code)]
 pub struct StaticUdpTmHandler {
     pub tm_rx: mpsc::Receiver<PacketInPool>,
     pub tm_store: SharedStaticMemoryPool,

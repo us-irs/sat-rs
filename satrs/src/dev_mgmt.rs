@@ -1,9 +1,9 @@
 use crate::{
+    ComponentId,
     mode::{ModeAndSubmode, ModeReply, ModeRequest, ModeRequestSender},
     mode_tree::{ModeStoreProvider, ModeStoreVec},
     queue::{GenericSendError, GenericTargetedMessagingError},
     request::{GenericMessage, RequestId},
-    ComponentId,
 };
 use core::fmt::Debug;
 
@@ -270,7 +270,7 @@ impl<UserHook: DevManagerUserHook> DevManagerCommandingHelper<UserHook> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        mode::{tests::ModeReqSenderMock, UNKNOWN_MODE},
+        mode::{UNKNOWN_MODE, tests::ModeReqSenderMock},
         request::MessageMetadata,
     };
 

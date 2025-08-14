@@ -31,9 +31,9 @@ use core::fmt::Debug;
 use core::hash::Hash;
 use core::marker::PhantomData;
 use delegate::delegate;
+use spacepackets::ByteConversionError;
 use spacepackets::ecss::EcssEnumeration;
 use spacepackets::util::{ToBeBytes, UnsignedEnum};
-use spacepackets::ByteConversionError;
 
 /// Using a type definition allows to change this to u64 in the future more easily
 pub type LargestEventRaw = u32;

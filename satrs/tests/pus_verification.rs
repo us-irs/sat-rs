@@ -8,10 +8,10 @@ pub mod crossbeam_test {
         VerificationReportingProvider,
     };
     use satrs::tmtc::{PacketSenderWithSharedPool, SharedStaticMemoryPool};
+    use spacepackets::SpHeader;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTmReader;
-    use spacepackets::ecss::{EcssEnumU16, EcssEnumU8, PusPacket, WritablePusPacket};
-    use spacepackets::SpHeader;
+    use spacepackets::ecss::{EcssEnumU8, EcssEnumU16, PusPacket, WritablePusPacket};
     use std::sync::RwLock;
     use std::thread;
     use std::time::Duration;

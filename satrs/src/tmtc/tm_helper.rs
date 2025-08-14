@@ -1,7 +1,7 @@
-use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
-use spacepackets::time::cds::CdsTime;
-use spacepackets::time::TimeWriter;
 use spacepackets::SpHeader;
+use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
+use spacepackets::time::TimeWriter;
+use spacepackets::time::cds::CdsTime;
 
 pub struct PusTmWithCdsShortHelper {
     apid: u16,
@@ -56,7 +56,7 @@ impl PusTmWithCdsShortHelper {
 
 #[cfg(test)]
 mod tests {
-    use spacepackets::{ecss::PusPacket, time::cds::CdsTime, CcsdsPacket};
+    use spacepackets::{CcsdsPacket, ecss::PusPacket, time::cds::CdsTime};
 
     use super::PusTmWithCdsShortHelper;
 

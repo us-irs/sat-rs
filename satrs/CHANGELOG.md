@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+- Bump `sat-rs` edition to 2024.
+
 # [v0.3.0-alpha.2] 2025-07-22
 
 `satrs-shared` update

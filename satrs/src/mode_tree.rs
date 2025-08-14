@@ -2,9 +2,9 @@ use alloc::vec::Vec;
 use hashbrown::HashMap;
 
 use crate::{
+    ComponentId,
     mode::{Mode, ModeAndSubmode, ModeReply, ModeRequest, Submode},
     request::MessageSenderProvider,
-    ComponentId,
 };
 
 #[cfg(feature = "alloc")]

@@ -9,13 +9,13 @@ pub use alloc_mod::*;
 pub use std_mod::*;
 
 use spacepackets::{
-    ecss::{tc::IsPusTelecommand, PusPacket},
     ByteConversionError,
+    ecss::{PusPacket, tc::IsPusTelecommand},
 };
 
 use crate::{
-    queue::{GenericReceiveError, GenericSendError},
     ComponentId,
+    queue::{GenericReceiveError, GenericSendError},
 };
 
 /// Generic request ID type. Requests can be associated with an ID to have a unique identifier
@@ -335,12 +335,12 @@ pub mod alloc_mod {
     }
 
     impl<
-            To,
-            From,
-            Sender: MessageSenderProvider<To>,
-            Receiver: MessageReceiverProvider<From>,
-            SenderStore: MessageSenderStoreProvider<To, Sender>,
-        > MessageSenderAndReceiver<To, From, Sender, Receiver, SenderStore>
+        To,
+        From,
+        Sender: MessageSenderProvider<To>,
+        Receiver: MessageReceiverProvider<From>,
+        SenderStore: MessageSenderStoreProvider<To, Sender>,
+    > MessageSenderAndReceiver<To, From, Sender, Receiver, SenderStore>
     {
         pub fn new(local_channel_id: ComponentId, message_receiver: Receiver) -> Self {
             Self {
@@ -403,15 +403,15 @@ pub mod alloc_mod {
     }
 
     impl<
-            Request,
-            ReqSender: MessageSenderProvider<Request>,
-            ReqReceiver: MessageReceiverProvider<Request>,
-            ReqSenderStore: MessageSenderStoreProvider<Request, ReqSender>,
-            Reply,
-            ReplySender: MessageSenderProvider<Reply>,
-            ReplyReceiver: MessageReceiverProvider<Reply>,
-            ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
-        >
+        Request,
+        ReqSender: MessageSenderProvider<Request>,
+        ReqReceiver: MessageReceiverProvider<Request>,
+        ReqSenderStore: MessageSenderStoreProvider<Request, ReqSender>,
+        Reply,
+        ReplySender: MessageSenderProvider<Reply>,
+        ReplyReceiver: MessageReceiverProvider<Reply>,
+        ReplySenderStore: MessageSenderStoreProvider<Reply, ReplySender>,
+    >
         RequestAndReplySenderAndReceiver<
             Request,
             ReqSender,
@@ -497,8 +497,8 @@ mod tests {
 
     use alloc::string::ToString;
     use spacepackets::{
-        ecss::tc::{PusTcCreator, PusTcSecondaryHeader},
         ByteConversionError, SpHeader,
+        ecss::tc::{PusTcCreator, PusTcSecondaryHeader},
     };
 
     use crate::{

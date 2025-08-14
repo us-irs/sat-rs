@@ -4,13 +4,13 @@ use satrs::dev_mgmt::{
     DevManagerCommandingHelper, DevManagerHelperResult, TransparentDevManagerHook,
 };
 use satrs::mode::{
-    Mode, ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender, ModeRequestHandler,
-    ModeRequestHandlerMpscBounded, ModeRequestReceiver, ModeRequestorAndHandlerMpscBounded,
-    ModeRequestorOneChildBoundedMpsc, INVALID_MODE, UNKNOWN_MODE,
+    INVALID_MODE, Mode, ModeError, ModeProvider, ModeReplyReceiver, ModeReplySender,
+    ModeRequestHandler, ModeRequestHandlerMpscBounded, ModeRequestReceiver,
+    ModeRequestorAndHandlerMpscBounded, ModeRequestorOneChildBoundedMpsc, UNKNOWN_MODE,
 };
 use satrs::mode_tree::{
-    connect_mode_nodes, ModeChild, ModeNode, ModeParent, ModeStoreProvider, SequenceTableEntry,
-    SequenceTableMapTable, TargetTableEntry,
+    ModeChild, ModeNode, ModeParent, ModeStoreProvider, SequenceTableEntry, SequenceTableMapTable,
+    TargetTableEntry, connect_mode_nodes,
 };
 use satrs::mode_tree::{SequenceTablesMapValue, TargetTablesMapValue};
 use satrs::request::{MessageMetadata, RequestId};
@@ -20,10 +20,10 @@ use satrs::subsystem::{
     StartSequenceError, SubsystemCommandingHelper, SubsystemHelperResult,
 };
 use satrs::{
+    ComponentId,
     mode::{ModeAndSubmode, ModeReply, ModeRequest},
     queue::GenericTargetedMessagingError,
     request::GenericMessage,
-    ComponentId,
 };
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;

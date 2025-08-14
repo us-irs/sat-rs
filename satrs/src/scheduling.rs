@@ -211,8 +211,8 @@ mod tests {
         println,
         rc::Rc,
         sync::{
-            mpsc::{self, TryRecvError},
             Arc, Mutex,
+            mpsc::{self, TryRecvError},
         },
         time::Instant,
     };

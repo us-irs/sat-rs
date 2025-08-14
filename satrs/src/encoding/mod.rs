@@ -11,8 +11,8 @@ pub(crate) mod tests {
     use alloc::collections::VecDeque;
 
     use crate::{
-        tmtc::{PacketAsVec, PacketSenderRaw},
         ComponentId,
+        tmtc::{PacketAsVec, PacketSenderRaw},
     };
 
     use super::cobs::encode_packet_with_cobs;

@@ -7,11 +7,11 @@ use core::hash::Hash;
 use hashbrown::HashSet;
 
 #[cfg(feature = "alloc")]
-pub use crate::pus::event::EventReporter;
-use crate::pus::verification::TcStateToken;
-#[cfg(feature = "alloc")]
 use crate::pus::EcssTmSender;
 use crate::pus::EcssTmtcError;
+#[cfg(feature = "alloc")]
+pub use crate::pus::event::EventReporter;
+use crate::pus::verification::TcStateToken;
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
 #[cfg(feature = "heapless")]
@@ -159,10 +159,10 @@ pub mod alloc_mod {
     }
 
     impl<
-            ReportingMap: PusEventReportingMapProvider<Event>,
-            Event: GenericEvent,
-            EventTmHook: EventTmHookProvider,
-        > PusEventTmCreatorWithMap<ReportingMap, Event, EventTmHook>
+        ReportingMap: PusEventReportingMapProvider<Event>,
+        Event: GenericEvent,
+        EventTmHook: EventTmHookProvider,
+    > PusEventTmCreatorWithMap<ReportingMap, Event, EventTmHook>
     {
         pub fn new(reporter: EventReporter<EventTmHook>, backend: ReportingMap) -> Self {
             Self {
@@ -311,9 +311,9 @@ pub mod alloc_mod {
 mod tests {
     use alloc::string::{String, ToString};
     use alloc::vec;
+    use spacepackets::ecss::PusPacket;
     use spacepackets::ecss::event::Subservice;
     use spacepackets::ecss::tm::PusTmReader;
-    use spacepackets::ecss::PusPacket;
 
     use super::*;
     use crate::request::UniqueApidTargetId;
