@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
+# [v0.1.3] 2024-08-26
+
+Bump `satrs-shared`.
+
 # [v0.1.2] 2024-04-17
 
 Allow `satrs-shared` from `v0.1.3` to `<v0.2`.
