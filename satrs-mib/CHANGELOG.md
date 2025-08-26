@@ -23,3 +23,6 @@ Allow `satrs-shared` from `v0.1.3` to `<v0.2`.
 # [v0.1.0] 2024-02-12
 
 Initial release containing the `resultcode` macro.
+
+[unreleased]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-mib-v0.1.3...HEAD
+[v0.1.3]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-mib-v0.1.2...satrs-mib-v0.1.3
