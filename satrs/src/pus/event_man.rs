@@ -46,7 +46,7 @@ pub mod heapless_mod {
     //       regular Event type again.
     #[derive(Default)]
     pub struct HeaplessPusMgmtBackendProvider<const N: usize, Provider: GenericEvent> {
-        disabled: heapless::FnvIndexSet<LargestEventRaw, N>,
+        disabled: heapless::index_set::FnvIndexSet<LargestEventRaw, N>,
         phantom: PhantomData<Provider>,
     }
 
