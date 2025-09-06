@@ -167,7 +167,7 @@ mod tests {
     use crate::{
         events::EventU32,
         pus::{
-            DirectPusPacketHandlerResult, EcssTcInSharedPoolConverter, PusPacketHandlingError,
+            DirectPusPacketHandlerResult, EcssTcInSharedPoolCacher, PusPacketHandlingError,
             event_man::EventRequestWithToken,
             tests::PusServiceHandlerWithSharedStoreCommon,
             verification::{TcStateAccepted, VerificationToken},
@@ -183,7 +183,7 @@ mod tests {
         handler: PusEventServiceHandler<
             MpscTcReceiver,
             PacketSenderWithSharedPool,
-            EcssTcInSharedPoolConverter,
+            EcssTcInSharedPoolCacher,
             VerificationReporter,
         >,
     }

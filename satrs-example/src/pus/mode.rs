@@ -8,8 +8,8 @@ use crate::requests::GenericRequestRouter;
 use crate::tmtc::sender::TmTcSender;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
-    DefaultActiveRequestMap, EcssTcAndToken, EcssTcInMemConverterWrapper, MpscTcReceiver,
-    PusPacketHandlingError, PusServiceHelper,
+    DefaultActiveRequestMap, EcssTcAndToken, EcssTcCacher, MpscTcReceiver, PusPacketHandlingError,
+    PusServiceHelper,
 };
 use satrs::request::GenericMessage;
 use satrs::{
@@ -210,7 +210,7 @@ impl PusTcToRequestConverter<ActivePusRequestStd, ModeRequest> for ModeRequestCo
 
 pub fn create_mode_service(
     tm_sender: TmTcSender,
-    tc_in_mem_converter: EcssTcInMemConverterWrapper,
+    tc_in_mem_converter: EcssTcCacher,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     mode_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<ModeReply>>,

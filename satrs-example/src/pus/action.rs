@@ -9,7 +9,7 @@ use satrs::pus::verification::{
     VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
-    ActiveRequest, EcssTcAndToken, EcssTcInMemConverterWrapper, EcssTmSender, EcssTmtcError,
+    ActiveRequest, EcssTcAndToken, EcssTcCacher, EcssTmSender, EcssTmtcError,
     GenericConversionError, MpscTcReceiver, PusPacketHandlingError, PusReplyHandler,
     PusServiceHelper, PusTcToRequestConverter,
 };
@@ -208,7 +208,7 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest> for Actio
 
 pub fn create_action_service(
     tm_sender: TmTcSender,
-    tc_in_mem_converter: EcssTcInMemConverterWrapper,
+    tc_in_mem_converter: EcssTcCacher,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     action_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<ActionReplyPus>>,
@@ -274,7 +274,7 @@ mod tests {
         TEST_APID, TEST_COMPONENT_ID_0, TEST_COMPONENT_ID_1, TEST_UNIQUE_ID_0, TEST_UNIQUE_ID_1,
     };
     use satrs::pus::verification::test_util::TestVerificationReporter;
-    use satrs::pus::{verification, EcssTcInVecConverter};
+    use satrs::pus::{verification, EcssTcVecCacher};
     use satrs::request::MessageMetadata;
     use satrs::tmtc::PacketAsVec;
     use satrs::ComponentId;
@@ -325,7 +325,7 @@ mod tests {
                         pus_action_rx,
                         TmTcSender::Heap(tm_funnel_tx.clone()),
                         verif_reporter,
-                        EcssTcInMemConverterWrapper::Heap(EcssTcInVecConverter::default()),
+                        EcssTcCacher::Heap(EcssTcVecCacher::default()),
                     ),
                     ActionRequestConverter::default(),
                     DefaultActiveActionRequestMap::default(),

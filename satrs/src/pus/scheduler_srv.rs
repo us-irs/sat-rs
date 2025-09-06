@@ -1,9 +1,9 @@
 use super::scheduler::PusSchedulerProvider;
 use super::verification::{VerificationReporter, VerificationReportingProvider};
 use super::{
-    CacheAndReadRawEcssTc, DirectPusPacketHandlerResult, EcssTcInSharedPoolConverter,
-    EcssTcInVecConverter, EcssTcReceiver, EcssTmSender, HandlingStatus, MpscTcReceiver,
-    PartialPusHandlingError, PusServiceHelper,
+    CacheAndReadRawEcssTc, DirectPusPacketHandlerResult, EcssTcInSharedPoolCacher, EcssTcReceiver,
+    EcssTcVecCacher, EcssTmSender, HandlingStatus, MpscTcReceiver, PartialPusHandlingError,
+    PusServiceHelper,
 };
 use crate::pool::PoolProvider;
 use crate::pus::PusPacketHandlingError;
@@ -213,7 +213,7 @@ impl<
 pub type PusService11SchedHandlerDynWithMpsc<PusScheduler> = PusSchedServiceHandler<
     MpscTcReceiver,
     mpsc::Sender<PacketAsVec>,
-    EcssTcInVecConverter,
+    EcssTcVecCacher,
     VerificationReporter,
     PusScheduler,
 >;
@@ -222,7 +222,7 @@ pub type PusService11SchedHandlerDynWithMpsc<PusScheduler> = PusSchedServiceHand
 pub type PusService11SchedHandlerDynWithBoundedMpsc<PusScheduler> = PusSchedServiceHandler<
     MpscTcReceiver,
     mpsc::SyncSender<PacketAsVec>,
-    EcssTcInVecConverter,
+    EcssTcVecCacher,
     VerificationReporter,
     PusScheduler,
 >;
@@ -231,7 +231,7 @@ pub type PusService11SchedHandlerDynWithBoundedMpsc<PusScheduler> = PusSchedServ
 pub type PusService11SchedHandlerStaticWithMpsc<PusScheduler> = PusSchedServiceHandler<
     MpscTcReceiver,
     PacketSenderWithSharedPool,
-    EcssTcInSharedPoolConverter,
+    EcssTcInSharedPoolCacher,
     VerificationReporter,
     PusScheduler,
 >;
@@ -240,7 +240,7 @@ pub type PusService11SchedHandlerStaticWithMpsc<PusScheduler> = PusSchedServiceH
 pub type PusService11SchedHandlerStaticWithBoundedMpsc<PusScheduler> = PusSchedServiceHandler<
     MpscTcReceiver,
     PacketSenderWithSharedPool,
-    EcssTcInSharedPoolConverter,
+    EcssTcInSharedPoolCacher,
     VerificationReporter,
     PusScheduler,
 >;
@@ -253,7 +253,7 @@ mod tests {
 
     use crate::pus::{DirectPusPacketHandlerResult, MpscTcReceiver, PusPacketHandlingError};
     use crate::pus::{
-        EcssTcInSharedPoolConverter,
+        EcssTcInSharedPoolCacher,
         scheduler::{self, PusSchedulerProvider, TcInfo},
         tests::PusServiceHandlerWithSharedStoreCommon,
         verification::{RequestId, TcStateAccepted, VerificationToken},
@@ -278,7 +278,7 @@ mod tests {
         handler: PusSchedServiceHandler<
             MpscTcReceiver,
             PacketSenderWithSharedPool,
-            EcssTcInSharedPoolConverter,
+            EcssTcInSharedPoolCacher,
             VerificationReporter,
             TestScheduler,
         >,

@@ -9,7 +9,7 @@ use satrs::pus::scheduler::{PusScheduler, TcInfo};
 use satrs::pus::scheduler_srv::PusSchedServiceHandler;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
-    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcInMemConverterWrapper, MpscTcReceiver,
+    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcCacher, MpscTcReceiver,
     PartialPusHandlingError, PusServiceHelper,
 };
 use satrs::spacepackets::ecss::PusServiceId;
@@ -84,7 +84,7 @@ pub struct SchedulingServiceWrapper {
     pub pus_11_handler: PusSchedServiceHandler<
         MpscTcReceiver,
         TmTcSender,
-        EcssTcInMemConverterWrapper,
+        EcssTcCacher,
         VerificationReporter,
         PusScheduler,
     >,
@@ -174,7 +174,7 @@ impl SchedulingServiceWrapper {
 
 pub fn create_scheduler_service(
     tm_sender: TmTcSender,
-    tc_in_mem_converter: EcssTcInMemConverterWrapper,
+    tc_in_mem_converter: EcssTcCacher,
     tc_releaser: TcReleaser,
     pus_sched_rx: mpsc::Receiver<EcssTcAndToken>,
     sched_tc_pool: StaticMemoryPool,

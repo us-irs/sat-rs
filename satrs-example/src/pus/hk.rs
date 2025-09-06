@@ -5,10 +5,9 @@ use satrs::pus::verification::{
     VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
-    ActivePusRequestStd, ActiveRequest, DefaultActiveRequestMap, EcssTcAndToken,
-    EcssTcInMemConverterWrapper, EcssTmSender, EcssTmtcError, GenericConversionError,
-    MpscTcReceiver, PusPacketHandlingError, PusReplyHandler, PusServiceHelper,
-    PusTcToRequestConverter,
+    ActivePusRequestStd, ActiveRequest, DefaultActiveRequestMap, EcssTcAndToken, EcssTcCacher,
+    EcssTmSender, EcssTmtcError, GenericConversionError, MpscTcReceiver, PusPacketHandlingError,
+    PusReplyHandler, PusServiceHelper, PusTcToRequestConverter,
 };
 use satrs::request::{GenericMessage, UniqueApidTargetId};
 use satrs::res_code::ResultU16;
@@ -243,7 +242,7 @@ impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for HkRequestConver
 
 pub fn create_hk_service(
     tm_sender: TmTcSender,
-    tc_in_mem_converter: EcssTcInMemConverterWrapper,
+    tc_in_mem_converter: EcssTcCacher,
     pus_hk_rx: mpsc::Receiver<EcssTcAndToken>,
     request_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<HkReply>>,
