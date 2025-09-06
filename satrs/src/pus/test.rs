@@ -9,9 +9,8 @@ use std::sync::mpsc;
 
 use super::verification::{VerificationReporter, VerificationReportingProvider};
 use super::{
-    EcssTcInMemConversionProvider, EcssTcInSharedPoolConverter, EcssTcInVecConverter,
-    EcssTcReceiver, EcssTmSender, GenericConversionError, HandlingStatus, MpscTcReceiver,
-    PusServiceHelper,
+    CacheAndReadRawEcssTc, EcssTcInSharedPoolConverter, EcssTcInVecConverter, EcssTcReceiver,
+    EcssTmSender, GenericConversionError, HandlingStatus, MpscTcReceiver, PusServiceHelper,
 };
 
 /// This is a helper class for [std] environments to handle generic PUS 17 (test service) packets.
@@ -19,7 +18,7 @@ use super::{
 pub struct PusService17TestHandler<
     TcReceiver: EcssTcReceiver,
     TmSender: EcssTmSender,
-    TcInMemConverter: EcssTcInMemConversionProvider,
+    TcInMemConverter: CacheAndReadRawEcssTc,
     VerificationReporter: VerificationReportingProvider,
 > {
     pub service_helper:
@@ -29,7 +28,7 @@ pub struct PusService17TestHandler<
 impl<
     TcReceiver: EcssTcReceiver,
     TmSender: EcssTmSender,
-    TcInMemConverter: EcssTcInMemConversionProvider,
+    TcInMemConverter: CacheAndReadRawEcssTc,
     VerificationReporter: VerificationReportingProvider,
 > PusService17TestHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {

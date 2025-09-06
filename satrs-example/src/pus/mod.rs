@@ -4,13 +4,13 @@ use log::warn;
 use satrs::pool::PoolAddr;
 use satrs::pus::verification::{
     self, FailParams, TcStateAccepted, TcStateStarted, VerificationReporter,
-    VerificationReporterCfg, VerificationReportingProvider, VerificationToken,
+    VerificationReporterConfig, VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
-    ActiveRequestMapProvider, ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConversionProvider,
-    EcssTcInMemConverter, EcssTcReceiver, EcssTmSender, EcssTmtcError, GenericConversionError,
-    GenericRoutingError, HandlingStatus, PusPacketHandlingError, PusReplyHandler, PusRequestRouter,
-    PusServiceHelper, PusTcToRequestConverter, TcInMemory,
+    ActiveRequest, ActiveRequestStore, CacheAndReadRawEcssTc, EcssTcAndToken,
+    EcssTcInMemConverterWrapper, EcssTcReceiver, EcssTmSender, EcssTmtcError,
+    GenericConversionError, GenericRoutingError, HandlingStatus, PusPacketHandlingError,
+    PusReplyHandler, PusRequestRouter, PusServiceHelper, PusTcToRequestConverter, TcInMemory,
 };
 use satrs::queue::{GenericReceiveError, GenericSendError};
 use satrs::request::{Apid, GenericMessage, MessageMetadata};
@@ -33,7 +33,7 @@ pub mod stack;
 pub mod test;
 
 pub fn create_verification_reporter(owner_id: ComponentId, apid: Apid) -> VerificationReporter {
-    let verif_cfg = VerificationReporterCfg::new(apid, 1, 2, 8).unwrap();
+    let verif_cfg = VerificationReporterConfig::new(apid, 1, 2, 8).unwrap();
     // Every software component which needs to generate verification telemetry, gets a cloned
     // verification reporter.
     VerificationReporter::new(owner_id, &verif_cfg)
@@ -269,16 +269,16 @@ pub struct PusTargetedRequestService<
     VerificationReporter: VerificationReportingProvider,
     RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = GenericConversionError>,
     ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType, Error = EcssTmtcError>,
-    ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestInfo>,
-    ActiveRequestInfo: ActiveRequestProvider,
+    ActiveRequestMapInstance: ActiveRequestStore<ActiveRequestInfo>,
+    ActiveRequestInfo: ActiveRequest,
     RequestType,
     ReplyType,
 > {
     pub service_helper:
-        PusServiceHelper<TcReceiver, TmTcSender, EcssTcInMemConverter, VerificationReporter>,
+        PusServiceHelper<TcReceiver, TmTcSender, EcssTcInMemConverterWrapper, VerificationReporter>,
     pub request_router: GenericRequestRouter,
     pub request_converter: RequestConverter,
-    pub active_request_map: ActiveRequestMap,
+    pub active_request_map: ActiveRequestMapInstance,
     pub reply_handler: ReplyHandler,
     pub reply_receiver: mpsc::Receiver<GenericMessage<ReplyType>>,
     phantom: std::marker::PhantomData<(RequestType, ActiveRequestInfo, ReplyType)>,
@@ -289,8 +289,8 @@ impl<
         VerificationReporter: VerificationReportingProvider,
         RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = GenericConversionError>,
         ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType, Error = EcssTmtcError>,
-        ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestInfo>,
-        ActiveRequestInfo: ActiveRequestProvider,
+        ActiveRequestMapInstance: ActiveRequestStore<ActiveRequestInfo>,
+        ActiveRequestInfo: ActiveRequest,
         RequestType,
         ReplyType,
     >
@@ -299,7 +299,7 @@ impl<
         VerificationReporter,
         RequestConverter,
         ReplyHandler,
-        ActiveRequestMap,
+        ActiveRequestMapInstance,
         ActiveRequestInfo,
         RequestType,
         ReplyType,
@@ -311,11 +311,11 @@ where
         service_helper: PusServiceHelper<
             TcReceiver,
             TmTcSender,
-            EcssTcInMemConverter,
+            EcssTcInMemConverterWrapper,
             VerificationReporter,
         >,
         request_converter: RequestConverter,
-        active_request_map: ActiveRequestMap,
+        active_request_map: ActiveRequestMapInstance,
         reply_hook: ReplyHandler,
         request_router: GenericRequestRouter,
         reply_receiver: mpsc::Receiver<GenericMessage<ReplyType>>,
@@ -509,7 +509,7 @@ where
 /// and also log the error.
 pub fn generic_pus_request_timeout_handler(
     sender: &(impl EcssTmSender + ?Sized),
-    active_request: &(impl ActiveRequestProvider + Debug),
+    active_request: &(impl ActiveRequest + Debug),
     verification_handler: &impl VerificationReportingProvider,
     time_stamp: &[u8],
     service_str: &'static str,
@@ -537,7 +537,7 @@ pub(crate) mod tests {
     use satrs::{
         pus::{
             verification::test_util::TestVerificationReporter, ActivePusRequestStd,
-            ActiveRequestMapProvider, MpscTcReceiver,
+            ActiveRequestStore, MpscTcReceiver,
         },
         request::UniqueApidTargetId,
         spacepackets::{
@@ -556,7 +556,7 @@ pub(crate) mod tests {
     // Testbench dedicated to the testing of [PusReplyHandler]s
     pub struct ReplyHandlerTestbench<
         ReplyHandler: PusReplyHandler<ActiveRequestInfo, Reply, Error = EcssTmtcError>,
-        ActiveRequestInfo: ActiveRequestProvider,
+        ActiveRequestInfo: ActiveRequest,
         Reply,
     > {
         pub id: ComponentId,
@@ -570,7 +570,7 @@ pub(crate) mod tests {
 
     impl<
             ReplyHandler: PusReplyHandler<ActiveRequestInfo, Reply, Error = EcssTmtcError>,
-            ActiveRequestInfo: ActiveRequestProvider,
+            ActiveRequestInfo: ActiveRequest,
             Reply,
         > ReplyHandlerTestbench<ReplyHandler, ActiveRequestInfo, Reply>
     {
@@ -671,7 +671,7 @@ pub(crate) mod tests {
     // Testbench dedicated to the testing of [PusTcToRequestConverter]s
     pub struct PusConverterTestbench<
         Converter: PusTcToRequestConverter<ActiveRequestInfo, Request, Error = GenericConversionError>,
-        ActiveRequestInfo: ActiveRequestProvider,
+        ActiveRequestInfo: ActiveRequest,
         Request,
     > {
         pub id: ComponentId,
@@ -685,7 +685,7 @@ pub(crate) mod tests {
 
     impl<
             Converter: PusTcToRequestConverter<ActiveRequestInfo, Request, Error = GenericConversionError>,
-            ActiveRequestInfo: ActiveRequestProvider,
+            ActiveRequestInfo: ActiveRequest,
             Request,
         > PusConverterTestbench<Converter, ActiveRequestInfo, Request>
     {
@@ -751,8 +751,8 @@ pub(crate) mod tests {
     pub struct TargetedPusRequestTestbench<
         RequestConverter: PusTcToRequestConverter<ActiveRequestInfo, RequestType, Error = GenericConversionError>,
         ReplyHandler: PusReplyHandler<ActiveRequestInfo, ReplyType, Error = EcssTmtcError>,
-        ActiveRequestMap: ActiveRequestMapProvider<ActiveRequestInfo>,
-        ActiveRequestInfo: ActiveRequestProvider,
+        ActiveRequestMapInstance: ActiveRequestStore<ActiveRequestInfo>,
+        ActiveRequestInfo: ActiveRequest,
         RequestType,
         ReplyType,
     > {
@@ -761,7 +761,7 @@ pub(crate) mod tests {
             TestVerificationReporter,
             RequestConverter,
             ReplyHandler,
-            ActiveRequestMap,
+            ActiveRequestMapInstance,
             ActiveRequestInfo,
             RequestType,
             ReplyType,

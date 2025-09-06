@@ -8,7 +8,7 @@ use crate::requests::GenericRequestRouter;
 use crate::tmtc::sender::TmTcSender;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
-    DefaultActiveRequestMap, EcssTcAndToken, EcssTcInMemConverter, MpscTcReceiver,
+    DefaultActiveRequestMap, EcssTcAndToken, EcssTcInMemConverterWrapper, MpscTcReceiver,
     PusPacketHandlingError, PusServiceHelper,
 };
 use satrs::request::GenericMessage;
@@ -20,8 +20,8 @@ use satrs::{
             self, FailParams, TcStateAccepted, TcStateStarted, VerificationReportingProvider,
             VerificationToken,
         },
-        ActivePusRequestStd, ActiveRequestProvider, EcssTmSender, EcssTmtcError,
-        GenericConversionError, PusReplyHandler, PusTcToRequestConverter, PusTmVariant,
+        ActivePusRequestStd, ActiveRequest, EcssTmSender, EcssTmtcError, GenericConversionError,
+        PusReplyHandler, PusTcToRequestConverter, PusTmVariant,
     },
     request::UniqueApidTargetId,
     spacepackets::{
@@ -210,7 +210,7 @@ impl PusTcToRequestConverter<ActivePusRequestStd, ModeRequest> for ModeRequestCo
 
 pub fn create_mode_service(
     tm_sender: TmTcSender,
-    tc_in_mem_converter: EcssTcInMemConverter,
+    tc_in_mem_converter: EcssTcInMemConverterWrapper,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     mode_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<ModeReply>>,

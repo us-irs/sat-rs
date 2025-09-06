@@ -139,24 +139,24 @@ mod alloc_mod {
     use core::cell::RefCell;
     use spacepackets::ecss::PusError;
 
-    pub trait EventTmHookProvider {
+    pub trait EventTmHook {
         fn modify_tm(&self, tm: &mut PusTmCreator);
     }
 
     #[derive(Default)]
     pub struct DummyEventHook {}
 
-    impl EventTmHookProvider for DummyEventHook {
+    impl EventTmHook for DummyEventHook {
         fn modify_tm(&self, _tm: &mut PusTmCreator) {}
     }
 
-    pub struct EventReporter<EventTmHook: EventTmHookProvider = DummyEventHook> {
+    pub struct EventReporter<EventTmHookInstance: EventTmHook = DummyEventHook> {
         id: ComponentId,
         // Use interior mutability pattern here. This is just an intermediate buffer to the PUS event packet
         // generation.
         source_data_buf: RefCell<Vec<u8>>,
         pub report_creator: EventReportCreator,
-        pub tm_hook: EventTmHook,
+        pub tm_hook: EventTmHookInstance,
     }
 
     impl EventReporter<DummyEventHook> {
@@ -175,13 +175,13 @@ mod alloc_mod {
             })
         }
     }
-    impl<EventTmHook: EventTmHookProvider> EventReporter<EventTmHook> {
+    impl<EventTmHookInstance: EventTmHook> EventReporter<EventTmHookInstance> {
         pub fn new_with_hook(
             id: ComponentId,
             default_apid: u16,
             default_dest_id: u16,
             max_event_id_and_aux_data_size: usize,
-            tm_hook: EventTmHook,
+            tm_hook: EventTmHookInstance,
         ) -> Option<Self> {
             let reporter = EventReportCreator::new(default_apid, default_dest_id)?;
             Some(Self {

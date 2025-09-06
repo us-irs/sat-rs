@@ -4,7 +4,7 @@ pub mod crossbeam_test {
     use satrs::pool::{PoolProvider, PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
     use satrs::pus::test_util::{TEST_APID, TEST_COMPONENT_ID_0};
     use satrs::pus::verification::{
-        FailParams, RequestId, VerificationReporter, VerificationReporterCfg,
+        FailParams, RequestId, VerificationReporter, VerificationReporterConfig,
         VerificationReportingProvider,
     };
     use satrs::tmtc::{PacketSenderWithSharedPool, SharedStaticMemoryPool};
@@ -31,7 +31,7 @@ pub mod crossbeam_test {
         // We use a synced sequence count provider here because both verification reporters have the
         // the same APID. If they had distinct APIDs, the more correct approach would be to have
         // each reporter have an own sequence count provider.
-        let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
+        let cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8).unwrap();
         // Shared pool object to store the verification PUS telemetry
         let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(
             vec![(10, 32), (10, 64), (10, 128), (10, 1024)],

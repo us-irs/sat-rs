@@ -102,7 +102,7 @@ pub mod alloc_mod {
     use crate::{
         events::EventU16,
         params::{Params, WritableToBeBytes},
-        pus::event::{DummyEventHook, EventTmHookProvider},
+        pus::event::{DummyEventHook, EventTmHook},
     };
 
     use super::*;
@@ -151,9 +151,9 @@ pub mod alloc_mod {
     pub struct PusEventTmCreatorWithMap<
         ReportingMap: PusEventReportingMapProvider<Event>,
         Event: GenericEvent,
-        EventTmHook: EventTmHookProvider = DummyEventHook,
+        EventTmHookInstance: EventTmHook = DummyEventHook,
     > {
-        pub reporter: EventReporter<EventTmHook>,
+        pub reporter: EventReporter<EventTmHookInstance>,
         reporting_map: ReportingMap,
         phantom: PhantomData<Event>,
     }
@@ -161,10 +161,10 @@ pub mod alloc_mod {
     impl<
         ReportingMap: PusEventReportingMapProvider<Event>,
         Event: GenericEvent,
-        EventTmHook: EventTmHookProvider,
-    > PusEventTmCreatorWithMap<ReportingMap, Event, EventTmHook>
+        EventTmHookInstance: EventTmHook,
+    > PusEventTmCreatorWithMap<ReportingMap, Event, EventTmHookInstance>
     {
-        pub fn new(reporter: EventReporter<EventTmHook>, backend: ReportingMap) -> Self {
+        pub fn new(reporter: EventReporter<EventTmHookInstance>, backend: ReportingMap) -> Self {
             Self {
                 reporter,
                 reporting_map: backend,
@@ -262,10 +262,10 @@ pub mod alloc_mod {
         }
     }
 
-    impl<Event: GenericEvent + Copy + PartialEq + Eq + Hash, EventTmHook: EventTmHookProvider>
-        PusEventTmCreatorWithMap<DefaultPusEventReportingMap<Event>, Event, EventTmHook>
+    impl<Event: GenericEvent + Copy + PartialEq + Eq + Hash, EventTmHookInstance: EventTmHook>
+        PusEventTmCreatorWithMap<DefaultPusEventReportingMap<Event>, Event, EventTmHookInstance>
     {
-        pub fn new_with_default_backend(reporter: EventReporter<EventTmHook>) -> Self {
+        pub fn new_with_default_backend(reporter: EventReporter<EventTmHookInstance>) -> Self {
             Self {
                 reporter,
                 reporting_map: DefaultPusEventReportingMap::default(),

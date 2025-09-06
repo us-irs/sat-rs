@@ -878,22 +878,22 @@ mod tests {
         )
     }
 
-    fn scheduled_tc(timestamp: UnixTime, buf: &mut [u8]) -> PusTcCreator {
+    fn scheduled_tc(timestamp: UnixTime, buf: &mut [u8]) -> PusTcCreator<'_> {
         let (sph, len_app_data) = pus_tc_base(timestamp, buf);
         PusTcCreator::new_simple(sph, 11, 4, &buf[..len_app_data], true)
     }
 
-    fn wrong_tc_service(timestamp: UnixTime, buf: &mut [u8]) -> PusTcCreator {
+    fn wrong_tc_service(timestamp: UnixTime, buf: &mut [u8]) -> PusTcCreator<'_> {
         let (sph, len_app_data) = pus_tc_base(timestamp, buf);
         PusTcCreator::new_simple(sph, 12, 4, &buf[..len_app_data], true)
     }
 
-    fn wrong_tc_subservice(timestamp: UnixTime, buf: &mut [u8]) -> PusTcCreator {
+    fn wrong_tc_subservice(timestamp: UnixTime, buf: &mut [u8]) -> PusTcCreator<'_> {
         let (sph, len_app_data) = pus_tc_base(timestamp, buf);
         PusTcCreator::new_simple(sph, 11, 5, &buf[..len_app_data], true)
     }
 
-    fn double_wrapped_time_tagged_tc(timestamp: UnixTime, buf: &mut [u8]) -> PusTcCreator {
+    fn double_wrapped_time_tagged_tc(timestamp: UnixTime, buf: &mut [u8]) -> PusTcCreator<'_> {
         let cds_time =
             cds::CdsTime::from_unix_time_with_u16_days(&timestamp, cds::SubmillisPrecision::Absent)
                 .unwrap();

@@ -33,7 +33,7 @@ use satrs::{
     hal::std::{tcp_server::ServerConfig, udp_server::UdpTcServer},
     mode::{Mode, ModeAndSubmode, ModeRequest, ModeRequestHandlerMpscBounded},
     mode_tree::connect_mode_nodes,
-    pus::{event_man::EventRequestWithToken, EcssTcInMemConverter, HandlingStatus},
+    pus::{event_man::EventRequestWithToken, EcssTcInMemConverterWrapper, HandlingStatus},
     request::{GenericMessage, MessageMetadata},
     spacepackets::time::{cds::CdsTime, TimeWriter},
 };
@@ -145,7 +145,7 @@ fn main() {
             let tc_in_mem_converter =
                 EcssTcInMemConverter::Static(EcssTcInSharedPoolConverter::new(shared_tc_pool, 4096));
         } else if #[cfg(feature = "heap_tmtc")] {
-            let tc_in_mem_converter = EcssTcInMemConverter::Heap(EcssTcInVecConverter::default());
+            let tc_in_mem_converter = EcssTcInMemConverterWrapper::Heap(EcssTcInVecConverter::default());
         }
     }
 
