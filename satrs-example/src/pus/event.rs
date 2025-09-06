@@ -6,7 +6,7 @@ use satrs::pus::event_man::EventRequestWithToken;
 use satrs::pus::event_srv::PusEventServiceHandler;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
-    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcInMemConverter, MpscTcReceiver,
+    DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcInMemConverterWrapper, MpscTcReceiver,
     PartialPusHandlingError, PusServiceHelper,
 };
 use satrs::spacepackets::ecss::PusServiceId;
@@ -16,7 +16,7 @@ use super::{DirectPusService, HandlingStatus};
 
 pub fn create_event_service(
     tm_sender: TmTcSender,
-    tm_in_pool_converter: EcssTcInMemConverter,
+    tm_in_pool_converter: EcssTcInMemConverterWrapper,
     pus_event_rx: mpsc::Receiver<EcssTcAndToken>,
     event_request_tx: mpsc::Sender<EventRequestWithToken>,
 ) -> EventServiceWrapper {
@@ -39,7 +39,7 @@ pub struct EventServiceWrapper {
     pub handler: PusEventServiceHandler<
         MpscTcReceiver,
         TmTcSender,
-        EcssTcInMemConverter,
+        EcssTcInMemConverterWrapper,
         VerificationReporter,
     >,
 }

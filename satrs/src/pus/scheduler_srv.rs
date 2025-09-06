@@ -1,7 +1,7 @@
 use super::scheduler::PusSchedulerProvider;
 use super::verification::{VerificationReporter, VerificationReportingProvider};
 use super::{
-    DirectPusPacketHandlerResult, EcssTcInMemConversionProvider, EcssTcInSharedPoolConverter,
+    CacheAndReadRawEcssTc, DirectPusPacketHandlerResult, EcssTcInSharedPoolConverter,
     EcssTcInVecConverter, EcssTcReceiver, EcssTmSender, HandlingStatus, MpscTcReceiver,
     PartialPusHandlingError, PusServiceHelper,
 };
@@ -24,7 +24,7 @@ use std::sync::mpsc;
 pub struct PusSchedServiceHandler<
     TcReceiver: EcssTcReceiver,
     TmSender: EcssTmSender,
-    TcInMemConverter: EcssTcInMemConversionProvider,
+    TcInMemConverter: CacheAndReadRawEcssTc,
     VerificationReporter: VerificationReportingProvider,
     PusScheduler: PusSchedulerProvider,
 > {
@@ -36,7 +36,7 @@ pub struct PusSchedServiceHandler<
 impl<
     TcReceiver: EcssTcReceiver,
     TmSender: EcssTmSender,
-    TcInMemConverter: EcssTcInMemConversionProvider,
+    TcInMemConverter: CacheAndReadRawEcssTc,
     VerificationReporter: VerificationReportingProvider,
     Scheduler: PusSchedulerProvider,
 > PusSchedServiceHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter, Scheduler>

@@ -222,7 +222,7 @@ impl Error for PoolError {
     }
 }
 
-/// Generic trait for pool providers which provide memory pools for variable sized data.
+/// Generic trait for pool providers which provide memory pools for variable sized packet data.
 ///
 /// It specifies a basic API to [Self::add], [Self::modify], [Self::read] and [Self::delete] data
 /// in the store at its core. The API was designed so internal optimizations can be performed

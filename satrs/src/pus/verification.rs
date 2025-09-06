@@ -17,7 +17,7 @@
 //! use std::time::Duration;
 //! use satrs::pool::{PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
 //! use satrs::pus::verification::{
-//!     VerificationReportingProvider, VerificationReporterCfg, VerificationReporter
+//!     VerificationReportingProvider, VerificationReporterConfig, VerificationReporter
 //! };
 //! use satrs::tmtc::{SharedStaticMemoryPool, PacketSenderWithSharedPool};
 //! use satrs::spacepackets::seq_count::SeqCountProviderSimple;
@@ -38,7 +38,7 @@
 //! let shared_tm_pool = SharedStaticMemoryPool::new(RwLock::new(tm_pool));
 //! let (verif_tx, verif_rx) = mpsc::sync_channel(10);
 //! let sender = PacketSenderWithSharedPool::new_with_shared_packet_pool(verif_tx, &shared_tm_pool);
-//! let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
+//! let cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8).unwrap();
 //! let mut  reporter = VerificationReporter::new(TEST_COMPONENT_ID.id(), &cfg);
 //!
 //! let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
@@ -846,14 +846,14 @@ pub mod alloc_mod {
     use core::cell::RefCell;
 
     #[derive(Clone)]
-    pub struct VerificationReporterCfg {
+    pub struct VerificationReporterConfig {
         apid: u16,
         pub step_field_width: usize,
         pub fail_code_field_width: usize,
         pub max_fail_data_len: usize,
     }
 
-    impl VerificationReporterCfg {
+    impl VerificationReporterConfig {
         pub fn new(
             apid: u16,
             step_field_width: usize,
@@ -876,7 +876,7 @@ pub mod alloc_mod {
     ///
     /// The [Self::modify_tm] function is called before the TM is sent. This allows users to change
     /// fields like the message count or sequence counter before the TM is sent.
-    pub trait VerificationHookProvider {
+    pub trait VerificationHook {
         fn modify_tm(&self, tm: &mut PusTmCreator);
     }
 
@@ -886,7 +886,7 @@ pub mod alloc_mod {
     #[derive(Default, Copy, Clone)]
     pub struct DummyVerificationHook {}
 
-    impl VerificationHookProvider for DummyVerificationHook {
+    impl VerificationHook for DummyVerificationHook {
         fn modify_tm(&self, _tm: &mut PusTmCreator) {}
     }
 
@@ -899,16 +899,16 @@ pub mod alloc_mod {
     /// destination fields are assumed to be constant for a given repoter instance.
     #[derive(Clone)]
     pub struct VerificationReporter<
-        VerificationHook: VerificationHookProvider = DummyVerificationHook,
+        VerificationHookInstance: VerificationHook = DummyVerificationHook,
     > {
         owner_id: ComponentId,
         source_data_buf: RefCell<alloc::vec::Vec<u8>>,
         pub reporter_creator: VerificationReportCreator,
-        pub tm_hook: VerificationHook,
+        pub tm_hook: VerificationHookInstance,
     }
 
     impl VerificationReporter<DummyVerificationHook> {
-        pub fn new(owner_id: ComponentId, cfg: &VerificationReporterCfg) -> Self {
+        pub fn new(owner_id: ComponentId, cfg: &VerificationReporterConfig) -> Self {
             let reporter = VerificationReportCreator::new(cfg.apid).unwrap();
             Self {
                 owner_id,
@@ -925,13 +925,13 @@ pub mod alloc_mod {
         }
     }
 
-    impl<VerificationHook: VerificationHookProvider> VerificationReporter<VerificationHook> {
+    impl<VerificationHookInstance: VerificationHook> VerificationReporter<VerificationHookInstance> {
         /// The provided [VerificationHookProvider] can be used to modify a verification packet
         /// before it is sent.
         pub fn new_with_hook(
             owner_id: ComponentId,
-            cfg: &VerificationReporterCfg,
-            tm_hook: VerificationHook,
+            cfg: &VerificationReporterConfig,
+            tm_hook: VerificationHookInstance,
         ) -> Self {
             let reporter = VerificationReportCreator::new(cfg.apid).unwrap();
             Self {
@@ -978,8 +978,8 @@ pub mod alloc_mod {
         }
     }
 
-    impl<VerificationHook: VerificationHookProvider> VerificationReportingProvider
-        for VerificationReporter<VerificationHook>
+    impl<VerificationHookInstance: VerificationHook> VerificationReportingProvider
+        for VerificationReporter<VerificationHookInstance>
     {
         delegate!(
             to self.reporter_creator {
@@ -1693,7 +1693,7 @@ pub mod tests {
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::verification::{
         EcssTmSender, EcssTmtcError, FailParams, FailParamsWithStep, RequestId, TcStateNone,
-        VerificationReporter, VerificationReporterCfg, VerificationToken,
+        VerificationReporter, VerificationReporterConfig, VerificationToken,
         handle_step_failure_with_generic_params,
     };
     use crate::pus::{ChannelWithId, PusTmVariant};
@@ -1717,8 +1717,8 @@ pub mod tests {
 
     use super::{
         DummyVerificationHook, FailParamHelper, SeqCountProviderSimple, TcStateAccepted,
-        TcStateStarted, VerificationHookProvider, VerificationReportingProvider,
-        WasAtLeastAccepted, handle_completion_failure_with_generic_params,
+        TcStateStarted, VerificationHook, VerificationReportingProvider, WasAtLeastAccepted,
+        handle_completion_failure_with_generic_params,
     };
 
     fn is_send<T: Send>(_: &T) {}
@@ -1787,7 +1787,7 @@ pub mod tests {
         pub msg_counter: SeqCountProviderSimple<u16>,
     }
 
-    impl VerificationHookProvider for SequenceCounterHook {
+    impl VerificationHook for SequenceCounterHook {
         fn modify_tm(&self, tm: &mut spacepackets::ecss::tm::PusTmCreator) {
             tm.set_seq_count(self.seq_counter.get_and_increment());
             tm.set_msg_counter(self.msg_counter.get_and_increment());
@@ -1795,29 +1795,29 @@ pub mod tests {
     }
 
     struct VerificationReporterTestbench<
-        VerificationHook: VerificationHookProvider = DummyVerificationHook,
+        VerificationHookInstance: VerificationHook = DummyVerificationHook,
     > {
         pub id: ComponentId,
         sender: TestSender,
-        reporter: VerificationReporter<VerificationHook>,
+        reporter: VerificationReporter<VerificationHookInstance>,
         pub request_id: RequestId,
         tc: Vec<u8>,
     }
 
     fn base_reporter(id: ComponentId, max_fail_data_len: usize) -> VerificationReporter {
-        let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, max_fail_data_len).unwrap();
+        let cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, max_fail_data_len).unwrap();
         VerificationReporter::new(id, &cfg)
     }
 
-    fn reporter_with_hook<VerificationHook: VerificationHookProvider>(
+    fn reporter_with_hook<VerificationHookInstance: VerificationHook>(
         id: ComponentId,
-        hook: VerificationHook,
-    ) -> VerificationReporter<VerificationHook> {
-        let cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
+        hook: VerificationHookInstance,
+    ) -> VerificationReporter<VerificationHookInstance> {
+        let cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8).unwrap();
         VerificationReporter::new_with_hook(id, &cfg, hook)
     }
 
-    impl<VerificiationHook: VerificationHookProvider> VerificationReporterTestbench<VerificiationHook> {
+    impl<VerificiationHook: VerificationHook> VerificationReporterTestbench<VerificiationHook> {
         fn new_with_hook(id: ComponentId, tc: PusTcCreator, tm_hook: VerificiationHook) -> Self {
             let reporter = reporter_with_hook(id, tm_hook);
             Self {

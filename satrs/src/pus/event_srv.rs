@@ -9,14 +9,14 @@ use std::sync::mpsc::Sender;
 
 use super::verification::VerificationReportingProvider;
 use super::{
-    EcssTcInMemConversionProvider, EcssTcReceiver, EcssTmSender, GenericConversionError,
+    CacheAndReadRawEcssTc, EcssTcReceiver, EcssTmSender, GenericConversionError,
     GenericRoutingError, HandlingStatus, PusServiceHelper,
 };
 
 pub struct PusEventServiceHandler<
     TcReceiver: EcssTcReceiver,
     TmSender: EcssTmSender,
-    TcInMemConverter: EcssTcInMemConversionProvider,
+    TcInMemConverter: CacheAndReadRawEcssTc,
     VerificationReporter: VerificationReportingProvider,
 > {
     pub service_helper:
@@ -27,7 +27,7 @@ pub struct PusEventServiceHandler<
 impl<
     TcReceiver: EcssTcReceiver,
     TmSender: EcssTmSender,
-    TcInMemConverter: EcssTcInMemConversionProvider,
+    TcInMemConverter: CacheAndReadRawEcssTc,
     VerificationReporter: VerificationReportingProvider,
 > PusEventServiceHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
 {

@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 - Bump `sat-rs` edition to 2024.
 
+## Changed
+
+Some trait renaming to be more in-line with Rust naming conventions.
+
+- `EventTmHookProvider` -> `EventTmHook`
+- `ActiveRequestProvider` -> `ActiveRequest`
+- `EcssTcInMemConversionProvider` -> `CacheAndReadRawEcssTc`
+- `ActiveRequestMapProvider` -> `ActiveRequestStore`
+- `CountdownProvider` -> `Countdown`
+
 # [v0.3.0-alpha.2] 2025-07-22
 
 `satrs-shared` update

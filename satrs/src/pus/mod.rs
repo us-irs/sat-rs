@@ -296,7 +296,7 @@ pub trait PacketSenderPusTc: Send {
     ) -> Result<(), Self::Error>;
 }
 
-pub trait ActiveRequestMapProvider<V>: Sized {
+pub trait ActiveRequestStore<V>: Sized {
     fn insert(&mut self, request_id: &RequestId, request_info: V);
     fn get(&self, request_id: RequestId) -> Option<&V>;
     fn get_mut(&mut self, request_id: RequestId) -> Option<&mut V>;
@@ -309,7 +309,7 @@ pub trait ActiveRequestMapProvider<V>: Sized {
     fn for_each_mut<F: FnMut(&RequestId, &mut V)>(&mut self, f: F);
 }
 
-pub trait ActiveRequestProvider {
+pub trait ActiveRequest {
     fn target_id(&self) -> ComponentId;
     fn token(&self) -> TcStateToken;
     fn set_token(&mut self, token: TcStateToken);
@@ -330,7 +330,7 @@ pub trait PusRequestRouter<Request> {
     ) -> Result<(), Self::Error>;
 }
 
-pub trait PusReplyHandler<ActiveRequestInfo: ActiveRequestProvider, ReplyType> {
+pub trait PusReplyHandler<ActiveRequestInfo: ActiveRequest, ReplyType> {
     type Error;
 
     /// This function handles a reply for a given PUS request and returns whether that request
@@ -459,7 +459,7 @@ pub mod alloc_mod {
     ///
     /// A [VerificationReportingProvider] instance is passed to the user to also allow handling
     /// of the verification process as part of the PUS standard requirements.
-    pub trait PusTcToRequestConverter<ActiveRequestInfo: ActiveRequestProvider, Request> {
+    pub trait PusTcToRequestConverter<ActiveRequestInfo: ActiveRequest, Request> {
         type Error;
         fn convert(
             &mut self,
@@ -480,7 +480,7 @@ pub mod alloc_mod {
         }
     }
 
-    impl<V> ActiveRequestMapProvider<V> for DefaultActiveRequestMap<V> {
+    impl<V> ActiveRequestStore<V> for DefaultActiveRequestMap<V> {
         fn insert(&mut self, request_id: &RequestId, request: V) {
             self.0.insert(*request_id, request);
         }
@@ -680,7 +680,7 @@ pub mod std_mod {
     pub use cb_mod::*;
 
     use super::verification::{TcStateToken, VerificationReportingProvider};
-    use super::{AcceptedEcssTcAndToken, ActiveRequestProvider, TcInMemory};
+    use super::{AcceptedEcssTcAndToken, ActiveRequest, TcInMemory};
     use crate::tmtc::PacketInPool;
 
     impl From<mpsc::SendError<PoolAddr>> for EcssTmtcError {
@@ -845,7 +845,7 @@ pub mod std_mod {
         }
     }
 
-    impl ActiveRequestProvider for ActivePusRequestStd {
+    impl ActiveRequest for ActivePusRequestStd {
         fn target_id(&self) -> ComponentId {
             self.target_id
         }
@@ -947,7 +947,9 @@ pub mod std_mod {
         }
     }
 
-    pub trait EcssTcInMemConversionProvider {
+    /// This trait provides an abstraction for caching a raw ECSS telecommand and then
+    /// providing the [PusTcReader] abstraction to read the cache raw telecommand.
+    pub trait CacheAndReadRawEcssTc {
         fn cache(&mut self, possible_packet: &TcInMemory) -> Result<(), PusTcFromMemError>;
 
         fn tc_slice_raw(&self) -> &[u8];
@@ -976,7 +978,7 @@ pub mod std_mod {
         pub pus_tc_raw: Option<Vec<u8>>,
     }
 
-    impl EcssTcInMemConversionProvider for EcssTcInVecConverter {
+    impl CacheAndReadRawEcssTc for EcssTcInVecConverter {
         fn cache(&mut self, tc_in_memory: &TcInMemory) -> Result<(), PusTcFromMemError> {
             self.pus_tc_raw = None;
             match tc_in_memory {
@@ -1045,7 +1047,7 @@ pub mod std_mod {
         }
     }
 
-    impl EcssTcInMemConversionProvider for EcssTcInSharedPoolConverter {
+    impl CacheAndReadRawEcssTc for EcssTcInSharedPoolConverter {
         fn cache(&mut self, tc_in_memory: &TcInMemory) -> Result<(), PusTcFromMemError> {
             match tc_in_memory {
                 super::TcInMemory::Pool(packet_in_pool) => {
@@ -1070,38 +1072,38 @@ pub mod std_mod {
 
     // TODO: alloc feature flag?
     #[derive(Clone)]
-    pub enum EcssTcInMemConverter {
+    pub enum EcssTcInMemConverterWrapper {
         Static(EcssTcInSharedPoolConverter),
         Heap(EcssTcInVecConverter),
     }
 
-    impl EcssTcInMemConverter {
+    impl EcssTcInMemConverterWrapper {
         pub fn new_static(static_store_converter: EcssTcInSharedPoolConverter) -> Self {
-            EcssTcInMemConverter::Static(static_store_converter)
+            Self::Static(static_store_converter)
         }
 
         pub fn new_heap(heap_converter: EcssTcInVecConverter) -> Self {
-            EcssTcInMemConverter::Heap(heap_converter)
+            Self::Heap(heap_converter)
         }
     }
 
-    impl EcssTcInMemConversionProvider for EcssTcInMemConverter {
+    impl CacheAndReadRawEcssTc for EcssTcInMemConverterWrapper {
         fn cache(&mut self, tc_in_memory: &TcInMemory) -> Result<(), PusTcFromMemError> {
             match self {
-                EcssTcInMemConverter::Static(converter) => converter.cache(tc_in_memory),
-                EcssTcInMemConverter::Heap(converter) => converter.cache(tc_in_memory),
+                Self::Static(converter) => converter.cache(tc_in_memory),
+                Self::Heap(converter) => converter.cache(tc_in_memory),
             }
         }
         fn tc_slice_raw(&self) -> &[u8] {
             match self {
-                EcssTcInMemConverter::Static(converter) => converter.tc_slice_raw(),
-                EcssTcInMemConverter::Heap(converter) => converter.tc_slice_raw(),
+                Self::Static(converter) => converter.tc_slice_raw(),
+                Self::Heap(converter) => converter.tc_slice_raw(),
             }
         }
         fn sender_id(&self) -> Option<ComponentId> {
             match self {
-                EcssTcInMemConverter::Static(converter) => converter.sender_id(),
-                EcssTcInMemConverter::Heap(converter) => converter.sender_id(),
+                Self::Static(converter) => converter.sender_id(),
+                Self::Heap(converter) => converter.sender_id(),
             }
         }
     }
@@ -1129,7 +1131,7 @@ pub mod std_mod {
     pub struct PusServiceHelper<
         TcReceiver: EcssTcReceiver,
         TmSender: EcssTmSender,
-        TcInMemConverter: EcssTcInMemConversionProvider,
+        TcInMemConverter: CacheAndReadRawEcssTc,
         VerificationReporter: VerificationReportingProvider,
     > {
         pub common: PusServiceBase<TcReceiver, TmSender, VerificationReporter>,
@@ -1139,7 +1141,7 @@ pub mod std_mod {
     impl<
         TcReceiver: EcssTcReceiver,
         TmSender: EcssTmSender,
-        TcInMemConverter: EcssTcInMemConversionProvider,
+        TcInMemConverter: CacheAndReadRawEcssTc,
         VerificationReporter: VerificationReportingProvider,
     > PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>
     {
@@ -1314,7 +1316,8 @@ pub mod tests {
 
     use super::verification::test_util::TestVerificationReporter;
     use super::verification::{
-        TcStateAccepted, VerificationReporterCfg, VerificationReportingProvider, VerificationToken,
+        TcStateAccepted, VerificationReporterConfig, VerificationReportingProvider,
+        VerificationToken,
     };
     use super::*;
 
@@ -1404,7 +1407,7 @@ pub mod tests {
             let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::sync_channel(10);
             let (tm_tx, tm_rx) = mpsc::sync_channel(10);
 
-            let verif_cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
+            let verif_cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8).unwrap();
             let verification_handler =
                 VerificationReporter::new(TEST_COMPONENT_ID_0.id(), &verif_cfg);
             let test_srv_tm_sender =
@@ -1501,7 +1504,7 @@ pub mod tests {
             let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::channel();
             let (tm_tx, tm_rx) = mpsc::channel();
 
-            let verif_cfg = VerificationReporterCfg::new(TEST_APID, 1, 2, 8).unwrap();
+            let verif_cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8).unwrap();
             let verification_handler =
                 VerificationReporter::new(TEST_COMPONENT_ID_0.id(), &verif_cfg);
             let in_store_converter = EcssTcInVecConverter::default();

@@ -71,18 +71,14 @@ pub enum ListenerKey {
 }
 
 #[derive(Debug)]
-pub struct EventMessage<Event: GenericEvent, ParamProvider: Debug = Params> {
+pub struct EventMessage<Event: GenericEvent, Parameters: Debug = Params> {
     sender_id: ComponentId,
     event: Event,
-    params: Option<ParamProvider>,
+    params: Option<Parameters>,
 }
 
-impl<Event: GenericEvent, ParamProvider: Debug + Clone> EventMessage<Event, ParamProvider> {
-    pub fn new_generic(
-        sender_id: ComponentId,
-        event: Event,
-        params: Option<&ParamProvider>,
-    ) -> Self {
+impl<Event: GenericEvent, Parameters: Debug + Clone> EventMessage<Event, Parameters> {
+    pub fn new_generic(sender_id: ComponentId, event: Event, params: Option<&Parameters>) -> Self {
         Self {
             sender_id,
             event,
@@ -98,7 +94,7 @@ impl<Event: GenericEvent, ParamProvider: Debug + Clone> EventMessage<Event, Para
         self.event
     }
 
-    pub fn params(&self) -> Option<&ParamProvider> {
+    pub fn params(&self) -> Option<&Parameters> {
         self.params.as_ref()
     }
 
@@ -106,7 +102,7 @@ impl<Event: GenericEvent, ParamProvider: Debug + Clone> EventMessage<Event, Para
         Self::new_generic(sender_id, event, None)
     }
 
-    pub fn new_with_params(sender_id: ComponentId, event: Event, params: &ParamProvider) -> Self {
+    pub fn new_with_params(sender_id: ComponentId, event: Event, params: &Parameters) -> Self {
         Self::new_generic(sender_id, event, Some(params))
     }
 }

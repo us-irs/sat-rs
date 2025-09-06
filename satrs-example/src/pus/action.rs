@@ -9,7 +9,7 @@ use satrs::pus::verification::{
     VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
-    ActiveRequestProvider, EcssTcAndToken, EcssTcInMemConverter, EcssTmSender, EcssTmtcError,
+    ActiveRequest, EcssTcAndToken, EcssTcInMemConverterWrapper, EcssTmSender, EcssTmtcError,
     GenericConversionError, MpscTcReceiver, PusPacketHandlingError, PusReplyHandler,
     PusServiceHelper, PusTcToRequestConverter,
 };
@@ -208,7 +208,7 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest> for Actio
 
 pub fn create_action_service(
     tm_sender: TmTcSender,
-    tc_in_mem_converter: EcssTcInMemConverter,
+    tc_in_mem_converter: EcssTcInMemConverterWrapper,
     pus_action_rx: mpsc::Receiver<EcssTcAndToken>,
     action_router: GenericRequestRouter,
     reply_receiver: mpsc::Receiver<GenericMessage<ActionReplyPus>>,
@@ -325,7 +325,7 @@ mod tests {
                         pus_action_rx,
                         TmTcSender::Heap(tm_funnel_tx.clone()),
                         verif_reporter,
-                        EcssTcInMemConverter::Heap(EcssTcInVecConverter::default()),
+                        EcssTcInMemConverterWrapper::Heap(EcssTcInVecConverter::default()),
                     ),
                     ActionRequestConverter::default(),
                     DefaultActiveActionRequestMap::default(),

@@ -2,7 +2,7 @@ use std::sync::mpsc::{self};
 
 use crate::pus::create_verification_reporter;
 use satrs::event_man::{EventMessageU32, EventRoutingError};
-use satrs::pus::event::EventTmHookProvider;
+use satrs::pus::event::EventTmHook;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::EcssTmSender;
 use satrs::request::UniqueApidTargetId;
@@ -26,7 +26,7 @@ pub struct EventApidSetter {
     pub next_apid: u16,
 }
 
-impl EventTmHookProvider for EventApidSetter {
+impl EventTmHook for EventApidSetter {
     fn modify_tm(&self, tm: &mut satrs::spacepackets::ecss::tm::PusTmCreator) {
         tm.set_apid(self.next_apid);
     }
@@ -219,7 +219,7 @@ impl<TmSender: EcssTmSender> EventHandler<TmSender> {
 mod tests {
     use satrs::{
         events::EventU32,
-        pus::verification::VerificationReporterCfg,
+        pus::verification::VerificationReporterConfig,
         spacepackets::{
             ecss::{tm::PusTmReader, PusPacket},
             CcsdsPacket,
@@ -244,7 +244,7 @@ mod tests {
             let (event_tx, event_rx) = mpsc::sync_channel(10);
             let (_event_req_tx, event_req_rx) = mpsc::sync_channel(10);
             let (tm_sender, tm_receiver) = mpsc::channel();
-            let verif_reporter_cfg = VerificationReporterCfg::new(0x05, 2, 2, 128).unwrap();
+            let verif_reporter_cfg = VerificationReporterConfig::new(0x05, 2, 2, 128).unwrap();
             let verif_reporter =
                 VerificationReporter::new(PUS_EVENT_MANAGEMENT.id(), &verif_reporter_cfg);
             let mut event_manager = EventManagerWithBoundedMpsc::new(event_rx);

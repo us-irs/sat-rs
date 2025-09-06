@@ -143,7 +143,7 @@ pub mod std_mod {
     use crate::{
         ComponentId,
         pus::{
-            ActivePusRequestStd, ActiveRequestProvider, DefaultActiveRequestMap,
+            ActivePusRequestStd, ActiveRequest, DefaultActiveRequestMap,
             verification::{self, TcStateToken},
         },
         request::{MessageSenderMap, OneMessageSender},
@@ -157,7 +157,7 @@ pub mod std_mod {
         common: ActivePusRequestStd,
     }
 
-    impl ActiveRequestProvider for ActivePusActionRequestStd {
+    impl ActiveRequest for ActivePusActionRequestStd {
         delegate::delegate! {
             to self.common {
                 fn target_id(&self) -> ComponentId;

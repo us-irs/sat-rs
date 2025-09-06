@@ -8,7 +8,7 @@ use satrs::mode::ModeRequest;
 use satrs::pus::verification::{
     FailParams, TcStateAccepted, VerificationReportingProvider, VerificationToken,
 };
-use satrs::pus::{ActiveRequestProvider, EcssTmSender, GenericRoutingError, PusRequestRouter};
+use satrs::pus::{ActiveRequest, EcssTmSender, GenericRoutingError, PusRequestRouter};
 use satrs::queue::GenericSendError;
 use satrs::request::{GenericMessage, MessageMetadata, UniqueApidTargetId};
 use satrs::spacepackets::ecss::tc::PusTcReader;
@@ -46,7 +46,7 @@ impl Default for GenericRequestRouter {
 impl GenericRequestRouter {
     pub(crate) fn handle_error_generic(
         &self,
-        active_request: &impl ActiveRequestProvider,
+        active_request: &impl ActiveRequest,
         tc: &PusTcReader,
         error: GenericRoutingError,
         tm_sender: &(impl EcssTmSender + ?Sized),
