@@ -973,12 +973,12 @@ pub mod std_mod {
     /// Please note that this structure is not able to convert TCs which are stored inside a
     /// [SharedStaticMemoryPool].
     #[derive(Default, Clone)]
-    pub struct EcssTcInVecConverter {
+    pub struct EcssTcVecCacher {
         sender_id: Option<ComponentId>,
         pub pus_tc_raw: Option<Vec<u8>>,
     }
 
-    impl CacheAndReadRawEcssTc for EcssTcInVecConverter {
+    impl CacheAndReadRawEcssTc for EcssTcVecCacher {
         fn cache(&mut self, tc_in_memory: &TcInMemory) -> Result<(), PusTcFromMemError> {
             self.pus_tc_raw = None;
             match tc_in_memory {
@@ -1010,13 +1010,13 @@ pub mod std_mod {
     /// packets should be avoided. Please note that this structure is not able to convert TCs which
     /// are stored as a `Vec<u8>`.
     #[derive(Clone)]
-    pub struct EcssTcInSharedPoolConverter {
+    pub struct EcssTcInSharedPoolCacher {
         sender_id: Option<ComponentId>,
         shared_tc_pool: SharedStaticMemoryPool,
         pus_buf: Vec<u8>,
     }
 
-    impl EcssTcInSharedPoolConverter {
+    impl EcssTcInSharedPoolCacher {
         pub fn new(shared_tc_store: SharedStaticMemoryPool, max_expected_tc_size: usize) -> Self {
             Self {
                 sender_id: None,
@@ -1047,7 +1047,7 @@ pub mod std_mod {
         }
     }
 
-    impl CacheAndReadRawEcssTc for EcssTcInSharedPoolConverter {
+    impl CacheAndReadRawEcssTc for EcssTcInSharedPoolCacher {
         fn cache(&mut self, tc_in_memory: &TcInMemory) -> Result<(), PusTcFromMemError> {
             match tc_in_memory {
                 super::TcInMemory::Pool(packet_in_pool) => {
@@ -1072,22 +1072,22 @@ pub mod std_mod {
 
     // TODO: alloc feature flag?
     #[derive(Clone)]
-    pub enum EcssTcInMemConverterWrapper {
-        Static(EcssTcInSharedPoolConverter),
-        Heap(EcssTcInVecConverter),
+    pub enum EcssTcCacher {
+        Static(EcssTcInSharedPoolCacher),
+        Heap(EcssTcVecCacher),
     }
 
-    impl EcssTcInMemConverterWrapper {
-        pub fn new_static(static_store_converter: EcssTcInSharedPoolConverter) -> Self {
+    impl EcssTcCacher {
+        pub fn new_static(static_store_converter: EcssTcInSharedPoolCacher) -> Self {
             Self::Static(static_store_converter)
         }
 
-        pub fn new_heap(heap_converter: EcssTcInVecConverter) -> Self {
+        pub fn new_heap(heap_converter: EcssTcVecCacher) -> Self {
             Self::Heap(heap_converter)
         }
     }
 
-    impl CacheAndReadRawEcssTc for EcssTcInMemConverterWrapper {
+    impl CacheAndReadRawEcssTc for EcssTcCacher {
         fn cache(&mut self, tc_in_memory: &TcInMemory) -> Result<(), PusTcFromMemError> {
             match self {
                 Self::Static(converter) => converter.cache(tc_in_memory),
@@ -1385,7 +1385,7 @@ pub mod tests {
     pub type PusServiceHelperStatic = PusServiceHelper<
         MpscTcReceiver,
         PacketSenderWithSharedPool,
-        EcssTcInSharedPoolConverter,
+        EcssTcInSharedPoolCacher,
         VerificationReporter,
     >;
 
@@ -1412,7 +1412,7 @@ pub mod tests {
                 VerificationReporter::new(TEST_COMPONENT_ID_0.id(), &verif_cfg);
             let test_srv_tm_sender =
                 PacketSenderWithSharedPool::new(tm_tx, shared_tm_pool_wrapper.clone());
-            let in_store_converter = EcssTcInSharedPoolConverter::new(shared_tc_pool.clone(), 2048);
+            let in_store_converter = EcssTcInSharedPoolCacher::new(shared_tc_pool.clone(), 2048);
             (
                 Self {
                     pus_buf: RefCell::new([0; 2048]),
@@ -1490,12 +1490,8 @@ pub mod tests {
         tc_sender: mpsc::Sender<EcssTcAndToken>,
         tm_receiver: mpsc::Receiver<PacketAsVec>,
     }
-    pub type PusServiceHelperDynamic = PusServiceHelper<
-        MpscTcReceiver,
-        MpscTmAsVecSender,
-        EcssTcInVecConverter,
-        VerificationReporter,
-    >;
+    pub type PusServiceHelperDynamic =
+        PusServiceHelper<MpscTcReceiver, MpscTmAsVecSender, EcssTcVecCacher, VerificationReporter>;
 
     impl PusServiceHandlerWithVecCommon {
         pub fn new_with_standard_verif_reporter(
@@ -1507,7 +1503,7 @@ pub mod tests {
             let verif_cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8).unwrap();
             let verification_handler =
                 VerificationReporter::new(TEST_COMPONENT_ID_0.id(), &verif_cfg);
-            let in_store_converter = EcssTcInVecConverter::default();
+            let in_store_converter = EcssTcVecCacher::default();
             (
                 Self {
                     current_tm: None,
@@ -1533,14 +1529,14 @@ pub mod tests {
             PusServiceHelper<
                 MpscTcReceiver,
                 MpscTmAsVecSender,
-                EcssTcInVecConverter,
+                EcssTcVecCacher,
                 TestVerificationReporter,
             >,
         ) {
             let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::channel();
             let (tm_tx, tm_rx) = mpsc::channel();
 
-            let in_store_converter = EcssTcInVecConverter::default();
+            let in_store_converter = EcssTcVecCacher::default();
             let verification_handler = TestVerificationReporter::new(id);
             (
                 Self {

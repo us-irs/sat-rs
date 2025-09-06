@@ -7,10 +7,10 @@ use satrs::pus::verification::{
     VerificationReporterConfig, VerificationReportingProvider, VerificationToken,
 };
 use satrs::pus::{
-    ActiveRequest, ActiveRequestStore, CacheAndReadRawEcssTc, EcssTcAndToken,
-    EcssTcInMemConverterWrapper, EcssTcReceiver, EcssTmSender, EcssTmtcError,
-    GenericConversionError, GenericRoutingError, HandlingStatus, PusPacketHandlingError,
-    PusReplyHandler, PusRequestRouter, PusServiceHelper, PusTcToRequestConverter, TcInMemory,
+    ActiveRequest, ActiveRequestStore, CacheAndReadRawEcssTc, EcssTcAndToken, EcssTcCacher,
+    EcssTcReceiver, EcssTmSender, EcssTmtcError, GenericConversionError, GenericRoutingError,
+    HandlingStatus, PusPacketHandlingError, PusReplyHandler, PusRequestRouter, PusServiceHelper,
+    PusTcToRequestConverter, TcInMemory,
 };
 use satrs::queue::{GenericReceiveError, GenericSendError};
 use satrs::request::{Apid, GenericMessage, MessageMetadata};
@@ -275,7 +275,7 @@ pub struct PusTargetedRequestService<
     ReplyType,
 > {
     pub service_helper:
-        PusServiceHelper<TcReceiver, TmTcSender, EcssTcInMemConverterWrapper, VerificationReporter>,
+        PusServiceHelper<TcReceiver, TmTcSender, EcssTcCacher, VerificationReporter>,
     pub request_router: GenericRequestRouter,
     pub request_converter: RequestConverter,
     pub active_request_map: ActiveRequestMapInstance,
@@ -311,7 +311,7 @@ where
         service_helper: PusServiceHelper<
             TcReceiver,
             TmTcSender,
-            EcssTcInMemConverterWrapper,
+            EcssTcCacher,
             VerificationReporter,
         >,
         request_converter: RequestConverter,

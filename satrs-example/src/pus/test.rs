@@ -6,8 +6,8 @@ use satrs::pus::test::PusService17TestHandler;
 use satrs::pus::verification::{FailParams, VerificationReporter, VerificationReportingProvider};
 use satrs::pus::PartialPusHandlingError;
 use satrs::pus::{
-    CacheAndReadRawEcssTc, DirectPusPacketHandlerResult, EcssTcAndToken,
-    EcssTcInMemConverterWrapper, MpscTcReceiver, PusServiceHelper,
+    CacheAndReadRawEcssTc, DirectPusPacketHandlerResult, EcssTcAndToken, EcssTcCacher,
+    MpscTcReceiver, PusServiceHelper,
 };
 use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::{PusPacket, PusServiceId};
@@ -19,7 +19,7 @@ use super::{DirectPusService, HandlingStatus};
 
 pub fn create_test_service(
     tm_sender: TmTcSender,
-    tc_in_mem_converter: EcssTcInMemConverterWrapper,
+    tc_in_mem_converter: EcssTcCacher,
     event_sender: mpsc::SyncSender<EventMessageU32>,
     pus_test_rx: mpsc::Receiver<EcssTcAndToken>,
 ) -> TestCustomServiceWrapper {
@@ -37,12 +37,8 @@ pub fn create_test_service(
 }
 
 pub struct TestCustomServiceWrapper {
-    pub handler: PusService17TestHandler<
-        MpscTcReceiver,
-        TmTcSender,
-        EcssTcInMemConverterWrapper,
-        VerificationReporter,
-    >,
+    pub handler:
+        PusService17TestHandler<MpscTcReceiver, TmTcSender, EcssTcCacher, VerificationReporter>,
     pub event_tx: mpsc::SyncSender<EventMessageU32>,
 }
 
