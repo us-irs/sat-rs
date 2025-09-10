@@ -1,9 +1,9 @@
 use crate::pus::source_buffer_large_enough;
+use arbitrary_int::u11;
+use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
+use spacepackets::ecss::{CreatorConfig, EcssEnumeration};
 use spacepackets::ByteConversionError;
-use spacepackets::ecss::EcssEnumeration;
-use spacepackets::ecss::tm::PusTmCreator;
-use spacepackets::ecss::tm::PusTmSecondaryHeader;
-use spacepackets::{MAX_APID, SpHeader};
+use spacepackets::SpHeader;
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
@@ -11,16 +11,13 @@ pub use alloc_mod::*;
 pub use spacepackets::ecss::event::*;
 
 pub struct EventReportCreator {
-    apid: u16,
+    apid: u11,
     pub dest_id: u16,
 }
 
 impl EventReportCreator {
-    pub fn new(apid: u16, dest_id: u16) -> Option<Self> {
-        if apid > MAX_APID {
-            return None;
-        }
-        Some(Self { dest_id, apid })
+    pub fn new(apid: u11, dest_id: u16) -> Self {
+        Self { dest_id, apid }
     }
 
     pub fn event_info<'time, 'src_data>(
@@ -124,7 +121,7 @@ impl EventReportCreator {
             SpHeader::new_from_apid(self.apid),
             sec_header,
             &src_data_buf[0..current_idx],
-            true,
+            CreatorConfig::default()
         ))
     }
 }
@@ -132,8 +129,8 @@ impl EventReportCreator {
 #[cfg(feature = "alloc")]
 mod alloc_mod {
     use super::*;
-    use crate::ComponentId;
     use crate::pus::{EcssTmSender, EcssTmtcError};
+    use crate::ComponentId;
     use alloc::vec;
     use alloc::vec::Vec;
     use core::cell::RefCell;
@@ -162,11 +159,11 @@ mod alloc_mod {
     impl EventReporter<DummyEventHook> {
         pub fn new(
             id: ComponentId,
-            default_apid: u16,
+            default_apid: u11,
             default_dest_id: u16,
             max_event_id_and_aux_data_size: usize,
         ) -> Option<Self> {
-            let reporter = EventReportCreator::new(default_apid, default_dest_id)?;
+            let reporter = EventReportCreator::new(default_apid, default_dest_id);
             Some(Self {
                 id,
                 source_data_buf: RefCell::new(vec![0; max_event_id_and_aux_data_size]),
@@ -178,12 +175,12 @@ mod alloc_mod {
     impl<EventTmHookInstance: EventTmHook> EventReporter<EventTmHookInstance> {
         pub fn new_with_hook(
             id: ComponentId,
-            default_apid: u16,
+            default_apid: u11,
             default_dest_id: u16,
             max_event_id_and_aux_data_size: usize,
             tm_hook: EventTmHookInstance,
         ) -> Option<Self> {
-            let reporter = EventReportCreator::new(default_apid, default_dest_id)?;
+            let reporter = EventReportCreator::new(default_apid, default_dest_id);
             Some(Self {
                 id,
                 source_data_buf: RefCell::new(vec![0; max_event_id_and_aux_data_size]),
@@ -265,18 +262,18 @@ mod alloc_mod {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ComponentId;
     use crate::events::{EventU32, Severity};
     use crate::pus::test_util::TEST_COMPONENT_ID_0;
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::{ChannelWithId, EcssTmSender, EcssTmtcError, PusTmVariant};
-    use spacepackets::ByteConversionError;
+    use crate::ComponentId;
     use spacepackets::ecss::PusError;
+    use spacepackets::ByteConversionError;
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::vec::Vec;
 
-    const EXAMPLE_APID: u16 = 0xee;
+    const EXAMPLE_APID: u11 = u11::new(0xee);
     const EXAMPLE_GROUP_ID: u16 = 2;
     const EXAMPLE_EVENT_ID_0: u16 = 1;
     #[allow(dead_code)]

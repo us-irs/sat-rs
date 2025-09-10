@@ -1,6 +1,7 @@
 use std::sync::mpsc::{self};
 
 use crate::pus::create_verification_reporter;
+use arbitrary_int::u11;
 use satrs::event_man::{EventMessageU32, EventRoutingError};
 use satrs::pus::event::EventTmHook;
 use satrs::pus::verification::VerificationReporter;
@@ -23,7 +24,7 @@ use crate::update_time;
 // This helper sets the APID of the event sender for the PUS telemetry.
 #[derive(Default)]
 pub struct EventApidSetter {
-    pub next_apid: u16,
+    pub next_apid: u11,
 }
 
 impl EventTmHook for EventApidSetter {
@@ -59,7 +60,7 @@ impl<TmSender: EcssTmSender> PusEventHandler<TmSender> {
         // telemetry for each event.
         let event_reporter = EventReporter::new_with_hook(
             PUS_EVENT_MANAGEMENT.raw(),
-            0,
+            u11::new(0),
             0,
             128,
             EventApidSetter::default(),
@@ -220,16 +221,13 @@ mod tests {
     use satrs::{
         events::EventU32,
         pus::verification::VerificationReporterConfig,
-        spacepackets::{
-            ecss::{tm::PusTmReader, PusPacket},
-            CcsdsPacket,
-        },
+        spacepackets::ecss::{tm::PusTmReader, PusPacket},
         tmtc::PacketAsVec,
     };
 
     use super::*;
 
-    const TEST_CREATOR_ID: UniqueApidTargetId = UniqueApidTargetId::new(1, 2);
+    const TEST_CREATOR_ID: UniqueApidTargetId = UniqueApidTargetId::new(u11::new(1), 2);
     const TEST_EVENT: EventU32 = EventU32::new(satrs::events::Severity::Info, 1, 1);
 
     pub struct EventManagementTestbench {
@@ -244,7 +242,8 @@ mod tests {
             let (event_tx, event_rx) = mpsc::sync_channel(10);
             let (_event_req_tx, event_req_rx) = mpsc::sync_channel(10);
             let (tm_sender, tm_receiver) = mpsc::channel();
-            let verif_reporter_cfg = VerificationReporterConfig::new(0x05, 2, 2, 128).unwrap();
+            let verif_reporter_cfg =
+                VerificationReporterConfig::new(u11::new(0x05), 2, 2, 128).unwrap();
             let verif_reporter =
                 VerificationReporter::new(PUS_EVENT_MANAGEMENT.id(), &verif_reporter_cfg);
             let mut event_manager = EventManagerWithBoundedMpsc::new(event_rx);

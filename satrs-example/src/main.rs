@@ -35,7 +35,7 @@ use satrs::{
     mode_tree::connect_mode_nodes,
     pus::{event_man::EventRequestWithToken, EcssTcCacher, HandlingStatus},
     request::{GenericMessage, MessageMetadata},
-    spacepackets::time::{cds::CdsTime, TimeWriter},
+    spacepackets::time::cds::CdsTime,
 };
 use satrs_example::{
     config::{

@@ -44,7 +44,7 @@ lazy_static! {
     pub static ref PACKET_ID_VALIDATOR: HashSet<PacketId> = {
         let mut set = HashSet::new();
         for id in crate::ids::Apid::iter() {
-            set.insert(PacketId::new(PacketType::Tc, true, id as u16));
+            set.insert(PacketId::new(PacketType::Tc, true, id.raw_value()));
         }
         set
     };

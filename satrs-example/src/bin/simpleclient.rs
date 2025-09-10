@@ -1,7 +1,9 @@
+use arbitrary_int::u11;
 use satrs::pus::verification::RequestId;
 use satrs::spacepackets::ecss::tc::PusTcCreator;
 use satrs::spacepackets::ecss::tm::PusTmReader;
-use satrs::{spacepackets::ecss::PusPacket, spacepackets::SpHeader};
+use satrs::spacepackets::ecss::CreatorConfig;
+use satrs::spacepackets::SpHeader;
 use satrs_example::config::{OBSW_SERVER_ADDR, SERVER_PORT};
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::time::Duration;
@@ -9,7 +11,13 @@ use std::time::Duration;
 fn main() {
     let mut buf = [0; 32];
     let addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
-    let pus_tc = PusTcCreator::new_simple(SpHeader::new_from_apid(0x02), 17, 1, &[], true);
+    let pus_tc = PusTcCreator::new_simple(
+        SpHeader::new_from_apid(u11::new(0x02)),
+        17,
+        1,
+        &[],
+        CreatorConfig::default(),
+    );
     let client = UdpSocket::bind("127.0.0.1:7302").expect("Connecting to UDP server failed");
     let tc_req_id = RequestId::new(&pus_tc);
     println!("Packing and sending PUS ping command TC[17,1] with request ID {tc_req_id}");

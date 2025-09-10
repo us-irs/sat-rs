@@ -1,4 +1,4 @@
-use satrs::spacepackets::time::{cds::CdsTime, TimeWriter};
+use satrs::spacepackets::time::cds::CdsTime;
 
 pub mod config;
 pub mod ids;
