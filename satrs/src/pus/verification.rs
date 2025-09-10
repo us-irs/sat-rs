@@ -511,9 +511,7 @@ impl VerificationReportCreator {
         self.dest_id = dest_id;
     }
 
-    /// Initialize verification handling by passing a TC reference. This returns a token required
-    /// to call the acceptance functions
-    pub fn read_request_id_from_tc(pus_tc: &(impl CcsdsPacket + IsPusTelecommand)) -> RequestId {
+    pub fn read_request_id(&self, pus_tc: &(impl CcsdsPacket + IsPusTelecommand)) -> RequestId {
         RequestId::new(pus_tc)
     }
 
@@ -903,7 +901,7 @@ pub mod alloc_mod {
     > {
         owner_id: ComponentId,
         source_data_buf: RefCell<alloc::vec::Vec<u8>>,
-        pub reporter_creator: VerificationReportCreator,
+        pub report_creator: VerificationReportCreator,
         pub tm_hook: VerificationHookInstance,
     }
 
@@ -919,7 +917,7 @@ pub mod alloc_mod {
                         + cfg.fail_code_field_width
                         + cfg.max_fail_data_len
                 ]),
-                reporter_creator: reporter,
+                report_creator: reporter,
                 tm_hook: DummyVerificationHook::default(),
             }
         }
@@ -943,7 +941,7 @@ pub mod alloc_mod {
                         + cfg.fail_code_field_width
                         + cfg.max_fail_data_len
                 ]),
-                reporter_creator: reporter,
+                report_creator: reporter,
                 tm_hook,
             }
         }
@@ -952,9 +950,7 @@ pub mod alloc_mod {
             &self,
             pus_tc: &(impl CcsdsPacket + IsPusTelecommand),
         ) -> VerificationToken<TcStateNone> {
-            VerificationToken::<TcStateNone>::new(
-                VerificationReportCreator::read_request_id_from_tc(pus_tc),
-            )
+            VerificationToken::<TcStateNone>::new(self.report_creator.read_request_id(pus_tc))
         }
 
         pub fn start_verification_with_req_id(
@@ -965,7 +961,7 @@ pub mod alloc_mod {
         }
 
         delegate!(
-            to self.reporter_creator {
+            to self.report_creator {
                 pub fn set_apid(&mut self, apid: u16) -> bool;
                 pub fn apid(&self) -> u16;
                 pub fn dest_id(&self) -> u16;
@@ -982,7 +978,7 @@ pub mod alloc_mod {
         for VerificationReporter<VerificationHookInstance>
     {
         delegate!(
-            to self.reporter_creator {
+            to self.report_creator {
                 fn set_apid(&mut self, apid: Apid);
                 fn apid(&self) -> Apid;
             }
@@ -1008,7 +1004,7 @@ pub mod alloc_mod {
         ) -> Result<VerificationToken<TcStateAccepted>, EcssTmtcError> {
             let mut source_data_buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .acceptance_success(
                     source_data_buf.as_mut_slice(),
                     &token.request_id(),
@@ -1031,7 +1027,7 @@ pub mod alloc_mod {
         ) -> Result<(), EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .acceptance_failure(buf.as_mut_slice(), &token.request_id(), 0, 0, params)
                 .map_err(PusError::ByteConversion)?;
             self.tm_hook.modify_tm(&mut tm_creator);
@@ -1050,7 +1046,7 @@ pub mod alloc_mod {
         ) -> Result<VerificationToken<TcStateStarted>, EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .start_success(buf.as_mut_slice(), &token.request_id(), 0, 0, time_stamp)
                 .map_err(PusError::ByteConversion)?;
             self.tm_hook.modify_tm(&mut tm_creator);
@@ -1070,7 +1066,7 @@ pub mod alloc_mod {
         ) -> Result<(), EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .start_failure(buf.as_mut_slice(), &token.request_id(), 0, 0, params)
                 .map_err(PusError::ByteConversion)?;
             self.tm_hook.modify_tm(&mut tm_creator);
@@ -1090,7 +1086,7 @@ pub mod alloc_mod {
         ) -> Result<(), EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .step_success(
                     buf.as_mut_slice(),
                     &token.request_id(),
@@ -1117,7 +1113,7 @@ pub mod alloc_mod {
         ) -> Result<(), EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .step_failure(buf.as_mut_slice(), token, 0, 0, params)
                 .map_err(PusError::ByteConversion)?;
             self.tm_hook.modify_tm(&mut tm_creator);
@@ -1138,7 +1134,7 @@ pub mod alloc_mod {
         ) -> Result<(), EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .completion_success(buf.as_mut_slice(), &token.request_id(), 0, 0, time_stamp)
                 .map_err(PusError::ByteConversion)?;
             self.tm_hook.modify_tm(&mut tm_creator);
@@ -1158,7 +1154,7 @@ pub mod alloc_mod {
         ) -> Result<(), EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .completion_failure(buf.as_mut_slice(), &token.request_id(), 0, 00, params)
                 .map_err(PusError::ByteConversion)?;
             self.tm_hook.modify_tm(&mut tm_creator);
