@@ -1,0 +1,2 @@
+[interface]
+serial_port = "/dev/ttyUSB0"

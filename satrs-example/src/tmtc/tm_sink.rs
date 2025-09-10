@@ -59,7 +59,7 @@ impl TmFunnelCommon {
         );
         let entry = self
             .msg_counter_map
-            .entry(zero_copy_writer.service())
+            .entry(zero_copy_writer.service_type_id())
             .or_insert(0);
         zero_copy_writer.set_msg_count(*entry);
         if *entry == u16::MAX {
@@ -76,8 +76,8 @@ impl TmFunnelCommon {
     fn packet_printout(tm: &PusTmZeroCopyWriter) {
         info!(
             "Sending PUS TM[{},{}] with APID {}",
-            tm.service(),
-            tm.subservice(),
+            tm.service_type_id(),
+            tm.message_subtype_id(),
             tm.apid()
         );
     }

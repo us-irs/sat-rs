@@ -501,7 +501,7 @@ mod tests {
     use spacepackets::{
         ByteConversionError, SpHeader,
         ecss::{
-            CreatorConfig,
+            CreatorConfig, MessageTypeId,
             tc::{PusTcCreator, PusTcSecondaryHeader},
         },
     };
@@ -540,8 +540,12 @@ mod tests {
     fn test_basic_target_id_with_apid_from_pus_tc() {
         let sp_header = SpHeader::new_for_unseg_tc(u11::new(0x111), u14::new(5), 0);
         let app_data = 1_u32.to_be_bytes();
-        let pus_tc =
-            PusTcCreator::new_simple(sp_header, 17, 1, &app_data, CreatorConfig::default());
+        let pus_tc = PusTcCreator::new_simple(
+            sp_header,
+            MessageTypeId::new(17, 1),
+            &app_data,
+            CreatorConfig::default(),
+        );
         let id = UniqueApidTargetId::from_pus_tc(&pus_tc).unwrap();
         assert_eq!(id.apid.value(), 0x111);
         assert_eq!(id.unique_id.value(), 1);
@@ -550,7 +554,7 @@ mod tests {
     #[test]
     fn test_basic_target_id_with_apid_from_pus_tc_invalid_app_data() {
         let sp_header = SpHeader::new_for_unseg_tc(u11::new(0x111), u14::new(5), 0);
-        let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(17, 1));
         let pus_tc = PusTcCreator::new_no_app_data(sp_header, sec_header, CreatorConfig::default());
         let error = UniqueApidTargetId::from_pus_tc(&pus_tc);
         assert!(error.is_err());

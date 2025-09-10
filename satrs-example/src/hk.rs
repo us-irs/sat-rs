@@ -3,7 +3,7 @@ use derive_new::new;
 use satrs::hk::UniqueId;
 use satrs::request::UniqueApidTargetId;
 use satrs::spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
-use satrs::spacepackets::ecss::{hk, CreatorConfig};
+use satrs::spacepackets::ecss::{hk, CreatorConfig, MessageTypeId};
 use satrs::spacepackets::{ByteConversionError, SpHeader};
 
 #[derive(Debug, new, Copy, Clone)]
@@ -54,8 +54,12 @@ impl PusHkHelper {
         hk_data_writer: &mut HkWriter,
         buf: &'b mut [u8],
     ) -> Result<PusTmCreator<'a, 'b>, ByteConversionError> {
-        let sec_header =
-            PusTmSecondaryHeader::new(3, hk::Subservice::TmHkPacket as u8, 0, 0, timestamp);
+        let sec_header = PusTmSecondaryHeader::new(
+            MessageTypeId::new(3, hk::Subservice::TmHkPacket as u8),
+            0,
+            0,
+            timestamp,
+        );
         buf[0..4].copy_from_slice(&self.component_id.unique_id.as_u32().to_be_bytes());
         buf[4..8].copy_from_slice(&set_id.to_be_bytes());
         let (_, second_half) = buf.split_at_mut(8);

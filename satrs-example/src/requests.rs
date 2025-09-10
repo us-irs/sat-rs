@@ -55,7 +55,7 @@ impl GenericRequestRouter {
     ) {
         warn!(
             "Routing request for service {} failed: {error:?}",
-            tc.service()
+            tc.service_type_id()
         );
         let accepted_token: VerificationToken<TcStateAccepted> = active_request
             .token()

@@ -241,7 +241,7 @@ mod tests {
     use hashbrown::HashSet;
     use spacepackets::{
         CcsdsPacket, PacketId, SpHeader,
-        ecss::{CreatorConfig, WritablePusPacket, tc::PusTcCreator},
+        ecss::{CreatorConfig, MessageTypeId, WritablePusPacket, tc::PusTcCreator},
     };
 
     use crate::{
@@ -334,8 +334,7 @@ mod tests {
         });
         let ping_tc = PusTcCreator::new_simple(
             SpHeader::new_from_apid(TEST_APID_0),
-            17,
-            1,
+            MessageTypeId::new(17, 1),
             &[],
             CreatorConfig::default(),
         );
@@ -370,8 +369,7 @@ mod tests {
         let mut total_tm_len = 0;
         let verif_tm = PusTcCreator::new_simple(
             SpHeader::new_from_apid(TEST_APID_0),
-            1,
-            1,
+            MessageTypeId::new(1, 1),
             &[],
             CreatorConfig::default(),
         );
@@ -380,8 +378,7 @@ mod tests {
         tm_source.add_tm(&tm_0);
         let verif_tm = PusTcCreator::new_simple(
             SpHeader::new_from_apid(TEST_APID_1),
-            1,
-            3,
+            MessageTypeId::new(1, 3),
             &[],
             CreatorConfig::default(),
         );
@@ -431,8 +428,7 @@ mod tests {
         // Send telecommands
         let ping_tc = PusTcCreator::new_simple(
             SpHeader::new_from_apid(TEST_APID_0),
-            17,
-            1,
+            MessageTypeId::new(17, 1),
             &[],
             CreatorConfig::default(),
         );
@@ -442,8 +438,7 @@ mod tests {
             .expect("writing to TCP server failed");
         let action_tc = PusTcCreator::new_simple(
             SpHeader::new_from_apid(TEST_APID_1),
-            8,
-            0,
+            MessageTypeId::new(8, 0),
             &[],
             CreatorConfig::default(),
         );

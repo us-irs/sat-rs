@@ -13,7 +13,9 @@ pub mod crossbeam_test {
     use spacepackets::SpHeader;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTmReader;
-    use spacepackets::ecss::{CreatorConfig, EcssEnumU8, EcssEnumU16, WritablePusPacket};
+    use spacepackets::ecss::{
+        CreatorConfig, EcssEnumU8, EcssEnumU16, MessageTypeId, WritablePusPacket,
+    };
     use std::sync::RwLock;
     use std::thread;
     use std::time::Duration;
@@ -60,7 +62,7 @@ pub mod crossbeam_test {
         {
             let mut tc_guard = shared_tc_pool.write().unwrap();
             let sph = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
-            let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
+            let tc_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(17, 1));
             let pus_tc_0 = PusTcCreator::new_no_app_data(sph, tc_header, CreatorConfig::default());
             req_id_0 = RequestId::new(&pus_tc_0);
             let addr = tc_guard
@@ -70,7 +72,7 @@ pub mod crossbeam_test {
                 .unwrap();
             tx_tc_0.send(addr).unwrap();
             let sph = SpHeader::new_for_unseg_tc(TEST_APID, u14::new(1), 0);
-            let tc_header = PusTcSecondaryHeader::new_simple(5, 1);
+            let tc_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(5, 1));
             let pus_tc_1 = PusTcCreator::new_no_app_data(sph, tc_header, CreatorConfig::default());
             req_id_1 = RequestId::new(&pus_tc_1);
             let addr = tc_guard
@@ -164,11 +166,11 @@ pub mod crossbeam_test {
                     RequestId::from_bytes(&pus_tm.source_data()[0..RequestId::SIZE_AS_BYTES])
                         .expect("reading request ID from PUS TM source data failed");
                 if !verif_map.contains_key(&req_id) {
-                    let content = vec![pus_tm.subservice()];
+                    let content = vec![pus_tm.service_type_id()];
                     verif_map.insert(req_id, content);
                 } else {
                     let content = verif_map.get_mut(&req_id).unwrap();
-                    content.push(pus_tm.subservice())
+                    content.push(pus_tm.message_subtype_id())
                 }
                 packet_counter += 1;
             }

@@ -26,7 +26,7 @@ use std::vec::Vec;
 /// use satrs::ComponentId;
 /// use satrs::tmtc::PacketHandler;
 /// use spacepackets::SpHeader;
-/// use spacepackets::ecss::tc::{PusTcCreator, CreatorConfig};
+/// use spacepackets::ecss::tc::{MessageTypeId, PusTcCreator, CreatorConfig};
 /// use arbitrary_int::u11;
 ///
 /// const UDP_SERVER_ID: ComponentId = 0x05;
@@ -36,7 +36,7 @@ use std::vec::Vec;
 /// let mut udp_tc_server = UdpTcServer::new(UDP_SERVER_ID, dest_addr, 2048, packet_sender)
 ///       .expect("Creating UDP TMTC server failed");
 /// let sph = SpHeader::new_from_apid(u11::new(0x02));
-/// let pus_tc = PusTcCreator::new_simple(sph, 17, 1, &[], CreatorConfig::default());
+/// let pus_tc = PusTcCreator::new_simple(sph, MessageTypeId::new(17, 1), &[], CreatorConfig::default());
 /// // Can not fail.
 /// let ping_tc_raw = pus_tc.to_vec().unwrap();
 ///
@@ -131,8 +131,8 @@ mod tests {
     use arbitrary_int::u11;
     use core::cell::RefCell;
     use spacepackets::SpHeader;
-    use spacepackets::ecss::CreatorConfig;
     use spacepackets::ecss::tc::PusTcCreator;
+    use spacepackets::ecss::{CreatorConfig, MessageTypeId};
     use std::collections::VecDeque;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
     use std::vec::Vec;
@@ -169,7 +169,12 @@ mod tests {
             .expect("Creating UDP TMTC server failed");
         is_send(&udp_tc_server);
         let sph = SpHeader::new_from_apid(u11::new(0x02));
-        let pus_tc = PusTcCreator::new_simple(sph, 17, 1, &[], CreatorConfig::default());
+        let pus_tc = PusTcCreator::new_simple(
+            sph,
+            MessageTypeId::new(17, 1),
+            &[],
+            CreatorConfig::default(),
+        );
         let len = pus_tc
             .write_to_bytes(&mut buf)
             .expect("Error writing PUS TC packet");

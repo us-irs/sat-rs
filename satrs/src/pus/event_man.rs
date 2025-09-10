@@ -409,8 +409,8 @@ mod tests {
         assert!(res.params_were_propagated);
         let event_tm = event_rx.try_recv().expect("no event received");
         let tm = PusTmReader::new(&event_tm.packet, 7).expect("reading TM failed");
-        assert_eq!(tm.service(), 5);
-        assert_eq!(tm.subservice(), Subservice::TmInfoReport as u8);
+        assert_eq!(tm.service_type_id(), 5);
+        assert_eq!(tm.message_subtype_id(), Subservice::TmInfoReport as u8);
         assert_eq!(tm.user_data().len(), 4 + param_data.len());
         let u32_event = u32::from_be_bytes(tm.user_data()[0..4].try_into().unwrap());
         assert_eq!(u32_event, INFO_EVENT.raw());
@@ -437,8 +437,8 @@ mod tests {
         assert!(res.params_were_propagated);
         let event_tm = event_rx.try_recv().expect("no event received");
         let tm = PusTmReader::new(&event_tm.packet, 7).expect("reading TM failed");
-        assert_eq!(tm.service(), 5);
-        assert_eq!(tm.subservice(), Subservice::TmInfoReport as u8);
+        assert_eq!(tm.service_type_id(), 5);
+        assert_eq!(tm.message_subtype_id(), Subservice::TmInfoReport as u8);
         assert_eq!(tm.user_data().len(), 4 + param_data.len());
         let u32_event = u32::from_be_bytes(tm.user_data()[0..4].try_into().unwrap());
         assert_eq!(u32_event, INFO_EVENT.raw());

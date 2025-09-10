@@ -272,13 +272,15 @@ pub trait PusSchedulerProvider {
         pus_tc: &(impl IsPusTelecommand + PusPacket + GenericPusTcSecondaryHeader),
         pool: &mut (impl PoolProvider + ?Sized),
     ) -> Result<TcInfo, ScheduleError> {
-        if PusPacket::service(pus_tc) != 11 {
-            return Err(ScheduleError::WrongService(PusPacket::service(pus_tc)));
-        }
-        if PusPacket::subservice(pus_tc) != 4 {
-            return Err(ScheduleError::WrongSubservice(PusPacket::subservice(
+        if PusPacket::service_type_id(pus_tc) != 11 {
+            return Err(ScheduleError::WrongService(PusPacket::service_type_id(
                 pus_tc,
             )));
+        }
+        if PusPacket::message_subtype_id(pus_tc) != 4 {
+            return Err(ScheduleError::WrongSubservice(
+                PusPacket::message_subtype_id(pus_tc),
+            ));
         }
         if pus_tc.user_data().is_empty() {
             return Err(ScheduleError::TcDataEmpty);
@@ -299,7 +301,9 @@ pub trait PusSchedulerProvider {
         pool: &mut (impl PoolProvider + ?Sized),
     ) -> Result<TcInfo, ScheduleError> {
         let check_tc = PusTcReader::new(tc)?;
-        if PusPacket::service(&check_tc) == 11 && PusPacket::subservice(&check_tc) == 4 {
+        if PusPacket::service_type_id(&check_tc) == 11
+            && PusPacket::message_subtype_id(&check_tc) == 4
+        {
             return Err(ScheduleError::NestedScheduledTc);
         }
         let req_id = RequestId::from_tc(&check_tc);
@@ -487,7 +491,9 @@ pub mod alloc_mod {
             pool: &mut (impl PoolProvider + ?Sized),
         ) -> Result<TcInfo, ScheduleError> {
             let check_tc = PusTcReader::new(tc)?;
-            if PusPacket::service(&check_tc) == 11 && PusPacket::subservice(&check_tc) == 4 {
+            if PusPacket::service_type_id(&check_tc) == 11
+                && PusPacket::message_subtype_id(&check_tc) == 4
+            {
                 return Err(ScheduleError::NestedScheduledTc);
             }
             let req_id = RequestId::from_tc(&check_tc);
@@ -865,7 +871,7 @@ mod tests {
     use arbitrary_int::traits::Integer;
     use arbitrary_int::{u11, u14};
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
-    use spacepackets::ecss::{CreatorConfig, WritablePusPacket};
+    use spacepackets::ecss::{CreatorConfig, MessageTypeId, WritablePusPacket};
     use spacepackets::time::{TimeWriter, UnixTime, cds};
     use spacepackets::{PacketId, PacketSequenceControl, PacketType, SequenceFlags, SpHeader};
     use std::time::Duration;
@@ -889,17 +895,32 @@ mod tests {
 
     fn scheduled_tc(timestamp: UnixTime, buf: &mut [u8]) -> PusTcCreator<'_> {
         let (sph, len_app_data) = pus_tc_base(timestamp, buf);
-        PusTcCreator::new_simple(sph, 11, 4, &buf[..len_app_data], CreatorConfig::default())
+        PusTcCreator::new_simple(
+            sph,
+            MessageTypeId::new(11, 4),
+            &buf[..len_app_data],
+            CreatorConfig::default(),
+        )
     }
 
     fn wrong_tc_service(timestamp: UnixTime, buf: &mut [u8]) -> PusTcCreator<'_> {
         let (sph, len_app_data) = pus_tc_base(timestamp, buf);
-        PusTcCreator::new_simple(sph, 12, 4, &buf[..len_app_data], CreatorConfig::default())
+        PusTcCreator::new_simple(
+            sph,
+            MessageTypeId::new(12, 4),
+            &buf[..len_app_data],
+            CreatorConfig::default(),
+        )
     }
 
     fn wrong_tc_subservice(timestamp: UnixTime, buf: &mut [u8]) -> PusTcCreator<'_> {
         let (sph, len_app_data) = pus_tc_base(timestamp, buf);
-        PusTcCreator::new_simple(sph, 11, 5, &buf[..len_app_data], CreatorConfig::default())
+        PusTcCreator::new_simple(
+            sph,
+            MessageTypeId::new(11, 5),
+            &buf[..len_app_data],
+            CreatorConfig::default(),
+        )
     }
 
     fn double_wrapped_time_tagged_tc(timestamp: UnixTime, buf: &mut [u8]) -> PusTcCreator<'_> {
@@ -910,15 +931,18 @@ mod tests {
         let sph = SpHeader::new_for_unseg_tc(u11::new(0x02), u14::new(0x34), 0);
         // app data should not matter, double wrapped time-tagged commands should be rejected right
         // away
-        let inner_time_tagged_tc =
-            PusTcCreator::new_simple(sph, 11, 4, &[], CreatorConfig::default());
+        let inner_time_tagged_tc = PusTcCreator::new_simple(
+            sph,
+            MessageTypeId::new(11, 4),
+            &[],
+            CreatorConfig::default(),
+        );
         let packet_len = inner_time_tagged_tc
             .write_to_bytes(&mut buf[len_time_stamp..])
             .expect("writing inner time tagged tc failed");
         PusTcCreator::new_simple(
             sph,
-            11,
-            4,
+            MessageTypeId::new(11, 4),
             &buf[..len_time_stamp + packet_len],
             CreatorConfig::default(),
         )
@@ -926,12 +950,22 @@ mod tests {
 
     fn invalid_time_tagged_cmd() -> PusTcCreator<'static> {
         let sph = SpHeader::new_for_unseg_tc(u11::new(0x02), u14::new(0x34), 1);
-        PusTcCreator::new_simple(sph, 11, 4, &[], CreatorConfig::default())
+        PusTcCreator::new_simple(
+            sph,
+            MessageTypeId::new(11, 4),
+            &[],
+            CreatorConfig::default(),
+        )
     }
 
     fn base_ping_tc_simple_ctor(seq_count: u14, app_data: &'static [u8]) -> PusTcCreator<'static> {
         let sph = SpHeader::new_for_unseg_tc(u11::new(0x02), seq_count, 0);
-        PusTcCreator::new_simple(sph, 17, 1, app_data, CreatorConfig::default())
+        PusTcCreator::new_simple(
+            sph,
+            MessageTypeId::new(17, 1),
+            app_data,
+            CreatorConfig::default(),
+        )
     }
 
     fn ping_tc_to_store(
@@ -1096,7 +1130,7 @@ mod tests {
         let apid_to_set = u11::new(0x22);
         let seq_count = u14::new(105);
         let sp_header = SpHeader::new_for_unseg_tc(apid_to_set, u14::new(105), 0);
-        let mut sec_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let mut sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(17, 1));
         sec_header.source_id = src_id_to_set;
         let ping_tc =
             PusTcCreator::new_no_app_data(sp_header, sec_header, CreatorConfig::default());
@@ -2047,7 +2081,7 @@ mod tests {
             PacketSequenceControl::new(SequenceFlags::Unsegmented, u14::new(5)),
             0,
         );
-        let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(17, 1));
         let ping_tc = PusTcCreator::new_no_app_data(sph, sec_header, CreatorConfig::default());
         let mut buf: [u8; 64] = [0; 64];
         let result = generate_insert_telecommand_app_data(&mut buf, &time_writer, &ping_tc);
@@ -2069,7 +2103,7 @@ mod tests {
             PacketSequenceControl::new(SequenceFlags::Unsegmented, u14::new(5)),
             0,
         );
-        let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(17, 1));
         let ping_tc = PusTcCreator::new_no_app_data(sph, sec_header, CreatorConfig::default());
         let mut buf: [u8; 16] = [0; 16];
         let result = generate_insert_telecommand_app_data(&mut buf, &time_writer, &ping_tc);
@@ -2098,7 +2132,7 @@ mod tests {
             PacketSequenceControl::new(SequenceFlags::Unsegmented, u14::new(5)),
             0,
         );
-        let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(17, 1));
         let ping_tc = PusTcCreator::new_no_app_data(sph, sec_header, CreatorConfig::default());
         let mut buf: [u8; 64] = [0; 64];
         generate_insert_telecommand_app_data(&mut buf, &time_writer, &ping_tc).unwrap();

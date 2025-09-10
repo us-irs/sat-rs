@@ -116,7 +116,7 @@ mod tests {
 
     use arbitrary_int::traits::Integer as _;
     use arbitrary_int::u14;
-    use satrs::spacepackets::ecss::CreatorConfig;
+    use satrs::spacepackets::ecss::{CreatorConfig, MessageTypeId};
     use satrs::{
         spacepackets::{
             ecss::{tc::PusTcCreator, WritablePusPacket},
@@ -182,9 +182,14 @@ mod tests {
             tm_handler,
         };
         let sph = SpHeader::new_for_unseg_tc(ids::Apid::GenericPus.raw_value(), u14::ZERO, 0);
-        let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], CreatorConfig::default())
-            .to_vec()
-            .unwrap();
+        let ping_tc = PusTcCreator::new_simple(
+            sph,
+            MessageTypeId::new(17, 1),
+            &[],
+            CreatorConfig::default(),
+        )
+        .to_vec()
+        .unwrap();
         let client = UdpSocket::bind("127.0.0.1:0").expect("Connecting to UDP server failed");
         let client_addr = client.local_addr().unwrap();
         println!("{}", server_addr);

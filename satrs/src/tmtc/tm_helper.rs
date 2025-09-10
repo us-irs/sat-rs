@@ -1,7 +1,7 @@
 use arbitrary_int::{u11, u14};
 use spacepackets::SpHeader;
-use spacepackets::ecss::CreatorConfig;
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
+use spacepackets::ecss::{CreatorConfig, MessageTypeId};
 use spacepackets::time::cds::CdsTime;
 
 pub struct PusTmWithCdsShortHelper {
@@ -50,7 +50,10 @@ impl PusTmWithCdsShortHelper {
         seq_count: u14,
     ) -> PusTmCreator<'_, 'data> {
         let reply_header = SpHeader::new_for_unseg_tm(self.apid, seq_count, 0);
-        let tc_header = PusTmSecondaryHeader::new_simple(service, subservice, &self.cds_short_buf);
+        let tc_header = PusTmSecondaryHeader::new_simple(
+            MessageTypeId::new(service, subservice),
+            &self.cds_short_buf,
+        );
         PusTmCreator::new(
             reply_header,
             tc_header,
@@ -73,8 +76,8 @@ mod tests {
         let stamper = CdsTime::new_with_u16_days(0, 0);
         let tm =
             pus_tm_helper.create_pus_tm_with_stamper(17, 1, &[1, 2, 3, 4], &stamper, u14::new(25));
-        assert_eq!(tm.service(), 17);
-        assert_eq!(tm.subservice(), 1);
+        assert_eq!(tm.service_type_id(), 17);
+        assert_eq!(tm.message_subtype_id(), 1);
         assert_eq!(tm.user_data(), &[1, 2, 3, 4]);
         assert_eq!(tm.seq_count().value(), 25);
         assert_eq!(tm.timestamp(), [64, 0, 0, 0, 0, 0, 0])
@@ -84,8 +87,8 @@ mod tests {
     fn test_helper_from_now() {
         let mut pus_tm_helper = PusTmWithCdsShortHelper::new(u11::new(0x123));
         let tm = pus_tm_helper.create_pus_tm_timestamp_now(17, 1, &[1, 2, 3, 4], u14::new(25));
-        assert_eq!(tm.service(), 17);
-        assert_eq!(tm.subservice(), 1);
+        assert_eq!(tm.service_type_id(), 17);
+        assert_eq!(tm.message_subtype_id(), 1);
         assert_eq!(tm.user_data(), &[1, 2, 3, 4]);
         assert_eq!(tm.seq_count().value(), 25);
         assert_eq!(tm.timestamp().len(), 7);
