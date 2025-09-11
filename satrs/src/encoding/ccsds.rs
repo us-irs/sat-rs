@@ -91,7 +91,8 @@ pub fn parse_buffer_for_ccsds_space_packets<SendError>(
 mod tests {
     use arbitrary_int::{u11, u14};
     use spacepackets::{
-        ecss::{tc::PusTcCreator, CreatorConfig}, CcsdsPacket, PacketId, PacketSequenceControl, PacketType, SequenceFlags, SpHeader
+        CcsdsPacket, PacketId, PacketSequenceControl, PacketType, SequenceFlags, SpHeader,
+        ecss::{CreatorConfig, tc::PusTcCreator},
     };
 
     use crate::{ComponentId, encoding::tests::TcCacher};
@@ -221,10 +222,20 @@ mod tests {
 
     #[test]
     fn test_split_packet_multi() {
-        let ping_tc =
-            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_0), 17, 1, &[], CreatorConfig::default());
-        let action_tc =
-            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_1), 8, 0, &[], CreatorConfig::default());
+        let ping_tc = PusTcCreator::new_simple(
+            SpHeader::new_from_apid(TEST_APID_0),
+            17,
+            1,
+            &[],
+            CreatorConfig::default(),
+        );
+        let action_tc = PusTcCreator::new_simple(
+            SpHeader::new_from_apid(TEST_APID_1),
+            8,
+            0,
+            &[],
+            CreatorConfig::default(),
+        );
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len_ping = ping_tc
             .write_to_bytes(&mut buffer)
@@ -255,8 +266,13 @@ mod tests {
 
     #[test]
     fn test_one_split_packet() {
-        let ping_tc =
-            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_0), 17, 1, &[], CreatorConfig::default());
+        let ping_tc = PusTcCreator::new_simple(
+            SpHeader::new_from_apid(TEST_APID_0),
+            17,
+            1,
+            &[],
+            CreatorConfig::default(),
+        );
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len_ping = ping_tc
             .write_to_bytes(&mut buffer)

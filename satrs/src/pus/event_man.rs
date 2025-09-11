@@ -311,6 +311,7 @@ pub mod alloc_mod {
 mod tests {
     use alloc::string::{String, ToString};
     use alloc::vec;
+    use arbitrary_int::u11;
     use spacepackets::ecss::PusPacket;
     use spacepackets::ecss::event::Subservice;
     use spacepackets::ecss::tm::PusTmReader;
@@ -323,7 +324,7 @@ mod tests {
     const INFO_EVENT: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::<SeverityInfo>::new(1, 0);
     const LOW_SEV_EVENT: EventU32 = EventU32::new(Severity::Low, 1, 5);
     const EMPTY_STAMP: [u8; 7] = [0; 7];
-    const TEST_APID: u16 = 0x02;
+    const TEST_APID: u11 = u11::new(0x02);
     const TEST_ID: UniqueApidTargetId = UniqueApidTargetId::new(TEST_APID, 0x05);
 
     fn create_basic_man_1() -> DefaultPusEventU32TmCreator {

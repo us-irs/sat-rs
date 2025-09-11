@@ -347,8 +347,8 @@ pub fn generate_insert_telecommand_app_data(
 pub mod alloc_mod {
     use alloc::{
         collections::{
-            btree_map::{Entry, Range},
             BTreeMap,
+            btree_map::{Entry, Range},
         },
         vec::Vec,
     };
@@ -865,7 +865,7 @@ mod tests {
     use arbitrary_int::traits::Integer as _;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::{CreatorConfig, WritablePusPacket};
-    use spacepackets::time::{cds, TimeWriter, UnixTime};
+    use spacepackets::time::{TimeWriter, UnixTime, cds};
     use spacepackets::{PacketId, PacketSequenceControl, PacketType, SequenceFlags, SpHeader};
     use std::time::Duration;
     use std::vec::Vec;
@@ -1919,8 +1919,10 @@ mod tests {
         ));
         let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 50);
-        let cmd_0_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 100);
-        let cmd_1_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 150);
+        let cmd_0_to_delete =
+            insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 100);
+        let cmd_1_to_delete =
+            insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 150);
         assert_eq!(scheduler.num_scheduled_telecommands(), 3);
         let start_stamp = cds::CdsTime::from_unix_time_with_u16_days(
             &UnixTime::new_only_secs(100),
@@ -1943,8 +1945,10 @@ mod tests {
             false,
         ));
         let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
-        let cmd_0_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 50);
-        let cmd_1_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 100);
+        let cmd_0_to_delete =
+            insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 50);
+        let cmd_1_to_delete =
+            insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 100);
         insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 150);
         assert_eq!(scheduler.num_scheduled_telecommands(), 3);
 
@@ -1969,9 +1973,12 @@ mod tests {
             false,
         ));
         let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
-        let cmd_out_of_range_0 = insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 50);
-        let cmd_0_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 100);
-        let cmd_1_to_delete = insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 150);
+        let cmd_out_of_range_0 =
+            insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 50);
+        let cmd_0_to_delete =
+            insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 100);
+        let cmd_1_to_delete =
+            insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 150);
         let cmd_out_of_range_1 =
             insert_command_with_release_time(&mut pool, &mut scheduler, ZERO_SEQ, 200);
         assert_eq!(scheduler.num_scheduled_telecommands(), 4);

@@ -1,5 +1,5 @@
-use core::{fmt, marker::PhantomData};
 use arbitrary_int::{traits::Integer as _, u11};
+use core::{fmt, marker::PhantomData};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -496,14 +496,18 @@ pub mod std_mod {
 mod tests {
     use std::sync::mpsc;
 
-    use alloc::string::ToString;
-    use arbitrary_int::{u11, u14};
-    use spacepackets::{
-        ecss::{tc::{PusTcCreator, PusTcSecondaryHeader}, CreatorConfig}, ByteConversionError, SpHeader
-    };
     use crate::{
         queue::{GenericReceiveError, GenericSendError},
         request::{MessageMetadata, MessageSenderMap, MessageSenderStoreProvider},
+    };
+    use alloc::string::ToString;
+    use arbitrary_int::{u11, u14};
+    use spacepackets::{
+        ByteConversionError, SpHeader,
+        ecss::{
+            CreatorConfig,
+            tc::{PusTcCreator, PusTcSecondaryHeader},
+        },
     };
 
     use super::{GenericMessage, MessageReceiverWithId, UniqueApidTargetId};
@@ -533,7 +537,9 @@ mod tests {
     #[test]
     fn test_basic_target_id_with_apid_from_pus_tc() {
         let sp_header = SpHeader::new_for_unseg_tc(u11::new(0x111), u14::new(5), 0);
-        let pus_tc = PusTcCreator::new_simple(sp_header, 17, 1, &[], CreatorConfig::default());
+        let app_data = 1_u32.to_be_bytes();
+        let pus_tc =
+            PusTcCreator::new_simple(sp_header, 17, 1, &app_data, CreatorConfig::default());
         let id = UniqueApidTargetId::from_pus_tc(&pus_tc).unwrap();
         assert_eq!(id.apid.value(), 0x111);
         assert_eq!(id.unique_id, 1);

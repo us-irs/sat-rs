@@ -79,10 +79,16 @@ impl PusReplyHandler<ActivePusRequestStd, ModeReply> for ModeReplyHandler {
                     .write_to_be_bytes(&mut source_data)
                     .expect("writing mode reply failed");
                 let req_id = verification::RequestId::from(reply.request_id());
-                let sp_header = SpHeader::new_for_unseg_tm(req_id.packet_id().apid(), u14::new(0), 0);
+                let sp_header =
+                    SpHeader::new_for_unseg_tm(req_id.packet_id().apid(), u14::new(0), 0);
                 let sec_header =
                     PusTmSecondaryHeader::new(200, Subservice::TmModeReply as u8, 0, 0, time_stamp);
-                let pus_tm = PusTmCreator::new(sp_header, sec_header, &source_data, CreatorConfig::default());
+                let pus_tm = PusTmCreator::new(
+                    sp_header,
+                    sec_header,
+                    &source_data,
+                    CreatorConfig::default(),
+                );
                 tm_sender.send_tm(self.owner_id, PusTmVariant::Direct(pus_tm))?;
                 verification_handler.completion_success(tm_sender, started_token, time_stamp)?;
             }

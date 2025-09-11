@@ -127,8 +127,10 @@ mod tests {
     use crate::hal::std::udp_server::{ReceiveResult, UdpTcServer};
     use crate::queue::GenericSendError;
     use crate::tmtc::PacketSenderRaw;
+    use arbitrary_int::u11;
     use core::cell::RefCell;
     use spacepackets::SpHeader;
+    use spacepackets::ecss::CreatorConfig;
     use spacepackets::ecss::tc::PusTcCreator;
     use std::collections::VecDeque;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
@@ -165,8 +167,8 @@ mod tests {
         let mut udp_tc_server = UdpTcServer::new(UDP_SERVER_ID, dest_addr, 2048, ping_receiver)
             .expect("Creating UDP TMTC server failed");
         is_send(&udp_tc_server);
-        let sph = SpHeader::new_from_apid(0x02);
-        let pus_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
+        let sph = SpHeader::new_from_apid(u11::new(0x02));
+        let pus_tc = PusTcCreator::new_simple(sph, 17, 1, &[], CreatorConfig::default());
         let len = pus_tc
             .write_to_bytes(&mut buf)
             .expect("Error writing PUS TC packet");

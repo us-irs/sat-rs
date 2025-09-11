@@ -574,7 +574,7 @@ mod tests {
             let (request_tx, request_rx) = mpsc::sync_channel(5);
             let (reply_tx_to_pus, reply_rx_to_pus) = mpsc::sync_channel(5);
             let (reply_tx_to_parent, reply_rx_to_parent) = mpsc::sync_channel(5);
-            let id = UniqueApidTargetId::new(Apid::Acs as u16, 1);
+            let id = UniqueApidTargetId::new(Apid::Acs.raw_value(), 1);
             let mode_node = ModeRequestHandlerMpscBounded::new(id.into(), request_rx);
             let (composite_request_tx, composite_request_rx) = mpsc::channel();
             let (hk_reply_tx, hk_reply_rx) = mpsc::sync_channel(10);

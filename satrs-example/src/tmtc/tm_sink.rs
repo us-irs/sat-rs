@@ -157,8 +157,9 @@ impl TmSinkDynamic {
         if let Ok(mut tm) = self.tm_funnel_rx.recv() {
             // Read the TM, set sequence counter and message counter, and finally update
             // the CRC.
-            let zero_copy_writer = PusTmZeroCopyWriter::new(&mut tm.packet, MIN_CDS_FIELD_LEN, true)
-                .expect("Creating TM zero copy writer failed");
+            let zero_copy_writer =
+                PusTmZeroCopyWriter::new(&mut tm.packet, MIN_CDS_FIELD_LEN, true)
+                    .expect("Creating TM zero copy writer failed");
             self.common.apply_packet_processing(zero_copy_writer);
             self.common.sync_tm_tcp_source.add_tm(&tm.packet);
             self.tm_server_tx

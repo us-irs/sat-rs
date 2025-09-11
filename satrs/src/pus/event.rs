@@ -1,9 +1,9 @@
 use crate::pus::source_buffer_large_enough;
 use arbitrary_int::u11;
-use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
-use spacepackets::ecss::{CreatorConfig, EcssEnumeration};
 use spacepackets::ByteConversionError;
 use spacepackets::SpHeader;
+use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
+use spacepackets::ecss::{CreatorConfig, EcssEnumeration};
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
@@ -121,7 +121,7 @@ impl EventReportCreator {
             SpHeader::new_from_apid(self.apid),
             sec_header,
             &src_data_buf[0..current_idx],
-            CreatorConfig::default()
+            CreatorConfig::default(),
         ))
     }
 }
@@ -129,8 +129,8 @@ impl EventReportCreator {
 #[cfg(feature = "alloc")]
 mod alloc_mod {
     use super::*;
-    use crate::pus::{EcssTmSender, EcssTmtcError};
     use crate::ComponentId;
+    use crate::pus::{EcssTmSender, EcssTmtcError};
     use alloc::vec;
     use alloc::vec::Vec;
     use core::cell::RefCell;
@@ -262,13 +262,13 @@ mod alloc_mod {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ComponentId;
     use crate::events::{EventU32, Severity};
     use crate::pus::test_util::TEST_COMPONENT_ID_0;
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::{ChannelWithId, EcssTmSender, EcssTmtcError, PusTmVariant};
-    use crate::ComponentId;
-    use spacepackets::ecss::PusError;
     use spacepackets::ByteConversionError;
+    use spacepackets::ecss::PusError;
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::vec::Vec;

@@ -144,7 +144,10 @@ impl<
 
 #[cfg(test)]
 mod tests {
+    use arbitrary_int::traits::Integer as _;
+    use arbitrary_int::u14;
     use delegate::delegate;
+    use spacepackets::ecss::CreatorConfig;
     use spacepackets::ecss::event::Subservice;
     use spacepackets::time::{TimeWriter, cds};
     use spacepackets::util::UnsignedEnum;
@@ -242,13 +245,13 @@ mod tests {
         expected_event_req: EventRequest,
         event_req_receiver: mpsc::Receiver<EventRequestWithToken>,
     ) {
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(5, subservice as u8);
         let mut app_data = [0; 4];
         TEST_EVENT_0
             .write_to_be_bytes(&mut app_data)
             .expect("writing test event failed");
-        let ping_tc = PusTcCreator::new(sp_header, sec_header, &app_data, true);
+        let ping_tc = PusTcCreator::new(sp_header, sec_header, &app_data, CreatorConfig::default());
         let token = test_harness.start_verification(&ping_tc);
         test_harness.send_tc(&token, &ping_tc);
         let request_id = token.request_id();
@@ -307,9 +310,10 @@ mod tests {
     fn test_sending_custom_subservice() {
         let (event_request_tx, _) = mpsc::channel();
         let mut test_harness = Pus5HandlerWithStoreTester::new(event_request_tx);
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(5, 200);
-        let ping_tc = PusTcCreator::new_no_app_data(sp_header, sec_header, true);
+        let ping_tc =
+            PusTcCreator::new_no_app_data(sp_header, sec_header, CreatorConfig::default());
         let token = test_harness.start_verification(&ping_tc);
         test_harness.send_tc(&token, &ping_tc);
         let result = test_harness.handle_one_tc();
@@ -326,10 +330,11 @@ mod tests {
     fn test_sending_invalid_app_data() {
         let (event_request_tx, _) = mpsc::channel();
         let mut test_harness = Pus5HandlerWithStoreTester::new(event_request_tx);
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let sec_header =
             PusTcSecondaryHeader::new_simple(5, Subservice::TcEnableEventGeneration as u8);
-        let ping_tc = PusTcCreator::new(sp_header, sec_header, &[0, 1, 2], true);
+        let ping_tc =
+            PusTcCreator::new(sp_header, sec_header, &[0, 1, 2], CreatorConfig::default());
         let token = test_harness.start_verification(&ping_tc);
         test_harness.send_tc(&token, &ping_tc);
         let result = test_harness.handle_one_tc();
