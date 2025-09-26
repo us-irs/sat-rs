@@ -302,10 +302,13 @@ impl TargetedPusService for HkServiceWrapper {
 
 #[cfg(test)]
 mod tests {
+    use arbitrary_int::traits::Integer as _;
+    use arbitrary_int::u14;
     use satrs::pus::test_util::{
         TEST_COMPONENT_ID_0, TEST_COMPONENT_ID_1, TEST_UNIQUE_ID_0, TEST_UNIQUE_ID_1,
     };
     use satrs::request::MessageMetadata;
+    use satrs::spacepackets::ecss::CreatorConfig;
     use satrs::{
         hk::HkRequestVariant,
         pus::test_util::TEST_APID,
@@ -328,7 +331,7 @@ mod tests {
     fn hk_converter_one_shot_req() {
         let mut hk_bench =
             PusConverterTestbench::new(TEST_COMPONENT_ID_0.id(), HkRequestConverter::default());
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let target_id = TEST_UNIQUE_ID_0;
         let unique_id = 5_u32;
         let mut app_data: [u8; 8] = [0; 8];
@@ -340,7 +343,7 @@ mod tests {
             3,
             Subservice::TcGenerateOneShotHk as u8,
             &app_data,
-            true,
+            CreatorConfig::default(),
         );
         let accepted_token = hk_bench.add_tc(&hk_req);
         let (_active_req, req) = hk_bench
@@ -358,7 +361,7 @@ mod tests {
     fn hk_converter_enable_periodic_generation() {
         let mut hk_bench =
             PusConverterTestbench::new(TEST_COMPONENT_ID_0.id(), HkRequestConverter::default());
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let target_id = TEST_UNIQUE_ID_0;
         let unique_id = 5_u32;
         let mut app_data: [u8; 8] = [0; 8];
@@ -380,7 +383,7 @@ mod tests {
             3,
             Subservice::TcEnableHkGeneration as u8,
             &app_data,
-            true,
+            CreatorConfig::default(),
         );
         generic_check(&tc0);
         let tc1 = PusTcCreator::new_simple(
@@ -388,7 +391,7 @@ mod tests {
             3,
             Subservice::TcEnableDiagGeneration as u8,
             &app_data,
-            true,
+            CreatorConfig::default(),
         );
         generic_check(&tc1);
     }
@@ -397,7 +400,7 @@ mod tests {
     fn hk_conversion_disable_periodic_generation() {
         let mut hk_bench =
             PusConverterTestbench::new(TEST_COMPONENT_ID_0.id(), HkRequestConverter::default());
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let target_id = TEST_UNIQUE_ID_0;
         let unique_id = 5_u32;
         let mut app_data: [u8; 8] = [0; 8];
@@ -419,7 +422,7 @@ mod tests {
             3,
             Subservice::TcDisableHkGeneration as u8,
             &app_data,
-            true,
+            CreatorConfig::default(),
         );
         generic_check(&tc0);
         let tc1 = PusTcCreator::new_simple(
@@ -427,7 +430,7 @@ mod tests {
             3,
             Subservice::TcDisableDiagGeneration as u8,
             &app_data,
-            true,
+            CreatorConfig::default(),
         );
         generic_check(&tc1);
     }
@@ -436,7 +439,7 @@ mod tests {
     fn hk_conversion_modify_interval() {
         let mut hk_bench =
             PusConverterTestbench::new(TEST_COMPONENT_ID_0.id(), HkRequestConverter::default());
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let target_id = TEST_UNIQUE_ID_0;
         let unique_id = 5_u32;
         let mut app_data: [u8; 12] = [0; 12];
@@ -462,7 +465,7 @@ mod tests {
             3,
             Subservice::TcModifyHkCollectionInterval as u8,
             &app_data,
-            true,
+            CreatorConfig::default(),
         );
         generic_check(&tc0);
         let tc1 = PusTcCreator::new_simple(
@@ -470,7 +473,7 @@ mod tests {
             3,
             Subservice::TcModifyDiagCollectionInterval as u8,
             &app_data,
-            true,
+            CreatorConfig::default(),
         );
         generic_check(&tc1);
     }

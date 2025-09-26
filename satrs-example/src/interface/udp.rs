@@ -1,13 +1,14 @@
+#![allow(dead_code)]
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc;
 
 use log::{info, warn};
+use satrs::hal::std::udp_server::{ReceiveResult, UdpTcServer};
 use satrs::pus::HandlingStatus;
-use satrs::tmtc::{PacketAsVec, PacketInPool, StoreAndSendError};
-use satrs::{
-    hal::std::udp_server::{ReceiveResult, UdpTcServer},
-    pool::{PoolProviderWithGuards, SharedStaticMemoryPool},
-};
+use satrs::tmtc::{PacketAsVec, StoreAndSendError};
+
+use satrs::pool::{PoolProviderWithGuards, SharedStaticMemoryPool};
+use satrs::tmtc::PacketInPool;
 
 use crate::tmtc::sender::TmTcSender;
 
@@ -15,7 +16,6 @@ pub trait UdpTmHandler {
     fn send_tm_to_udp_client(&mut self, socket: &UdpSocket, recv_addr: &SocketAddr);
 }
 
-#[allow(dead_code)]
 pub struct StaticUdpTmHandler {
     pub tm_rx: mpsc::Receiver<PacketInPool>,
     pub tm_store: SharedStaticMemoryPool,
@@ -113,6 +113,9 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
+    use arbitrary_int::traits::Integer as _;
+    use arbitrary_int::u14;
+    use satrs::spacepackets::ecss::CreatorConfig;
     use satrs::{
         spacepackets::{
             ecss::{tc::PusTcCreator, WritablePusPacket},
@@ -177,8 +180,8 @@ mod tests {
             udp_tc_server,
             tm_handler,
         };
-        let sph = SpHeader::new_for_unseg_tc(ids::Apid::GenericPus as u16, 0, 0);
-        let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true)
+        let sph = SpHeader::new_for_unseg_tc(ids::Apid::GenericPus.raw_value(), u14::ZERO, 0);
+        let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], CreatorConfig::default())
             .to_vec()
             .unwrap();
         let client = UdpSocket::bind("127.0.0.1:0").expect("Connecting to UDP server failed");

@@ -449,7 +449,7 @@ pub mod alloc_mod {
     /// Having a dedicated trait for this allows maximum flexiblity and tailoring of the standard.
     /// The only requirement is that a valid active request information instance and a request
     /// are returned by the core conversion function. The active request type needs to fulfill
-    /// the [ActiveRequestProvider] trait bound.
+    /// the [ActiveRequest] trait bound.
     ///
     /// The user should take care of performing the error handling as well. Some of the following
     /// aspects might be relevant:
@@ -1126,7 +1126,7 @@ pub mod std_mod {
     /// groups (for example individual services).
     ///
     /// This base class can handle PUS telecommands backed by different memory storage machanisms
-    /// by using the [EcssTcInMemConverter] abstraction. This object provides some convenience
+    /// by using the [CacheAndReadRawEcssTc] abstraction. This object provides some convenience
     /// methods to make the generic parts of TC handling easier.
     pub struct PusServiceHelper<
         TcReceiver: EcssTcReceiver,
@@ -1258,6 +1258,7 @@ pub(crate) fn source_buffer_large_enough(
 
 #[cfg(any(feature = "test_util", test))]
 pub mod test_util {
+    use arbitrary_int::u11;
     use spacepackets::ecss::{tc::PusTcCreator, tm::PusTmReader};
 
     use crate::request::UniqueApidTargetId;
@@ -1267,7 +1268,7 @@ pub mod test_util {
         verification::{self, TcStateAccepted, VerificationToken},
     };
 
-    pub const TEST_APID: u16 = 0x101;
+    pub const TEST_APID: u11 = u11::new(0x101);
     pub const TEST_UNIQUE_ID_0: u32 = 0x05;
     pub const TEST_UNIQUE_ID_1: u32 = 0x06;
 
@@ -1302,6 +1303,7 @@ pub mod tests {
 
     use alloc::collections::VecDeque;
     use alloc::vec::Vec;
+    use arbitrary_int::{u11, u14};
     use satrs_shared::res_code::ResultU16;
     use spacepackets::CcsdsPacket;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader};
@@ -1324,8 +1326,8 @@ pub mod tests {
     #[derive(Debug, Eq, PartialEq, Clone)]
     pub(crate) struct CommonTmInfo {
         pub subservice: u8,
-        pub apid: u16,
-        pub seq_count: u16,
+        pub apid: u11,
+        pub seq_count: u14,
         pub msg_counter: u16,
         pub dest_id: u16,
         pub timestamp: Vec<u8>,
@@ -1334,8 +1336,8 @@ pub mod tests {
     impl CommonTmInfo {
         pub fn new(
             subservice: u8,
-            apid: u16,
-            seq_count: u16,
+            apid: u11,
+            seq_count: u14,
             msg_counter: u16,
             dest_id: u16,
             timestamp: &[u8],
@@ -1351,11 +1353,11 @@ pub mod tests {
         }
         pub fn new_zero_seq_count(
             subservice: u8,
-            apid: u16,
+            apid: u11,
             dest_id: u16,
             timestamp: &[u8],
         ) -> Self {
-            Self::new(subservice, apid, 0, 0, dest_id, timestamp)
+            Self::new(subservice, apid, u14::new(0), 0, dest_id, timestamp)
         }
 
         pub fn new_from_tm(tm: &PusTmCreator) -> Self {
@@ -1407,7 +1409,7 @@ pub mod tests {
             let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::sync_channel(10);
             let (tm_tx, tm_rx) = mpsc::sync_channel(10);
 
-            let verif_cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8).unwrap();
+            let verif_cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8);
             let verification_handler =
                 VerificationReporter::new(TEST_COMPONENT_ID_0.id(), &verif_cfg);
             let test_srv_tm_sender =
@@ -1500,7 +1502,7 @@ pub mod tests {
             let (test_srv_tc_tx, test_srv_tc_rx) = mpsc::channel();
             let (tm_tx, tm_rx) = mpsc::channel();
 
-            let verif_cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8).unwrap();
+            let verif_cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8);
             let verification_handler =
                 VerificationReporter::new(TEST_COMPONENT_ID_0.id(), &verif_cfg);
             let in_store_converter = EcssTcVecCacher::default();

@@ -1,7 +1,8 @@
 //! This is an auto-generated configuration module.
 use satrs::request::UniqueApidTargetId;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, strum::EnumIter)]
+#[derive(Debug, PartialEq, Eq, strum::EnumIter)]
+#[bitbybit::bitenum(u11)]
 pub enum Apid {
     Sched = 1,
     GenericPus = 2,
@@ -12,6 +13,7 @@ pub enum Apid {
 }
 
 pub mod acs {
+
     #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub enum Id {
         Subsystem = 1,
@@ -21,13 +23,13 @@ pub mod acs {
     }
 
     pub const SUBSYSTEM: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Acs as u16, Id::Subsystem as u32);
+        super::UniqueApidTargetId::new(super::Apid::Acs.raw_value(), Id::Subsystem as u32);
     pub const ASSEMBLY: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Acs as u16, Id::Assembly as u32);
+        super::UniqueApidTargetId::new(super::Apid::Acs.raw_value(), Id::Assembly as u32);
     pub const MGM0: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Acs as u16, Id::Mgm0 as u32);
+        super::UniqueApidTargetId::new(super::Apid::Acs.raw_value(), Id::Mgm0 as u32);
     pub const MGM1: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Acs as u16, Id::Mgm1 as u32);
+        super::UniqueApidTargetId::new(super::Apid::Acs.raw_value(), Id::Mgm1 as u32);
 }
 
 pub mod eps {
@@ -38,9 +40,9 @@ pub mod eps {
     }
 
     pub const PCDU: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Eps as u16, Id::Pcdu as u32);
+        super::UniqueApidTargetId::new(super::Apid::Eps.raw_value(), Id::Pcdu as u32);
     pub const SUBSYSTEM: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Eps as u16, Id::Subsystem as u32);
+        super::UniqueApidTargetId::new(super::Apid::Eps.raw_value(), Id::Subsystem as u32);
 }
 
 pub mod generic_pus {
@@ -55,19 +57,19 @@ pub mod generic_pus {
     }
 
     pub const PUS_EVENT_MANAGEMENT: super::UniqueApidTargetId = super::UniqueApidTargetId::new(
-        super::Apid::GenericPus as u16,
+        super::Apid::GenericPus.raw_value(),
         Id::PusEventManagement as u32,
     );
     pub const PUS_ROUTING: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::GenericPus as u16, Id::PusRouting as u32);
+        super::UniqueApidTargetId::new(super::Apid::GenericPus.raw_value(), Id::PusRouting as u32);
     pub const PUS_TEST: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::GenericPus as u16, Id::PusTest as u32);
+        super::UniqueApidTargetId::new(super::Apid::GenericPus.raw_value(), Id::PusTest as u32);
     pub const PUS_ACTION: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::GenericPus as u16, Id::PusAction as u32);
+        super::UniqueApidTargetId::new(super::Apid::GenericPus.raw_value(), Id::PusAction as u32);
     pub const PUS_MODE: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::GenericPus as u16, Id::PusMode as u32);
+        super::UniqueApidTargetId::new(super::Apid::GenericPus.raw_value(), Id::PusMode as u32);
     pub const PUS_HK: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::GenericPus as u16, Id::PusHk as u32);
+        super::UniqueApidTargetId::new(super::Apid::GenericPus.raw_value(), Id::PusHk as u32);
 }
 
 pub mod sched {
@@ -77,7 +79,7 @@ pub mod sched {
     }
 
     pub const PUS_SCHED: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Sched as u16, Id::PusSched as u32);
+        super::UniqueApidTargetId::new(super::Apid::Sched.raw_value(), Id::PusSched as u32);
 }
 
 pub mod tmtc {
@@ -88,7 +90,7 @@ pub mod tmtc {
     }
 
     pub const UDP_SERVER: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Tmtc as u16, Id::UdpServer as u32);
+        super::UniqueApidTargetId::new(super::Apid::Tmtc.raw_value(), Id::UdpServer as u32);
     pub const TCP_SERVER: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Tmtc as u16, Id::TcpServer as u32);
+        super::UniqueApidTargetId::new(super::Apid::Tmtc.raw_value(), Id::TcpServer as u32);
 }

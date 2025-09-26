@@ -1,9 +1,11 @@
 use crate::pus::source_buffer_large_enough;
+use arbitrary_int::u11;
 use spacepackets::ByteConversionError;
+use spacepackets::SpHeader;
+use spacepackets::ecss::CreatorConfig;
 use spacepackets::ecss::EcssEnumeration;
 use spacepackets::ecss::tm::PusTmCreator;
 use spacepackets::ecss::tm::PusTmSecondaryHeader;
-use spacepackets::{MAX_APID, SpHeader};
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
@@ -11,16 +13,13 @@ pub use alloc_mod::*;
 pub use spacepackets::ecss::event::*;
 
 pub struct EventReportCreator {
-    apid: u16,
+    apid: u11,
     pub dest_id: u16,
 }
 
 impl EventReportCreator {
-    pub fn new(apid: u16, dest_id: u16) -> Option<Self> {
-        if apid > MAX_APID {
-            return None;
-        }
-        Some(Self { dest_id, apid })
+    pub fn new(apid: u11, dest_id: u16) -> Self {
+        Self { dest_id, apid }
     }
 
     pub fn event_info<'time, 'src_data>(
@@ -124,7 +123,7 @@ impl EventReportCreator {
             SpHeader::new_from_apid(self.apid),
             sec_header,
             &src_data_buf[0..current_idx],
-            true,
+            CreatorConfig::default(),
         ))
     }
 }
@@ -162,34 +161,34 @@ mod alloc_mod {
     impl EventReporter<DummyEventHook> {
         pub fn new(
             id: ComponentId,
-            default_apid: u16,
+            default_apid: u11,
             default_dest_id: u16,
             max_event_id_and_aux_data_size: usize,
-        ) -> Option<Self> {
-            let reporter = EventReportCreator::new(default_apid, default_dest_id)?;
-            Some(Self {
+        ) -> Self {
+            let reporter = EventReportCreator::new(default_apid, default_dest_id);
+            Self {
                 id,
                 source_data_buf: RefCell::new(vec![0; max_event_id_and_aux_data_size]),
                 report_creator: reporter,
                 tm_hook: DummyEventHook::default(),
-            })
+            }
         }
     }
     impl<EventTmHookInstance: EventTmHook> EventReporter<EventTmHookInstance> {
         pub fn new_with_hook(
             id: ComponentId,
-            default_apid: u16,
+            default_apid: u11,
             default_dest_id: u16,
             max_event_id_and_aux_data_size: usize,
             tm_hook: EventTmHookInstance,
-        ) -> Option<Self> {
-            let reporter = EventReportCreator::new(default_apid, default_dest_id)?;
-            Some(Self {
+        ) -> Self {
+            let reporter = EventReportCreator::new(default_apid, default_dest_id);
+            Self {
                 id,
                 source_data_buf: RefCell::new(vec![0; max_event_id_and_aux_data_size]),
                 report_creator: reporter,
                 tm_hook,
-            })
+            }
         }
 
         pub fn event_info(
@@ -276,7 +275,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::vec::Vec;
 
-    const EXAMPLE_APID: u16 = 0xee;
+    const EXAMPLE_APID: u11 = u11::new(0xee);
     const EXAMPLE_GROUP_ID: u16 = 2;
     const EXAMPLE_EVENT_ID_0: u16 = 1;
     #[allow(dead_code)]
@@ -376,14 +375,12 @@ mod tests {
         error_data: Option<&[u8]>,
     ) {
         let mut sender = TestSender::default();
-        let reporter = EventReporter::new(
+        let mut reporter = EventReporter::new(
             TEST_COMPONENT_ID_0.id(),
             EXAMPLE_APID,
             0,
             max_event_aux_data_buf,
         );
-        assert!(reporter.is_some());
-        let mut reporter = reporter.unwrap();
         let time_stamp_empty: [u8; 7] = [0; 7];
         let mut error_copy = Vec::new();
         if let Some(err_data) = error_data {
@@ -474,9 +471,7 @@ mod tests {
     fn insufficient_buffer() {
         let mut sender = TestSender::default();
         for i in 0..3 {
-            let reporter = EventReporter::new(0, EXAMPLE_APID, 0, i);
-            assert!(reporter.is_some());
-            let mut reporter = reporter.unwrap();
+            let mut reporter = EventReporter::new(0, EXAMPLE_APID, 0, i);
             check_buf_too_small(&mut reporter, &mut sender, i);
         }
     }

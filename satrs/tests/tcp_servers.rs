@@ -21,6 +21,7 @@ use std::{
     thread,
 };
 
+use arbitrary_int::{u11, u14};
 use hashbrown::HashSet;
 use satrs::{
     ComponentId,
@@ -36,7 +37,7 @@ use satrs::{
 };
 use spacepackets::{
     CcsdsPacket, PacketId, SpHeader,
-    ecss::{WritablePusPacket, tc::PusTcCreator},
+    ecss::{CreatorConfig, WritablePusPacket, tc::PusTcCreator},
 };
 use std::{collections::VecDeque, sync::Arc, vec::Vec};
 
@@ -192,7 +193,7 @@ fn test_cobs_server() {
     matches!(tc_receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
 }
 
-const TEST_APID_0: u16 = 0x02;
+const TEST_APID_0: u11 = u11::new(0x02);
 const TEST_PACKET_ID_0: PacketId = PacketId::new_for_tc(true, TEST_APID_0);
 
 #[derive(Default)]
@@ -217,8 +218,8 @@ impl SpacePacketValidator for SimpleVerificator {
 fn test_ccsds_server() {
     let (tc_sender, tc_receiver) = mpsc::channel();
     let mut tm_source = SyncTmSource::default();
-    let sph = SpHeader::new_for_unseg_tc(TEST_APID_0, 0, 0);
-    let verif_tm = PusTcCreator::new_simple(sph, 1, 1, &[], true);
+    let sph = SpHeader::new_for_unseg_tc(TEST_APID_0, u14::new(0), 0);
+    let verif_tm = PusTcCreator::new_simple(sph, 1, 1, &[], CreatorConfig::default());
     let tm_0 = verif_tm.to_vec().expect("tm generation failed");
     tm_source.add_tm(&tm_0);
     let mut packet_id_lookup = SimpleVerificator::default();
@@ -267,8 +268,8 @@ fn test_ccsds_server() {
         .expect("setting reas timeout failed");
 
     // Send ping telecommand.
-    let sph = SpHeader::new_for_unseg_tc(TEST_APID_0, 0, 0);
-    let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
+    let sph = SpHeader::new_for_unseg_tc(TEST_APID_0, u14::new(0), 0);
+    let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], CreatorConfig::default());
     let tc_0 = ping_tc.to_vec().expect("packet creation failed");
     stream
         .write_all(&tc_0)

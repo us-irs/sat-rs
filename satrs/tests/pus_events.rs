@@ -1,3 +1,4 @@
+use arbitrary_int::u11;
 use satrs::event_man::{
     EventManagerWithMpsc, EventMessage, EventMessageU32, EventRoutingError, EventSendProvider,
     EventU32SenderMpsc,
@@ -8,15 +9,15 @@ use satrs::params::{Params, ParamsHeapless, WritableToBeBytes};
 use satrs::pus::event_man::{DefaultPusEventReportingMap, EventReporter, PusEventTmCreatorWithMap};
 use satrs::request::UniqueApidTargetId;
 use satrs::tmtc::PacketAsVec;
+use spacepackets::ecss::PusError;
 use spacepackets::ecss::tm::PusTmReader;
-use spacepackets::ecss::{PusError, PusPacket};
 use std::sync::mpsc::{self, SendError, TryRecvError};
 use std::thread;
 
 const INFO_EVENT: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::<SeverityInfo>::new(1, 0);
 const LOW_SEV_EVENT: EventU32 = EventU32::new(Severity::Low, 1, 5);
 const EMPTY_STAMP: [u8; 7] = [0; 7];
-const TEST_APID: u16 = 0x02;
+const TEST_APID: u11 = u11::new(0x02);
 const TEST_ID: UniqueApidTargetId = UniqueApidTargetId::new(TEST_APID, 0x05);
 
 #[derive(Debug, Clone)]
@@ -35,8 +36,7 @@ fn test_threaded_usage() {
     event_man.subscribe_all(pus_event_man_send_provider.target_id());
     event_man.add_sender(pus_event_man_send_provider);
     let (event_packet_tx, event_packet_rx) = mpsc::channel::<PacketAsVec>();
-    let reporter =
-        EventReporter::new(TEST_ID.raw(), 0x02, 0, 128).expect("Creating event reporter failed");
+    let reporter = EventReporter::new(TEST_ID.raw(), u11::new(0x02), 0, 128);
     let pus_event_man =
         PusEventTmCreatorWithMap::new(reporter, DefaultPusEventReportingMap::default());
     let error_handler = |event_msg: &EventMessageU32, error: EventRoutingError| {

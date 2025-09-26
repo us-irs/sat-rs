@@ -276,6 +276,7 @@ mod tests {
     use satrs::pus::verification::test_util::TestVerificationReporter;
     use satrs::pus::{verification, EcssTcVecCacher};
     use satrs::request::MessageMetadata;
+    use satrs::spacepackets::ecss::CreatorConfig;
     use satrs::tmtc::PacketAsVec;
     use satrs::ComponentId;
     use satrs::{
@@ -453,7 +454,8 @@ mod tests {
         let mut app_data: [u8; 8] = [0; 8];
         app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_1.to_be_bytes());
         app_data[4..8].copy_from_slice(&action_id.to_be_bytes());
-        let pus8_packet = PusTcCreator::new(sp_header, sec_header, &app_data, true);
+        let pus8_packet =
+            PusTcCreator::new(sp_header, sec_header, &app_data, CreatorConfig::default());
         testbench.add_tc(&pus8_packet);
         let time_stamp: [u8; 7] = [0; 7];
         testbench.verify_next_tc_is_handled_properly(&time_stamp);
@@ -499,7 +501,7 @@ mod tests {
             SpHeader::new_from_apid(TEST_APID),
             sec_header,
             &app_data,
-            true,
+            CreatorConfig::default(),
         );
         testbench.add_tc(&pus8_packet);
         let time_stamp: [u8; 7] = [0; 7];
@@ -525,7 +527,7 @@ mod tests {
             SpHeader::new_from_apid(TEST_APID),
             sec_header,
             &app_data,
-            true,
+            CreatorConfig::default(),
         );
         let token = testbench.add_tc(&pus8_packet);
         let result = testbench.convert(token, &[], TEST_APID, TEST_UNIQUE_ID_0);
@@ -564,7 +566,7 @@ mod tests {
             SpHeader::new_from_apid(TEST_APID),
             sec_header,
             &app_data,
-            true,
+            CreatorConfig::default(),
         );
         let token = testbench.add_tc(&pus8_packet);
         let result = testbench.convert(token, &[], TEST_APID, TEST_UNIQUE_ID_0);
