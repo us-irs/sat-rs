@@ -2,9 +2,11 @@ use crate::pus::{
     DirectPusPacketHandlerResult, PartialPusHandlingError, PusPacketHandlingError, PusTmVariant,
 };
 use crate::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
+use arbitrary_int::traits::Integer as _;
+use arbitrary_int::u14;
 use spacepackets::SpHeader;
-use spacepackets::ecss::PusPacket;
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
+use spacepackets::ecss::{CreatorConfig, PusPacket};
 use std::sync::mpsc;
 
 use super::verification::{VerificationReporter, VerificationReportingProvider};
@@ -75,10 +77,14 @@ impl<
             // Sequence count will be handled centrally in TM funnel.
             // It is assumed that the verification reporter was built with a valid APID, so we use
             // the unchecked API here.
-            let reply_header =
-                SpHeader::new_for_unseg_tm(self.service_helper.verif_reporter().apid(), 0, 0);
+            let reply_header = SpHeader::new_for_unseg_tm(
+                self.service_helper.verif_reporter().apid(),
+                u14::ZERO,
+                0,
+            );
             let tc_header = PusTmSecondaryHeader::new_simple(17, 2, time_stamp);
-            let ping_reply = PusTmCreator::new(reply_header, tc_header, &[], true);
+            let ping_reply =
+                PusTmCreator::new(reply_header, tc_header, &[], CreatorConfig::default());
             if let Err(e) = self
                 .service_helper
                 .common
@@ -148,11 +154,13 @@ mod tests {
         PartialPusHandlingError, PusPacketHandlingError,
     };
     use crate::tmtc::PacketSenderWithSharedPool;
+    use arbitrary_int::traits::Integer as _;
+    use arbitrary_int::u14;
     use delegate::delegate;
     use spacepackets::SpHeader;
-    use spacepackets::ecss::PusPacket;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTmReader;
+    use spacepackets::ecss::{CreatorConfig, PusPacket};
     use spacepackets::time::{TimeWriter, cds};
 
     use super::PusService17TestHandler;
@@ -283,9 +291,10 @@ mod tests {
 
     fn ping_test(test_harness: &mut (impl PusTestHarness + SimplePusPacketHandler)) {
         // Create a ping TC, verify acceptance.
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
-        let ping_tc = PusTcCreator::new_no_app_data(sp_header, sec_header, true);
+        let ping_tc =
+            PusTcCreator::new_no_app_data(sp_header, sec_header, CreatorConfig::default());
         let token = test_harness.start_verification(&ping_tc);
         test_harness.send_tc(&token, &ping_tc);
         let request_id = token.request_id();
@@ -338,9 +347,10 @@ mod tests {
     #[test]
     fn test_sending_unsupported_service() {
         let mut test_harness = Pus17HandlerWithStoreTester::new(0);
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(3, 1);
-        let ping_tc = PusTcCreator::new_no_app_data(sp_header, sec_header, true);
+        let ping_tc =
+            PusTcCreator::new_no_app_data(sp_header, sec_header, CreatorConfig::default());
         let token = test_harness.start_verification(&ping_tc);
         test_harness.send_tc(&token, &ping_tc);
         let result = test_harness.handle_one_tc();
@@ -359,9 +369,10 @@ mod tests {
     #[test]
     fn test_sending_custom_subservice() {
         let mut test_harness = Pus17HandlerWithStoreTester::new(0);
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(17, 200);
-        let ping_tc = PusTcCreator::new_no_app_data(sp_header, sec_header, true);
+        let ping_tc =
+            PusTcCreator::new_no_app_data(sp_header, sec_header, CreatorConfig::default());
         let token = test_harness.start_verification(&ping_tc);
         test_harness.send_tc(&token, &ping_tc);
         let result = test_harness.handle_one_tc();

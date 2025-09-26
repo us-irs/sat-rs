@@ -20,15 +20,15 @@
 //!     VerificationReportingProvider, VerificationReporterConfig, VerificationReporter
 //! };
 //! use satrs::tmtc::{SharedStaticMemoryPool, PacketSenderWithSharedPool};
-//! use satrs::spacepackets::seq_count::SeqCountProviderSimple;
 //! use satrs::request::UniqueApidTargetId;
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
-//! use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
+//! use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader, CreatorConfig};
 //! use spacepackets::ecss::tm::PusTmReader;
+//! use arbitrary_int::u11;
 //!
 //! const EMPTY_STAMP: [u8; 7] = [0; 7];
-//! const TEST_APID: u16 = 0x02;
+//! const TEST_APID: u11 = u11::new(0x02);
 //! const TEST_COMPONENT_ID: UniqueApidTargetId = UniqueApidTargetId::new(TEST_APID, 0x05);
 //!
 //! let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(
@@ -38,14 +38,14 @@
 //! let shared_tm_pool = SharedStaticMemoryPool::new(RwLock::new(tm_pool));
 //! let (verif_tx, verif_rx) = mpsc::sync_channel(10);
 //! let sender = PacketSenderWithSharedPool::new_with_shared_packet_pool(verif_tx, &shared_tm_pool);
-//! let cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8).unwrap();
+//! let cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8);
 //! let mut  reporter = VerificationReporter::new(TEST_COMPONENT_ID.id(), &cfg);
 //!
 //! let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
 //! let pus_tc_0 = PusTcCreator::new_no_app_data(
 //!     SpHeader::new_from_apid(TEST_APID),
 //!     tc_header,
-//!     true
+//!     CreatorConfig::default()
 //! );
 //! let init_token = reporter.start_verification(&pus_tc_0);
 //!
@@ -82,6 +82,7 @@
 //! context involving multiple threads
 use crate::params::{Params, WritableToBeBytes};
 use crate::pus::{EcssTmSender, EcssTmtcError, source_buffer_large_enough};
+use arbitrary_int::{u3, u11, u14};
 use core::fmt::{Debug, Display, Formatter};
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
@@ -90,14 +91,14 @@ use core::mem::size_of;
 use delegate::delegate;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use spacepackets::ecss::EcssEnumeration;
+use spacepackets::SpHeader;
 use spacepackets::ecss::tc::IsPusTelecommand;
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
-use spacepackets::{ByteConversionError, CcsdsPacket, PacketId, PacketSequenceCtrl};
-use spacepackets::{MAX_APID, SpHeader};
+use spacepackets::ecss::{CreatorConfig, EcssEnumeration};
+use spacepackets::{ByteConversionError, CcsdsPacket, PacketId, PacketSequenceControl};
 
 pub use spacepackets::ecss::verification::*;
-pub use spacepackets::seq_count::SeqCountProviderSimple;
+pub use spacepackets::seq_count::SequenceCounterSimple;
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
@@ -113,9 +114,9 @@ use crate::request::Apid;
 #[derive(Debug, Eq, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RequestId {
-    version_number: u8,
+    version_number: u3,
     packet_id: PacketId,
-    psc: PacketSequenceCtrl,
+    psc: PacketSequenceControl,
 }
 
 impl Display for RequestId {
@@ -157,16 +158,18 @@ impl RequestId {
     }
 
     pub fn raw(&self) -> u32 {
-        ((self.version_number as u32) << 29)
+        ((self.version_number.value() as u32) << 29)
             | ((self.packet_id.raw() as u32) << 16)
             | self.psc.raw() as u32
     }
 
-    pub fn packet_id(&self) -> PacketId {
+    #[inline]
+    pub const fn packet_id(&self) -> PacketId {
         self.packet_id
     }
 
-    pub fn packet_seq_ctrl(&self) -> PacketSequenceCtrl {
+    #[inline]
+    pub const fn packet_seq_ctrl(&self) -> PacketSequenceControl {
         self.psc
     }
 
@@ -181,9 +184,9 @@ impl RequestId {
         }
         let raw = u32::from_be_bytes(buf[0..Self::SIZE_AS_BYTES].try_into().unwrap());
         Some(Self {
-            version_number: ((raw >> 29) & 0b111) as u8,
+            version_number: u3::new(((raw >> 29) & 0b111) as u8),
             packet_id: PacketId::from(((raw >> 16) & 0xffff) as u16),
-            psc: PacketSequenceCtrl::from((raw & 0xffff) as u16),
+            psc: PacketSequenceControl::from((raw & 0xffff) as u16),
         })
     }
 }
@@ -191,9 +194,9 @@ impl RequestId {
 impl From<u32> for RequestId {
     fn from(value: u32) -> Self {
         Self {
-            version_number: ((value >> 29) & 0b111) as u8,
+            version_number: u3::new(((value >> 29) & 0b111) as u8),
             packet_id: PacketId::from(((value >> 16) & 0xffff) as u16),
-            psc: PacketSequenceCtrl::from((value & 0xffff) as u16),
+            psc: PacketSequenceControl::from((value & 0xffff) as u16),
         }
     }
 }
@@ -480,26 +483,19 @@ pub trait VerificationReportingProvider {
 #[derive(Debug, Clone)]
 pub struct VerificationReportCreator {
     pub dest_id: u16,
-    apid: u16,
+    apid: u11,
 }
 
 impl VerificationReportCreator {
-    pub fn new(apid: u16) -> Option<Self> {
-        if apid > MAX_APID {
-            return None;
-        }
-        Some(Self { apid, dest_id: 0 })
+    pub fn new(apid: u11) -> Self {
+        Self { apid, dest_id: 0 }
     }
 
-    pub fn set_apid(&mut self, apid: u16) -> bool {
-        if apid > MAX_APID {
-            return false;
-        }
+    pub fn set_apid(&mut self, apid: u11) {
         self.apid = apid;
-        true
     }
 
-    pub fn apid(&self) -> u16 {
+    pub fn apid(&self) -> u11 {
         self.apid
     }
 
@@ -522,7 +518,7 @@ impl VerificationReportCreator {
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
         request_id: &RequestId,
-        seq_count: u16,
+        seq_count: u14,
         msg_count: u16,
         time_stamp: &'time [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
@@ -545,7 +541,7 @@ impl VerificationReportCreator {
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
         request_id: &RequestId,
-        seq_count: u16,
+        seq_count: u14,
         msg_count: u16,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
         params: &FailParams<'time, '_>,
@@ -567,7 +563,7 @@ impl VerificationReportCreator {
         &self,
         src_data_buf: &'src_data mut [u8],
         request_id: &RequestId,
-        seq_count: u16,
+        seq_count: u14,
         msg_count: u16,
         time_stamp: &'time [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
@@ -587,7 +583,7 @@ impl VerificationReportCreator {
         &self,
         src_data_buf: &'src_data mut [u8],
         request_id: &RequestId,
-        seq_count: u16,
+        seq_count: u14,
         msg_count: u16,
         params: FailParams<'time, '_>,
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
@@ -609,7 +605,7 @@ impl VerificationReportCreator {
         &self,
         src_data_buf: &'src_data mut [u8],
         request_id: &RequestId,
-        seq_count: u16,
+        seq_count: u14,
         msg_count: u16,
         time_stamp: &'time [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
@@ -632,7 +628,7 @@ impl VerificationReportCreator {
         &self,
         src_data_buf: &'src_data mut [u8],
         request_id: &RequestId,
-        seq_count: u16,
+        seq_count: u14,
         msg_count: u16,
         params: FailParams<'time, '_>,
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
@@ -654,7 +650,7 @@ impl VerificationReportCreator {
         &self,
         src_data_buf: &'src_data mut [u8],
         request_id: &RequestId,
-        seq_count: u16,
+        seq_count: u14,
         msg_count: u16,
         time_stamp: &'time [u8],
         step: impl EcssEnumeration,
@@ -678,7 +674,7 @@ impl VerificationReportCreator {
         &self,
         src_data_buf: &'src_data mut [u8],
         token: VerificationToken<TcStateStarted>,
-        seq_count: u16,
+        seq_count: u14,
         msg_count: u16,
         params: FailParamsWithStep<'time, '_>,
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
@@ -701,7 +697,7 @@ impl VerificationReportCreator {
         &self,
         src_data_buf: &'src_data mut [u8],
         request_id: &RequestId,
-        seq_counter: u16,
+        seq_counter: u14,
         msg_counter: u16,
         time_stamp: &'time [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
@@ -723,7 +719,7 @@ impl VerificationReportCreator {
         &self,
         src_data_buf: &'src_data mut [u8],
         request_id: &RequestId,
-        seq_count: u16,
+        seq_count: u14,
         msg_count: u16,
         params: FailParams<'time, '_>,
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
@@ -744,7 +740,7 @@ impl VerificationReportCreator {
         &self,
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
-        seq_count: u16,
+        seq_count: u14,
         msg_counter: u16,
         req_id: &RequestId,
         time_stamp: &'time [u8],
@@ -780,7 +776,7 @@ impl VerificationReportCreator {
         &self,
         src_data_buf: &'src_data mut [u8],
         subservice: u8,
-        seq_count: u16,
+        seq_count: u14,
         msg_counter: u16,
         req_id: &RequestId,
         step: Option<&(impl EcssEnumeration + ?Sized)>,
@@ -832,13 +828,14 @@ impl VerificationReportCreator {
             sp_header,
             tm_sec_header,
             &src_data_buf[0..source_data_len],
-            true,
+            CreatorConfig::default(),
         )
     }
 }
 
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
+    use arbitrary_int::traits::Integer as _;
     use spacepackets::ecss::PusError;
 
     use super::*;
@@ -847,7 +844,7 @@ pub mod alloc_mod {
 
     #[derive(Clone)]
     pub struct VerificationReporterConfig {
-        apid: u16,
+        apid: u11,
         pub step_field_width: usize,
         pub fail_code_field_width: usize,
         pub max_fail_data_len: usize,
@@ -855,20 +852,17 @@ pub mod alloc_mod {
 
     impl VerificationReporterConfig {
         pub fn new(
-            apid: u16,
+            apid: u11,
             step_field_width: usize,
             fail_code_field_width: usize,
             max_fail_data_len: usize,
-        ) -> Option<Self> {
-            if apid > MAX_APID {
-                return None;
-            }
-            Some(Self {
+        ) -> Self {
+            Self {
                 apid,
                 step_field_width,
                 fail_code_field_width,
                 max_fail_data_len,
-            })
+            }
         }
     }
 
@@ -880,7 +874,7 @@ pub mod alloc_mod {
         fn modify_tm(&self, tm: &mut PusTmCreator);
     }
 
-    /// [VerificationHookProvider] which does nothing. This is the default hook variant for
+    /// [VerificationHook] which does nothing. This is the default hook variant for
     /// the [VerificationReporter], assuming that any necessary packet manipulation is performed by
     /// a centralized TM funnel or inlet.
     #[derive(Default, Copy, Clone)]
@@ -909,7 +903,7 @@ pub mod alloc_mod {
 
     impl VerificationReporter<DummyVerificationHook> {
         pub fn new(owner_id: ComponentId, cfg: &VerificationReporterConfig) -> Self {
-            let reporter = VerificationReportCreator::new(cfg.apid).unwrap();
+            let reporter = VerificationReportCreator::new(cfg.apid);
             Self {
                 owner_id,
                 source_data_buf: RefCell::new(alloc::vec![
@@ -926,14 +920,14 @@ pub mod alloc_mod {
     }
 
     impl<VerificationHookInstance: VerificationHook> VerificationReporter<VerificationHookInstance> {
-        /// The provided [VerificationHookProvider] can be used to modify a verification packet
+        /// The provided [VerificationHook] can be used to modify a verification packet
         /// before it is sent.
         pub fn new_with_hook(
             owner_id: ComponentId,
             cfg: &VerificationReporterConfig,
             tm_hook: VerificationHookInstance,
         ) -> Self {
-            let reporter = VerificationReportCreator::new(cfg.apid).unwrap();
+            let reporter = VerificationReportCreator::new(cfg.apid);
             Self {
                 owner_id,
                 source_data_buf: RefCell::new(alloc::vec![
@@ -966,8 +960,8 @@ pub mod alloc_mod {
 
         delegate!(
             to self.reporter_creator {
-                pub fn set_apid(&mut self, apid: u16) -> bool;
-                pub fn apid(&self) -> u16;
+                pub fn set_apid(&mut self, apid: u11);
+                pub fn apid(&self) -> u11;
                 pub fn dest_id(&self) -> u16;
                 pub fn set_dest_id(&mut self, dest_id: u16);
             }
@@ -1012,7 +1006,7 @@ pub mod alloc_mod {
                 .acceptance_success(
                     source_data_buf.as_mut_slice(),
                     &token.request_id(),
-                    0,
+                    u14::ZERO,
                     0,
                     time_stamp,
                 )
@@ -1032,7 +1026,13 @@ pub mod alloc_mod {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
                 .reporter_creator
-                .acceptance_failure(buf.as_mut_slice(), &token.request_id(), 0, 0, params)
+                .acceptance_failure(
+                    buf.as_mut_slice(),
+                    &token.request_id(),
+                    u14::ZERO,
+                    0,
+                    params,
+                )
                 .map_err(PusError::ByteConversion)?;
             self.tm_hook.modify_tm(&mut tm_creator);
             sender.send_tm(self.owner_id(), PusTmVariant::Direct(tm_creator))?;
@@ -1051,7 +1051,13 @@ pub mod alloc_mod {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
                 .reporter_creator
-                .start_success(buf.as_mut_slice(), &token.request_id(), 0, 0, time_stamp)
+                .start_success(
+                    buf.as_mut_slice(),
+                    &token.request_id(),
+                    u14::ZERO,
+                    0,
+                    time_stamp,
+                )
                 .map_err(PusError::ByteConversion)?;
             self.tm_hook.modify_tm(&mut tm_creator);
             sender.send_tm(self.owner_id(), PusTmVariant::Direct(tm_creator))?;
@@ -1071,7 +1077,13 @@ pub mod alloc_mod {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
                 .reporter_creator
-                .start_failure(buf.as_mut_slice(), &token.request_id(), 0, 0, params)
+                .start_failure(
+                    buf.as_mut_slice(),
+                    &token.request_id(),
+                    u14::ZERO,
+                    0,
+                    params,
+                )
                 .map_err(PusError::ByteConversion)?;
             self.tm_hook.modify_tm(&mut tm_creator);
             sender.send_tm(self.owner_id(), PusTmVariant::Direct(tm_creator))?;
@@ -1094,7 +1106,7 @@ pub mod alloc_mod {
                 .step_success(
                     buf.as_mut_slice(),
                     &token.request_id(),
-                    0,
+                    u14::ZERO,
                     0,
                     time_stamp,
                     step,
@@ -1118,7 +1130,7 @@ pub mod alloc_mod {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
                 .reporter_creator
-                .step_failure(buf.as_mut_slice(), token, 0, 0, params)
+                .step_failure(buf.as_mut_slice(), token, u14::ZERO, 0, params)
                 .map_err(PusError::ByteConversion)?;
             self.tm_hook.modify_tm(&mut tm_creator);
             sender.send_tm(self.owner_id(), PusTmVariant::Direct(tm_creator))?;
@@ -1139,7 +1151,13 @@ pub mod alloc_mod {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
                 .reporter_creator
-                .completion_success(buf.as_mut_slice(), &token.request_id(), 0, 0, time_stamp)
+                .completion_success(
+                    buf.as_mut_slice(),
+                    &token.request_id(),
+                    u14::ZERO,
+                    0,
+                    time_stamp,
+                )
                 .map_err(PusError::ByteConversion)?;
             self.tm_hook.modify_tm(&mut tm_creator);
             sender.send_tm(self.owner_id, PusTmVariant::Direct(tm_creator))?;
@@ -1159,7 +1177,13 @@ pub mod alloc_mod {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
                 .reporter_creator
-                .completion_failure(buf.as_mut_slice(), &token.request_id(), 0, 00, params)
+                .completion_failure(
+                    buf.as_mut_slice(),
+                    &token.request_id(),
+                    u14::ZERO,
+                    0,
+                    params,
+                )
                 .map_err(PusError::ByteConversion)?;
             self.tm_hook.modify_tm(&mut tm_creator);
             sender.send_tm(self.owner_id(), PusTmVariant::Direct(tm_creator))?;
@@ -1309,6 +1333,7 @@ pub fn handle_step_failure_with_generic_params(
 #[cfg(any(feature = "test_util", test))]
 pub mod test_util {
     use alloc::vec::Vec;
+    use arbitrary_int::traits::Integer;
     use core::cell::RefCell;
     use std::collections::VecDeque;
 
@@ -1370,7 +1395,7 @@ pub mod test_util {
         fn set_apid(&mut self, _apid: Apid) {}
 
         fn apid(&self) -> Apid {
-            0
+            Apid::ZERO
         }
 
         fn acceptance_success(
@@ -1698,13 +1723,15 @@ pub mod tests {
     };
     use crate::pus::{ChannelWithId, PusTmVariant};
     use crate::request::MessageMetadata;
-    use crate::spacepackets::seq_count::{CcsdsSimpleSeqCountProvider, SequenceCountProvider};
+    use crate::spacepackets::seq_count::{SequenceCounter, SequenceCounterCcsdsSimple};
     use crate::tmtc::{PacketSenderWithSharedPool, SharedPacketPool};
     use alloc::format;
     use alloc::string::ToString;
+    use arbitrary_int::traits::Integer;
+    use arbitrary_int::{u11, u14};
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::{
-        EcssEnumU8, EcssEnumU16, EcssEnumU32, EcssEnumeration, PusError, PusPacket,
+        CreatorConfig, EcssEnumU8, EcssEnumU16, EcssEnumU32, EcssEnumeration, PusError, PusPacket,
         WritablePusPacket,
     };
     use spacepackets::util::UnsignedEnum;
@@ -1716,7 +1743,7 @@ pub mod tests {
     use std::vec::Vec;
 
     use super::{
-        DummyVerificationHook, FailParamHelper, SeqCountProviderSimple, TcStateAccepted,
+        DummyVerificationHook, FailParamHelper, SequenceCounterSimple, TcStateAccepted,
         TcStateStarted, VerificationHook, VerificationReportingProvider, WasAtLeastAccepted,
         handle_completion_failure_with_generic_params,
     };
@@ -1783,13 +1810,13 @@ pub mod tests {
 
     #[derive(Default)]
     pub struct SequenceCounterHook {
-        pub seq_counter: CcsdsSimpleSeqCountProvider,
-        pub msg_counter: SeqCountProviderSimple<u16>,
+        pub seq_counter: SequenceCounterCcsdsSimple,
+        pub msg_counter: SequenceCounterSimple<u16>,
     }
 
     impl VerificationHook for SequenceCounterHook {
         fn modify_tm(&self, tm: &mut spacepackets::ecss::tm::PusTmCreator) {
-            tm.set_seq_count(self.seq_counter.get_and_increment());
+            tm.set_seq_count(u14::new(self.seq_counter.get_and_increment()));
             tm.set_msg_counter(self.msg_counter.get_and_increment());
         }
     }
@@ -1805,7 +1832,7 @@ pub mod tests {
     }
 
     fn base_reporter(id: ComponentId, max_fail_data_len: usize) -> VerificationReporter {
-        let cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, max_fail_data_len).unwrap();
+        let cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, max_fail_data_len);
         VerificationReporter::new(id, &cfg)
     }
 
@@ -1813,7 +1840,7 @@ pub mod tests {
         id: ComponentId,
         hook: VerificationHookInstance,
     ) -> VerificationReporter<VerificationHookInstance> {
-        let cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8).unwrap();
+        let cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8);
         VerificationReporter::new_with_hook(id, &cfg, hook)
     }
 
@@ -1912,7 +1939,14 @@ pub mod tests {
         fn check_acceptance_success(&self, timestamp: &[u8; 7]) {
             let cmp_info = TmInfo {
                 requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo::new(1, TEST_APID, 0, 0, self.reporter.dest_id(), timestamp),
+                common: CommonTmInfo::new(
+                    1,
+                    TEST_APID,
+                    u14::ZERO,
+                    0,
+                    self.reporter.dest_id(),
+                    timestamp,
+                ),
                 additional_data: None,
             };
             let mut service_queue = self.sender.service_queue.borrow_mut();
@@ -1921,7 +1955,7 @@ pub mod tests {
             assert_eq!(info, cmp_info);
         }
 
-        fn check_start_success(&mut self, seq_count: u16, msg_counter: u16, timestamp: &[u8]) {
+        fn check_start_success(&mut self, seq_count: u14, msg_counter: u16, timestamp: &[u8]) {
             let mut srv_queue = self.sender.service_queue.borrow_mut();
             let cmp_info = TmInfo {
                 requestor: MessageMetadata::new(self.request_id.into(), self.id),
@@ -1939,7 +1973,7 @@ pub mod tests {
             assert_eq!(info, cmp_info);
         }
 
-        fn check_completion_success(&mut self, seq_count: u16, msg_counter: u16) {
+        fn check_completion_success(&mut self, seq_count: u14, msg_counter: u16) {
             let cmp_info = TmInfo {
                 requestor: MessageMetadata::new(self.request_id.into(), self.id),
                 common: CommonTmInfo::new(
@@ -1972,7 +2006,14 @@ pub mod tests {
         fn check_acceptance_failure(&mut self, timestamp: &[u8; 7]) {
             let cmp_info = TmInfo {
                 requestor: MessageMetadata::new(self.request_id.into(), self.id),
-                common: CommonTmInfo::new(2, TEST_APID, 0, 0, self.reporter.dest_id(), timestamp),
+                common: CommonTmInfo::new(
+                    2,
+                    TEST_APID,
+                    u14::ZERO,
+                    0,
+                    self.reporter.dest_id(),
+                    timestamp,
+                ),
                 additional_data: Some([0, 2].to_vec()),
             };
             let service_queue = self.sender.service_queue.get_mut();
@@ -2060,9 +2101,9 @@ pub mod tests {
     }
 
     fn create_generic_ping() -> PusTcCreator<'static> {
-        let sph = SpHeader::new_for_unseg_tc(TEST_APID, 0x34, 0);
+        let sph = SpHeader::new_for_unseg_tc(TEST_APID, u14::new(0x34), 0);
         let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-        PusTcCreator::new(sph, tc_header, &[], true)
+        PusTcCreator::new(sph, tc_header, &[], CreatorConfig::default())
     }
 
     #[test]
@@ -2082,8 +2123,8 @@ pub mod tests {
     fn test_state() {
         let mut testbench = VerificationReporterTestbench::new(0, create_generic_ping(), 16);
         assert_eq!(testbench.reporter.apid(), TEST_APID);
-        testbench.reporter.set_apid(TEST_APID + 1);
-        assert_eq!(testbench.reporter.apid(), TEST_APID + 1);
+        testbench.reporter.set_apid(u11::new(TEST_APID.value() + 1));
+        assert_eq!(testbench.reporter.apid().value(), TEST_APID.value() + 1);
     }
 
     #[test]
@@ -2233,7 +2274,7 @@ pub mod tests {
             .expect("step 1 failed");
         assert_eq!(testbench.sender.service_queue.borrow().len(), 4);
         testbench.check_acceptance_success(&EMPTY_STAMP);
-        testbench.check_start_success(0, 0, &EMPTY_STAMP);
+        testbench.check_start_success(u14::ZERO, 0, &EMPTY_STAMP);
         testbench.check_step_success(0, &EMPTY_STAMP);
         testbench.check_step_success(1, &EMPTY_STAMP);
     }
@@ -2267,7 +2308,7 @@ pub mod tests {
             .step_failure(started_token, fail_params)
             .expect("Step failure failed");
         testbench.check_acceptance_success(&EMPTY_STAMP);
-        testbench.check_start_success(0, 0, DUMMY_STAMP);
+        testbench.check_start_success(u14::ZERO, 0, DUMMY_STAMP);
         testbench.check_step_success(0, &EMPTY_STAMP);
         testbench.check_step_failure(&fail_step, &fail_code, &fail_data_raw);
     }
@@ -2289,7 +2330,7 @@ pub mod tests {
             .completion_failure(started_token, fail_params)
             .expect("Completion failure");
         testbench.check_acceptance_success(&EMPTY_STAMP);
-        testbench.check_start_success(0, 0, DUMMY_STAMP);
+        testbench.check_start_success(u14::ZERO, 0, DUMMY_STAMP);
 
         testbench.check_completion_failure(&fail_code, &[]);
     }
@@ -2309,8 +2350,8 @@ pub mod tests {
             .completion_success(started_token, &EMPTY_STAMP)
             .expect("Sending completion success failed");
         testbench.check_acceptance_success(&EMPTY_STAMP);
-        testbench.check_start_success(0, 0, DUMMY_STAMP);
-        testbench.check_completion_success(0, 0);
+        testbench.check_start_success(u14::ZERO, 0, DUMMY_STAMP);
+        testbench.check_completion_success(u14::ZERO, 0);
     }
 
     #[test]
@@ -2331,8 +2372,8 @@ pub mod tests {
             .completion_success(started_token, &EMPTY_STAMP)
             .expect("Sending completion success failed");
         testbench.check_acceptance_success(&EMPTY_STAMP);
-        testbench.check_start_success(1, 1, DUMMY_STAMP);
-        testbench.check_completion_success(2, 2);
+        testbench.check_start_success(u14::new(1), 1, DUMMY_STAMP);
+        testbench.check_completion_success(u14::new(2), 2);
     }
 
     #[test]
@@ -2391,7 +2432,7 @@ pub mod tests {
         );
         assert!(result.unwrap());
         testbench.check_acceptance_success(&EMPTY_STAMP);
-        testbench.check_start_success(0, 0, &EMPTY_STAMP);
+        testbench.check_start_success(u14::ZERO, 0, &EMPTY_STAMP);
         testbench.check_step_failure(&step, &fail_code, fail_data.as_bytes());
     }
 

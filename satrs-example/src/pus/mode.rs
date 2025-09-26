@@ -1,5 +1,8 @@
+use arbitrary_int::traits::Integer as _;
+use arbitrary_int::u14;
 use derive_new::new;
 use satrs::mode_tree::{ModeNode, ModeParent};
+use satrs::spacepackets::ecss::CreatorConfig;
 use satrs_example::ids;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -77,10 +80,15 @@ impl PusReplyHandler<ActivePusRequestStd, ModeReply> for ModeReplyHandler {
                     .write_to_be_bytes(&mut source_data)
                     .expect("writing mode reply failed");
                 let req_id = verification::RequestId::from(reply.request_id());
-                let sp_header = SpHeader::new_for_unseg_tm(req_id.packet_id().apid(), 0, 0);
+                let sp_header = SpHeader::new_for_unseg_tm(req_id.packet_id().apid(), u14::ZERO, 0);
                 let sec_header =
                     PusTmSecondaryHeader::new(200, Subservice::TmModeReply as u8, 0, 0, time_stamp);
-                let pus_tm = PusTmCreator::new(sp_header, sec_header, &source_data, true);
+                let pus_tm = PusTmCreator::new(
+                    sp_header,
+                    sec_header,
+                    &source_data,
+                    CreatorConfig::default(),
+                );
                 tm_sender.send_tm(self.owner_id, PusTmVariant::Direct(pus_tm))?;
                 verification_handler.completion_success(tm_sender, started_token, time_stamp)?;
             }
@@ -290,8 +298,11 @@ impl TargetedPusService for ModeServiceWrapper {
 
 #[cfg(test)]
 mod tests {
+    use arbitrary_int::traits::Integer;
+    use arbitrary_int::u14;
     use satrs::pus::test_util::{TEST_APID, TEST_COMPONENT_ID_0, TEST_UNIQUE_ID_0};
     use satrs::request::MessageMetadata;
+    use satrs::spacepackets::ecss::CreatorConfig;
     use satrs::{
         mode::{ModeAndSubmode, ModeReply, ModeRequest},
         pus::mode::Subservice,
@@ -314,11 +325,11 @@ mod tests {
     fn mode_converter_read_mode_request() {
         let mut testbench =
             PusConverterTestbench::new(TEST_COMPONENT_ID_0.id(), ModeRequestConverter::default());
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(200, Subservice::TcReadMode as u8);
         let mut app_data: [u8; 4] = [0; 4];
         app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.to_be_bytes());
-        let tc = PusTcCreator::new(sp_header, sec_header, &app_data, true);
+        let tc = PusTcCreator::new(sp_header, sec_header, &app_data, CreatorConfig::default());
         let token = testbench.add_tc(&tc);
         let (_active_req, req) = testbench
             .convert(token, &[], TEST_APID, TEST_UNIQUE_ID_0)
@@ -330,7 +341,7 @@ mod tests {
     fn mode_converter_set_mode_request() {
         let mut testbench =
             PusConverterTestbench::new(TEST_COMPONENT_ID_0.id(), ModeRequestConverter::default());
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(200, Subservice::TcSetMode as u8);
         let mut app_data: [u8; 4 + ModeAndSubmode::RAW_LEN] = [0; 4 + ModeAndSubmode::RAW_LEN];
         let mode_and_submode = ModeAndSubmode::new(2, 1);
@@ -338,7 +349,7 @@ mod tests {
         mode_and_submode
             .write_to_be_bytes(&mut app_data[4..])
             .unwrap();
-        let tc = PusTcCreator::new(sp_header, sec_header, &app_data, true);
+        let tc = PusTcCreator::new(sp_header, sec_header, &app_data, CreatorConfig::default());
         let token = testbench.add_tc(&tc);
         let (_active_req, req) = testbench
             .convert(token, &[], TEST_APID, TEST_UNIQUE_ID_0)
@@ -356,11 +367,11 @@ mod tests {
     fn mode_converter_announce_mode() {
         let mut testbench =
             PusConverterTestbench::new(TEST_COMPONENT_ID_0.id(), ModeRequestConverter::default());
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(200, Subservice::TcAnnounceMode as u8);
         let mut app_data: [u8; 4] = [0; 4];
         app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.to_be_bytes());
-        let tc = PusTcCreator::new(sp_header, sec_header, &app_data, true);
+        let tc = PusTcCreator::new(sp_header, sec_header, &app_data, CreatorConfig::default());
         let token = testbench.add_tc(&tc);
         let (_active_req, req) = testbench
             .convert(token, &[], TEST_APID, TEST_UNIQUE_ID_0)
@@ -372,12 +383,12 @@ mod tests {
     fn mode_converter_announce_mode_recursively() {
         let mut testbench =
             PusConverterTestbench::new(TEST_COMPONENT_ID_0.id(), ModeRequestConverter::default());
-        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+        let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let sec_header =
             PusTcSecondaryHeader::new_simple(200, Subservice::TcAnnounceModeRecursive as u8);
         let mut app_data: [u8; 4] = [0; 4];
         app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.to_be_bytes());
-        let tc = PusTcCreator::new(sp_header, sec_header, &app_data, true);
+        let tc = PusTcCreator::new(sp_header, sec_header, &app_data, CreatorConfig::default());
         let token = testbench.add_tc(&tc);
         let (_active_req, req) = testbench
             .convert(token, &[], TEST_APID, TEST_UNIQUE_ID_0)

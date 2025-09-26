@@ -1,3 +1,4 @@
+use arbitrary_int::u11;
 use lazy_static::lazy_static;
 use satrs::{
     res_code::ResultU16,
@@ -44,7 +45,7 @@ lazy_static! {
     pub static ref PACKET_ID_VALIDATOR: HashSet<PacketId> = {
         let mut set = HashSet::new();
         for id in crate::ids::Apid::iter() {
-            set.insert(PacketId::new(PacketType::Tc, true, id as u16));
+            set.insert(PacketId::new(PacketType::Tc, true, u11::new(id as u16)));
         }
         set
     };

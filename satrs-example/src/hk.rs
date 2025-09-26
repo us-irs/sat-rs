@@ -1,8 +1,8 @@
 use derive_new::new;
 use satrs::hk::UniqueId;
 use satrs::request::UniqueApidTargetId;
-use satrs::spacepackets::ecss::hk;
 use satrs::spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
+use satrs::spacepackets::ecss::{hk, CreatorConfig};
 use satrs::spacepackets::{ByteConversionError, SpHeader};
 
 #[derive(Debug, new, Copy, Clone)]
@@ -63,7 +63,7 @@ impl PusHkHelper {
             SpHeader::new_from_apid(self.component_id.apid),
             sec_header,
             &buf[0..8 + hk_data_len],
-            true,
+            CreatorConfig::default(),
         ))
     }
 }

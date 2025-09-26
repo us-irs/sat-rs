@@ -183,10 +183,11 @@ mod tests {
     };
 
     use alloc::sync::Arc;
+    use arbitrary_int::u11;
     use hashbrown::HashSet;
     use spacepackets::{
         CcsdsPacket, PacketId, SpHeader,
-        ecss::{WritablePusPacket, tc::PusTcCreator},
+        ecss::{CreatorConfig, WritablePusPacket, tc::PusTcCreator},
     };
 
     use crate::{
@@ -203,9 +204,9 @@ mod tests {
     use super::TcpSpacepacketsServer;
 
     const TCP_SERVER_ID: ComponentId = 0x05;
-    const TEST_APID_0: u16 = 0x02;
+    const TEST_APID_0: u11 = u11::new(0x02);
     const TEST_PACKET_ID_0: PacketId = PacketId::new_for_tc(true, TEST_APID_0);
-    const TEST_APID_1: u16 = 0x10;
+    const TEST_APID_1: u11 = u11::new(0x10);
     const TEST_PACKET_ID_1: PacketId = PacketId::new_for_tc(true, TEST_APID_1);
 
     #[derive(Default)]
@@ -283,8 +284,13 @@ mod tests {
                 .check_no_connections_left();
             set_if_done.store(true, Ordering::Relaxed);
         });
-        let ping_tc =
-            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_0), 17, 1, &[], true);
+        let ping_tc = PusTcCreator::new_simple(
+            SpHeader::new_from_apid(TEST_APID_0),
+            17,
+            1,
+            &[],
+            CreatorConfig::default(),
+        );
         let tc_0 = ping_tc.to_vec().expect("packet generation failed");
         let mut stream = TcpStream::connect(dest_addr).expect("connecting to TCP server failed");
         stream
@@ -314,13 +320,23 @@ mod tests {
 
         // Add telemetry
         let mut total_tm_len = 0;
-        let verif_tm =
-            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_0), 1, 1, &[], true);
+        let verif_tm = PusTcCreator::new_simple(
+            SpHeader::new_from_apid(TEST_APID_0),
+            1,
+            1,
+            &[],
+            CreatorConfig::default(),
+        );
         let tm_0 = verif_tm.to_vec().expect("writing packet failed");
         total_tm_len += tm_0.len();
         tm_source.add_tm(&tm_0);
-        let verif_tm =
-            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_1), 1, 3, &[], true);
+        let verif_tm = PusTcCreator::new_simple(
+            SpHeader::new_from_apid(TEST_APID_1),
+            1,
+            3,
+            &[],
+            CreatorConfig::default(),
+        );
         let tm_1 = verif_tm.to_vec().expect("writing packet failed");
         total_tm_len += tm_1.len();
         tm_source.add_tm(&tm_1);
@@ -366,14 +382,24 @@ mod tests {
             .expect("setting reas timeout failed");
 
         // Send telecommands
-        let ping_tc =
-            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_0), 17, 1, &[], true);
+        let ping_tc = PusTcCreator::new_simple(
+            SpHeader::new_from_apid(TEST_APID_0),
+            17,
+            1,
+            &[],
+            CreatorConfig::default(),
+        );
         let tc_0 = ping_tc.to_vec().expect("ping tc creation failed");
         stream
             .write_all(&tc_0)
             .expect("writing to TCP server failed");
-        let action_tc =
-            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_1), 8, 0, &[], true);
+        let action_tc = PusTcCreator::new_simple(
+            SpHeader::new_from_apid(TEST_APID_1),
+            8,
+            0,
+            &[],
+            CreatorConfig::default(),
+        );
         let tc_1 = action_tc.to_vec().expect("action tc creation failed");
         stream
             .write_all(&tc_1)

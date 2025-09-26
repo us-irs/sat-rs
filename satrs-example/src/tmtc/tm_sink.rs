@@ -3,18 +3,17 @@ use std::{
     sync::mpsc::{self},
 };
 
+use arbitrary_int::{u11, u14};
 use log::info;
 use satrs::{
     pool::PoolProvider,
     spacepackets::{
         ecss::{tm::PusTmZeroCopyWriter, PusPacket},
-        seq_count::CcsdsSimpleSeqCountProvider,
+        seq_count::SequenceCounter,
+        seq_count::SequenceCounterCcsdsSimple,
         time::cds::MIN_CDS_FIELD_LEN,
         CcsdsPacket,
     },
-};
-use satrs::{
-    spacepackets::seq_count::SequenceCountProvider,
     tmtc::{PacketAsVec, PacketInPool, SharedPacketPool},
 };
 
@@ -22,14 +21,16 @@ use crate::interface::tcp::SyncTcpTmSource;
 
 #[derive(Default)]
 pub struct CcsdsSeqCounterMap {
-    apid_seq_counter_map: HashMap<u16, CcsdsSimpleSeqCountProvider>,
+    apid_seq_counter_map: HashMap<u11, SequenceCounterCcsdsSimple>,
 }
 impl CcsdsSeqCounterMap {
-    pub fn get_and_increment(&mut self, apid: u16) -> u16 {
-        self.apid_seq_counter_map
-            .entry(apid)
-            .or_default()
-            .get_and_increment()
+    pub fn get_and_increment(&mut self, apid: u11) -> u14 {
+        u14::new(
+            self.apid_seq_counter_map
+                .entry(apid)
+                .or_default()
+                .get_and_increment(),
+        )
     }
 }
 
@@ -114,7 +115,7 @@ impl TmSinkStatic {
             let mut tm_copy = Vec::new();
             pool_guard
                 .modify(&pus_tm_in_pool.store_addr, |buf| {
-                    let zero_copy_writer = PusTmZeroCopyWriter::new(buf, MIN_CDS_FIELD_LEN)
+                    let zero_copy_writer = PusTmZeroCopyWriter::new(buf, MIN_CDS_FIELD_LEN, true)
                         .expect("Creating TM zero copy writer failed");
                     self.common.apply_packet_processing(zero_copy_writer);
                     tm_copy = buf.to_vec()
@@ -154,8 +155,9 @@ impl TmSinkDynamic {
         if let Ok(mut tm) = self.tm_funnel_rx.recv() {
             // Read the TM, set sequence counter and message counter, and finally update
             // the CRC.
-            let zero_copy_writer = PusTmZeroCopyWriter::new(&mut tm.packet, MIN_CDS_FIELD_LEN)
-                .expect("Creating TM zero copy writer failed");
+            let zero_copy_writer =
+                PusTmZeroCopyWriter::new(&mut tm.packet, MIN_CDS_FIELD_LEN, true)
+                    .expect("Creating TM zero copy writer failed");
             self.common.apply_packet_processing(zero_copy_writer);
             self.common.sync_tm_tcp_source.add_tm(&tm.packet);
             self.tm_server_tx

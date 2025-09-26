@@ -1,4 +1,4 @@
-use spacepackets::{CcsdsPacket, SpHeader};
+use spacepackets::SpHeader;
 
 use crate::{ComponentId, tmtc::PacketSenderRaw};
 
@@ -63,7 +63,7 @@ pub fn parse_buffer_for_ccsds_space_packets<SendError>(
         let sp_header = SpHeader::from_be_bytes(&buf[current_idx..]).unwrap().0;
         match packet_validator.validate(&sp_header, &buf[current_idx..]) {
             SpValidity::Valid => {
-                let packet_size = sp_header.total_len();
+                let packet_size = sp_header.packet_len();
                 if (current_idx + packet_size) <= buf_len {
                     packet_sender
                         .send_packet(sender_id, &buf[current_idx..current_idx + packet_size])?;
@@ -76,7 +76,7 @@ pub fn parse_buffer_for_ccsds_space_packets<SendError>(
                 continue;
             }
             SpValidity::Skip => {
-                current_idx += sp_header.total_len();
+                current_idx += sp_header.packet_len();
             }
             // We might have lost sync. Try to find the start of a new space packet header.
             SpValidity::Invalid => {
@@ -89,9 +89,10 @@ pub fn parse_buffer_for_ccsds_space_packets<SendError>(
 
 #[cfg(test)]
 mod tests {
+    use arbitrary_int::{u11, u14};
     use spacepackets::{
-        CcsdsPacket, PacketId, PacketSequenceCtrl, PacketType, SequenceFlags, SpHeader,
-        ecss::tc::PusTcCreator,
+        CcsdsPacket, PacketId, PacketSequenceControl, PacketType, SequenceFlags, SpHeader,
+        ecss::{CreatorConfig, tc::PusTcCreator},
     };
 
     use crate::{ComponentId, encoding::tests::TcCacher};
@@ -99,8 +100,8 @@ mod tests {
     use super::{SpValidity, SpacePacketValidator, parse_buffer_for_ccsds_space_packets};
 
     const PARSER_ID: ComponentId = 0x05;
-    const TEST_APID_0: u16 = 0x02;
-    const TEST_APID_1: u16 = 0x10;
+    const TEST_APID_0: u11 = u11::new(0x02);
+    const TEST_APID_1: u11 = u11::new(0x10);
     const TEST_PACKET_ID_0: PacketId = PacketId::new_for_tc(true, TEST_APID_0);
     const TEST_PACKET_ID_1: PacketId = PacketId::new_for_tc(true, TEST_APID_1);
 
@@ -131,7 +132,7 @@ mod tests {
     #[test]
     fn test_basic() {
         let sph = SpHeader::new_from_apid(TEST_APID_0);
-        let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
+        let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], CreatorConfig::default());
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len = ping_tc
             .write_to_bytes(&mut buffer)
@@ -156,8 +157,8 @@ mod tests {
     #[test]
     fn test_multi_packet() {
         let sph = SpHeader::new_from_apid(TEST_APID_0);
-        let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
-        let action_tc = PusTcCreator::new_simple(sph, 8, 0, &[], true);
+        let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], CreatorConfig::default());
+        let action_tc = PusTcCreator::new_simple(sph, 8, 0, &[], CreatorConfig::default());
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len_ping = ping_tc
             .write_to_bytes(&mut buffer)
@@ -191,9 +192,9 @@ mod tests {
     #[test]
     fn test_multi_apid() {
         let sph = SpHeader::new_from_apid(TEST_APID_0);
-        let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], true);
+        let ping_tc = PusTcCreator::new_simple(sph, 17, 1, &[], CreatorConfig::default());
         let sph = SpHeader::new_from_apid(TEST_APID_1);
-        let action_tc = PusTcCreator::new_simple(sph, 8, 0, &[], true);
+        let action_tc = PusTcCreator::new_simple(sph, 8, 0, &[], CreatorConfig::default());
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len_ping = ping_tc
             .write_to_bytes(&mut buffer)
@@ -221,10 +222,20 @@ mod tests {
 
     #[test]
     fn test_split_packet_multi() {
-        let ping_tc =
-            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_0), 17, 1, &[], true);
-        let action_tc =
-            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_1), 8, 0, &[], true);
+        let ping_tc = PusTcCreator::new_simple(
+            SpHeader::new_from_apid(TEST_APID_0),
+            17,
+            1,
+            &[],
+            CreatorConfig::default(),
+        );
+        let action_tc = PusTcCreator::new_simple(
+            SpHeader::new_from_apid(TEST_APID_1),
+            8,
+            0,
+            &[],
+            CreatorConfig::default(),
+        );
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len_ping = ping_tc
             .write_to_bytes(&mut buffer)
@@ -255,8 +266,13 @@ mod tests {
 
     #[test]
     fn test_one_split_packet() {
-        let ping_tc =
-            PusTcCreator::new_simple(SpHeader::new_from_apid(TEST_APID_0), 17, 1, &[], true);
+        let ping_tc = PusTcCreator::new_simple(
+            SpHeader::new_from_apid(TEST_APID_0),
+            17,
+            1,
+            &[],
+            CreatorConfig::default(),
+        );
         let mut buffer: [u8; 32] = [0; 32];
         let packet_len_ping = ping_tc
             .write_to_bytes(&mut buffer)
@@ -281,7 +297,7 @@ mod tests {
     fn test_smallest_packet() {
         let ccsds_header_only = SpHeader::new(
             PacketId::new(PacketType::Tc, true, TEST_APID_0),
-            PacketSequenceCtrl::new(SequenceFlags::Unsegmented, 0),
+            PacketSequenceControl::new(SequenceFlags::Unsegmented, u14::new(0)),
             0,
         );
         let mut buf: [u8; 7] = [0; 7];

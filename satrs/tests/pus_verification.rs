@@ -1,5 +1,7 @@
 #[cfg(feature = "crossbeam")]
 pub mod crossbeam_test {
+    use arbitrary_int::traits::Integer as _;
+    use arbitrary_int::u14;
     use hashbrown::HashMap;
     use satrs::pool::{PoolProvider, PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
     use satrs::pus::test_util::{TEST_APID, TEST_COMPONENT_ID_0};
@@ -11,7 +13,7 @@ pub mod crossbeam_test {
     use spacepackets::SpHeader;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTmReader;
-    use spacepackets::ecss::{EcssEnumU8, EcssEnumU16, PusPacket, WritablePusPacket};
+    use spacepackets::ecss::{CreatorConfig, EcssEnumU8, EcssEnumU16, WritablePusPacket};
     use std::sync::RwLock;
     use std::thread;
     use std::time::Duration;
@@ -31,7 +33,7 @@ pub mod crossbeam_test {
         // We use a synced sequence count provider here because both verification reporters have the
         // the same APID. If they had distinct APIDs, the more correct approach would be to have
         // each reporter have an own sequence count provider.
-        let cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8).unwrap();
+        let cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8);
         // Shared pool object to store the verification PUS telemetry
         let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(
             vec![(10, 32), (10, 64), (10, 128), (10, 1024)],
@@ -57,9 +59,9 @@ pub mod crossbeam_test {
         let (tx_tc_1, rx_tc_1) = crossbeam_channel::bounded(3);
         {
             let mut tc_guard = shared_tc_pool.write().unwrap();
-            let sph = SpHeader::new_for_unseg_tc(TEST_APID, 0, 0);
+            let sph = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
             let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
-            let pus_tc_0 = PusTcCreator::new_no_app_data(sph, tc_header, true);
+            let pus_tc_0 = PusTcCreator::new_no_app_data(sph, tc_header, CreatorConfig::default());
             req_id_0 = RequestId::new(&pus_tc_0);
             let addr = tc_guard
                 .free_element(pus_tc_0.len_written(), |buf| {
@@ -67,9 +69,9 @@ pub mod crossbeam_test {
                 })
                 .unwrap();
             tx_tc_0.send(addr).unwrap();
-            let sph = SpHeader::new_for_unseg_tc(TEST_APID, 1, 0);
+            let sph = SpHeader::new_for_unseg_tc(TEST_APID, u14::new(1), 0);
             let tc_header = PusTcSecondaryHeader::new_simple(5, 1);
-            let pus_tc_1 = PusTcCreator::new_no_app_data(sph, tc_header, true);
+            let pus_tc_1 = PusTcCreator::new_no_app_data(sph, tc_header, CreatorConfig::default());
             req_id_1 = RequestId::new(&pus_tc_1);
             let addr = tc_guard
                 .free_element(pus_tc_0.len_written(), |buf| {

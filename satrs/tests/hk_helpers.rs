@@ -2,8 +2,8 @@
 use core::mem::size_of;
 use serde::{Deserialize, Serialize};
 use spacepackets::ecss::{PfcReal, PfcUnsigned, Ptc};
+use spacepackets::time::CcsdsTimeProvider;
 use spacepackets::time::cds::CdsTime;
-use spacepackets::time::{CcsdsTimeProvider, TimeWriter};
 
 enum NumOfParamsInfo {
     /// The parameter entry is a scalar field
