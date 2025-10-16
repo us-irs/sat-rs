@@ -1,7 +1,7 @@
 use crate::pus::create_verification_reporter;
 use crate::tmtc::sender::TmTcSender;
 use log::info;
-use satrs::event_man::{EventMessage, EventMessageU32};
+use satrs::event_man_legacy::{EventMessage, EventMessageU32};
 use satrs::pus::test::PusService17TestHandler;
 use satrs::pus::verification::{FailParams, VerificationReporter, VerificationReportingProvider};
 use satrs::pus::PartialPusHandlingError;

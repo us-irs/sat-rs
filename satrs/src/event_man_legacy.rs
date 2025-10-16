@@ -1,4 +1,6 @@
-//! Event management and forwarding
+//! # Event management and forwarding
+//!
+//! This is a legacy module. It is recommended to use [super::event_man] instead.
 //!
 //! It is recommended to read the
 //! [sat-rs book chapter](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/book/events.html)
@@ -8,25 +10,25 @@
 //! task is the [EventManager]. It receives all events and then routes them to event subscribers
 //! where appropriate.
 //!
-//! The event manager has a listener table abstracted by the [ListenerMap], which maps
+//! The event manager has a listener table abstracted by the [ListenerMapProvider], which maps
 //! listener groups identified by [ListenerKey]s to a [listener ID][ComponentId].
-//! It also contains a sender table abstracted by the [SenderMap] which maps these sender
-//! IDs to concrete [EventSender]s. A simple approach would be to use one send event provider
+//! It also contains a sender table abstracted by the [SenderMapProvider] which maps these sender
+//! IDs to concrete [EventSendProvider]s. A simple approach would be to use one send event provider
 //! for each OBSW thread and then subscribe for all interesting events for a particular thread
 //! using the send event provider ID.
 //!
 //! This can be done with the [EventManager] like this:
 //!
-//!  1. Provide a concrete [EventReceiver] implementation. This abstraction allow to use different
+//!  1. Provide a concrete [EventReceiveProvider] implementation. This abstraction allow to use different
 //!     message queue backends. A straightforward implementation where dynamic memory allocation is
 //!     not a big concern would be to use the [std::sync::mpsc::Receiver] handle. The trait is
 //!     already implemented for this type.
 //!  2. To set up event creators, create channel pairs using some message queue implementation.
 //!     Each event creator gets a (cloned) sender component which allows it to send events to the
 //!     manager.
-//!  3. The event manager receives the receiver component as part of a [EventReceiver]
+//!  3. The event manager receives the receiver component as part of a [EventReceiveProvider]
 //!     implementation so all events are routed to the manager.
-//!  4. Create the [event sender map][SenderMap]s which allow routing events to
+//!  4. Create the [event sender map][SenderMapProvider]s which allow routing events to
 //!     subscribers. You can now use the subscriber component IDs to subscribe
 //!     for event groups, for example by using the [EventManager::subscribe_single] method.
 //!  5. Add the send provider as well using the [EventManager::add_sender] call so the event
@@ -48,60 +50,87 @@
 //! The [PUS event](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example/src/pus/event.rs)
 //! module and the generic [events module](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example/src/events.rs)
 //! show how the event management modules can be integrated into a more complex software.
-use crate::{
-    ComponentId,
-    events::{Event, EventId, GroupId},
-    queue::GenericSendError,
-};
+use crate::events_legacy::{EventU16, EventU32, GenericEvent, LargestEventRaw, LargestGroupIdRaw};
+use crate::params::Params;
+use crate::queue::GenericSendError;
+use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::slice::Iter;
 
+use crate::ComponentId;
+
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
+
 #[cfg(feature = "std")]
 pub use std_mod::*;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum ListenerKey {
-    Single(EventId),
-    Group(GroupId),
+    Single(LargestEventRaw),
+    Group(LargestGroupIdRaw),
     All,
 }
 
 #[derive(Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct EventMessage<EventInstance> {
+pub struct EventMessage<Event: GenericEvent, Parameters: Debug = Params> {
     sender_id: ComponentId,
-    event: EventInstance,
+    event: Event,
+    params: Option<Parameters>,
 }
 
-impl<EventInstance: Event> EventMessage<EventInstance> {
-    pub fn new(sender_id: ComponentId, event: EventInstance) -> Self {
-        EventMessage { sender_id, event }
+impl<Event: GenericEvent, Parameters: Debug + Clone> EventMessage<Event, Parameters> {
+    pub fn new_generic(sender_id: ComponentId, event: Event, params: Option<&Parameters>) -> Self {
+        Self {
+            sender_id,
+            event,
+            params: params.cloned(),
+        }
     }
 
     pub fn sender_id(&self) -> ComponentId {
         self.sender_id
     }
 
-    pub fn event(&self) -> &EventInstance {
-        &self.event
+    pub fn event(&self) -> Event {
+        self.event
+    }
+
+    pub fn params(&self) -> Option<&Parameters> {
+        self.params.as_ref()
+    }
+
+    pub fn new(sender_id: ComponentId, event: Event) -> Self {
+        Self::new_generic(sender_id, event, None)
+    }
+
+    pub fn new_with_params(sender_id: ComponentId, event: Event, params: &Parameters) -> Self {
+        Self::new_generic(sender_id, event, Some(params))
     }
 }
 
-/// Generic abstraction for event senders.
-pub trait EventSender<EventInstance: Event> {
+pub type EventMessageU32 = EventMessage<EventU32, Params>;
+pub type EventMessageU16 = EventMessage<EventU16, Params>;
+
+/// Generic abstraction
+pub trait EventSendProvider<Event: GenericEvent, ParamProvider: Debug = Params> {
     type Error;
 
     fn target_id(&self) -> ComponentId;
 
-    fn send(&self, message: EventMessage<EventInstance>) -> Result<(), Self::Error>;
+    fn send(&self, message: EventMessage<Event, ParamProvider>) -> Result<(), Self::Error>;
 }
 
-pub trait ListenerMap {
+/// Generic abstraction for an event receiver.
+pub trait EventReceiveProvider<Event: GenericEvent, ParamsProvider: Debug = Params> {
+    type Error;
+
+    /// This function has to be provided by any event receiver. A call may or may not return
+    /// an event and optional auxiliary data.
+    fn try_recv_event(&self) -> Result<Option<EventMessage<Event, ParamsProvider>>, Self::Error>;
+}
+
+pub trait ListenerMapProvider {
     #[cfg(feature = "alloc")]
     fn get_listeners(&self) -> alloc::vec::Vec<ListenerKey>;
     fn contains_listener(&self, key: &ListenerKey) -> bool;
@@ -110,52 +139,52 @@ pub trait ListenerMap {
     fn remove_duplicates(&mut self, key: &ListenerKey);
 }
 
-/// Generic abstraction for an event receiver.
-pub trait EventReceiver<EventInstance: Event> {
-    type Error;
-
-    /// This function has to be provided by any event receiver. A call may or may not return
-    /// an event.
-    fn try_recv_event(&self) -> Result<Option<EventMessage<EventInstance>>, Self::Error>;
-}
-
-pub trait SenderMap<EventSenderInstance: EventSender<EventInstance>, EventInstance: Event> {
+pub trait SenderMapProvider<
+    EventSender: EventSendProvider<Event, ParamProvider>,
+    Event: GenericEvent = EventU32,
+    ParamProvider: Debug = Params,
+>
+{
     fn contains_send_event_provider(&self, target_id: &ComponentId) -> bool;
 
-    fn get_send_event_provider(&self, target_id: &ComponentId) -> Option<&EventSenderInstance>;
-    fn add_send_event_provider(&mut self, send_provider: EventSenderInstance) -> bool;
+    fn get_send_event_provider(&self, target_id: &ComponentId) -> Option<&EventSender>;
+    fn add_send_event_provider(&mut self, send_provider: EventSender) -> bool;
 }
 
 /// Generic event manager implementation.
 ///
 /// # Generics
 ///
-///  * `EventReceiverInstance`: [EventReceiver] used to receive all events.
-///  * `SenderMapInstance`: [SenderMap]  which maps channel IDs to send providers.
-///  * `ListenerMapInstance`: [ListenerMap] which maps listener keys to channel IDs.
-///  * `EventSenderInstance`: [EventSender] contained within the sender map which sends the events.
-///  * `Event`: The event type. This type must implement the [Event] trait.
+///  * `EventReceiver`: [EventReceiveProvider] used to receive all events.
+///  * `SenderMap`: [SenderMapProvider]  which maps channel IDs to send providers.
+///  * `ListenerMap`: [ListenerMapProvider] which maps listener keys to channel IDs.
+///  * `EventSender`: [EventSendProvider] contained within the sender map which sends the events.
+///  * `Event`: The event type. This type must implement the [GenericEvent]. Currently only [EventU32]
+///    and [EventU16] are supported.
+///  * `ParamProvider`: Auxiliary data which is sent with the event to provide optional context
+///    information
 pub struct EventManager<
-    EventReceiverInstance: EventReceiver<EventInstance>,
-    SenderMapInstance: SenderMap<EventSenderInstance, EventInstance>,
-    ListenerMapInstance: ListenerMap,
-    EventSenderInstance: EventSender<EventInstance>,
-    EventInstance: Event,
+    EventReceiver: EventReceiveProvider<Event, ParamProvider>,
+    SenderMap: SenderMapProvider<EventSender, Event, ParamProvider>,
+    ListenerMap: ListenerMapProvider,
+    EventSender: EventSendProvider<Event, ParamProvider>,
+    Event: GenericEvent = EventU32,
+    ParamProvider: Debug = Params,
 > {
-    event_receiver: EventReceiverInstance,
-    sender_map: SenderMapInstance,
-    listener_map: ListenerMapInstance,
-    phantom: core::marker::PhantomData<(EventSenderInstance, EventInstance)>,
+    event_receiver: EventReceiver,
+    sender_map: SenderMap,
+    listener_map: ListenerMap,
+    phantom: core::marker::PhantomData<(EventSender, Event, ParamProvider)>,
 }
 
 #[derive(Debug)]
-pub enum EventRoutingResult<EventInstance: Event> {
+pub enum EventRoutingResult<Event: GenericEvent, ParamProvider: Debug> {
     /// No event was received
     Empty,
     /// An event was received and routed to listeners.
     Handled {
         num_recipients: u32,
-        event_msg: EventMessage<EventInstance>,
+        event_msg: EventMessage<Event, ParamProvider>,
     },
 }
 
@@ -167,31 +196,25 @@ pub enum EventRoutingError {
 }
 
 impl<
-    EventReceiverInstance: EventReceiver<EventInstance>,
-    SenderMapInstance: SenderMap<EventSenderInstance, EventInstance>,
-    ListenerMapInstance: ListenerMap,
-    EventSenderInstance: EventSender<EventInstance>,
-    EventInstance: Event,
->
-    EventManager<
-        EventReceiverInstance,
-        SenderMapInstance,
-        ListenerMapInstance,
-        EventSenderInstance,
-        EventInstance,
-    >
+    EventReceiver: EventReceiveProvider<Event, ParamProvider>,
+    SenderMap: SenderMapProvider<EventSender, Event, ParamProvider>,
+    ListenerMap: ListenerMapProvider,
+    EventSender: EventSendProvider<Event, ParamProvider>,
+    Event: GenericEvent + Copy,
+    ParamProvider: Debug,
+> EventManager<EventReceiver, SenderMap, ListenerMap, EventSender, Event, ParamProvider>
 {
     pub fn remove_duplicates(&mut self, key: &ListenerKey) {
         self.listener_map.remove_duplicates(key)
     }
 
     /// Subscribe for a unique event.
-    pub fn subscribe_single(&mut self, event: EventId, sender_id: ComponentId) {
-        self.update_listeners(ListenerKey::Single(event), sender_id);
+    pub fn subscribe_single(&mut self, event: &Event, sender_id: ComponentId) {
+        self.update_listeners(ListenerKey::Single(event.raw_as_largest_type()), sender_id);
     }
 
     /// Subscribe for an event group.
-    pub fn subscribe_group(&mut self, group_id: GroupId, sender_id: ComponentId) {
+    pub fn subscribe_group(&mut self, group_id: LargestGroupIdRaw, sender_id: ComponentId) {
         self.update_listeners(ListenerKey::Group(group_id), sender_id);
     }
 
@@ -204,24 +227,18 @@ impl<
     }
 }
 impl<
-    EventReceiverInstance: EventReceiver<EventInstance>,
-    SenderMapInstance: SenderMap<EventSenderInstance, EventInstance>,
-    ListenerMapInstance: ListenerMap,
-    EventSenderInstance: EventSender<EventInstance>,
-    EventInstance: Event,
->
-    EventManager<
-        EventReceiverInstance,
-        SenderMapInstance,
-        ListenerMapInstance,
-        EventSenderInstance,
-        EventInstance,
-    >
+    EventReceiver: EventReceiveProvider<Event, ParamProvider>,
+    SenderMap: SenderMapProvider<EventSenderMap, Event, ParamProvider>,
+    ListenerMap: ListenerMapProvider,
+    EventSenderMap: EventSendProvider<Event, ParamProvider>,
+    Event: GenericEvent + Copy,
+    ParamProvider: Debug,
+> EventManager<EventReceiver, SenderMap, ListenerMap, EventSenderMap, Event, ParamProvider>
 {
     pub fn new_with_custom_maps(
-        event_receiver: EventReceiverInstance,
-        sender_map: SenderMapInstance,
-        listener_map: ListenerMapInstance,
+        event_receiver: EventReceiver,
+        sender_map: SenderMap,
+        listener_map: ListenerMap,
     ) -> Self {
         EventManager {
             listener_map,
@@ -232,7 +249,7 @@ impl<
     }
 
     /// Add a new sender component which can be used to send events to subscribers.
-    pub fn add_sender(&mut self, send_provider: EventSenderInstance) {
+    pub fn add_sender(&mut self, send_provider: EventSenderMap) {
         if !self
             .sender_map
             .contains_send_event_provider(&send_provider.target_id())
@@ -248,19 +265,13 @@ impl<
 }
 
 impl<
-    EventReceiverInstance: EventReceiver<EventInstance>,
-    SenderMapInstance: SenderMap<EventSenderInstance, EventInstance>,
-    ListenerMapInstance: ListenerMap,
-    EventSenderInstance: EventSender<EventInstance, Error = GenericSendError>,
-    EventInstance: Event,
->
-    EventManager<
-        EventReceiverInstance,
-        SenderMapInstance,
-        ListenerMapInstance,
-        EventSenderInstance,
-        EventInstance,
-    >
+    EventReceiver: EventReceiveProvider<Event, ParamProvider>,
+    SenderMap: SenderMapProvider<EventSenderMap, Event, ParamProvider>,
+    ListenerMap: ListenerMapProvider,
+    EventSenderMap: EventSendProvider<Event, ParamProvider, Error = GenericSendError>,
+    Event: GenericEvent + Copy,
+    ParamProvider: Clone + Debug,
+> EventManager<EventReceiver, SenderMap, ListenerMap, EventSenderMap, Event, ParamProvider>
 {
     /// This function will use the cached event receiver and try to receive one event.
     /// If an event was received, it will try to route that event to all subscribed event listeners.
@@ -270,37 +281,39 @@ impl<
     /// If an error occurs during the routing, the error handler will be called. The error handler
     /// should take a reference to the event message as the first argument, and the routing error
     /// as the second argument.
-    pub fn try_event_handling<E: FnMut(&EventMessage<EventInstance>, EventRoutingError)>(
+    pub fn try_event_handling<E: FnMut(&EventMessage<Event, ParamProvider>, EventRoutingError)>(
         &self,
         mut error_handler: E,
-    ) -> EventRoutingResult<EventInstance> {
+    ) -> EventRoutingResult<Event, ParamProvider> {
         let mut num_recipients = 0;
-        let mut send_handler = |key: &ListenerKey, event_msg: &EventMessage<EventInstance>| {
-            if self.listener_map.contains_listener(key) {
-                if let Some(ids) = self.listener_map.get_listener_ids(key) {
-                    for id in ids {
-                        if let Some(sender) = self.sender_map.get_send_event_provider(id) {
-                            if let Err(e) = sender.send(EventMessage::new(
-                                event_msg.sender_id,
-                                event_msg.event.clone(),
-                            )) {
-                                error_handler(event_msg, EventRoutingError::Send(e));
+        let mut send_handler =
+            |key: &ListenerKey, event_msg: &EventMessage<Event, ParamProvider>| {
+                if self.listener_map.contains_listener(key) {
+                    if let Some(ids) = self.listener_map.get_listener_ids(key) {
+                        for id in ids {
+                            if let Some(sender) = self.sender_map.get_send_event_provider(id) {
+                                if let Err(e) = sender.send(EventMessage::new_generic(
+                                    event_msg.sender_id,
+                                    event_msg.event,
+                                    event_msg.params.as_ref(),
+                                )) {
+                                    error_handler(event_msg, EventRoutingError::Send(e));
+                                } else {
+                                    num_recipients += 1;
+                                }
                             } else {
-                                num_recipients += 1;
+                                error_handler(event_msg, EventRoutingError::NoSenderForId(*id));
                             }
-                        } else {
-                            error_handler(event_msg, EventRoutingError::NoSenderForId(*id));
                         }
+                    } else {
+                        error_handler(event_msg, EventRoutingError::NoSendersForKey(*key));
                     }
-                } else {
-                    error_handler(event_msg, EventRoutingError::NoSendersForKey(*key));
                 }
-            }
-        };
+            };
         if let Ok(Some(event_msg)) = self.event_receiver.try_recv_event() {
-            let single_key = ListenerKey::Single(event_msg.event().id());
+            let single_key = ListenerKey::Single(event_msg.event.raw_as_largest_type());
             send_handler(&single_key, &event_msg);
-            let group_key = ListenerKey::Group(event_msg.event().id().group_id());
+            let group_key = ListenerKey::Group(event_msg.event.group_id_as_largest_type());
             send_handler(&group_key, &event_msg);
             send_handler(&ListenerKey::All, &event_msg);
             return EventRoutingResult::Handled {
@@ -317,48 +330,46 @@ pub mod alloc_mod {
     use alloc::vec::Vec;
     use hashbrown::HashMap;
 
-    use crate::events::EventErasedAlloc;
-
     use super::*;
 
     /// Helper type which constrains the sender map and listener map generics to the [DefaultSenderMap]
     /// and the [DefaultListenerMap]. It uses regular mpsc channels as the message queue backend.
-    pub type EventManagerWithMpsc<EventInstance = EventErasedAlloc> = EventManager<
-        EventDynParamReceiverMpsc,
-        DefaultSenderMap<EventSenderMpsc<EventInstance>, EventInstance>,
+    pub type EventManagerWithMpsc<Event = EventU32, ParamProvider = Params> = EventManager<
+        EventU32ReceiverMpsc<ParamProvider>,
+        DefaultSenderMap<EventSenderMpsc<Event>, Event, ParamProvider>,
         DefaultListenerMap,
-        EventSenderMpsc<EventInstance>,
-        EventInstance,
+        EventSenderMpsc<Event>,
     >;
 
     /// Helper type which constrains the sender map and listener map generics to the [DefaultSenderMap]
     /// and the [DefaultListenerMap]. It uses
     /// [bounded mpsc senders](https://doc.rust-lang.org/std/sync/mpsc/struct.SyncSender.html) as the
     /// message queue backend.
-    pub type EventManagerWithBoundedMpsc<EventInstance = EventErasedAlloc> = EventManager<
-        EventDynParamReceiverMpsc,
-        DefaultSenderMap<EventSenderMpscBounded<EventInstance>, EventInstance>,
+    pub type EventManagerWithBoundedMpsc<Event = EventU32, ParamProvider = Params> = EventManager<
+        EventU32ReceiverMpsc<ParamProvider>,
+        DefaultSenderMap<EventSenderMpscBounded<Event>, Event, ParamProvider>,
         DefaultListenerMap,
-        EventSenderMpscBounded<EventInstance>,
-        EventInstance,
+        EventSenderMpscBounded<Event>,
     >;
 
     impl<
-        EventReceiverInstance: EventReceiver<EventInstance>,
-        EventSenderInstance: EventSender<EventInstance>,
-        EventInstance: Event,
+        EventReceiver: EventReceiveProvider<Event, ParamProvider>,
+        EventSender: EventSendProvider<Event, ParamProvider>,
+        Event: GenericEvent + Copy,
+        ParamProvider: 'static + Debug,
     >
         EventManager<
-            EventReceiverInstance,
-            DefaultSenderMap<EventSenderInstance, EventInstance>,
+            EventReceiver,
+            DefaultSenderMap<EventSender, Event, ParamProvider>,
             DefaultListenerMap,
-            EventSenderInstance,
-            EventInstance,
+            EventSender,
+            Event,
+            ParamProvider,
         >
     {
         /// Create an event manager where the sender table will be the [DefaultSenderMap]
         /// and the listener table will be the [DefaultListenerMap].
-        pub fn new(event_receiver: EventReceiverInstance) -> Self {
+        pub fn new(event_receiver: EventReceiver) -> Self {
             Self {
                 listener_map: DefaultListenerMap::default(),
                 sender_map: DefaultSenderMap::default(),
@@ -376,7 +387,7 @@ pub mod alloc_mod {
         listeners: HashMap<ListenerKey, Vec<ComponentId>>,
     }
 
-    impl ListenerMap for DefaultListenerMap {
+    impl ListenerMapProvider for DefaultListenerMap {
         fn get_listeners(&self) -> Vec<ListenerKey> {
             let mut key_list = Vec::new();
             for key in self.listeners.keys() {
@@ -415,15 +426,19 @@ pub mod alloc_mod {
     ///
     /// Simple implementation which uses a [HashMap] internally.
     pub struct DefaultSenderMap<
-        EventSenderInstance: EventSender<EventInstance>,
-        EventInstance: Event,
+        EventSender: EventSendProvider<Event, ParamProvider>,
+        Event: GenericEvent = EventU32,
+        ParamProvider: Debug = Params,
     > {
-        senders: HashMap<ComponentId, EventSenderInstance>,
-        phantom: PhantomData<EventInstance>,
+        senders: HashMap<ComponentId, EventSender>,
+        phantom: PhantomData<(Event, ParamProvider)>,
     }
 
-    impl<EventSenderInstance: EventSender<EventInstance>, EventInstance: Event> Default
-        for DefaultSenderMap<EventSenderInstance, EventInstance>
+    impl<
+        EventSender: EventSendProvider<Event, ParamProvider>,
+        Event: GenericEvent,
+        ParamProvider: Debug,
+    > Default for DefaultSenderMap<EventSender, Event, ParamProvider>
     {
         fn default() -> Self {
             Self {
@@ -433,21 +448,24 @@ pub mod alloc_mod {
         }
     }
 
-    impl<EventSenderInstance: EventSender<EventInstance>, EventInstance: Event>
-        SenderMap<EventSenderInstance, EventInstance>
-        for DefaultSenderMap<EventSenderInstance, EventInstance>
+    impl<
+        EventSender: EventSendProvider<Event, ParamProvider>,
+        Event: GenericEvent,
+        ParamProvider: Debug,
+    > SenderMapProvider<EventSender, Event, ParamProvider>
+        for DefaultSenderMap<EventSender, Event, ParamProvider>
     {
         fn contains_send_event_provider(&self, id: &ComponentId) -> bool {
             self.senders.contains_key(id)
         }
 
-        fn get_send_event_provider(&self, id: &ComponentId) -> Option<&EventSenderInstance> {
+        fn get_send_event_provider(&self, id: &ComponentId) -> Option<&EventSender> {
             self.senders
                 .get(id)
                 .filter(|sender| sender.target_id() == *id)
         }
 
-        fn add_send_event_provider(&mut self, send_provider: EventSenderInstance) -> bool {
+        fn add_send_event_provider(&mut self, send_provider: EventSender) -> bool {
             let id = send_provider.target_id();
             if self.senders.contains_key(&id) {
                 return false;
@@ -459,20 +477,20 @@ pub mod alloc_mod {
 
 #[cfg(feature = "std")]
 pub mod std_mod {
-    use crate::{
-        events::{EventErasedAlloc, EventErasedHeapless},
-        queue::GenericReceiveError,
-    };
+    use crate::queue::GenericReceiveError;
 
     use super::*;
     use std::sync::mpsc;
 
-    impl<EventInstance: Event + Send> EventReceiver<EventInstance>
-        for mpsc::Receiver<EventMessage<EventInstance>>
+    impl<Event: GenericEvent + Send, ParamProvider: Debug>
+        EventReceiveProvider<Event, ParamProvider>
+        for mpsc::Receiver<EventMessage<Event, ParamProvider>>
     {
         type Error = GenericReceiveError;
 
-        fn try_recv_event(&self) -> Result<Option<EventMessage<EventInstance>>, Self::Error> {
+        fn try_recv_event(
+            &self,
+        ) -> Result<Option<EventMessage<Event, ParamProvider>>, Self::Error> {
             match self.try_recv() {
                 Ok(msg) => Ok(Some(msg)),
                 Err(e) => match e {
@@ -485,35 +503,33 @@ pub mod std_mod {
         }
     }
 
-    pub type EventDynParamReceiverMpsc = mpsc::Receiver<EventMessage<EventErasedAlloc>>;
-    pub type EventHeaplessReceiverMpsc<const N: usize> =
-        mpsc::Receiver<EventMessage<EventErasedHeapless<N>>>;
+    pub type EventU32ReceiverMpsc<ParamProvider = Params> =
+        mpsc::Receiver<EventMessage<EventU32, ParamProvider>>;
+    pub type EventU16ReceiverMpsc<ParamProvider = Params> =
+        mpsc::Receiver<EventMessage<EventU16, ParamProvider>>;
 
     /// Generic event sender which uses a regular [mpsc::Sender] as the messaging backend to
     /// send events.
     #[derive(Clone)]
-    pub struct EventSenderMpsc<EventInstance: Event + Send> {
+    pub struct EventSenderMpsc<Event: GenericEvent + Send> {
         target_id: ComponentId,
-        sender: mpsc::Sender<EventMessage<EventInstance>>,
+        sender: mpsc::Sender<EventMessage<Event>>,
     }
 
-    impl<EventInstance: Event + Send> EventSenderMpsc<EventInstance> {
-        pub fn new(
-            target_id: ComponentId,
-            sender: mpsc::Sender<EventMessage<EventInstance>>,
-        ) -> Self {
+    impl<Event: GenericEvent + Send> EventSenderMpsc<Event> {
+        pub fn new(target_id: ComponentId, sender: mpsc::Sender<EventMessage<Event>>) -> Self {
             Self { target_id, sender }
         }
     }
 
-    impl<EventInstance: Event + Send> EventSender<EventInstance> for EventSenderMpsc<EventInstance> {
+    impl<Event: GenericEvent + Send> EventSendProvider<Event> for EventSenderMpsc<Event> {
         type Error = GenericSendError;
 
         fn target_id(&self) -> ComponentId {
             self.target_id
         }
 
-        fn send(&self, event_msg: EventMessage<EventInstance>) -> Result<(), GenericSendError> {
+        fn send(&self, event_msg: EventMessage<Event>) -> Result<(), GenericSendError> {
             self.sender
                 .send(event_msg)
                 .map_err(|_| GenericSendError::RxDisconnected)
@@ -523,16 +539,16 @@ pub mod std_mod {
     /// Generic event sender which uses the [mpsc::SyncSender] as the messaging backend to send
     /// events. This has the advantage that the channel is bounded and thus more deterministic.
     #[derive(Clone)]
-    pub struct EventSenderMpscBounded<EventInstance: Event + Send> {
+    pub struct EventSenderMpscBounded<Event: GenericEvent + Send> {
         target_id: ComponentId,
-        sender: mpsc::SyncSender<EventMessage<EventInstance>>,
+        sender: mpsc::SyncSender<EventMessage<Event>>,
         capacity: usize,
     }
 
-    impl<EventInstance: Event + Send> EventSenderMpscBounded<EventInstance> {
+    impl<Event: GenericEvent + Send> EventSenderMpscBounded<Event> {
         pub fn new(
             target_id: ComponentId,
-            sender: mpsc::SyncSender<EventMessage<EventInstance>>,
+            sender: mpsc::SyncSender<EventMessage<Event>>,
             capacity: usize,
         ) -> Self {
             Self {
@@ -543,16 +559,14 @@ pub mod std_mod {
         }
     }
 
-    impl<EventInstance: Event + Send> EventSender<EventInstance>
-        for EventSenderMpscBounded<EventInstance>
-    {
+    impl<Event: GenericEvent + Send> EventSendProvider<Event> for EventSenderMpscBounded<Event> {
         type Error = GenericSendError;
 
         fn target_id(&self) -> ComponentId {
             self.target_id
         }
 
-        fn send(&self, event_msg: EventMessage<EventInstance>) -> Result<(), Self::Error> {
+        fn send(&self, event_msg: EventMessage<Event>) -> Result<(), Self::Error> {
             if let Err(e) = self.sender.try_send(event_msg) {
                 return match e {
                     mpsc::TrySendError::Full(_) => {
@@ -565,58 +579,38 @@ pub mod std_mod {
         }
     }
 
-    pub type EventDynParamSenderMpsc = EventSenderMpsc<EventErasedAlloc>;
-    pub type EventHeaplessSenderMpsc<const N: usize> = EventSenderMpsc<EventErasedHeapless<N>>;
-    pub type EventDynParamSenderMpscBounded = EventSenderMpscBounded<EventErasedAlloc>;
-    pub type EventHeaplessSenderMpscBounded<const N: usize> =
-        EventSenderMpscBounded<EventErasedHeapless<N>>;
+    pub type EventU32SenderMpsc = EventSenderMpsc<EventU32>;
+    pub type EventU16SenderMpsc = EventSenderMpsc<EventU16>;
+    pub type EventU32SenderMpscBounded = EventSenderMpscBounded<EventU32>;
+    pub type EventU16SenderMpscBounded = EventSenderMpscBounded<EventU16>;
 }
 
 #[cfg(test)]
 mod tests {
-    use arbitrary_int::u14;
-
     use super::*;
-    use crate::events::{EventErasedAlloc, Severity};
+    use crate::event_man_legacy::EventManager;
+    use crate::events_legacy::{EventU32, GenericEvent, Severity};
+    use crate::params::{ParamsHeapless, ParamsRaw};
     use crate::pus::test_util::{TEST_COMPONENT_ID_0, TEST_COMPONENT_ID_1};
-    use std::sync::mpsc;
+    use std::format;
+    use std::sync::mpsc::{self};
 
-    const TEST_GROUP_ID_0: u14 = u14::new(0);
-    const TEST_GROUP_ID_1: u14 = u14::new(1);
-
-    #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash, serde::Serialize, serde::Deserialize)]
-    pub enum TestEvent {
-        Info,
-        Error,
-        InfoWithParams(u16),
-        OtherGroup,
-    }
-
-    impl Event for TestEvent {
-        fn id(&self) -> EventId {
-            match self {
-                TestEvent::Info => EventId::new(Severity::Info, TEST_GROUP_ID_0, 0),
-                TestEvent::Error => EventId::new(Severity::High, TEST_GROUP_ID_0, 1),
-                TestEvent::InfoWithParams(_) => EventId::new(Severity::Info, TEST_GROUP_ID_0, 2),
-                TestEvent::OtherGroup => EventId::new(Severity::Info, TEST_GROUP_ID_1, 0),
-            }
-        }
-    }
+    const TEST_EVENT: EventU32 = EventU32::new(Severity::Info, 0, 5);
 
     fn check_next_event(
-        expected: TestEvent,
-        receiver: &mpsc::Receiver<EventMessage<EventErasedAlloc>>,
-    ) {
+        expected: EventU32,
+        receiver: &mpsc::Receiver<EventMessageU32>,
+    ) -> Option<Params> {
         if let Ok(event_msg) = receiver.try_recv() {
-            assert_eq!(event_msg.event.id(), expected.id());
-            let event: TestEvent = postcard::from_bytes(event_msg.event().raw()).unwrap();
-            assert_eq!(event, expected);
+            assert_eq!(event_msg.event, expected);
+            return event_msg.params;
         }
+        None
     }
 
     fn check_handled_event(
-        res: EventRoutingResult<EventErasedAlloc>,
-        expected: &EventErasedAlloc,
+        res: EventRoutingResult<EventU32, Params>,
+        expected: EventU32,
         expected_num_sent: u32,
         expected_sender_id: ComponentId,
     ) {
@@ -626,16 +620,13 @@ mod tests {
             event_msg,
         } = res
         {
-            assert_eq!(event_msg.event, *expected);
+            assert_eq!(event_msg.event, expected);
             assert_eq!(event_msg.sender_id, expected_sender_id);
             assert_eq!(num_recipients, expected_num_sent);
         }
     }
 
-    fn generic_event_man() -> (
-        mpsc::Sender<EventMessage<EventErasedAlloc>>,
-        EventManagerWithMpsc,
-    ) {
+    fn generic_event_man() -> (mpsc::Sender<EventMessageU32>, EventManagerWithMpsc) {
         let (event_sender, event_receiver) = mpsc::channel();
         (event_sender, EventManager::new(event_receiver))
     }
@@ -643,209 +634,184 @@ mod tests {
     #[test]
     fn test_basic() {
         let (event_sender, mut event_man) = generic_event_man();
+        let event_grp_0 = EventU32::new(Severity::Info, 0, 0);
+        let event_grp_1_0 = EventU32::new(Severity::High, 1, 0);
         let (single_event_sender, single_event_receiver) = mpsc::channel();
         let single_event_listener = EventSenderMpsc::new(0, single_event_sender);
-        event_man.subscribe_single(TestEvent::Info.id(), single_event_listener.target_id());
+        event_man.subscribe_single(&event_grp_0, single_event_listener.target_id());
         event_man.add_sender(single_event_listener);
         let (group_event_sender_0, group_event_receiver_0) = mpsc::channel();
-        let group_event_listener = EventDynParamSenderMpsc::new(1, group_event_sender_0);
-        event_man.subscribe_group(
-            TestEvent::OtherGroup.id().group_id(),
-            group_event_listener.target_id(),
-        );
+        let group_event_listener = EventU32SenderMpsc::new(1, group_event_sender_0);
+        event_man.subscribe_group(event_grp_1_0.group_id(), group_event_listener.target_id());
         event_man.add_sender(group_event_listener);
 
-        let error_handler = |event_msg: &EventMessage<EventErasedAlloc>, e: EventRoutingError| {
+        let error_handler = |event_msg: &EventMessageU32, e: EventRoutingError| {
             panic!("routing error occurred for event {:?}: {:?}", event_msg, e);
         };
-        let event_grp_0 = EventErasedAlloc::new(&TestEvent::Info);
-        let event_grp_1 = EventErasedAlloc::new(&TestEvent::OtherGroup);
         // Test event with one listener
         event_sender
-            .send(EventMessage::new(
-                TEST_COMPONENT_ID_0.id(),
-                event_grp_0.clone(),
-            ))
+            .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), event_grp_0))
             .expect("Sending single error failed");
         let res = event_man.try_event_handling(&error_handler);
-        check_handled_event(res, &event_grp_0, 1, TEST_COMPONENT_ID_0.id());
-        check_next_event(TestEvent::Info, &single_event_receiver);
+        check_handled_event(res, event_grp_0, 1, TEST_COMPONENT_ID_0.id());
+        check_next_event(event_grp_0, &single_event_receiver);
 
         // Test event which is sent to all group listeners
         event_sender
-            .send(EventMessage::new(
-                TEST_COMPONENT_ID_1.id(),
-                event_grp_1.clone(),
-            ))
+            .send(EventMessage::new(TEST_COMPONENT_ID_1.id(), event_grp_1_0))
             .expect("Sending group error failed");
         let res = event_man.try_event_handling(&error_handler);
-        check_handled_event(res, &event_grp_1, 1, TEST_COMPONENT_ID_1.id());
-        check_next_event(TestEvent::OtherGroup, &group_event_receiver_0);
+        check_handled_event(res, event_grp_1_0, 1, TEST_COMPONENT_ID_1.id());
+        check_next_event(event_grp_1_0, &group_event_receiver_0);
     }
 
     #[test]
     fn test_with_basic_params() {
-        let error_handler = |event_msg: &EventMessage<EventErasedAlloc>, e: EventRoutingError| {
+        let error_handler = |event_msg: &EventMessageU32, e: EventRoutingError| {
             panic!("routing error occurred for event {:?}: {:?}", event_msg, e);
         };
         let (event_sender, mut event_man) = generic_event_man();
-        let event_0 = TestEvent::InfoWithParams(5);
+        let event_grp_0 = EventU32::new(Severity::Info, 0, 0);
         let (single_event_sender, single_event_receiver) = mpsc::channel();
         let single_event_listener = EventSenderMpsc::new(0, single_event_sender);
-        event_man.subscribe_single(event_0.id(), single_event_listener.target_id());
+        event_man.subscribe_single(&event_grp_0, single_event_listener.target_id());
         event_man.add_sender(single_event_listener);
-        let event_0_erased = EventErasedAlloc::new(&event_0);
         event_sender
-            .send(EventMessage::new(
+            .send(EventMessage::new_with_params(
                 TEST_COMPONENT_ID_0.id(),
-                event_0_erased.clone(),
+                event_grp_0,
+                &Params::Heapless((2_u32, 3_u32).into()),
             ))
             .expect("Sending group error failed");
         let res = event_man.try_event_handling(&error_handler);
-        check_handled_event(res, &event_0_erased, 1, TEST_COMPONENT_ID_0.id());
-        check_next_event(event_0, &single_event_receiver);
+        check_handled_event(res, event_grp_0, 1, TEST_COMPONENT_ID_0.id());
+        let aux = check_next_event(event_grp_0, &single_event_receiver);
+        assert!(aux.is_some());
+        let aux = aux.unwrap();
+        if let Params::Heapless(ParamsHeapless::Raw(ParamsRaw::U32Pair(pair))) = aux {
+            assert_eq!(pair.0, 2);
+            assert_eq!(pair.1, 3);
+        } else {
+            panic!("{}", format!("Unexpected auxiliary value type {:?}", aux));
+        }
     }
 
     /// Test listening for multiple groups
     #[test]
     fn test_multi_group() {
-        let error_handler = |event_msg: &EventMessage<EventErasedAlloc>, e: EventRoutingError| {
+        let error_handler = |event_msg: &EventMessageU32, e: EventRoutingError| {
             panic!("routing error occurred for event {:?}: {:?}", event_msg, e);
         };
         let (event_sender, mut event_man) = generic_event_man();
         let res = event_man.try_event_handling(error_handler);
         assert!(matches!(res, EventRoutingResult::Empty));
 
-        let event_grp_0 = TestEvent::Info;
-        let event_grp_1 = TestEvent::OtherGroup;
+        let event_grp_0 = EventU32::new(Severity::Info, 0, 0);
+        let event_grp_1_0 = EventU32::new(Severity::High, 1, 0);
         let (event_grp_0_sender, event_grp_0_receiver) = mpsc::channel();
-        let event_grp_0_and_1_listener = EventSenderMpsc::new(0, event_grp_0_sender);
+        let event_grp_0_and_1_listener = EventU32SenderMpsc::new(0, event_grp_0_sender);
         event_man.subscribe_group(
-            event_grp_0.id().group_id(),
+            event_grp_0.group_id(),
             event_grp_0_and_1_listener.target_id(),
         );
         event_man.subscribe_group(
-            event_grp_1.id().group_id(),
+            event_grp_1_0.group_id(),
             event_grp_0_and_1_listener.target_id(),
         );
         event_man.add_sender(event_grp_0_and_1_listener);
 
-        let event_grp_0_erased = EventErasedAlloc::new(&event_grp_0);
-        let event_grp_1_erased = EventErasedAlloc::new(&event_grp_1);
         event_sender
-            .send(EventMessage::new(
-                TEST_COMPONENT_ID_0.id(),
-                event_grp_0_erased.clone(),
-            ))
+            .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), event_grp_0))
             .expect("Sending Event Group 0 failed");
         event_sender
-            .send(EventMessage::new(
-                TEST_COMPONENT_ID_1.id(),
-                event_grp_1_erased.clone(),
-            ))
+            .send(EventMessage::new(TEST_COMPONENT_ID_1.id(), event_grp_1_0))
             .expect("Sendign Event Group 1 failed");
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, &event_grp_0_erased, 1, TEST_COMPONENT_ID_0.id());
+        check_handled_event(res, event_grp_0, 1, TEST_COMPONENT_ID_0.id());
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, &event_grp_1_erased, 1, TEST_COMPONENT_ID_1.id());
+        check_handled_event(res, event_grp_1_0, 1, TEST_COMPONENT_ID_1.id());
 
         check_next_event(event_grp_0, &event_grp_0_receiver);
-        check_next_event(event_grp_1, &event_grp_0_receiver);
+        check_next_event(event_grp_1_0, &event_grp_0_receiver);
     }
 
     /// Test listening to the same event from multiple listeners. Also test listening
     /// to both group and single events from one listener
     #[test]
     fn test_listening_to_same_event_and_multi_type() {
-        let error_handler = |event_msg: &EventMessage<EventErasedAlloc>, e: EventRoutingError| {
+        let error_handler = |event_msg: &EventMessageU32, e: EventRoutingError| {
             panic!("routing error occurred for event {:?}: {:?}", event_msg, e);
         };
         let (event_sender, mut event_man) = generic_event_man();
-        let event_0 = TestEvent::Info;
-        let event_1 = TestEvent::OtherGroup;
-        //let event_0 = EventU32::new(Severity::Info, 0, 5);
-        //let event_1 = EventU32::new(Severity::High, 1, 0);
+        let event_0 = EventU32::new(Severity::Info, 0, 5);
+        let event_1 = EventU32::new(Severity::High, 1, 0);
         let (event_0_tx_0, event_0_rx_0) = mpsc::channel();
         let (event_0_tx_1, event_0_rx_1) = mpsc::channel();
-        let event_listener_0 = EventSenderMpsc::new(0, event_0_tx_0);
-        let event_listener_1 = EventSenderMpsc::new(1, event_0_tx_1);
+        let event_listener_0 = EventU32SenderMpsc::new(0, event_0_tx_0);
+        let event_listener_1 = EventU32SenderMpsc::new(1, event_0_tx_1);
         let event_listener_0_sender_id = event_listener_0.target_id();
-        event_man.subscribe_single(event_0.id(), event_listener_0_sender_id);
+        event_man.subscribe_single(&event_0, event_listener_0_sender_id);
         event_man.add_sender(event_listener_0);
         let event_listener_1_sender_id = event_listener_1.target_id();
-        event_man.subscribe_single(event_0.id(), event_listener_1_sender_id);
+        event_man.subscribe_single(&event_0, event_listener_1_sender_id);
         event_man.add_sender(event_listener_1);
-        let event_0_erased = EventErasedAlloc::new(&event_0);
-        let event_1_erased = EventErasedAlloc::new(&event_1);
         event_sender
-            .send(EventMessage::new(
-                TEST_COMPONENT_ID_0.id(),
-                event_0_erased.clone(),
-            ))
+            .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), event_0))
             .expect("Triggering Event 0 failed");
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, &event_0_erased, 2, TEST_COMPONENT_ID_0.id());
+        check_handled_event(res, event_0, 2, TEST_COMPONENT_ID_0.id());
         check_next_event(event_0, &event_0_rx_0);
         check_next_event(event_0, &event_0_rx_1);
-        event_man.subscribe_group(event_1.id().group_id(), event_listener_0_sender_id);
+        event_man.subscribe_group(event_1.group_id(), event_listener_0_sender_id);
         event_sender
-            .send(EventMessage::new(
-                TEST_COMPONENT_ID_0.id(),
-                event_0_erased.clone(),
-            ))
+            .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), event_0))
             .expect("Triggering Event 0 failed");
         event_sender
-            .send(EventMessage::new(
-                TEST_COMPONENT_ID_1.id(),
-                event_1_erased.clone(),
-            ))
+            .send(EventMessage::new(TEST_COMPONENT_ID_1.id(), event_1))
             .expect("Triggering Event 1 failed");
 
         // 3 Events messages will be sent now
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, &event_0_erased, 2, TEST_COMPONENT_ID_0.id());
+        check_handled_event(res, event_0, 2, TEST_COMPONENT_ID_0.id());
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, &event_1_erased, 1, TEST_COMPONENT_ID_1.id());
+        check_handled_event(res, event_1, 1, TEST_COMPONENT_ID_1.id());
         // Both the single event and the group event should arrive now
         check_next_event(event_0, &event_0_rx_0);
         check_next_event(event_1, &event_0_rx_0);
 
         // Do double insertion and then remove duplicates
-        event_man.subscribe_group(event_1.id().group_id(), event_listener_0_sender_id);
-        event_man.remove_duplicates(&ListenerKey::Group(event_1.id().group_id()));
+        event_man.subscribe_group(event_1.group_id(), event_listener_0_sender_id);
+        event_man.remove_duplicates(&ListenerKey::Group(event_1.group_id()));
         event_sender
-            .send(EventMessage::new(
-                TEST_COMPONENT_ID_0.id(),
-                event_1_erased.clone(),
-            ))
+            .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), event_1))
             .expect("Triggering Event 1 failed");
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, &event_1_erased, 1, TEST_COMPONENT_ID_0.id());
+        check_handled_event(res, event_1, 1, TEST_COMPONENT_ID_0.id());
     }
 
     #[test]
     fn test_all_events_listener() {
-        let error_handler = |event_msg: &EventMessage<EventErasedAlloc>, e: EventRoutingError| {
+        let error_handler = |event_msg: &EventMessageU32, e: EventRoutingError| {
             panic!("routing error occurred for event {:?}: {:?}", event_msg, e);
         };
         let (event_sender, event_receiver) = mpsc::channel();
         let mut event_man = EventManagerWithMpsc::new(event_receiver);
-        let event_0 = TestEvent::Info;
-        let event_1 = TestEvent::Error;
+        let event_0 = EventU32::new(Severity::Info, 0, 5);
+        let event_1 = EventU32::new(Severity::High, 1, 0);
         let (event_0_tx_0, all_events_rx) = mpsc::channel();
-        let all_events_listener = EventSenderMpsc::new(0, event_0_tx_0);
+        let all_events_listener = EventU32SenderMpsc::new(0, event_0_tx_0);
         event_man.subscribe_all(all_events_listener.target_id());
         event_man.add_sender(all_events_listener);
         event_sender
-            .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), event_0.into()))
+            .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), event_0))
             .expect("Triggering event 0 failed");
         event_sender
-            .send(EventMessage::new(TEST_COMPONENT_ID_1.id(), event_1.into()))
+            .send(EventMessage::new(TEST_COMPONENT_ID_1.id(), event_1))
             .expect("Triggering event 1 failed");
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, &event_0.into(), 1, TEST_COMPONENT_ID_0.id());
+        check_handled_event(res, event_0, 1, TEST_COMPONENT_ID_0.id());
         let res = event_man.try_event_handling(error_handler);
-        check_handled_event(res, &event_1.into(), 1, TEST_COMPONENT_ID_1.id());
+        check_handled_event(res, event_1, 1, TEST_COMPONENT_ID_1.id());
         check_next_event(event_0, &all_events_rx);
         check_next_event(event_1, &all_events_rx);
     }
@@ -853,30 +819,17 @@ mod tests {
     #[test]
     fn test_bounded_event_sender_queue_full() {
         let (event_sender, _event_receiver) = mpsc::sync_channel(3);
-        let test_event = TestEvent::Info;
-        let event_sender = EventSenderMpscBounded::<EventErasedAlloc>::new(1, event_sender, 3);
+        let event_sender = EventU32SenderMpscBounded::new(1, event_sender, 3);
         event_sender
-            .send(EventMessage::new(
-                TEST_COMPONENT_ID_0.id(),
-                test_event.into(),
-            ))
+            .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), TEST_EVENT))
             .expect("sending test event failed");
         event_sender
-            .send(EventMessage::new(
-                TEST_COMPONENT_ID_0.id(),
-                test_event.into(),
-            ))
+            .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), TEST_EVENT))
             .expect("sending test event failed");
         event_sender
-            .send(EventMessage::new(
-                TEST_COMPONENT_ID_0.id(),
-                test_event.into(),
-            ))
+            .send(EventMessage::new(TEST_COMPONENT_ID_0.id(), TEST_EVENT))
             .expect("sending test event failed");
-        let error = event_sender.send(EventMessage::new(
-            TEST_COMPONENT_ID_0.id(),
-            test_event.into(),
-        ));
+        let error = event_sender.send(EventMessage::new(TEST_COMPONENT_ID_0.id(), TEST_EVENT));
         if let Err(e) = error {
             assert!(matches!(e, GenericSendError::QueueFull(Some(3))));
         } else {
@@ -886,13 +839,9 @@ mod tests {
     #[test]
     fn test_bounded_event_sender_rx_dropped() {
         let (event_sender, event_receiver) = mpsc::sync_channel(3);
-        let test_event = TestEvent::Info;
-        let event_sender = EventSenderMpscBounded::<EventErasedAlloc>::new(1, event_sender, 3);
+        let event_sender = EventU32SenderMpscBounded::new(1, event_sender, 3);
         drop(event_receiver);
-        if let Err(e) = event_sender.send(EventMessage::new(
-            TEST_COMPONENT_ID_0.id(),
-            test_event.into(),
-        )) {
+        if let Err(e) = event_sender.send(EventMessage::new(TEST_COMPONENT_ID_0.id(), TEST_EVENT)) {
             assert!(matches!(e, GenericSendError::RxDisconnected));
         } else {
             panic!("Expected error");

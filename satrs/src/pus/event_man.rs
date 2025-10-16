@@ -1,6 +1,6 @@
-use crate::events::{EventU32, GenericEvent, Severity};
+use crate::events_legacy::{EventU32, GenericEvent, Severity};
 #[cfg(feature = "alloc")]
-use crate::events::{EventU32TypedSev, HasSeverity};
+use crate::events_legacy::{EventU32TypedSev, HasSeverity};
 #[cfg(feature = "alloc")]
 use core::hash::Hash;
 #[cfg(feature = "alloc")]
@@ -100,7 +100,7 @@ pub mod alloc_mod {
     use core::marker::PhantomData;
 
     use crate::{
-        events::EventU16,
+        events_legacy::EventU16,
         params::{Params, WritableToBeBytes},
         pus::event::{DummyEventHook, EventTmHook},
     };
@@ -318,7 +318,7 @@ mod tests {
 
     use super::*;
     use crate::request::UniqueApidTargetId;
-    use crate::{events::SeverityInfo, tmtc::PacketAsVec};
+    use crate::{events_legacy::SeverityInfo, tmtc::PacketAsVec};
     use std::sync::mpsc::{self, TryRecvError};
 
     const INFO_EVENT: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::<SeverityInfo>::new(1, 0);

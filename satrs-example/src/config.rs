@@ -11,7 +11,7 @@ use strum::IntoEnumIterator;
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use satrs::{
-    events::{EventU32TypedSev, SeverityInfo},
+    events_legacy::{EventU32TypedSev, SeverityInfo},
     pool::{StaticMemoryPool, StaticPoolConfig},
 };
 

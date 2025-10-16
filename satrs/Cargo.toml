@@ -24,12 +24,13 @@ cobs = { version = "0.4", default-features = false }
 thiserror = { version = "2", default-features = false }
 
 hashbrown = { version = ">=0.14, <=0.15", optional = true }
-static_cell = { version = "2", optional = true }
-dyn-clone = { version = "1", optional = true }
+static_cell = { version = "2" }
 heapless = { version = "0.9", optional = true }
+dyn-clone = { version = "1", optional = true }
 downcast-rs = { version = "2", default-features = false, optional = true }
 bus = { version = "2.2", optional = true }
 crossbeam-channel = { version = "0.5", default-features = false, optional = true }
+postcard = { version = "1", features = ["alloc"] }
 serde = { version = "1", default-features = false, optional = true }
 socket2 = { version = "0.6", features = ["all"], optional = true }
 arbitrary-int = "2"
@@ -48,7 +49,7 @@ tempfile = "3"
 version = "1"
 
 [features]
-default = ["std"]
+default = ["std", "heapless"]
 std = [
     "downcast-rs/std",
     "alloc",
@@ -70,7 +71,7 @@ alloc = [
 ]
 serde = ["dep:serde", "spacepackets/serde", "satrs-shared/serde"]
 crossbeam = ["crossbeam-channel"]
-heapless = ["dep:heapless", "static_cell"]
+# heapless = ["dep:heapless", "static_cell"]
 defmt = ["dep:defmt", "spacepackets/defmt"]
 test_util = []
 
