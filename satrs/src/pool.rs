@@ -258,6 +258,9 @@ pub trait PoolProvider {
 
     /// Delete data inside the pool given a [PoolAddr].
     fn delete(&mut self, addr: PoolAddr) -> Result<(), PoolError>;
+
+    fn clear(&mut self) -> Result<(), PoolError>;
+
     fn has_element_at(&self, addr: &PoolAddr) -> Result<bool, PoolError>;
 
     /// Retrieve the length of the data at the given store address.
@@ -714,6 +717,13 @@ pub mod heapless_mod {
             Ok(())
         }
 
+        fn clear(&mut self) -> Result<(), PoolError> {
+            for size in self.sizes_lists.iter_mut() {
+                size.fill(STORE_FREE);
+            }
+            Ok(())
+        }
+
         fn has_element_at(&self, addr: &PoolAddr) -> Result<bool, PoolError> {
             let addr = StaticPoolAddr::from(*addr);
             self.validate_addr(&addr)?;
@@ -1054,6 +1064,13 @@ mod alloc_mod {
                 STORE_FREE => 0,
                 _ => size,
             })
+        }
+
+        fn clear(&mut self) -> Result<(), PoolError> {
+            for size in self.sizes_lists.iter_mut() {
+                size.fill(STORE_FREE);
+            }
+            Ok(())
         }
     }
 
@@ -1597,223 +1614,228 @@ mod tests {
     mod heapless_tests {
         use super::*;
         use crate::static_subpool;
-        use std::cell::UnsafeCell;
-        use std::sync::Mutex;
 
         const SUBPOOL_1_BLOCK_SIZE: usize = 4;
         const SUBPOOL_1_NUM_ELEMENTS: u16 = 4;
 
-        static SUBPOOL_1: static_cell::ConstStaticCell<
-            [u8; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE],
-        > = static_cell::ConstStaticCell::new(
-            [0; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE],
-        );
-
-        static SUBPOOL_1_SIZES: Mutex<UnsafeCell<[usize; SUBPOOL_1_NUM_ELEMENTS as usize]>> =
-            Mutex::new(UnsafeCell::new(
-                [STORE_FREE; SUBPOOL_1_NUM_ELEMENTS as usize],
-            ));
-
         const SUBPOOL_2_NUM_ELEMENTS: u16 = 2;
         const SUBPOOL_2_BLOCK_SIZE: usize = 8;
-        static SUBPOOL_2: static_cell::ConstStaticCell<
-            [u8; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE],
-        > = static_cell::ConstStaticCell::new(
-            [0; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE],
-        );
-        static SUBPOOL_2_SIZES: static_cell::ConstStaticCell<
-            [usize; SUBPOOL_2_NUM_ELEMENTS as usize],
-        > = static_cell::ConstStaticCell::new([STORE_FREE; SUBPOOL_2_NUM_ELEMENTS as usize]);
 
         const SUBPOOL_3_NUM_ELEMENTS: u16 = 1;
         const SUBPOOL_3_BLOCK_SIZE: usize = 16;
-        static_subpool!(
-            SUBPOOL_3,
-            SUBPOOL_3_SIZES,
-            SUBPOOL_3_NUM_ELEMENTS as usize,
-            SUBPOOL_3_BLOCK_SIZE
-        );
 
         const SUBPOOL_4_NUM_ELEMENTS: u16 = 2;
         const SUBPOOL_4_BLOCK_SIZE: usize = 16;
-        static_subpool!(
-            SUBPOOL_4,
-            SUBPOOL_4_SIZES,
-            SUBPOOL_4_NUM_ELEMENTS as usize,
-            SUBPOOL_4_BLOCK_SIZE
-        );
 
         const SUBPOOL_5_NUM_ELEMENTS: u16 = 1;
         const SUBPOOL_5_BLOCK_SIZE: usize = 8;
-        static_subpool!(
-            SUBPOOL_5,
-            SUBPOOL_5_SIZES,
-            SUBPOOL_5_NUM_ELEMENTS as usize,
-            SUBPOOL_5_BLOCK_SIZE
-        );
 
         const SUBPOOL_6_NUM_ELEMENTS: u16 = 1;
         const SUBPOOL_6_BLOCK_SIZE: usize = 12;
-        static_subpool!(
-            SUBPOOL_6,
-            SUBPOOL_6_SIZES,
-            SUBPOOL_6_NUM_ELEMENTS as usize,
-            SUBPOOL_6_BLOCK_SIZE
-        );
 
-        fn small_heapless_pool() -> StaticHeaplessMemoryPool<3> {
-            let mut heapless_pool: StaticHeaplessMemoryPool<3> =
-                StaticHeaplessMemoryPool::new(false);
-            assert!(
-                heapless_pool
-                    .grow(
-                        SUBPOOL_1.take(),
-                        unsafe { &mut *SUBPOOL_1_SIZES.lock().unwrap().get() },
-                        SUBPOOL_1_NUM_ELEMENTS,
-                        true
-                    )
-                    .is_ok()
-            );
-            assert!(
-                heapless_pool
-                    .grow(
-                        SUBPOOL_2.take(),
-                        SUBPOOL_2_SIZES.take(),
-                        SUBPOOL_2_NUM_ELEMENTS,
-                        true
-                    )
-                    .is_ok()
-            );
-            assert!(
-                heapless_pool
-                    .grow(
-                        SUBPOOL_3.take(),
-                        SUBPOOL_3_SIZES.take(),
-                        SUBPOOL_3_NUM_ELEMENTS,
-                        true
-                    )
-                    .is_ok()
-            );
-            heapless_pool
+        macro_rules! make_heapless_pool {
+            ($prefix:ident) => {{
+                paste::paste! {
+                    static [<$prefix _SUBPOOL_1>]: static_cell::ConstStaticCell<
+                        [u8; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE],
+                    > = static_cell::ConstStaticCell::new(
+                        [0; SUBPOOL_1_NUM_ELEMENTS as usize * SUBPOOL_1_BLOCK_SIZE],
+                    );
+
+                    static [<$prefix _SUBPOOL_1_SIZES>]: std::sync::Mutex<
+                        std::cell::UnsafeCell<[usize; SUBPOOL_1_NUM_ELEMENTS as usize]>
+                    > = std::sync::Mutex::new(
+                        std::cell::UnsafeCell::new([STORE_FREE; SUBPOOL_1_NUM_ELEMENTS as usize])
+                    );
+
+                    static [<$prefix _SUBPOOL_2>]: static_cell::ConstStaticCell<
+                        [u8; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE],
+                    > = static_cell::ConstStaticCell::new(
+                        [0; SUBPOOL_2_NUM_ELEMENTS as usize * SUBPOOL_2_BLOCK_SIZE],
+                    );
+
+                    static [<$prefix _SUBPOOL_2_SIZES>]: static_cell::ConstStaticCell<
+                        [usize; SUBPOOL_2_NUM_ELEMENTS as usize],
+                    > = static_cell::ConstStaticCell::new(
+                        [STORE_FREE; SUBPOOL_2_NUM_ELEMENTS as usize]
+                    );
+
+                    static [<$prefix _SUBPOOL_3>]: static_cell::ConstStaticCell<
+                        [u8; SUBPOOL_3_NUM_ELEMENTS as usize * SUBPOOL_3_BLOCK_SIZE],
+                    > = static_cell::ConstStaticCell::new(
+                        [0; SUBPOOL_3_NUM_ELEMENTS as usize * SUBPOOL_3_BLOCK_SIZE],
+                    );
+
+                    static [<$prefix _SUBPOOL_3_SIZES>]: static_cell::ConstStaticCell<
+                        [usize; SUBPOOL_3_NUM_ELEMENTS as usize],
+                    > = static_cell::ConstStaticCell::new(
+                        [STORE_FREE; SUBPOOL_3_NUM_ELEMENTS as usize]
+                    );
+
+                    let mut heapless_pool: StaticHeaplessMemoryPool<3> =
+                        StaticHeaplessMemoryPool::new(false);
+
+                    heapless_pool
+                        .grow(
+                            [<$prefix _SUBPOOL_1>].take(),
+                            unsafe { &mut *[<$prefix _SUBPOOL_1_SIZES>].lock().unwrap().get() },
+                            SUBPOOL_1_NUM_ELEMENTS,
+                            true
+                        )
+                        .unwrap();
+
+                    heapless_pool
+                        .grow(
+                            [<$prefix _SUBPOOL_2>].take(),
+                            [<$prefix _SUBPOOL_2_SIZES>].take(),
+                            SUBPOOL_2_NUM_ELEMENTS,
+                            true
+                        )
+                        .unwrap();
+
+                    heapless_pool
+                        .grow(
+                            [<$prefix _SUBPOOL_3>].take(),
+                            [<$prefix _SUBPOOL_3_SIZES>].take(),
+                            SUBPOOL_3_NUM_ELEMENTS,
+                            true
+                        )
+                        .unwrap();
+
+                    heapless_pool
+                }
+            }};
         }
 
         #[test]
         fn test_heapless_add_and_read() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T0);
             generic_test_add_and_read::<16>(&mut pool_provider);
         }
 
         #[test]
         fn test_add_smaller_than_full_slot() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T1);
             generic_test_add_smaller_than_full_slot(&mut pool_provider);
         }
 
         #[test]
         fn test_delete() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T2);
             generic_test_delete(&mut pool_provider);
         }
 
         #[test]
         fn test_modify() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T3);
             generic_test_modify(&mut pool_provider);
         }
 
         #[test]
         fn test_consecutive_reservation() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T4);
             generic_test_consecutive_reservation(&mut pool_provider);
         }
 
         #[test]
         fn test_read_does_not_exist() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T5);
             generic_test_read_does_not_exist(&mut pool_provider);
         }
 
         #[test]
         fn test_store_full() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T6);
             generic_test_store_full(&mut pool_provider);
         }
 
         #[test]
         fn test_invalid_pool_idx() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T7);
             generic_test_invalid_pool_idx(&mut pool_provider);
         }
 
         #[test]
         fn test_invalid_packet_idx() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T8);
             generic_test_invalid_packet_idx(&mut pool_provider);
         }
 
         #[test]
         fn test_add_too_large() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T9);
             generic_test_add_too_large(&mut pool_provider);
         }
 
         #[test]
         fn test_data_too_large_1() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T10);
             generic_test_data_too_large_1(&mut pool_provider);
         }
 
         #[test]
         fn test_free_element_too_large() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T11);
             generic_test_free_element_too_large(&mut pool_provider);
         }
 
         #[test]
         fn test_pool_guard_deletion_man_creation() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T12);
             generic_test_pool_guard_deletion_man_creation(&mut pool_provider);
         }
 
         #[test]
         fn test_pool_guard_deletion() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T13);
             generic_test_pool_guard_deletion(&mut pool_provider);
         }
 
         #[test]
         fn test_pool_guard_with_release() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T14);
             generic_test_pool_guard_with_release(&mut pool_provider);
         }
 
         #[test]
         fn test_pool_modify_guard_man_creation() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T15);
             generic_test_pool_modify_guard_man_creation(&mut pool_provider);
         }
 
         #[test]
         fn test_pool_modify_guard() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T16);
             generic_test_pool_modify_guard(&mut pool_provider);
         }
 
         #[test]
         fn modify_pool_index_above_0() {
-            let mut pool_provider = small_heapless_pool();
+            let mut pool_provider = make_heapless_pool!(T17);
             generic_modify_pool_index_above_0(&mut pool_provider);
         }
 
         #[test]
         fn test_spills_to_higher_subpools() {
+            static_subpool!(
+                SUBPOOL_2_T18,
+                SUBPOOL_2_SIZES_T18,
+                SUBPOOL_2_NUM_ELEMENTS as usize,
+                SUBPOOL_2_BLOCK_SIZE
+            );
+            static_subpool!(
+                SUBPOOL_4_T18,
+                SUBPOOL_4_SIZES_T18,
+                SUBPOOL_4_NUM_ELEMENTS as usize,
+                SUBPOOL_4_BLOCK_SIZE
+            );
             let mut heapless_pool: StaticHeaplessMemoryPool<2> =
                 StaticHeaplessMemoryPool::new(true);
             assert!(
                 heapless_pool
                     .grow(
-                        SUBPOOL_2.take(),
-                        SUBPOOL_2_SIZES.take(),
+                        SUBPOOL_2_T18.take(),
+                        SUBPOOL_2_SIZES_T18.take(),
                         SUBPOOL_2_NUM_ELEMENTS,
                         true
                     )
@@ -1822,8 +1844,8 @@ mod tests {
             assert!(
                 heapless_pool
                     .grow(
-                        SUBPOOL_4.take(),
-                        SUBPOOL_4_SIZES.take(),
+                        SUBPOOL_4_T18.take(),
+                        SUBPOOL_4_SIZES_T18.take(),
                         SUBPOOL_4_NUM_ELEMENTS,
                         true
                     )
@@ -1836,6 +1858,18 @@ mod tests {
         fn test_spillage_fails_as_well() {
             let mut heapless_pool: StaticHeaplessMemoryPool<2> =
                 StaticHeaplessMemoryPool::new(true);
+            static_subpool!(
+                SUBPOOL_5,
+                SUBPOOL_5_SIZES,
+                SUBPOOL_5_NUM_ELEMENTS as usize,
+                SUBPOOL_5_BLOCK_SIZE
+            );
+            static_subpool!(
+                SUBPOOL_3,
+                SUBPOOL_3_SIZES,
+                SUBPOOL_3_NUM_ELEMENTS as usize,
+                SUBPOOL_3_BLOCK_SIZE
+            );
             assert!(
                 heapless_pool
                     .grow(
@@ -1863,6 +1897,24 @@ mod tests {
         fn test_spillage_works_across_multiple_subpools() {
             let mut heapless_pool: StaticHeaplessMemoryPool<3> =
                 StaticHeaplessMemoryPool::new(true);
+            static_subpool!(
+                SUBPOOL_3,
+                SUBPOOL_3_SIZES,
+                SUBPOOL_3_NUM_ELEMENTS as usize,
+                SUBPOOL_3_BLOCK_SIZE
+            );
+            static_subpool!(
+                SUBPOOL_5,
+                SUBPOOL_5_SIZES,
+                SUBPOOL_5_NUM_ELEMENTS as usize,
+                SUBPOOL_5_BLOCK_SIZE
+            );
+            static_subpool!(
+                SUBPOOL_6,
+                SUBPOOL_6_SIZES,
+                SUBPOOL_6_NUM_ELEMENTS as usize,
+                SUBPOOL_6_BLOCK_SIZE
+            );
             assert!(
                 heapless_pool
                     .grow(
@@ -1898,6 +1950,24 @@ mod tests {
 
         #[test]
         fn test_spillage_fails_across_multiple_subpools() {
+            static_subpool!(
+                SUBPOOL_3,
+                SUBPOOL_3_SIZES,
+                SUBPOOL_3_NUM_ELEMENTS as usize,
+                SUBPOOL_3_BLOCK_SIZE
+            );
+            static_subpool!(
+                SUBPOOL_5,
+                SUBPOOL_5_SIZES,
+                SUBPOOL_5_NUM_ELEMENTS as usize,
+                SUBPOOL_5_BLOCK_SIZE
+            );
+            static_subpool!(
+                SUBPOOL_6,
+                SUBPOOL_6_SIZES,
+                SUBPOOL_6_NUM_ELEMENTS as usize,
+                SUBPOOL_6_BLOCK_SIZE
+            );
             let mut heapless_pool: StaticHeaplessMemoryPool<3> =
                 StaticHeaplessMemoryPool::new(true);
             assert!(

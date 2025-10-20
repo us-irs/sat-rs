@@ -265,7 +265,7 @@ mod alloc_mod {
 mod tests {
     use super::*;
     use crate::ComponentId;
-    use crate::events::{EventU32, Severity};
+    use crate::events_legacy::{EventU32, Severity};
     use crate::pus::test_util::TEST_COMPONENT_ID_0;
     use crate::pus::tests::CommonTmInfo;
     use crate::pus::{ChannelWithId, EcssTmSender, EcssTmtcError, PusTmVariant};

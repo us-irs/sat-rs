@@ -1,4 +1,4 @@
-use crate::events::EventU32;
+use crate::events_legacy::EventU32;
 use crate::pus::event_man::{EventRequest, EventRequestWithToken};
 use crate::pus::verification::TcStateToken;
 use crate::pus::{DirectPusPacketHandlerResult, PartialPusHandlingError, PusPacketHandlingError};
@@ -168,7 +168,7 @@ mod tests {
     use crate::pus::{GenericConversionError, HandlingStatus, MpscTcReceiver};
     use crate::tmtc::PacketSenderWithSharedPool;
     use crate::{
-        events::EventU32,
+        events_legacy::EventU32,
         pus::{
             DirectPusPacketHandlerResult, EcssTcInSharedPoolCacher, PusPacketHandlingError,
             event_man::EventRequestWithToken,
@@ -179,7 +179,7 @@ mod tests {
 
     use super::PusEventServiceHandler;
 
-    const TEST_EVENT_0: EventU32 = EventU32::new(crate::events::Severity::Info, 5, 25);
+    const TEST_EVENT_0: EventU32 = EventU32::new(crate::events_legacy::Severity::Info, 5, 25);
 
     struct Pus5HandlerWithStoreTester {
         common: PusServiceHandlerWithSharedStoreCommon,

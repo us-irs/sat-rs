@@ -17,5 +17,7 @@ fmt:
 clippy:
   cargo clippy -- -D warnings
 
-docs:
-  cargo +nightly doc --all-features --config 'build.rustdocflags=["--cfg", "docs_rs"]'
+docs-satrs:
+  RUSTDOCFLAGS="--cfg docsrs --generate-link-to-definition -Z unstable-options" cargo +nightly doc -p satrs --all-features
+
+docs: docs-satrs

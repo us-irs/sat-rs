@@ -57,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-      - run: cargo +nightly doc --all-features --config 'build.rustdocflags=["--cfg", "docs_rs"]'
+      - run: RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc -p satrs --all-features
 
   clippy:
     name: Clippy

@@ -1,9 +1,9 @@
 use arbitrary_int::u11;
-use satrs::event_man::{
+use satrs::event_man_legacy::{
     EventManagerWithMpsc, EventMessage, EventMessageU32, EventRoutingError, EventSendProvider,
     EventU32SenderMpsc,
 };
-use satrs::events::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
+use satrs::events_legacy::{EventU32, EventU32TypedSev, Severity, SeverityInfo};
 use satrs::params::U32Pair;
 use satrs::params::{Params, ParamsHeapless, WritableToBeBytes};
 use satrs::pus::event_man::{DefaultPusEventReportingMap, EventReporter, PusEventTmCreatorWithMap};

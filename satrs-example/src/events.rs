@@ -3,13 +3,13 @@ use std::sync::mpsc::{self};
 use crate::pus::create_verification_reporter;
 use arbitrary_int::traits::Integer as _;
 use arbitrary_int::u11;
-use satrs::event_man::{EventMessageU32, EventRoutingError};
+use satrs::event_man_legacy::{EventMessageU32, EventRoutingError};
 use satrs::pus::event::EventTmHook;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::EcssTmSender;
 use satrs::request::UniqueApidTargetId;
 use satrs::{
-    event_man::{EventManagerWithBoundedMpsc, EventSendProvider, EventU32SenderMpscBounded},
+    event_man_legacy::{EventManagerWithBoundedMpsc, EventSendProvider, EventU32SenderMpscBounded},
     pus::{
         event_man::{
             DefaultPusEventU32TmCreator, EventReporter, EventRequest, EventRequestWithToken,
@@ -219,7 +219,7 @@ impl<TmSender: EcssTmSender> EventHandler<TmSender> {
 #[cfg(test)]
 mod tests {
     use satrs::{
-        events::EventU32,
+        events_legacy::EventU32,
         pus::verification::VerificationReporterConfig,
         spacepackets::ecss::{tm::PusTmReader, PusPacket},
         tmtc::PacketAsVec,
@@ -228,7 +228,7 @@ mod tests {
     use super::*;
 
     const TEST_CREATOR_ID: UniqueApidTargetId = UniqueApidTargetId::new(u11::new(1), 2);
-    const TEST_EVENT: EventU32 = EventU32::new(satrs::events::Severity::Info, 1, 1);
+    const TEST_EVENT: EventU32 = EventU32::new(satrs::events_legacy::Severity::Info, 1, 1);
 
     pub struct EventManagementTestbench {
         pub event_tx: mpsc::SyncSender<EventMessageU32>,
@@ -268,7 +268,7 @@ mod tests {
             .event_tx
             .send(EventMessageU32::new(
                 TEST_CREATOR_ID.id(),
-                EventU32::new(satrs::events::Severity::Info, 1, 1),
+                EventU32::new(satrs::events_legacy::Severity::Info, 1, 1),
             ))
             .expect("failed to send event");
         testbench.pus_event_handler.handle_event_requests();
