@@ -5,7 +5,7 @@ use crate::pus::create_verification_reporter;
 use crate::tmtc::sender::TmTcSender;
 use log::info;
 use satrs::pool::{PoolProvider, StaticMemoryPool};
-use satrs::pus::scheduler::{PusScheduler, TcInfo};
+use satrs::pus::scheduler::{PusSchedulerAlloc, TcInfo};
 use satrs::pus::scheduler_srv::PusSchedServiceHandler;
 use satrs::pus::verification::VerificationReporter;
 use satrs::pus::{
@@ -86,7 +86,7 @@ pub struct SchedulingServiceWrapper {
         TmTcSender,
         EcssTcCacher,
         VerificationReporter,
-        PusScheduler,
+        PusSchedulerAlloc,
     >,
     pub sched_tc_pool: StaticMemoryPool,
     pub releaser_buf: [u8; 4096],
@@ -179,7 +179,7 @@ pub fn create_scheduler_service(
     pus_sched_rx: mpsc::Receiver<EcssTcAndToken>,
     sched_tc_pool: StaticMemoryPool,
 ) -> SchedulingServiceWrapper {
-    let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
+    let scheduler = PusSchedulerAlloc::new_with_current_init_time(Duration::from_secs(5))
         .expect("Creating PUS Scheduler failed");
     let pus_11_handler = PusSchedServiceHandler::new(
         PusServiceHelper::new(

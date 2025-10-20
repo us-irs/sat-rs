@@ -51,6 +51,7 @@ pub mod scheduling;
 pub mod subsystem;
 pub mod time;
 pub mod tmtc;
+pub mod ccsds;
 
 pub use spacepackets;
 
