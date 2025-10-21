@@ -296,18 +296,18 @@ mod tests {
     fn test_mode_announce() {
         let mut assy_helper = DevManagerCommandingHelper::new(TransparentDevManagerHook::default());
         let mode_req_sender = ModeReqSenderMock::default();
-        assy_helper.add_mode_child(ExampleId::Id1 as u64, UNKNOWN_MODE);
-        assy_helper.add_mode_child(ExampleId::Id2 as u64, UNKNOWN_MODE);
+        assy_helper.add_mode_child(ExampleId::Id1 as ComponentId, UNKNOWN_MODE);
+        assy_helper.add_mode_child(ExampleId::Id2 as ComponentId, UNKNOWN_MODE);
         assy_helper
             .send_announce_mode_cmd_to_children(1, &mode_req_sender, false)
             .unwrap();
         assert_eq!(mode_req_sender.requests.borrow().len(), 2);
         let mut req = mode_req_sender.requests.borrow_mut().pop_front().unwrap();
-        assert_eq!(req.target_id, ExampleId::Id1 as u64);
+        assert_eq!(req.target_id, ExampleId::Id1 as ComponentId);
         assert_eq!(req.request_id, 1);
         assert_eq!(req.request, ModeRequest::AnnounceMode);
         req = mode_req_sender.requests.borrow_mut().pop_front().unwrap();
-        assert_eq!(req.target_id, ExampleId::Id2 as u64);
+        assert_eq!(req.target_id, ExampleId::Id2 as ComponentId);
         assert_eq!(req.request_id, 1);
         assert_eq!(req.request, ModeRequest::AnnounceMode);
     }
@@ -316,18 +316,18 @@ mod tests {
     fn test_mode_announce_recursive() {
         let mut assy_helper = DevManagerCommandingHelper::new(TransparentDevManagerHook::default());
         let mode_req_sender = ModeReqSenderMock::default();
-        assy_helper.add_mode_child(ExampleId::Id1 as u64, UNKNOWN_MODE);
-        assy_helper.add_mode_child(ExampleId::Id2 as u64, UNKNOWN_MODE);
+        assy_helper.add_mode_child(ExampleId::Id1 as ComponentId, UNKNOWN_MODE);
+        assy_helper.add_mode_child(ExampleId::Id2 as ComponentId, UNKNOWN_MODE);
         assy_helper
             .send_announce_mode_cmd_to_children(1, &mode_req_sender, true)
             .unwrap();
         assert_eq!(mode_req_sender.requests.borrow().len(), 2);
         let mut req = mode_req_sender.requests.borrow_mut().pop_front().unwrap();
-        assert_eq!(req.target_id, ExampleId::Id1 as u64);
+        assert_eq!(req.target_id, ExampleId::Id1 as ComponentId);
         assert_eq!(req.request_id, 1);
         assert_eq!(req.request, ModeRequest::AnnounceModeRecursive);
         req = mode_req_sender.requests.borrow_mut().pop_front().unwrap();
-        assert_eq!(req.target_id, ExampleId::Id2 as u64);
+        assert_eq!(req.target_id, ExampleId::Id2 as ComponentId);
         assert_eq!(req.request_id, 1);
         assert_eq!(req.request, ModeRequest::AnnounceModeRecursive);
     }
@@ -337,12 +337,12 @@ mod tests {
         let mut dev_mgmt_helper =
             DevManagerCommandingHelper::new(TransparentDevManagerHook::default());
         let mode_req_sender = ModeReqSenderMock::default();
-        dev_mgmt_helper.add_mode_child(ExampleId::Id1 as u64, UNKNOWN_MODE);
+        dev_mgmt_helper.add_mode_child(ExampleId::Id1 as ComponentId, UNKNOWN_MODE);
         let expected_mode = ModeAndSubmode::new(ExampleMode::Mode1 as u32, 0);
         dev_mgmt_helper
             .send_mode_cmd_to_one_child(
                 1,
-                ExampleId::Id1 as u64,
+                ExampleId::Id1 as ComponentId,
                 expected_mode,
                 false,
                 &mode_req_sender,
@@ -350,7 +350,7 @@ mod tests {
             .unwrap();
         assert_eq!(mode_req_sender.requests.borrow().len(), 1);
         let req = mode_req_sender.requests.borrow_mut().pop_front().unwrap();
-        assert_eq!(req.target_id, ExampleId::Id1 as u64);
+        assert_eq!(req.target_id, ExampleId::Id1 as ComponentId);
         assert_eq!(req.request_id, 1);
         assert_eq!(
             req.request,
@@ -368,7 +368,7 @@ mod tests {
             assert_eq!(ctx.active_request_id, 1);
         }
         let reply = GenericMessage::new(
-            MessageMetadata::new(1, ExampleId::Id1 as u64),
+            MessageMetadata::new(1, ExampleId::Id1 as ComponentId),
             ModeReply::ModeReply(expected_mode),
         );
         if let DevManagerHelperResult::ModeCommandingDone(ActiveModeCommandContext {
@@ -387,15 +387,15 @@ mod tests {
         let mut dev_mgmt_helper =
             DevManagerCommandingHelper::new(TransparentDevManagerHook::default());
         let mode_req_sender = ModeReqSenderMock::default();
-        dev_mgmt_helper.add_mode_child(ExampleId::Id1 as u64, UNKNOWN_MODE);
-        dev_mgmt_helper.add_mode_child(ExampleId::Id2 as u64, UNKNOWN_MODE);
+        dev_mgmt_helper.add_mode_child(ExampleId::Id1 as ComponentId, UNKNOWN_MODE);
+        dev_mgmt_helper.add_mode_child(ExampleId::Id2 as ComponentId, UNKNOWN_MODE);
         let expected_mode = ModeAndSubmode::new(ExampleMode::Mode2 as u32, 0);
         dev_mgmt_helper
             .send_mode_cmd_to_all_children(1, expected_mode, false, &mode_req_sender)
             .unwrap();
         assert_eq!(mode_req_sender.requests.borrow().len(), 2);
         let req = mode_req_sender.requests.borrow_mut().pop_front().unwrap();
-        assert_eq!(req.target_id, ExampleId::Id1 as u64);
+        assert_eq!(req.target_id, ExampleId::Id1 as ComponentId);
         assert_eq!(req.request_id, 1);
         assert_eq!(
             req.request,
@@ -405,7 +405,7 @@ mod tests {
             }
         );
         let req = mode_req_sender.requests.borrow_mut().pop_front().unwrap();
-        assert_eq!(req.target_id, ExampleId::Id2 as u64);
+        assert_eq!(req.target_id, ExampleId::Id2 as ComponentId);
         assert_eq!(req.request_id, 1);
         assert_eq!(
             req.request,
@@ -424,7 +424,7 @@ mod tests {
         }
 
         let reply = GenericMessage::new(
-            MessageMetadata::new(1, ExampleId::Id1 as u64),
+            MessageMetadata::new(1, ExampleId::Id1 as ComponentId),
             ModeReply::ModeReply(expected_mode),
         );
         assert_eq!(
@@ -432,7 +432,7 @@ mod tests {
             DevManagerHelperResult::Busy
         );
         let reply = GenericMessage::new(
-            MessageMetadata::new(1, ExampleId::Id2 as u64),
+            MessageMetadata::new(1, ExampleId::Id2 as ComponentId),
             ModeReply::ModeReply(expected_mode),
         );
         if let DevManagerHelperResult::ModeCommandingDone(ActiveModeCommandContext {

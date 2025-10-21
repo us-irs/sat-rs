@@ -29,9 +29,12 @@ use satrs::{
         ccsds::{SpValidity, SpacePacketValidator},
         cobs::encode_packet_with_cobs,
     },
-    hal::std::tcp_server::{
-        ConnectionResult, HandledConnectionHandler, HandledConnectionInfo, ServerConfig,
-        TcpSpacepacketsServer, TcpTmtcInCobsServer,
+    hal::std::{
+        tcp_server::{
+            CobsTcParser, ConnectionResult, HandledConnectionHandler, HandledConnectionInfo,
+            ServerConfig, TcpSpacepacketsServer, TcpTmtcInCobsServer,
+        },
+        tcp_spacepackets_server::CcsdsPacketParser,
     },
     tmtc::PacketSource,
 };
@@ -121,7 +124,7 @@ fn test_cobs_server() {
             1024,
         ),
         tm_source,
-        tc_sender.clone(),
+        CobsTcParser::new(TCP_SERVER_ID, 1024, tc_sender.clone()),
         ConnectionFinishedHandler::default(),
         None,
     )
@@ -233,8 +236,7 @@ fn test_ccsds_server() {
             1024,
         ),
         tm_source,
-        tc_sender,
-        packet_id_lookup,
+        CcsdsPacketParser::new(TCP_SERVER_ID, 1024, tc_sender, packet_id_lookup),
         ConnectionFinishedHandler::default(),
         None,
     )

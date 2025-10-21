@@ -45,7 +45,7 @@ pub enum AcsMode {
 }
 
 #[derive(Debug, TryFromPrimitive)]
-#[repr(u64)]
+#[repr(u32)]
 pub enum TestComponentId {
     MagnetometerDevice0 = 1,
     MagnetometerDevice1 = 2,
@@ -299,7 +299,7 @@ struct AcsSubsystem {
 
 impl AcsSubsystem {
     pub fn id() -> ComponentId {
-        TestComponentId::AcsSubsystem as u64
+        TestComponentId::AcsSubsystem as ComponentId
     }
 
     pub fn new(mode_node: ModeRequestorAndHandlerMpscBounded) -> Self {
@@ -518,7 +518,7 @@ struct MgmAssembly {
 
 impl MgmAssembly {
     pub fn id() -> ComponentId {
-        TestComponentId::MagnetometerAssembly as u64
+        TestComponentId::MagnetometerAssembly as ComponentId
     }
     pub fn new(mode_node: ModeRequestorAndHandlerMpscBounded) -> Self {
         Self {
@@ -923,7 +923,7 @@ impl ModeRequestHandler for CommonDevice {
         mode_and_submode: ModeAndSubmode,
         forced: bool,
     ) -> Result<(), ModeError> {
-        if self.id() == TestComponentId::MagnetorquerDevice as u64 {
+        if self.id() == TestComponentId::MagnetorquerDevice as ComponentId {
             println!("test");
         }
         self.mode_and_submode = mode_and_submode;
@@ -996,7 +996,7 @@ pub struct AcsController {
 
 impl AcsController {
     pub fn id() -> ComponentId {
-        TestComponentId::AcsController as u64
+        TestComponentId::AcsController as ComponentId
     }
     pub fn new(mode_node: ModeRequestHandlerMpscBounded) -> Self {
         Self {
@@ -1020,7 +1020,7 @@ impl AcsController {
 
 impl ModeNode for AcsController {
     fn id(&self) -> ComponentId {
-        TestComponentId::AcsController as u64
+        TestComponentId::AcsController as ComponentId
     }
 }
 
@@ -1185,22 +1185,22 @@ impl TreeTestbench {
 
         let mut mgm_dev_0 = CommonDevice::new(
             "MGM_0",
-            TestComponentId::MagnetometerDevice0 as u64,
+            TestComponentId::MagnetometerDevice0 as ComponentId,
             mgm_dev_node_0,
         );
         let mut mgm_dev_1 = CommonDevice::new(
             "MGM_1",
-            TestComponentId::MagnetometerDevice1 as u64,
+            TestComponentId::MagnetometerDevice1 as ComponentId,
             mgm_dev_node_1,
         );
         let mut mgt_dev = CommonDevice::new(
             "MGT",
-            TestComponentId::MagnetorquerDevice as u64,
+            TestComponentId::MagnetorquerDevice as ComponentId,
             mgt_dev_node,
         );
         let mut mgt_manager = DeviceManager::new(
             "MGT_MANAGER",
-            TestComponentId::MgtDevManager as u64,
+            TestComponentId::MgtDevManager as ComponentId,
             mgt_dev_mgmt_node,
         );
         let mut mgm_assy = MgmAssembly::new(mgm_assy_node);
@@ -1212,38 +1212,38 @@ impl TreeTestbench {
         let mut target_table_safe = TargetTablesMapValue::new("SAFE_TARGET_TBL", None);
         target_table_safe.add_entry(TargetTableEntry::new(
             "CTRL_SAFE",
-            TestComponentId::AcsController as u64,
+            TestComponentId::AcsController as ComponentId,
             ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
             // All submodes allowed.
             Some(0xffff),
         ));
         target_table_safe.add_entry(TargetTableEntry::new_with_precise_submode(
             "MGM_A_NML",
-            TestComponentId::MagnetometerAssembly as u64,
+            TestComponentId::MagnetometerAssembly as ComponentId,
             ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
         ));
         target_table_safe.add_entry(TargetTableEntry::new_with_precise_submode(
             "MGT_MAN_NML",
-            TestComponentId::MgtDevManager as u64,
+            TestComponentId::MgtDevManager as ComponentId,
             ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
         ));
         let mut sequence_tbl_safe_0 = SequenceTableMapTable::new("SAFE_SEQ_0_TBL");
         sequence_tbl_safe_0.add_entry(SequenceTableEntry::new(
             "SAFE_SEQ_0_MGM_A",
-            TestComponentId::MagnetometerAssembly as u64,
+            TestComponentId::MagnetometerAssembly as ComponentId,
             ModeAndSubmode::new(DefaultMode::NORMAL as Mode, 0),
             false,
         ));
         sequence_tbl_safe_0.add_entry(SequenceTableEntry::new(
             "SAFE_SEQ_0_MGT_MAN",
-            TestComponentId::MgtDevManager as u64,
+            TestComponentId::MgtDevManager as ComponentId,
             ModeAndSubmode::new(DefaultMode::NORMAL as Mode, 0),
             false,
         ));
         let mut sequence_tbl_safe_1 = SequenceTableMapTable::new("SAFE_SEQ_1_TBL");
         sequence_tbl_safe_1.add_entry(SequenceTableEntry::new(
             "SAFE_SEQ_1_ACS_CTRL",
-            TestComponentId::AcsController as u64,
+            TestComponentId::AcsController as ComponentId,
             ModeAndSubmode::new(AcsMode::SAFE as Mode, 0),
             false,
         ));
@@ -1408,7 +1408,7 @@ fn announce_recursively() {
 fn generic_mode_reply_checker(
     reply_meta: MessageMetadata,
     mode_and_submode: ModeAndSubmode,
-    expected_modes: &mut HashMap<u64, ModeAndSubmode>,
+    expected_modes: &mut HashMap<ComponentId, ModeAndSubmode>,
 ) {
     let id = TestComponentId::try_from(reply_meta.sender_id()).expect("invalid sender id");
     if !expected_modes.contains_key(&reply_meta.sender_id()) {
@@ -1528,15 +1528,15 @@ fn command_safe_mode() {
     );
     let mut expected_modes = HashMap::new();
     expected_modes.insert(
-        TestComponentId::AcsController as u64,
+        TestComponentId::AcsController as ComponentId,
         ModeAndSubmode::new(AcsMode::SAFE as u32, 0),
     );
     expected_modes.insert(
-        TestComponentId::MagnetometerAssembly as u64,
+        TestComponentId::MagnetometerAssembly as ComponentId,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
     );
     expected_modes.insert(
-        TestComponentId::MgtDevManager as u64,
+        TestComponentId::MgtDevManager as ComponentId,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
     );
     while let Some(reply) = tb.subsystem.mode_reply_mock.mode_reply_messages.pop_front() {
@@ -1558,11 +1558,11 @@ fn command_safe_mode() {
     );
     let mut expected_modes = HashMap::new();
     expected_modes.insert(
-        TestComponentId::MagnetometerDevice0 as u64,
+        TestComponentId::MagnetometerDevice0 as ComponentId,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
     );
     expected_modes.insert(
-        TestComponentId::MagnetometerDevice1 as u64,
+        TestComponentId::MagnetometerDevice1 as ComponentId,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
     );
     while let Some(reply) = tb.mgm_assy.mode_reply_mock.mode_reply_messages.pop_front() {
@@ -1578,7 +1578,7 @@ fn command_safe_mode() {
     );
     let mut expected_modes = HashMap::new();
     expected_modes.insert(
-        TestComponentId::MagnetorquerDevice as u64,
+        TestComponentId::MagnetorquerDevice as ComponentId,
         ModeAndSubmode::new(DefaultMode::NORMAL as u32, 0),
     );
     let reply = tb

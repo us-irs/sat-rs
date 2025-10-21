@@ -1258,7 +1258,7 @@ pub(crate) fn source_buffer_large_enough(
 
 #[cfg(any(feature = "test_util", test))]
 pub mod test_util {
-    use arbitrary_int::u11;
+    use arbitrary_int::{u11, u21};
     use spacepackets::ecss::{tc::PusTcCreator, tm::PusTmReader};
 
     use crate::request::UniqueApidTargetId;
@@ -1269,8 +1269,8 @@ pub mod test_util {
     };
 
     pub const TEST_APID: u11 = u11::new(0x101);
-    pub const TEST_UNIQUE_ID_0: u32 = 0x05;
-    pub const TEST_UNIQUE_ID_1: u32 = 0x06;
+    pub const TEST_UNIQUE_ID_0: u21 = u21::new(0x05);
+    pub const TEST_UNIQUE_ID_1: u21 = u21::new(0x06);
 
     pub const TEST_COMPONENT_ID_0: UniqueApidTargetId =
         UniqueApidTargetId::new(TEST_APID, TEST_UNIQUE_ID_0);

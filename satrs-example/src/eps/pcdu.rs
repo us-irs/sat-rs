@@ -506,6 +506,7 @@ impl<ComInterface: SerialInterface> ModeChild for PcduHandler<ComInterface> {
 mod tests {
     use std::sync::mpsc;
 
+    use arbitrary_int::u21;
     use satrs::{
         mode::ModeRequest, power::SwitchStateBinary, request::GenericMessage, tmtc::PacketAsVec,
     };
@@ -572,7 +573,7 @@ mod tests {
             let (switch_request_tx, switch_reqest_rx) = mpsc::channel();
             let shared_switch_map = Arc::new(Mutex::new(SwitchSet::default()));
             let mut handler = PcduHandler::new(
-                UniqueApidTargetId::new(Apid::Eps.raw_value(), 0),
+                UniqueApidTargetId::new(Apid::Eps.raw_value(), u21::new(0)),
                 "TEST_PCDU",
                 mode_node,
                 composite_request_rx,

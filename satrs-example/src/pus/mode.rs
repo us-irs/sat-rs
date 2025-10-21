@@ -328,7 +328,7 @@ mod tests {
         let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(200, Subservice::TcReadMode as u8);
         let mut app_data: [u8; 4] = [0; 4];
-        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.to_be_bytes());
+        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.as_u32().to_be_bytes());
         let tc = PusTcCreator::new(sp_header, sec_header, &app_data, CreatorConfig::default());
         let token = testbench.add_tc(&tc);
         let (_active_req, req) = testbench
@@ -345,7 +345,7 @@ mod tests {
         let sec_header = PusTcSecondaryHeader::new_simple(200, Subservice::TcSetMode as u8);
         let mut app_data: [u8; 4 + ModeAndSubmode::RAW_LEN] = [0; 4 + ModeAndSubmode::RAW_LEN];
         let mode_and_submode = ModeAndSubmode::new(2, 1);
-        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.to_be_bytes());
+        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.as_u32().to_be_bytes());
         mode_and_submode
             .write_to_be_bytes(&mut app_data[4..])
             .unwrap();
@@ -370,7 +370,7 @@ mod tests {
         let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(200, Subservice::TcAnnounceMode as u8);
         let mut app_data: [u8; 4] = [0; 4];
-        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.to_be_bytes());
+        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.as_u32().to_be_bytes());
         let tc = PusTcCreator::new(sp_header, sec_header, &app_data, CreatorConfig::default());
         let token = testbench.add_tc(&tc);
         let (_active_req, req) = testbench
@@ -387,7 +387,7 @@ mod tests {
         let sec_header =
             PusTcSecondaryHeader::new_simple(200, Subservice::TcAnnounceModeRecursive as u8);
         let mut app_data: [u8; 4] = [0; 4];
-        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.to_be_bytes());
+        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.as_u32().to_be_bytes());
         let tc = PusTcCreator::new(sp_header, sec_header, &app_data, CreatorConfig::default());
         let token = testbench.add_tc(&tc);
         let (_active_req, req) = testbench
@@ -404,7 +404,7 @@ mod tests {
         );
         let mode_reply = ModeReply::ModeReply(ModeAndSubmode::new(5, 1));
         let unrequested_reply =
-            GenericMessage::new(MessageMetadata::new(10_u32, 15_u64), mode_reply);
+            GenericMessage::new(MessageMetadata::new(10_u32, 15_u32), mode_reply);
         // Right now this function does not do a lot. We simply check that it does not panic or do
         // weird stuff.
         let result = testbench.handle_unrequested_reply(&unrequested_reply);

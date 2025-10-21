@@ -1,6 +1,6 @@
 //! Generic UDP TC server.
 use crate::ComponentId;
-use crate::tmtc::PacketSenderRaw;
+use crate::tmtc::PacketHandler;
 use core::fmt::Debug;
 use std::io::{self, ErrorKind};
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
@@ -12,7 +12,7 @@ use std::vec::Vec;
 ///
 /// It caches all received telecomands into a vector. The maximum expected telecommand size should
 /// be declared upfront. This avoids dynamic allocation during run-time. The user can specify a TC
-/// sender in form of a special trait object which implements [PacketSenderRaw]. For example, this
+/// sender in form of a special trait object which implements [PacketHandler]. For example, this
 /// can be used to send the telecommands to a centralized TC source component for further
 /// processing and routing.
 ///
@@ -24,7 +24,7 @@ use std::vec::Vec;
 /// use spacepackets::ecss::WritablePusPacket;
 /// use satrs::hal::std::udp_server::UdpTcServer;
 /// use satrs::ComponentId;
-/// use satrs::tmtc::PacketSenderRaw;
+/// use satrs::tmtc::PacketHandler;
 /// use spacepackets::SpHeader;
 /// use spacepackets::ecss::tc::{PusTcCreator, CreatorConfig};
 /// use arbitrary_int::u11;
@@ -60,7 +60,7 @@ use std::vec::Vec;
 /// [example code](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example/src/tmtc.rs#L67)
 /// on how to use this TC server. It uses the server to receive PUS telecommands on a specific port
 /// and then forwards them to a generic CCSDS packet receiver.
-pub struct UdpTcServer<TcSender: PacketSenderRaw<Error = SendError>, SendError> {
+pub struct UdpTcServer<TcSender: PacketHandler<Error = SendError>, SendError> {
     pub id: ComponentId,
     pub socket: UdpSocket,
     recv_buf: Vec<u8>,
@@ -78,7 +78,7 @@ pub enum ReceiveResult<SendError: Debug + 'static> {
     Send(SendError),
 }
 
-impl<TcSender: PacketSenderRaw<Error = SendError>, SendError: Debug + 'static>
+impl<TcSender: PacketHandler<Error = SendError>, SendError: Debug + 'static>
     UdpTcServer<TcSender, SendError>
 {
     pub fn new<A: ToSocketAddrs>(
@@ -112,7 +112,7 @@ impl<TcSender: PacketSenderRaw<Error = SendError>, SendError: Debug + 'static>
         let (num_bytes, from) = res;
         self.sender_addr = Some(from);
         self.tc_sender
-            .send_packet(self.id, &self.recv_buf[0..num_bytes])
+            .handle_packet(self.id, &self.recv_buf[0..num_bytes])
             .map_err(ReceiveResult::Send)?;
         Ok(res)
     }
@@ -127,7 +127,7 @@ mod tests {
     use crate::ComponentId;
     use crate::hal::std::udp_server::{ReceiveResult, UdpTcServer};
     use crate::queue::GenericSendError;
-    use crate::tmtc::PacketSenderRaw;
+    use crate::tmtc::PacketHandler;
     use arbitrary_int::u11;
     use core::cell::RefCell;
     use spacepackets::SpHeader;
@@ -146,10 +146,10 @@ mod tests {
         pub sent_cmds: RefCell<VecDeque<Vec<u8>>>,
     }
 
-    impl PacketSenderRaw for PingReceiver {
+    impl PacketHandler for PingReceiver {
         type Error = GenericSendError;
 
-        fn send_packet(&self, sender_id: ComponentId, tc_raw: &[u8]) -> Result<(), Self::Error> {
+        fn handle_packet(&self, sender_id: ComponentId, tc_raw: &[u8]) -> Result<(), Self::Error> {
             assert_eq!(sender_id, UDP_SERVER_ID);
             let mut sent_data = Vec::new();
             sent_data.extend_from_slice(tc_raw);

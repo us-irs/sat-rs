@@ -37,6 +37,7 @@ mod tests {
     use std::sync::mpsc;
 
     use crate::{
+        ComponentId,
         mode::{
             ModeAndSubmode, ModeReply, ModeReplySender, ModeRequest, ModeRequestSender,
             ModeRequestorAndHandlerMpsc, ModeRequestorOneChildMpsc,
@@ -44,9 +45,9 @@ mod tests {
         request::{GenericMessage, MessageMetadata},
     };
 
-    const TEST_COMPONENT_ID_0: u64 = 5;
-    const TEST_COMPONENT_ID_1: u64 = 6;
-    const TEST_COMPONENT_ID_2: u64 = 7;
+    const TEST_COMPONENT_ID_0: ComponentId = 5;
+    const TEST_COMPONENT_ID_1: ComponentId = 6;
+    const TEST_COMPONENT_ID_2: ComponentId = 7;
 
     #[test]
     fn test_simple_mode_requestor() {

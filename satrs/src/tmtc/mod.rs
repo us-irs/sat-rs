@@ -50,20 +50,20 @@ impl PacketInPool {
 
 /// Generic trait for object which can send any packets in form of a raw bytestream, with
 /// no assumptions about the received protocol.
-pub trait PacketSenderRaw: Send {
+pub trait PacketHandler: Send {
     type Error;
-    fn send_packet(&self, sender_id: ComponentId, packet: &[u8]) -> Result<(), Self::Error>;
+    fn handle_packet(&self, sender_id: ComponentId, packet: &[u8]) -> Result<(), Self::Error>;
 }
 
-/// Extension trait of [PacketSenderRaw] which allows downcasting by implementing [Downcast].
+/// Extension trait of [PacketHandler] which allows downcasting by implementing [Downcast].
 #[cfg(feature = "alloc")]
-pub trait PacketSenderRawExt: PacketSenderRaw + Downcast {
+pub trait PacketSenderRawExt: PacketHandler + Downcast {
     // Remove this once trait upcasting coercion has been implemented.
     // Tracking issue: https://github.com/rust-lang/rust/issues/65991
-    fn upcast(&self) -> &dyn PacketSenderRaw<Error = Self::Error>;
+    fn upcast(&self) -> &dyn PacketHandler<Error = Self::Error>;
     // Remove this once trait upcasting coercion has been implemented.
     // Tracking issue: https://github.com/rust-lang/rust/issues/65991
-    fn upcast_mut(&mut self) -> &mut dyn PacketSenderRaw<Error = Self::Error>;
+    fn upcast_mut(&mut self) -> &mut dyn PacketHandler<Error = Self::Error>;
 }
 
 /// Blanket implementation to automatically implement [PacketSenderRawExt] when the [alloc]
@@ -71,16 +71,16 @@ pub trait PacketSenderRawExt: PacketSenderRaw + Downcast {
 #[cfg(feature = "alloc")]
 impl<T> PacketSenderRawExt for T
 where
-    T: PacketSenderRaw + Send + 'static,
+    T: PacketHandler + Send + 'static,
 {
     // Remove this once trait upcasting coercion has been implemented.
     // Tracking issue: https://github.com/rust-lang/rust/issues/65991
-    fn upcast(&self) -> &dyn PacketSenderRaw<Error = Self::Error> {
+    fn upcast(&self) -> &dyn PacketHandler<Error = Self::Error> {
         self
     }
     // Remove this once trait upcasting coercion has been implemented.
     // Tracking issue: https://github.com/rust-lang/rust/issues/65991
-    fn upcast_mut(&mut self) -> &mut dyn PacketSenderRaw<Error = Self::Error> {
+    fn upcast_mut(&mut self) -> &mut dyn PacketHandler<Error = Self::Error> {
         self
     }
 }
@@ -288,19 +288,19 @@ pub mod std_mod {
         }
     }
 
-    impl PacketSenderRaw for mpsc::Sender<PacketAsVec> {
+    impl PacketHandler for mpsc::Sender<PacketAsVec> {
         type Error = GenericSendError;
 
-        fn send_packet(&self, sender_id: ComponentId, packet: &[u8]) -> Result<(), Self::Error> {
+        fn handle_packet(&self, sender_id: ComponentId, packet: &[u8]) -> Result<(), Self::Error> {
             self.send(PacketAsVec::new(sender_id, packet.to_vec()))
                 .map_err(|_| GenericSendError::RxDisconnected)
         }
     }
 
-    impl PacketSenderRaw for mpsc::SyncSender<PacketAsVec> {
+    impl PacketHandler for mpsc::SyncSender<PacketAsVec> {
         type Error = GenericSendError;
 
-        fn send_packet(&self, sender_id: ComponentId, tc_raw: &[u8]) -> Result<(), Self::Error> {
+        fn handle_packet(&self, sender_id: ComponentId, tc_raw: &[u8]) -> Result<(), Self::Error> {
             self.try_send(PacketAsVec::new(sender_id, tc_raw.to_vec()))
                 .map_err(|e| match e {
                     mpsc::TrySendError::Full(_) => GenericSendError::QueueFull(None),
@@ -402,12 +402,12 @@ pub mod std_mod {
         }
     }
 
-    impl<Sender: PacketInPoolSender, PacketStore: CcsdsPacketPool + Send> PacketSenderRaw
+    impl<Sender: PacketInPoolSender, PacketStore: CcsdsPacketPool + Send> PacketHandler
         for PacketSenderWithSharedPool<Sender, PacketStore>
     {
         type Error = StoreAndSendError;
 
-        fn send_packet(&self, sender_id: ComponentId, packet: &[u8]) -> Result<(), Self::Error> {
+        fn handle_packet(&self, sender_id: ComponentId, packet: &[u8]) -> Result<(), Self::Error> {
             let mut shared_pool = self.shared_pool.borrow_mut();
             let store_addr = shared_pool.add_raw_tc(packet)?;
             drop(shared_pool);
@@ -450,7 +450,7 @@ pub mod std_mod {
             _sp_header: &SpHeader,
             tc_raw: &[u8],
         ) -> Result<(), Self::Error> {
-            self.send_packet(sender_id, tc_raw)
+            self.handle_packet(sender_id, tc_raw)
         }
     }
 
@@ -494,10 +494,10 @@ pub(crate) mod tests {
 
     pub(crate) fn send_with_sender<SendError>(
         sender_id: ComponentId,
-        packet_sender: &(impl PacketSenderRaw<Error = SendError> + ?Sized),
+        packet_sender: &(impl PacketHandler<Error = SendError> + ?Sized),
         packet: &[u8],
     ) -> Result<(), SendError> {
-        packet_sender.send_packet(sender_id, packet)
+        packet_sender.handle_packet(sender_id, packet)
     }
 
     #[test]

@@ -66,7 +66,8 @@ impl GenericRequestRouter {
                 let apid_target_id = UniqueApidTargetId::from(id);
                 warn!("Target APID for request: {}", apid_target_id.apid);
                 warn!("Target Unique ID for request: {}", apid_target_id.unique_id);
-                let mut fail_data: [u8; 8] = [0; 8];
+                let mut fail_data: [u8; core::mem::size_of::<ComponentId>()] =
+                    [0; core::mem::size_of::<ComponentId>()];
                 fail_data.copy_from_slice(&id.to_be_bytes());
                 verif_reporter
                     .completion_failure(

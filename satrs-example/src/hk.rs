@@ -1,3 +1,4 @@
+use arbitrary_int::traits::Integer as _;
 use derive_new::new;
 use satrs::hk::UniqueId;
 use satrs::request::UniqueApidTargetId;
@@ -29,7 +30,7 @@ impl HkUniqueId {
                 expected: 8,
             });
         }
-        buf[0..4].copy_from_slice(&self.target_id.unique_id.to_be_bytes());
+        buf[0..4].copy_from_slice(&self.target_id.unique_id.as_u32().to_be_bytes());
         buf[4..8].copy_from_slice(&self.set_id.to_be_bytes());
 
         Ok(8)
@@ -55,7 +56,7 @@ impl PusHkHelper {
     ) -> Result<PusTmCreator<'a, 'b>, ByteConversionError> {
         let sec_header =
             PusTmSecondaryHeader::new(3, hk::Subservice::TmHkPacket as u8, 0, 0, timestamp);
-        buf[0..4].copy_from_slice(&self.component_id.unique_id.to_be_bytes());
+        buf[0..4].copy_from_slice(&self.component_id.unique_id.as_u32().to_be_bytes());
         buf[4..8].copy_from_slice(&set_id.to_be_bytes());
         let (_, second_half) = buf.split_at_mut(8);
         let hk_data_len = hk_data_writer(second_half)?;

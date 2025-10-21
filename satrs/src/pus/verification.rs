@@ -25,11 +25,11 @@
 //! use spacepackets::SpHeader;
 //! use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader, CreatorConfig};
 //! use spacepackets::ecss::tm::PusTmReader;
-//! use arbitrary_int::u11;
+//! use arbitrary_int::{u11, u21};
 //!
 //! const EMPTY_STAMP: [u8; 7] = [0; 7];
 //! const TEST_APID: u11 = u11::new(0x02);
-//! const TEST_COMPONENT_ID: UniqueApidTargetId = UniqueApidTargetId::new(TEST_APID, 0x05);
+//! const TEST_COMPONENT_ID: UniqueApidTargetId = UniqueApidTargetId::new(TEST_APID, u21::new(0x05));
 //!
 //! let pool_cfg = StaticPoolConfig::new_from_subpool_cfg_tuples(
 //!     vec![(10, 32), (10, 64), (10, 128), (10, 1024)], false

@@ -2,5 +2,5 @@
 pub mod tcp_server;
 pub mod udp_server;
 
-mod tcp_cobs_server;
-mod tcp_spacepackets_server;
+pub mod tcp_cobs_server;
+pub mod tcp_spacepackets_server;

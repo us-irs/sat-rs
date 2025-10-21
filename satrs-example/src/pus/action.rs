@@ -270,6 +270,7 @@ impl TargetedPusService for ActionServiceWrapper {
 
 #[cfg(test)]
 mod tests {
+    use arbitrary_int::traits::Integer as _;
     use satrs::pus::test_util::{
         TEST_APID, TEST_COMPONENT_ID_0, TEST_COMPONENT_ID_1, TEST_UNIQUE_ID_0, TEST_UNIQUE_ID_1,
     };
@@ -452,7 +453,7 @@ mod tests {
         let sec_header = PusTcSecondaryHeader::new_simple(8, 128);
         let action_id = 5_u32;
         let mut app_data: [u8; 8] = [0; 8];
-        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_1.to_be_bytes());
+        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_1.as_u32().to_be_bytes());
         app_data[4..8].copy_from_slice(&action_id.to_be_bytes());
         let pus8_packet =
             PusTcCreator::new(sp_header, sec_header, &app_data, CreatorConfig::default());
@@ -521,7 +522,7 @@ mod tests {
         let action_id = 5_u32;
         let mut app_data: [u8; 8] = [0; 8];
         // Invalid ID, routing should fail.
-        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.to_be_bytes());
+        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.as_u32().to_be_bytes());
         app_data[4..8].copy_from_slice(&action_id.to_be_bytes());
         let pus8_packet = PusTcCreator::new(
             SpHeader::new_from_apid(TEST_APID),
@@ -557,7 +558,7 @@ mod tests {
         let action_id = 5_u32;
         let mut app_data: [u8; 16] = [0; 16];
         // Invalid ID, routing should fail.
-        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.to_be_bytes());
+        app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_0.as_u32().to_be_bytes());
         app_data[4..8].copy_from_slice(&action_id.to_be_bytes());
         for i in 0..8 {
             app_data[i + 8] = i as u8;
@@ -696,7 +697,7 @@ mod tests {
             ReplyHandlerTestbench::new(TEST_COMPONENT_ID_0.id(), ActionReplyHandler::default());
         let action_reply = ActionReplyPus::new(5_u32, ActionReplyVariant::Completed);
         let unrequested_reply =
-            GenericMessage::new(MessageMetadata::new(10_u32, 15_u64), action_reply);
+            GenericMessage::new(MessageMetadata::new(10_u32, 15_u32), action_reply);
         // Right now this function does not do a lot. We simply check that it does not panic or do
         // weird stuff.
         let result = testbench.handle_unrequested_reply(&unrequested_reply);
