@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 - Bump `sat-rs` edition to 2024.
 - Bumped `spacepackets` to v0.16
+- `ComponentId` is u32 now
+- Simplified TCP servers
 
 ## Changed
 

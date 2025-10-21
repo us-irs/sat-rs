@@ -14,7 +14,8 @@ pub enum Apid {
 
 pub mod acs {
 
-    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    #[derive(Debug, PartialEq, Eq)]
+    #[bitbybit::bitenum(u21, exhaustive = false)]
     pub enum Id {
         Subsystem = 1,
         Assembly = 2,
@@ -23,30 +24,32 @@ pub mod acs {
     }
 
     pub const SUBSYSTEM: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Acs.raw_value(), Id::Subsystem as u32);
+        super::UniqueApidTargetId::new(super::Apid::Acs.raw_value(), Id::Subsystem.raw_value());
     pub const ASSEMBLY: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Acs.raw_value(), Id::Assembly as u32);
+        super::UniqueApidTargetId::new(super::Apid::Acs.raw_value(), Id::Assembly.raw_value());
     pub const MGM0: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Acs.raw_value(), Id::Mgm0 as u32);
+        super::UniqueApidTargetId::new(super::Apid::Acs.raw_value(), Id::Mgm0.raw_value());
     pub const MGM1: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Acs.raw_value(), Id::Mgm1 as u32);
+        super::UniqueApidTargetId::new(super::Apid::Acs.raw_value(), Id::Mgm1.raw_value());
 }
 
 pub mod eps {
-    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    #[derive(Debug, PartialEq, Eq)]
+    #[bitbybit::bitenum(u21, exhaustive = false)]
     pub enum Id {
         Pcdu = 0,
         Subsystem = 1,
     }
 
     pub const PCDU: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Eps.raw_value(), Id::Pcdu as u32);
+        super::UniqueApidTargetId::new(super::Apid::Eps.raw_value(), Id::Pcdu.raw_value());
     pub const SUBSYSTEM: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Eps.raw_value(), Id::Subsystem as u32);
+        super::UniqueApidTargetId::new(super::Apid::Eps.raw_value(), Id::Subsystem.raw_value());
 }
 
 pub mod generic_pus {
-    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    #[derive(Debug, PartialEq, Eq)]
+    #[bitbybit::bitenum(u21, exhaustive = false)]
     pub enum Id {
         PusEventManagement = 0,
         PusRouting = 1,
@@ -58,39 +61,49 @@ pub mod generic_pus {
 
     pub const PUS_EVENT_MANAGEMENT: super::UniqueApidTargetId = super::UniqueApidTargetId::new(
         super::Apid::GenericPus.raw_value(),
-        Id::PusEventManagement as u32,
+        Id::PusEventManagement.raw_value(),
     );
-    pub const PUS_ROUTING: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::GenericPus.raw_value(), Id::PusRouting as u32);
-    pub const PUS_TEST: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::GenericPus.raw_value(), Id::PusTest as u32);
-    pub const PUS_ACTION: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::GenericPus.raw_value(), Id::PusAction as u32);
-    pub const PUS_MODE: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::GenericPus.raw_value(), Id::PusMode as u32);
+    pub const PUS_ROUTING: super::UniqueApidTargetId = super::UniqueApidTargetId::new(
+        super::Apid::GenericPus.raw_value(),
+        Id::PusRouting.raw_value(),
+    );
+    pub const PUS_TEST: super::UniqueApidTargetId = super::UniqueApidTargetId::new(
+        super::Apid::GenericPus.raw_value(),
+        Id::PusTest.raw_value(),
+    );
+    pub const PUS_ACTION: super::UniqueApidTargetId = super::UniqueApidTargetId::new(
+        super::Apid::GenericPus.raw_value(),
+        Id::PusAction.raw_value(),
+    );
+    pub const PUS_MODE: super::UniqueApidTargetId = super::UniqueApidTargetId::new(
+        super::Apid::GenericPus.raw_value(),
+        Id::PusMode.raw_value(),
+    );
     pub const PUS_HK: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::GenericPus.raw_value(), Id::PusHk as u32);
+        super::UniqueApidTargetId::new(super::Apid::GenericPus.raw_value(), Id::PusHk.raw_value());
 }
 
 pub mod sched {
-    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    #[derive(Debug, PartialEq, Eq)]
+    #[bitbybit::bitenum(u21, exhaustive = false)]
     pub enum Id {
         PusSched = 0,
     }
 
     pub const PUS_SCHED: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Sched.raw_value(), Id::PusSched as u32);
+        super::UniqueApidTargetId::new(super::Apid::Sched.raw_value(), Id::PusSched.raw_value());
 }
 
 pub mod tmtc {
-    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    #[derive(Debug, PartialEq, Eq)]
+    #[bitbybit::bitenum(u21, exhaustive = false)]
     pub enum Id {
         UdpServer = 0,
         TcpServer = 1,
     }
 
     pub const UDP_SERVER: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Tmtc.raw_value(), Id::UdpServer as u32);
+        super::UniqueApidTargetId::new(super::Apid::Tmtc.raw_value(), Id::UdpServer.raw_value());
     pub const TCP_SERVER: super::UniqueApidTargetId =
-        super::UniqueApidTargetId::new(super::Apid::Tmtc.raw_value(), Id::TcpServer as u32);
+        super::UniqueApidTargetId::new(super::Apid::Tmtc.raw_value(), Id::TcpServer.raw_value());
 }

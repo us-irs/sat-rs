@@ -57,7 +57,7 @@ pub use spacepackets;
 use spacepackets::PacketId;
 
 /// Generic component ID type.
-pub type ComponentId = u64;
+pub type ComponentId = u32;
 
 pub trait ValidatorU16Id {
     fn validate(&self, id: u16) -> bool;

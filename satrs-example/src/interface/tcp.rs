@@ -5,7 +5,7 @@ use std::{
 };
 
 use log::{info, warn};
-use satrs::tmtc::StoreAndSendError;
+use satrs::hal::std::tcp_spacepackets_server::CcsdsPacketParser;
 use satrs::{
     encoding::ccsds::{SpValidity, SpacePacketValidator},
     hal::std::tcp_server::{HandledConnectionHandler, ServerConfig, TcpSpacepacketsServer},
@@ -103,16 +103,14 @@ impl PacketSource for SyncTcpTmSource {
     }
 }
 
-pub type TcpServer<ReceivesTc, SendError> = TcpSpacepacketsServer<
+pub type TcpServer<ReceivesTc> = TcpSpacepacketsServer<
     SyncTcpTmSource,
     ReceivesTc,
     SimplePacketValidator,
     ConnectionFinishedHandler,
-    (),
-    SendError,
 >;
 
-pub struct TcpTask(pub TcpServer<TmTcSender, StoreAndSendError>);
+pub struct TcpTask(pub TcpServer<TmTcSender>);
 
 impl TcpTask {
     pub fn new(
@@ -124,8 +122,7 @@ impl TcpTask {
         Ok(Self(TcpSpacepacketsServer::new(
             cfg,
             tm_source,
-            tc_sender,
-            SimplePacketValidator { valid_ids },
+            CcsdsPacketParser::new(cfg.id, 2048, tc_sender, SimplePacketValidator { valid_ids }),
             ConnectionFinishedHandler::default(),
             None,
         )?))

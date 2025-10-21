@@ -218,6 +218,7 @@ impl<TmSender: EcssTmSender> EventHandler<TmSender> {
 
 #[cfg(test)]
 mod tests {
+    use arbitrary_int::u21;
     use satrs::{
         events_legacy::EventU32,
         pus::verification::VerificationReporterConfig,
@@ -227,7 +228,7 @@ mod tests {
 
     use super::*;
 
-    const TEST_CREATOR_ID: UniqueApidTargetId = UniqueApidTargetId::new(u11::new(1), 2);
+    const TEST_CREATOR_ID: UniqueApidTargetId = UniqueApidTargetId::new(u11::new(1), u21::new(2));
     const TEST_EVENT: EventU32 = EventU32::new(satrs::events_legacy::Severity::Info, 1, 1);
 
     pub struct EventManagementTestbench {

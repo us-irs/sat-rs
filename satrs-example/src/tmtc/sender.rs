@@ -4,7 +4,7 @@ use satrs::{
     pus::EcssTmSender,
     queue::GenericSendError,
     spacepackets::ecss::WritablePusPacket,
-    tmtc::{PacketAsVec, PacketSenderRaw, PacketSenderWithSharedPool, StoreAndSendError},
+    tmtc::{PacketAsVec, PacketHandler, PacketSenderWithSharedPool},
     ComponentId,
 };
 
@@ -48,26 +48,33 @@ impl EcssTmSender for TmTcSender {
     }
 }
 
-impl PacketSenderRaw for TmTcSender {
-    type Error = StoreAndSendError;
+impl PacketHandler for TmTcSender {
+    type Error = GenericSendError;
 
-    fn send_packet(&self, sender_id: ComponentId, packet: &[u8]) -> Result<(), Self::Error> {
+    fn handle_packet(&self, sender_id: ComponentId, packet: &[u8]) -> Result<(), Self::Error> {
         match self {
             TmTcSender::Static(packet_sender_with_shared_pool) => {
-                packet_sender_with_shared_pool.send_packet(sender_id, packet)
+                if let Err(e) = packet_sender_with_shared_pool.handle_packet(sender_id, packet) {
+                    log::error!("Error sending packet via Static TM/TC sender: {:?}", e);
+                }
             }
-            TmTcSender::Heap(sync_sender) => sync_sender
-                .send_packet(sender_id, packet)
-                .map_err(StoreAndSendError::Send),
-            TmTcSender::Mock(sender) => sender.send_packet(sender_id, packet),
+            TmTcSender::Heap(sync_sender) => {
+                if let Err(e) = sync_sender.handle_packet(sender_id, packet) {
+                    log::error!("Error sending packet via Heap TM/TC sender: {:?}", e);
+                }
+            }
+            TmTcSender::Mock(sender) => {
+                sender.handle_packet(sender_id, packet).unwrap();
+            }
         }
+        Ok(())
     }
 }
 
-impl PacketSenderRaw for MockSender {
-    type Error = StoreAndSendError;
+impl PacketHandler for MockSender {
+    type Error = GenericSendError;
 
-    fn send_packet(&self, sender_id: ComponentId, tc_raw: &[u8]) -> Result<(), Self::Error> {
+    fn handle_packet(&self, sender_id: ComponentId, tc_raw: &[u8]) -> Result<(), Self::Error> {
         let mut mut_queue = self.0.borrow_mut();
         mut_queue.push_back(PacketAsVec::new(sender_id, tc_raw.to_vec()));
         Ok(())

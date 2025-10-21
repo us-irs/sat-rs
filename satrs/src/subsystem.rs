@@ -782,7 +782,7 @@ mod tests {
             );
             assert_eq!(self.sender.requests.borrow().len(), 2);
             let req_0 = self.sender.requests.get_mut().pop_front().unwrap();
-            assert_eq!(req_0.target_id, ExampleTargetId::Target0 as u64);
+            assert_eq!(req_0.target_id, ExampleTargetId::Target0 as ComponentId);
             assert_eq!(req_0.request_id, expected_req_id);
             assert_eq!(
                 req_0.request,
@@ -792,7 +792,7 @@ mod tests {
                 }
             );
             let req_1 = self.sender.requests.borrow_mut().pop_front().unwrap();
-            assert_eq!(req_1.target_id, ExampleTargetId::Target1 as u64);
+            assert_eq!(req_1.target_id, ExampleTargetId::Target1 as ComponentId);
             assert_eq!(
                 req_1.request,
                 ModeRequest::SetMode {
@@ -808,7 +808,7 @@ mod tests {
             );
             assert_eq!(self.sender.requests.borrow().len(), 1);
             let req_0 = self.sender.requests.get_mut().pop_front().unwrap();
-            assert_eq!(req_0.target_id, ExampleTargetId::Target2 as u64);
+            assert_eq!(req_0.target_id, ExampleTargetId::Target2 as ComponentId);
             assert_eq!(req_0.request_id, expected_req_id);
             assert_eq!(
                 req_0.request,
@@ -827,7 +827,7 @@ mod tests {
             assert_eq!(self.execution_helper.current_sequence_index().unwrap(), 0);
             assert_eq!(self.sender.requests.borrow().len(), 2);
             let req_0 = self.sender.requests.get_mut().pop_front().unwrap();
-            assert_eq!(req_0.target_id, ExampleTargetId::Target0 as u64);
+            assert_eq!(req_0.target_id, ExampleTargetId::Target0 as ComponentId);
             assert_eq!(req_0.request_id, expected_req_id);
             assert_eq!(
                 req_0.request,
@@ -837,7 +837,7 @@ mod tests {
                 }
             );
             let req_1 = self.sender.requests.borrow_mut().pop_front().unwrap();
-            assert_eq!(req_1.target_id, ExampleTargetId::Target1 as u64);
+            assert_eq!(req_1.target_id, ExampleTargetId::Target1 as ComponentId);
             assert_eq!(
                 req_1.request,
                 ModeRequest::SetMode {
@@ -850,9 +850,9 @@ mod tests {
 
     fn create_default_mode_store() -> ModeStoreVec {
         let mut mode_store = ModeStoreVec::default();
-        mode_store.add_component(ExampleTargetId::Target0 as u64, UNKNOWN_MODE);
-        mode_store.add_component(ExampleTargetId::Target1 as u64, UNKNOWN_MODE);
-        mode_store.add_component(ExampleTargetId::Target2 as u64, UNKNOWN_MODE);
+        mode_store.add_component(ExampleTargetId::Target0 as ComponentId, UNKNOWN_MODE);
+        mode_store.add_component(ExampleTargetId::Target1 as ComponentId, UNKNOWN_MODE);
+        mode_store.add_component(ExampleTargetId::Target2 as ComponentId, UNKNOWN_MODE);
         mode_store
     }
 
@@ -863,13 +863,13 @@ mod tests {
         let mut table_seq_0 = SequenceTableMapTable::new("MODE_0_SEQ_0");
         table_seq_0.add_entry(SequenceTableEntry::new(
             "TARGET_0",
-            ExampleTargetId::Target0 as u64,
+            ExampleTargetId::Target0 as ComponentId,
             SUBSYSTEM_MD0_TGT0_MODE,
             false,
         ));
         table_seq_0.add_entry(SequenceTableEntry::new(
             "TARGET_1",
-            ExampleTargetId::Target1 as u64,
+            ExampleTargetId::Target1 as ComponentId,
             SUBSYSTEM_MD0_TGT1_MODE,
             false,
         ));
@@ -881,13 +881,13 @@ mod tests {
         let mut table_seq_0 = SequenceTableMapTable::new("MODE_1_SEQ_0");
         table_seq_0.add_entry(SequenceTableEntry::new(
             "MD1_SEQ0_TGT0",
-            ExampleTargetId::Target0 as u64,
+            ExampleTargetId::Target0 as ComponentId,
             SUBSYSTEM_MD1_ST0_TGT0_MODE,
             false,
         ));
         table_seq_0.add_entry(SequenceTableEntry::new(
             "MD1_SEQ0_TGT1",
-            ExampleTargetId::Target1 as u64,
+            ExampleTargetId::Target1 as ComponentId,
             SUBSYSTEM_MD1_ST0_TGT1_MODE,
             false,
         ));
@@ -895,7 +895,7 @@ mod tests {
         let mut table_seq_1 = SequenceTableMapTable::new("MODE_1_SEQ_1");
         table_seq_1.add_entry(SequenceTableEntry::new(
             "MD1_SEQ1_TGT2",
-            ExampleTargetId::Target2 as u64,
+            ExampleTargetId::Target2 as ComponentId,
             SUBSYSTEM_MD1_ST1_TGT2_MODE,
             false,
         ));
@@ -1263,11 +1263,11 @@ mod tests {
             assert_eq!(req.request, ModeRequest::AnnounceModeRecursive);
         };
         let req0 = tb.sender.requests.borrow_mut().pop_front().unwrap();
-        check_req(req0, ExampleTargetId::Target0 as u64);
+        check_req(req0, ExampleTargetId::Target0 as ComponentId);
         let req1 = tb.sender.requests.borrow_mut().pop_front().unwrap();
-        check_req(req1, ExampleTargetId::Target1 as u64);
+        check_req(req1, ExampleTargetId::Target1 as ComponentId);
         let req2 = tb.sender.requests.borrow_mut().pop_front().unwrap();
-        check_req(req2, ExampleTargetId::Target2 as u64);
+        check_req(req2, ExampleTargetId::Target2 as ComponentId);
     }
 
     #[test]
@@ -1283,11 +1283,11 @@ mod tests {
             assert_eq!(req.request, ModeRequest::AnnounceMode);
         };
         let req0 = tb.sender.requests.borrow_mut().pop_front().unwrap();
-        check_req(req0, ExampleTargetId::Target0 as u64);
+        check_req(req0, ExampleTargetId::Target0 as ComponentId);
         let req1 = tb.sender.requests.borrow_mut().pop_front().unwrap();
-        check_req(req1, ExampleTargetId::Target1 as u64);
+        check_req(req1, ExampleTargetId::Target1 as ComponentId);
         let req2 = tb.sender.requests.borrow_mut().pop_front().unwrap();
-        check_req(req2, ExampleTargetId::Target2 as u64);
+        check_req(req2, ExampleTargetId::Target2 as ComponentId);
     }
 
     #[test]

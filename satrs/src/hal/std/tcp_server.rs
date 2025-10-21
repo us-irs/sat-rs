@@ -12,7 +12,7 @@ use std::net::SocketAddr;
 use std::thread;
 
 use crate::ComponentId;
-use crate::tmtc::{PacketSenderRaw, PacketSource};
+use crate::tmtc::PacketSource;
 use thiserror::Error;
 
 // Re-export the TMTC in COBS server.
@@ -73,11 +73,9 @@ impl ServerConfig {
 }
 
 #[derive(Error, Debug)]
-pub enum TcpTmtcError<TmError, TcError> {
+pub enum TcpTmError<TmError> {
     #[error("TM retrieval error: {0}")]
     TmError(TmError),
-    #[error("TC retrieval error: {0}")]
-    TcError(TcError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -116,32 +114,29 @@ pub trait HandledConnectionHandler {
 }
 
 /// Generic parser abstraction for an object which can parse for telecommands given a raw
-/// bytestream received from a TCP socket and send them using a generic [PacketSenderRaw]
-/// implementation. This allows different encoding schemes for telecommands.
-pub trait TcpTcParser<TmError, SendError> {
-    fn handle_tc_parsing(
-        &mut self,
-        tc_buffer: &mut [u8],
-        sender_id: ComponentId,
-        tc_sender: &(impl PacketSenderRaw<Error = SendError> + ?Sized),
-        conn_result: &mut HandledConnectionInfo,
-        current_write_idx: usize,
-        next_write_idx: &mut usize,
-    ) -> Result<(), TcpTmtcError<TmError, SendError>>;
+/// bytestream received from a TCP socket and extract packets from them. This allows different
+/// encoding schemes for telecommands.
+pub trait TcpTcParser {
+    /// Reset the state of the parser.
+    fn reset(&mut self);
+
+    /// Pushes received data into the parser.
+    fn push(&mut self, tc_data: &[u8], conn_result: &mut HandledConnectionInfo);
 }
 
 /// Generic sender abstraction for an object which can pull telemetry from a given TM source
 /// using a [PacketSource] and then send them back to a client using a given [TcpStream].
 /// The concrete implementation can also perform any encoding steps which are necessary before
 /// sending back the data to a client.
-pub trait TcpTmSender<TmError, TcError> {
+pub trait TcpTmSender {
+    /// Returns whether any packets were sent back to the client.
     fn handle_tm_sending(
         &mut self,
         tm_buffer: &mut [u8],
-        tm_source: &mut (impl PacketSource<Error = TmError> + ?Sized),
+        tm_source: &mut (impl PacketSource<Error = ()> + ?Sized),
         conn_result: &mut HandledConnectionInfo,
         stream: &mut TcpStream,
-    ) -> Result<bool, TcpTmtcError<TmError, TcError>>;
+    ) -> Result<bool, std::io::Error>;
 }
 
 /// TCP TMTC server implementation for exchange of generic TMTC packets in a generic way which
@@ -151,7 +146,8 @@ pub trait TcpTmSender<TmError, TcError> {
 /// through the following 4 core abstractions:
 ///
 /// 1. [TcpTcParser] to parse for telecommands from the raw bytestream received from a client.
-/// 2. Parsed telecommands will be sent using the [PacketSenderRaw] object.
+/// 2. Parsed telecommands will be handled by the [TcpTcParser] object as well. For example, this
+///    parser can contain a message queue handle to send the packets somewhere.
 /// 3. [TcpTmSender] to send telemetry pulled from a TM source back to the client.
 /// 4. [PacketSource] as a generic TM source used by the [TcpTmSender].
 ///
@@ -163,13 +159,10 @@ pub trait TcpTmSender<TmError, TcError> {
 /// 1. [TcpTmtcInCobsServer] to exchange TMTC wrapped inside the COBS framing protocol.
 /// 2. [TcpSpacepacketsServer] to exchange space packets via TCP.
 pub struct TcpTmtcGenericServer<
-    TmSource: PacketSource<Error = TmError>,
-    TcSender: PacketSenderRaw<Error = TcSendError>,
-    TmSender: TcpTmSender<TmError, TcSendError>,
-    TcParser: TcpTcParser<TmError, TcSendError>,
+    TmSource: PacketSource<Error = ()>,
+    TmSender: TcpTmSender,
+    TcParser: TcpTcParser,
     HandledConnection: HandledConnectionHandler,
-    TmError,
-    TcSendError,
 > {
     pub id: ComponentId,
     pub finished_handler: HandledConnection,
@@ -177,7 +170,6 @@ pub struct TcpTmtcGenericServer<
     pub(crate) inner_loop_delay: Duration,
     pub(crate) tm_source: TmSource,
     pub(crate) tm_buffer: Vec<u8>,
-    pub(crate) tc_sender: TcSender,
     pub(crate) tc_buffer: Vec<u8>,
     poll: Poll,
     events: Events,
@@ -187,23 +179,11 @@ pub struct TcpTmtcGenericServer<
 }
 
 impl<
-    TmSource: PacketSource<Error = TmError>,
-    TcSender: PacketSenderRaw<Error = TcSendError>,
-    TmSender: TcpTmSender<TmError, TcSendError>,
-    TcParser: TcpTcParser<TmError, TcSendError>,
+    TmSource: PacketSource<Error = ()>,
+    TmSender: TcpTmSender,
+    TcParser: TcpTcParser,
     HandledConnection: HandledConnectionHandler,
-    TmError: 'static,
-    TcSendError: 'static,
->
-    TcpTmtcGenericServer<
-        TmSource,
-        TcSender,
-        TmSender,
-        TcParser,
-        HandledConnection,
-        TmError,
-        TcSendError,
-    >
+> TcpTmtcGenericServer<TmSource, TmSender, TcParser, HandledConnection>
 {
     /// Create a new generic TMTC server instance.
     ///
@@ -223,7 +203,6 @@ impl<
         tc_parser: TcParser,
         tm_sender: TmSender,
         tm_source: TmSource,
-        tc_receiver: TcSender,
         finished_handler: HandledConnection,
         stop_signal: Option<Arc<AtomicBool>>,
     ) -> Result<Self, std::io::Error> {
@@ -263,7 +242,6 @@ impl<
             inner_loop_delay: cfg.inner_loop_delay,
             tm_source,
             tm_buffer: vec![0; cfg.tm_buffer_size],
-            tc_sender: tc_receiver,
             tc_buffer: vec![0; cfg.tc_buffer_size],
             stop_signal,
             finished_handler,
@@ -297,7 +275,7 @@ impl<
     pub fn handle_all_connections(
         &mut self,
         poll_timeout: Option<Duration>,
-    ) -> Result<ConnectionResult, TcpTmtcError<TmError, TcSendError>> {
+    ) -> Result<ConnectionResult, std::io::Error> {
         let mut handled_connections = 0;
         // Poll Mio for events.
         self.poll.poll(&mut self.events, poll_timeout)?;
@@ -327,7 +305,7 @@ impl<
                     Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => break,
                     Err(err) => {
                         self.reregister_poll_interest()?;
-                        return Err(TcpTmtcError::Io(err));
+                        return Err(err);
                     }
                 }
             }
@@ -350,58 +328,24 @@ impl<
         &mut self,
         mut stream: TcpStream,
         addr: SocketAddr,
-    ) -> Result<(), TcpTmtcError<TmError, TcSendError>> {
-        let mut current_write_idx;
-        let mut next_write_idx = 0;
+    ) -> Result<(), std::io::Error> {
+        self.tc_handler.reset();
         let mut connection_result = HandledConnectionInfo::new(addr);
-        current_write_idx = next_write_idx;
         loop {
-            let read_result = stream.read(&mut self.tc_buffer[current_write_idx..]);
+            let read_result = stream.read(&mut self.tc_buffer);
             match read_result {
                 Ok(0) => {
-                    // Connection closed by client. If any TC was read, parse for complete packets.
-                    // After that, break the outer loop.
-                    if current_write_idx > 0 {
-                        self.tc_handler.handle_tc_parsing(
-                            &mut self.tc_buffer,
-                            self.id,
-                            &self.tc_sender,
-                            &mut connection_result,
-                            current_write_idx,
-                            &mut next_write_idx,
-                        )?;
-                    }
+                    // Connection closed by client.
                     break;
                 }
                 Ok(read_len) => {
-                    current_write_idx += read_len;
-                    // TC buffer is full, we must parse for complete packets now.
-                    if current_write_idx == self.tc_buffer.capacity() {
-                        self.tc_handler.handle_tc_parsing(
-                            &mut self.tc_buffer,
-                            self.id,
-                            &self.tc_sender,
-                            &mut connection_result,
-                            current_write_idx,
-                            &mut next_write_idx,
-                        )?;
-                        current_write_idx = next_write_idx;
-                    }
+                    self.tc_handler
+                        .push(&self.tc_buffer[0..read_len], &mut connection_result);
                 }
                 Err(e) => match e.kind() {
                     // As per [TcpStream::set_read_timeout] documentation, this should work for
                     // both UNIX and Windows.
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-                        self.tc_handler.handle_tc_parsing(
-                            &mut self.tc_buffer,
-                            self.id,
-                            &self.tc_sender,
-                            &mut connection_result,
-                            current_write_idx,
-                            &mut next_write_idx,
-                        )?;
-                        current_write_idx = next_write_idx;
-
                         if !self.tm_handler.handle_tm_sending(
                             &mut self.tm_buffer,
                             &mut self.tm_source,
@@ -426,7 +370,7 @@ impl<
                         }
                     }
                     _ => {
-                        return Err(TcpTmtcError::Io(e));
+                        return Err(e);
                     }
                 },
             }
@@ -502,8 +446,11 @@ pub(crate) mod tests {
                 .connection_info
                 .pop_back()
                 .expect("no connection info available");
-            assert_eq!(last_conn_result.num_received_tcs, num_tcs);
-            assert_eq!(last_conn_result.num_sent_tms, num_tms);
+            assert_eq!(
+                last_conn_result.num_received_tcs, num_tcs,
+                "received tcs mismatch"
+            );
+            assert_eq!(last_conn_result.num_sent_tms, num_tms, "sent tms missmatch");
         }
 
         pub fn check_no_connections_left(&self) {

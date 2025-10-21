@@ -1,5 +1,7 @@
 use alloc::sync::Arc;
 use alloc::vec;
+use cobs::CobsDecoderOwned;
+use cobs::DecodeError;
 use cobs::encode;
 use core::sync::atomic::AtomicBool;
 use core::time::Duration;
@@ -9,40 +11,58 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::vec::Vec;
 
-use crate::encoding::parse_buffer_for_cobs_encoded_packets;
-use crate::tmtc::PacketSenderRaw;
+use crate::queue::GenericSendError;
+use crate::tmtc::PacketHandler;
 use crate::tmtc::PacketSource;
 
 use crate::ComponentId;
 use crate::hal::std::tcp_server::{
-    ConnectionResult, ServerConfig, TcpTcParser, TcpTmSender, TcpTmtcError, TcpTmtcGenericServer,
+    ConnectionResult, ServerConfig, TcpTcParser, TcpTmSender, TcpTmtcGenericServer,
 };
 
 use super::tcp_server::HandledConnectionHandler;
 use super::tcp_server::HandledConnectionInfo;
 
 /// Concrete [TcpTcParser] implementation for the [TcpTmtcInCobsServer].
-#[derive(Default)]
-pub struct CobsTcParser {}
+pub struct CobsTcParser<PacketHandlerInstance: PacketHandler> {
+    sender_id: ComponentId,
+    owned_decoder: CobsDecoderOwned,
+    packet_handler: PacketHandlerInstance,
+    last_decode_error: Option<DecodeError>,
+}
 
-impl<TmError, TcError: 'static> TcpTcParser<TmError, TcError> for CobsTcParser {
-    fn handle_tc_parsing(
-        &mut self,
-        tc_buffer: &mut [u8],
+impl<PacketHandlerInstance: PacketHandler> CobsTcParser<PacketHandlerInstance> {
+    pub fn new(
         sender_id: ComponentId,
-        tc_sender: &(impl PacketSenderRaw<Error = TcError> + ?Sized),
-        conn_result: &mut HandledConnectionInfo,
-        current_write_idx: usize,
-        next_write_idx: &mut usize,
-    ) -> Result<(), TcpTmtcError<TmError, TcError>> {
-        conn_result.num_received_tcs += parse_buffer_for_cobs_encoded_packets(
-            &mut tc_buffer[..current_write_idx],
+        decoder_buf_size: usize,
+        packet_handler: PacketHandlerInstance,
+    ) -> Self {
+        Self {
             sender_id,
-            tc_sender,
-            next_write_idx,
-        )
-        .map_err(|e| TcpTmtcError::TcError(e))?;
-        Ok(())
+            owned_decoder: CobsDecoderOwned::new(decoder_buf_size),
+            packet_handler,
+            last_decode_error: None,
+        }
+    }
+}
+impl<PacketHandlerInstance: PacketHandler> TcpTcParser for CobsTcParser<PacketHandlerInstance> {
+    fn reset(&mut self) {
+        self.owned_decoder.reset();
+    }
+
+    fn push(&mut self, data: &[u8], conn_result: &mut HandledConnectionInfo) {
+        for byte in data {
+            match self.owned_decoder.feed(*byte) {
+                Ok(Some(packet_len)) => {
+                    self.packet_handler
+                        .handle_packet(self.sender_id, &self.owned_decoder.dest()[..packet_len])
+                        .ok();
+                    conn_result.num_received_tcs += 1;
+                }
+                Ok(None) => (),
+                Err(e) => self.last_decode_error = Some(e),
+            }
+        }
     }
 }
 
@@ -61,22 +81,18 @@ impl CobsTmSender {
     }
 }
 
-impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
+impl TcpTmSender for CobsTmSender {
     fn handle_tm_sending(
         &mut self,
         tm_buffer: &mut [u8],
-        tm_source: &mut (impl PacketSource<Error = TmError> + ?Sized),
+        tm_source: &mut (impl PacketSource<Error = ()> + ?Sized),
         conn_result: &mut HandledConnectionInfo,
         stream: &mut TcpStream,
-    ) -> Result<bool, TcpTmtcError<TmError, TcError>> {
+    ) -> Result<bool, std::io::Error> {
         let mut tm_was_sent = false;
-        loop {
-            // Write TM until TM source is exhausted. For now, there is no limit for the amount
-            // of TM written this way.
-            let read_tm_len = tm_source
-                .retrieve_packet(tm_buffer)
-                .map_err(|e| TcpTmtcError::TmError(e))?;
-
+        // Write TM until TM source is exhausted or there is an unexpected error. For now, there
+        // is no limit for the amount of TM written this way.
+        while let Ok(read_tm_len) = tm_source.retrieve_packet(tm_buffer) {
             if read_tm_len == 0 {
                 return Ok(tm_was_sent);
             }
@@ -95,6 +111,7 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
             current_idx += 1;
             stream.write_all(&self.tm_encoding_buffer[..current_idx])?;
         }
+        Ok(tm_was_sent)
     }
 }
 
@@ -108,8 +125,8 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
 ///
 /// Using a framing protocol like COBS imposes minimal restrictions on the type of TMTC data
 /// exchanged while also allowing packets with flexible size and a reliable way to reconstruct full
-/// packets even from a data stream which is split up. The server wil use the
-/// [parse_buffer_for_cobs_encoded_packets] function to parse for packets and pass them to a
+/// packets even from a data stream which is split up. The server wil use the streaming
+/// [CobsDecoderOwned] decoder to parse for packets and pass them to a
 /// generic TC receiver. The user can use [crate::encoding::encode_packet_with_cobs] to encode
 /// telecommands sent to the server.
 ///
@@ -118,30 +135,19 @@ impl<TmError, TcError> TcpTmSender<TmError, TcError> for CobsTmSender {
 /// The [TCP integration tests](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs/tests/tcp_servers.rs)
 /// test also serves as the example application for this module.
 pub struct TcpTmtcInCobsServer<
-    TmSource: PacketSource<Error = TmError>,
-    TcSender: PacketSenderRaw<Error = SendError>,
+    TmSource: PacketSource<Error = ()>,
+    TcHandler: PacketHandler<Error = GenericSendError>,
     HandledConnection: HandledConnectionHandler,
-    TmError,
-    SendError: 'static,
 > {
-    pub generic_server: TcpTmtcGenericServer<
-        TmSource,
-        TcSender,
-        CobsTmSender,
-        CobsTcParser,
-        HandledConnection,
-        TmError,
-        SendError,
-    >,
+    pub generic_server:
+        TcpTmtcGenericServer<TmSource, CobsTmSender, CobsTcParser<TcHandler>, HandledConnection>,
 }
 
 impl<
-    TmSource: PacketSource<Error = TmError>,
-    TcReceiver: PacketSenderRaw<Error = TcError>,
+    TmSource: PacketSource<Error = ()>,
+    TcHandler: PacketHandler<Error = GenericSendError>,
     HandledConnection: HandledConnectionHandler,
-    TmError: 'static,
-    TcError: 'static,
-> TcpTmtcInCobsServer<TmSource, TcReceiver, HandledConnection, TmError, TcError>
+> TcpTmtcInCobsServer<TmSource, TcHandler, HandledConnection>
 {
     /// Create a new TCP TMTC server which exchanges TMTC packets encoded with
     /// [COBS protocol](https://en.wikipedia.org/wiki/Consistent_Overhead_Byte_Stuffing).
@@ -156,17 +162,16 @@ impl<
     pub fn new(
         cfg: ServerConfig,
         tm_source: TmSource,
-        tc_receiver: TcReceiver,
+        cobs_tc_parser: CobsTcParser<TcHandler>,
         handled_connection: HandledConnection,
         stop_signal: Option<Arc<AtomicBool>>,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
             generic_server: TcpTmtcGenericServer::new(
                 cfg,
-                CobsTcParser::default(),
+                cobs_tc_parser,
                 CobsTmSender::new(cfg.tm_buffer_size),
                 tm_source,
-                tc_receiver,
                 handled_connection,
                 stop_signal,
             )?,
@@ -185,7 +190,7 @@ impl<
             pub fn handle_all_connections(
                 &mut self,
                 poll_duration: Option<Duration>,
-            ) -> Result<ConnectionResult, TcpTmtcError<TmError, TcError>>;
+            ) -> Result<ConnectionResult, std::io::Error>;
         }
     }
 }
@@ -212,7 +217,6 @@ mod tests {
             ConnectionResult, ServerConfig,
             tests::{ConnectionFinishedHandler, SyncTmSource},
         },
-        queue::GenericSendError,
         tmtc::PacketAsVec,
     };
     use alloc::sync::Arc;
@@ -243,17 +247,12 @@ mod tests {
         tc_sender: mpsc::Sender<PacketAsVec>,
         tm_source: SyncTmSource,
         stop_signal: Option<Arc<AtomicBool>>,
-    ) -> TcpTmtcInCobsServer<
-        SyncTmSource,
-        mpsc::Sender<PacketAsVec>,
-        ConnectionFinishedHandler,
-        (),
-        GenericSendError,
-    > {
+    ) -> TcpTmtcInCobsServer<SyncTmSource, mpsc::Sender<PacketAsVec>, ConnectionFinishedHandler>
+    {
         TcpTmtcInCobsServer::new(
             ServerConfig::new(TCP_SERVER_ID, *addr, Duration::from_millis(2), 1024, 1024),
             tm_source,
-            tc_sender,
+            super::CobsTcParser::new(TCP_SERVER_ID, 1024, tc_sender),
             ConnectionFinishedHandler::default(),
             stop_signal,
         )

@@ -303,7 +303,7 @@ impl TargetedPusService for HkServiceWrapper {
 #[cfg(test)]
 mod tests {
     use arbitrary_int::traits::Integer as _;
-    use arbitrary_int::u14;
+    use arbitrary_int::{u14, u21};
     use satrs::pus::test_util::{
         TEST_COMPONENT_ID_0, TEST_COMPONENT_ID_1, TEST_UNIQUE_ID_0, TEST_UNIQUE_ID_1,
     };
@@ -335,7 +335,7 @@ mod tests {
         let target_id = TEST_UNIQUE_ID_0;
         let unique_id = 5_u32;
         let mut app_data: [u8; 8] = [0; 8];
-        app_data[0..4].copy_from_slice(&target_id.to_be_bytes());
+        app_data[0..4].copy_from_slice(&target_id.as_u32().to_be_bytes());
         app_data[4..8].copy_from_slice(&unique_id.to_be_bytes());
 
         let hk_req = PusTcCreator::new_simple(
@@ -365,7 +365,7 @@ mod tests {
         let target_id = TEST_UNIQUE_ID_0;
         let unique_id = 5_u32;
         let mut app_data: [u8; 8] = [0; 8];
-        app_data[0..4].copy_from_slice(&target_id.to_be_bytes());
+        app_data[0..4].copy_from_slice(&target_id.as_u32().to_be_bytes());
         app_data[4..8].copy_from_slice(&unique_id.to_be_bytes());
         let mut generic_check = |tc: &PusTcCreator| {
             let accepted_token = hk_bench.add_tc(tc);
@@ -404,7 +404,7 @@ mod tests {
         let target_id = TEST_UNIQUE_ID_0;
         let unique_id = 5_u32;
         let mut app_data: [u8; 8] = [0; 8];
-        app_data[0..4].copy_from_slice(&target_id.to_be_bytes());
+        app_data[0..4].copy_from_slice(&target_id.as_u32().to_be_bytes());
         app_data[4..8].copy_from_slice(&unique_id.to_be_bytes());
         let mut generic_check = |tc: &PusTcCreator| {
             let accepted_token = hk_bench.add_tc(tc);
@@ -444,7 +444,7 @@ mod tests {
         let unique_id = 5_u32;
         let mut app_data: [u8; 12] = [0; 12];
         let collection_interval_factor = 5_u32;
-        app_data[0..4].copy_from_slice(&target_id.to_be_bytes());
+        app_data[0..4].copy_from_slice(&target_id.as_u32().to_be_bytes());
         app_data[4..8].copy_from_slice(&unique_id.to_be_bytes());
         app_data[8..12].copy_from_slice(&collection_interval_factor.to_be_bytes());
 
@@ -482,8 +482,8 @@ mod tests {
     fn hk_reply_handler() {
         let mut reply_testbench =
             ReplyHandlerTestbench::new(TEST_COMPONENT_ID_0.id(), HkReplyHandler::default());
-        let sender_id = 2_u64;
-        let apid_target_id = 3_u32;
+        let sender_id = 2_u32;
+        let apid_target_id = u21::new(3);
         let unique_id = 5_u32;
         let (req_id, active_req) = reply_testbench.add_tc(TEST_APID, apid_target_id, &[]);
         let reply = GenericMessage::new(
@@ -504,7 +504,7 @@ mod tests {
             ReplyHandlerTestbench::new(TEST_COMPONENT_ID_1.id(), HkReplyHandler::default());
         let action_reply = HkReply::new(5_u32, HkReplyVariant::Ack);
         let unrequested_reply =
-            GenericMessage::new(MessageMetadata::new(10_u32, 15_u64), action_reply);
+            GenericMessage::new(MessageMetadata::new(10_u32, 15_u32), action_reply);
         // Right now this function does not do a lot. We simply check that it does not panic or do
         // weird stuff.
         let result = testbench.handle_unrequested_reply(&unrequested_reply);

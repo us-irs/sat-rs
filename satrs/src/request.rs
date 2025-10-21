@@ -1,4 +1,4 @@
-use arbitrary_int::u11;
+use arbitrary_int::{prelude::*, u11, u21};
 use core::{fmt, marker::PhantomData};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -29,11 +29,11 @@ pub type Apid = u11;
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct UniqueApidTargetId {
     pub apid: Apid,
-    pub unique_id: u32,
+    pub unique_id: u21,
 }
 
 impl UniqueApidTargetId {
-    pub const fn new(apid: Apid, target: u32) -> Self {
+    pub const fn new(apid: Apid, target: u21) -> Self {
         Self {
             apid,
             unique_id: target,
@@ -41,7 +41,7 @@ impl UniqueApidTargetId {
     }
 
     pub fn raw(&self) -> ComponentId {
-        ((self.apid.value() as u64) << 32) | (self.unique_id as u64)
+        ((self.apid.value() as u32) << 21) | (self.unique_id.value())
     }
 
     pub fn id(&self) -> ComponentId {
@@ -61,21 +61,21 @@ impl UniqueApidTargetId {
         }
         Ok(Self::new(
             tc.apid(),
-            u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap()),
+            u21::new(u32::from_be_bytes(tc.user_data()[0..4].try_into().unwrap())),
         ))
     }
 }
 
-impl From<u64> for UniqueApidTargetId {
-    fn from(raw: u64) -> Self {
+impl From<ComponentId> for UniqueApidTargetId {
+    fn from(raw: ComponentId) -> Self {
         Self {
-            apid: u11::new((raw >> 32) as u16),
-            unique_id: raw as u32,
+            apid: u11::new((raw >> 21) as u16),
+            unique_id: u21::new(raw & u21::MAX.value()),
         }
     }
 }
 
-impl From<UniqueApidTargetId> for u64 {
+impl From<UniqueApidTargetId> for ComponentId {
     fn from(target_and_apid_id: UniqueApidTargetId) -> Self {
         target_and_apid_id.raw()
     }
@@ -497,7 +497,7 @@ mod tests {
     use std::sync::mpsc;
 
     use alloc::string::ToString;
-    use arbitrary_int::{u11, u14};
+    use arbitrary_int::{u11, u14, u21};
     use spacepackets::{
         ByteConversionError, SpHeader,
         ecss::{
@@ -507,27 +507,28 @@ mod tests {
     };
 
     use crate::{
+        ComponentId,
         queue::{GenericReceiveError, GenericSendError},
         request::{Apid, MessageMetadata, MessageSenderMap, MessageSenderStoreProvider},
     };
 
     use super::{GenericMessage, MessageReceiverWithId, UniqueApidTargetId};
 
-    const TEST_CHANNEL_ID_0: u64 = 1;
-    const TEST_CHANNEL_ID_1: u64 = 2;
-    const TEST_CHANNEL_ID_2: u64 = 3;
+    const TEST_CHANNEL_ID_0: ComponentId = 1;
+    const TEST_CHANNEL_ID_1: ComponentId = 2;
+    const TEST_CHANNEL_ID_2: ComponentId = 3;
 
     #[test]
     fn test_basic_target_id_with_apid() {
-        let id = UniqueApidTargetId::new(Apid::new(0x111), 0x01);
+        let id = UniqueApidTargetId::new(Apid::new(0x111), u21::new(0x01));
         assert_eq!(id.apid.value(), 0x111);
-        assert_eq!(id.unique_id, 0x01);
+        assert_eq!(id.unique_id.value(), 0x01);
         assert_eq!(id.id(), id.raw());
-        assert_eq!(u64::from(id), id.raw());
+        assert_eq!(ComponentId::from(id), id.raw());
         let id_raw = id.raw();
         let id_from_raw = UniqueApidTargetId::from(id_raw);
         assert_eq!(id_from_raw, id);
-        assert_eq!(id.id(), (0x111 << 32) | 0x01);
+        assert_eq!(id.id(), (0x111 << 21) | 0x01);
         let string = id.to_string();
         assert_eq!(
             string,
@@ -543,7 +544,7 @@ mod tests {
             PusTcCreator::new_simple(sp_header, 17, 1, &app_data, CreatorConfig::default());
         let id = UniqueApidTargetId::from_pus_tc(&pus_tc).unwrap();
         assert_eq!(id.apid.value(), 0x111);
-        assert_eq!(id.unique_id, 1);
+        assert_eq!(id.unique_id.value(), 1);
     }
 
     #[test]

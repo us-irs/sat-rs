@@ -1,6 +1,6 @@
 use spacepackets::SpHeader;
 
-use crate::{ComponentId, tmtc::PacketSenderRaw};
+use crate::{ComponentId, tmtc::PacketHandler};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SpValidity {
@@ -24,13 +24,17 @@ pub trait SpacePacketValidator {
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct ParseResult {
     pub packets_found: u32,
-    /// If an incomplete space packet was found, its start index is indicated by this value.
-    pub incomplete_tail_start: Option<usize>,
+    pub parsed_bytes: usize,
+    // If an incomplete space packet was found, its start index is indicated by this value.
+    //pub incomplete_packet_start: Option<usize>,
 }
 
-/// This function parses a given buffer for tightly packed CCSDS space packets. It uses the
-/// [spacepackets::SpHeader] of the CCSDS packets and a user provided [SpacePacketValidator]
-/// to check whether a received space packet is relevant for processing.
+/// This function parses a given buffer for tightly packed CCSDS space packets.
+///
+/// Please note that it is recommended to use a proper data link layer instead to have proper
+/// packet framing and to allow more reliable recovery from packet loss.
+/// It uses the [spacepackets::SpHeader] of the CCSDS packets and a user provided
+/// [SpacePacketValidator] to check whether a received space packet is relevant for processing.
 ///
 /// This function is also able to deal with broken tail packets at the end as long a the parser
 /// can read the full 7 bytes which constitue a space packet header plus one byte minimal size.
@@ -41,17 +45,18 @@ pub struct ParseResult {
 /// [SpacePacketValidator]:
 ///
 ///  1. [SpValidity::Valid]: The parser will forward all packets to the given `packet_sender` and
-///     return the number of packets found.If the [PacketSenderRaw::send_packet] calls fails, the
+///     return the number of packets found.If the [PacketHandler::handle_packet] calls fails, the
 ///     error will be returned.
 ///  2. [SpValidity::Invalid]: The parser assumes that the synchronization is lost and tries to
 ///     find the start of a new space packet header by scanning all the following bytes.
 ///  3. [SpValidity::Skip]: The parser skips the packet using the packet length determined from the
 ///     space packet header.
+///
 pub fn parse_buffer_for_ccsds_space_packets<SendError>(
     buf: &[u8],
     packet_validator: &(impl SpacePacketValidator + ?Sized),
     sender_id: ComponentId,
-    packet_sender: &(impl PacketSenderRaw<Error = SendError> + ?Sized),
+    packet_sender: &(impl PacketHandler<Error = SendError> + ?Sized),
 ) -> Result<ParseResult, SendError> {
     let mut parse_result = ParseResult::default();
     let mut current_idx = 0;
@@ -66,11 +71,12 @@ pub fn parse_buffer_for_ccsds_space_packets<SendError>(
                 let packet_size = sp_header.packet_len();
                 if (current_idx + packet_size) <= buf_len {
                     packet_sender
-                        .send_packet(sender_id, &buf[current_idx..current_idx + packet_size])?;
+                        .handle_packet(sender_id, &buf[current_idx..current_idx + packet_size])?;
                     parse_result.packets_found += 1;
                 } else {
                     // Move packet to start of buffer if applicable.
-                    parse_result.incomplete_tail_start = Some(current_idx);
+                    //parse_result.incomplete_packet_start = Some(current_idx);
+                    break;
                 }
                 current_idx += packet_size;
                 continue;
@@ -84,6 +90,7 @@ pub fn parse_buffer_for_ccsds_space_packets<SendError>(
             }
         }
     }
+    parse_result.parsed_bytes = current_idx;
     Ok(parse_result)
 }
 
@@ -254,8 +261,7 @@ mod tests {
         assert!(parse_result.is_ok());
         let parse_result = parse_result.unwrap();
         assert_eq!(parse_result.packets_found, 1);
-        assert!(parse_result.incomplete_tail_start.is_some());
-        let incomplete_tail_idx = parse_result.incomplete_tail_start.unwrap();
+        let incomplete_tail_idx = parse_result.parsed_bytes;
         assert_eq!(incomplete_tail_idx, packet_len_ping);
 
         let queue = tc_cacher.tc_queue.borrow();

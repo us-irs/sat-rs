@@ -531,7 +531,7 @@ pub fn generic_pus_request_timeout_handler(
 pub(crate) mod tests {
     use std::time::Duration;
 
-    use arbitrary_int::u11;
+    use arbitrary_int::{u11, u21};
     use satrs::pus::test_util::TEST_COMPONENT_ID_0;
     use satrs::pus::{MpscTmAsVecSender, PusTmVariant};
     use satrs::request::RequestId;
@@ -593,7 +593,7 @@ pub(crate) mod tests {
         pub fn add_tc(
             &mut self,
             apid: u11,
-            apid_target: u32,
+            apid_target: u21,
             time_stamp: &[u8],
         ) -> (verification::RequestId, ActivePusRequestStd) {
             let sp_header = SpHeader::new_from_apid(apid);
@@ -722,7 +722,7 @@ pub(crate) mod tests {
             token: VerificationToken<TcStateAccepted>,
             time_stamp: &[u8],
             expected_apid: u11,
-            expected_apid_target: u32,
+            expected_apid_target: u21,
         ) -> Result<(ActiveRequestInfo, Request), Converter::Error> {
             if self.current_packet.is_none() {
                 return Err(GenericConversionError::InvalidAppData(

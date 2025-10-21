@@ -1,5 +1,5 @@
-use crate::{ComponentId, tmtc::PacketSenderRaw};
-use cobs::{decode_in_place, encode, max_encoding_length};
+use crate::{ComponentId, tmtc::PacketHandler};
+use cobs::{decode_in_place, encode_including_sentinels, max_encoding_length};
 
 /// This function encodes the given packet with COBS and also wraps the encoded packet with
 /// the sentinel value 0. It can be used repeatedly on the same encoded buffer by expecting
@@ -37,15 +37,16 @@ pub fn encode_packet_with_cobs(
     if *current_idx + max_encoding_len + 2 > encoded_buf.len() {
         return false;
     }
-    encoded_buf[*current_idx] = 0;
-    *current_idx += 1;
-    *current_idx += encode(packet, &mut encoded_buf[*current_idx..]);
-    encoded_buf[*current_idx] = 0;
-    *current_idx += 1;
+    *current_idx += encode_including_sentinels(packet, &mut encoded_buf[*current_idx..]);
     true
 }
 
-/// This function parses a given buffer for COBS encoded packets. The packet structure is
+/// This function parses a given buffer for COBS encoded packets.
+///
+/// Please note that, it is recommended to use [cobs::CobsDecoderOwned] or [cobs::CobsDecoder]
+/// instead.
+///
+/// The packet structure is
 /// expected to be like this, assuming a sentinel value of 0 as the packet delimiter:
 ///
 /// 0 | ... Encoded Packet Data ... | 0 | 0 | ... Encoded Packet Data ... | 0
@@ -58,7 +59,7 @@ pub fn encode_packet_with_cobs(
 pub fn parse_buffer_for_cobs_encoded_packets<SendError>(
     buf: &mut [u8],
     sender_id: ComponentId,
-    packet_sender: &(impl PacketSenderRaw<Error = SendError> + ?Sized),
+    packet_sender: &(impl PacketHandler<Error = SendError> + ?Sized),
     next_write_idx: &mut usize,
 ) -> Result<u32, SendError> {
     let mut start_index_packet = 0;
@@ -79,7 +80,7 @@ pub fn parse_buffer_for_cobs_encoded_packets<SendError>(
                 let decode_result = decode_in_place(&mut buf[start_index_packet..i]);
                 if let Ok(packet_len) = decode_result {
                     packets_found += 1;
-                    packet_sender.send_packet(
+                    packet_sender.handle_packet(
                         sender_id,
                         &buf[start_index_packet..start_index_packet + packet_len],
                     )?;

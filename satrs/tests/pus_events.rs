@@ -1,4 +1,4 @@
-use arbitrary_int::u11;
+use arbitrary_int::{u11, u21};
 use satrs::event_man_legacy::{
     EventManagerWithMpsc, EventMessage, EventMessageU32, EventRoutingError, EventSendProvider,
     EventU32SenderMpsc,
@@ -18,7 +18,7 @@ const INFO_EVENT: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::<SeverityIn
 const LOW_SEV_EVENT: EventU32 = EventU32::new(Severity::Low, 1, 5);
 const EMPTY_STAMP: [u8; 7] = [0; 7];
 const TEST_APID: u11 = u11::new(0x02);
-const TEST_ID: UniqueApidTargetId = UniqueApidTargetId::new(TEST_APID, 0x05);
+const TEST_ID: UniqueApidTargetId = UniqueApidTargetId::new(TEST_APID, u21::new(0x05));
 
 #[derive(Debug, Clone)]
 pub enum CustomTmSenderError {

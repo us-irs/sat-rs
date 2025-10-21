@@ -5,7 +5,8 @@ use std::sync::mpsc;
 use log::{info, warn};
 use satrs::hal::std::udp_server::{ReceiveResult, UdpTcServer};
 use satrs::pus::HandlingStatus;
-use satrs::tmtc::{PacketAsVec, StoreAndSendError};
+use satrs::queue::GenericSendError;
+use satrs::tmtc::PacketAsVec;
 
 use satrs::pool::{PoolProviderWithGuards, SharedStaticMemoryPool};
 use satrs::tmtc::PacketInPool;
@@ -68,7 +69,7 @@ impl UdpTmHandler for DynamicUdpTmHandler {
 }
 
 pub struct UdpTmtcServer<TmHandler: UdpTmHandler> {
-    pub udp_tc_server: UdpTcServer<TmTcSender, StoreAndSendError>,
+    pub udp_tc_server: UdpTcServer<TmTcSender, GenericSendError>,
     pub tm_handler: TmHandler,
 }
 

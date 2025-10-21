@@ -12,7 +12,7 @@ pub(crate) mod tests {
 
     use crate::{
         ComponentId,
-        tmtc::{PacketAsVec, PacketSenderRaw},
+        tmtc::{PacketAsVec, PacketHandler},
     };
 
     use super::cobs::encode_packet_with_cobs;
@@ -25,10 +25,10 @@ pub(crate) mod tests {
         pub(crate) tc_queue: RefCell<VecDeque<PacketAsVec>>,
     }
 
-    impl PacketSenderRaw for TcCacher {
+    impl PacketHandler for TcCacher {
         type Error = ();
 
-        fn send_packet(&self, sender_id: ComponentId, tc_raw: &[u8]) -> Result<(), Self::Error> {
+        fn handle_packet(&self, sender_id: ComponentId, tc_raw: &[u8]) -> Result<(), Self::Error> {
             let mut mut_queue = self.tc_queue.borrow_mut();
             mut_queue.push_back(PacketAsVec::new(sender_id, tc_raw.to_vec()));
             Ok(())
