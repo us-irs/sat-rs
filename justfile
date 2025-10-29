@@ -1,8 +1,11 @@
-all: check embedded test fmt clippy docs
+all: check build embedded test fmt clippy docs
 
 check:
   cargo check
   cargo check -p satrs-example --no-default-features
+
+build:
+  cargo build
 
 test:
   cargo nextest run --all-features
