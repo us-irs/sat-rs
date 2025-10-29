@@ -11,7 +11,7 @@ license = "Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-spacepackets = { version = ">=0.14, <=0.16", default-features = false }
+spacepackets = { version = ">=0.14, <=0.17", git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git", default-features = false }
 serde = { version = "1", default-features = false, optional = true }
 defmt = {version = "1", optional = true }
 

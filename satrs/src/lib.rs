@@ -14,7 +14,7 @@
 //!  - The [pus] module which provides special support for projects using
 //!    the [ECSS PUS C standard](https://ecss.nl/standard/ecss-e-st-70-41c-space-engineering-telemetry-and-telecommand-packet-utilization-15-april-2016/).
 #![no_std]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #[cfg(any(feature = "alloc", test))]
 extern crate alloc;
 #[cfg(feature = "alloc")]

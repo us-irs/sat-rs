@@ -14,13 +14,13 @@ categories = ["aerospace", "aerospace::space-protocols", "no-std", "hardware-sup
 
 [dependencies]
 satrs-shared = { version = "0.2", path = "../satrs-shared" }
-spacepackets = { version = "0.16", default-features = false }
+spacepackets = { version = "0.17", git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git", default-features = false }
 
 delegate = "0.13"
 paste = "1"
 derive-new = "0.7"
 num_enum = { version = "0.7", default-features = false }
-cobs = { version = "0.5", default-features = false, features = ["alloc"] }
+cobs = { version = "0.5", default-features = false }
 thiserror = { version = "2", default-features = false }
 
 hashbrown = { version = "0.16", optional = true }
@@ -64,6 +64,7 @@ std = [
 ]
 alloc = [
     "serde/alloc",
+    "cobs/alloc",
     "spacepackets/alloc",
     "hashbrown",
     "dyn-clone",
@@ -71,7 +72,6 @@ alloc = [
 ]
 serde = ["dep:serde", "spacepackets/serde", "satrs-shared/serde"]
 crossbeam = ["crossbeam-channel"]
-# heapless = ["dep:heapless", "static_cell"]
 defmt = ["dep:defmt", "spacepackets/defmt"]
 test_util = []
 
