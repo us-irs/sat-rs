@@ -1364,10 +1364,10 @@ pub mod tests {
             let mut timestamp = [0; 7];
             timestamp.clone_from_slice(&tm.timestamp()[0..7]);
             Self {
-                subservice: PusPacket::subservice(tm),
+                subservice: PusPacket::message_subtype_id(tm),
                 apid: tm.apid(),
                 seq_count: tm.seq_count(),
-                msg_counter: tm.msg_counter(),
+                msg_counter: tm.msg_type_counter(),
                 dest_id: tm.dest_id(),
                 timestamp: timestamp.to_vec(),
             }
@@ -1478,8 +1478,8 @@ pub mod tests {
             let tm_pool = self.tm_pool.0.read().unwrap();
             let tm_raw = tm_pool.read_as_vec(&tm_in_pool.store_addr).unwrap();
             let tm = PusTmReader::new(&tm_raw, 7).unwrap();
-            assert_eq!(PusPacket::service(&tm), 1);
-            assert_eq!(PusPacket::subservice(&tm), subservice);
+            assert_eq!(PusPacket::service_type_id(&tm), 1);
+            assert_eq!(PusPacket::message_subtype_id(&tm), subservice);
             assert_eq!(tm.apid(), TEST_APID);
             let req_id =
                 RequestId::from_bytes(tm.user_data()).expect("generating request ID failed");
@@ -1597,8 +1597,8 @@ pub mod tests {
             assert!(next_msg.is_ok());
             let next_msg = next_msg.unwrap();
             let tm = PusTmReader::new(next_msg.packet.as_slice(), 7).unwrap();
-            assert_eq!(PusPacket::service(&tm), 1);
-            assert_eq!(PusPacket::subservice(&tm), subservice);
+            assert_eq!(PusPacket::service_type_id(&tm), 1);
+            assert_eq!(PusPacket::message_subtype_id(&tm), subservice);
             assert_eq!(tm.apid(), TEST_APID);
             let req_id =
                 RequestId::from_bytes(tm.user_data()).expect("generating request ID failed");
@@ -1615,9 +1615,9 @@ pub mod tests {
 
     impl<const SERVICE: u8> TestConverter<SERVICE> {
         pub fn check_service(&self, tc: &PusTcReader) -> Result<(), PusPacketHandlingError> {
-            if tc.service() != SERVICE {
+            if tc.service_type_id() != SERVICE {
                 return Err(PusPacketHandlingError::RequestConversion(
-                    GenericConversionError::WrongService(tc.service()),
+                    GenericConversionError::WrongService(tc.service_type_id()),
                 ));
             }
             Ok(())

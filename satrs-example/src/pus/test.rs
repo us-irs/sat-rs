@@ -122,7 +122,7 @@ impl DirectPusService for TestCustomServiceWrapper {
                         }
                     }
                 } else {
-                    let fail_data = [tc.subservice()];
+                    let fail_data = [tc.message_subtype_id()];
                     self.handler
                         .service_helper
                         .verif_reporter()

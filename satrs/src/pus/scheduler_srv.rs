@@ -79,7 +79,7 @@ impl<
             .tc_in_mem_converter_mut()
             .cache(&ecss_tc_and_token.tc_in_memory)?;
         let tc = self.service_helper.tc_in_mem_converter().convert()?;
-        let subservice = PusPacket::subservice(&tc);
+        let subservice = PusPacket::message_subtype_id(&tc);
         let standard_subservice = scheduling::Subservice::try_from(subservice);
         if standard_subservice.is_err() {
             return Ok(DirectPusPacketHandlerResult::CustomSubservice(
@@ -266,7 +266,7 @@ mod tests {
     use spacepackets::SpHeader;
     use spacepackets::ecss::scheduling::Subservice;
     use spacepackets::ecss::tc::PusTcSecondaryHeader;
-    use spacepackets::ecss::{CreatorConfig, WritablePusPacket};
+    use spacepackets::ecss::{CreatorConfig, MessageTypeId, WritablePusPacket};
     use spacepackets::time::TimeWriter;
     use spacepackets::{
         ecss::{tc::PusTcCreator, tm::PusTmReader},
@@ -389,7 +389,7 @@ mod tests {
         subservice: Subservice,
     ) {
         let reply_header = SpHeader::new_for_unseg_tm(TEST_APID, u14::ZERO, 0);
-        let tc_header = PusTcSecondaryHeader::new_simple(11, subservice as u8);
+        let tc_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(11, subservice as u8));
         let enable_scheduling =
             PusTcCreator::new(reply_header, tc_header, &[0; 7], CreatorConfig::default());
         let token = test_harness.start_verification(&enable_scheduling);
@@ -437,7 +437,7 @@ mod tests {
     fn test_insert_activity_tc() {
         let mut test_harness = Pus11HandlerWithStoreTester::new();
         let mut reply_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
-        let mut sec_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let mut sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(17, 1));
         let ping_tc = PusTcCreator::new(reply_header, sec_header, &[], CreatorConfig::default());
         let req_id_ping_tc = scheduler::RequestId::from_tc(&ping_tc);
         let stamper = cds::CdsTime::now_with_u16_days().expect("time provider failed");
@@ -447,7 +447,10 @@ mod tests {
         sched_app_data[written_len..written_len + ping_raw.len()].copy_from_slice(&ping_raw);
         written_len += ping_raw.len();
         reply_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
-        sec_header = PusTcSecondaryHeader::new_simple(11, Subservice::TcInsertActivity as u8);
+        sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(
+            11,
+            Subservice::TcInsertActivity as u8,
+        ));
         let enable_scheduling = PusTcCreator::new(
             reply_header,
             sec_header,

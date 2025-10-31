@@ -6,7 +6,7 @@ use arbitrary_int::traits::Integer as _;
 use arbitrary_int::u14;
 use spacepackets::SpHeader;
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
-use spacepackets::ecss::{CreatorConfig, PusPacket};
+use spacepackets::ecss::{CreatorConfig, MessageTypeId, PusPacket};
 use std::sync::mpsc;
 
 use super::verification::{VerificationReporter, VerificationReportingProvider};
@@ -59,10 +59,10 @@ impl<
             .tc_in_mem_converter_mut()
             .cache(&ecss_tc_and_token.tc_in_memory)?;
         let tc = self.service_helper.tc_in_mem_converter().convert()?;
-        if tc.service() != 17 {
-            return Err(GenericConversionError::WrongService(tc.service()).into());
+        if tc.service_type_id() != 17 {
+            return Err(GenericConversionError::WrongService(tc.service_type_id()).into());
         }
-        if tc.subservice() == 1 {
+        if tc.message_subtype_id() == 1 {
             let opt_started_token = match self.service_helper.verif_reporter().start_success(
                 &self.service_helper.common.tm_sender,
                 ecss_tc_and_token.token,
@@ -82,7 +82,7 @@ impl<
                 u14::ZERO,
                 0,
             );
-            let tc_header = PusTmSecondaryHeader::new_simple(17, 2, time_stamp);
+            let tc_header = PusTmSecondaryHeader::new_simple(MessageTypeId::new(17, 2), time_stamp);
             let ping_reply =
                 PusTmCreator::new(reply_header, tc_header, &[], CreatorConfig::default());
             if let Err(e) = self
@@ -104,7 +104,7 @@ impl<
             }
         } else {
             return Ok(DirectPusPacketHandlerResult::CustomSubservice(
-                tc.subservice(),
+                tc.message_subtype_id(),
                 ecss_tc_and_token.token,
             ));
         }
@@ -160,7 +160,7 @@ mod tests {
     use spacepackets::SpHeader;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader};
     use spacepackets::ecss::tm::PusTmReader;
-    use spacepackets::ecss::{CreatorConfig, PusPacket};
+    use spacepackets::ecss::{CreatorConfig, MessageTypeId, PusPacket};
     use spacepackets::time::{TimeWriter, cds};
 
     use super::PusService17TestHandler;
@@ -292,7 +292,7 @@ mod tests {
     fn ping_test(test_harness: &mut (impl PusTestHarness + SimplePusPacketHandler)) {
         // Create a ping TC, verify acceptance.
         let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
-        let sec_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(17, 1));
         let ping_tc =
             PusTcCreator::new_no_app_data(sp_header, sec_header, CreatorConfig::default());
         let token = test_harness.start_verification(&ping_tc);
@@ -311,8 +311,8 @@ mod tests {
 
         // Ping reply
         let tm = test_harness.read_next_tm();
-        assert_eq!(tm.service(), 17);
-        assert_eq!(tm.subservice(), 2);
+        assert_eq!(tm.service_type_id(), 17);
+        assert_eq!(tm.message_subtype_id(), 2);
         assert!(tm.user_data().is_empty());
 
         // TM completion
@@ -348,7 +348,7 @@ mod tests {
     fn test_sending_unsupported_service() {
         let mut test_harness = Pus17HandlerWithStoreTester::new(0);
         let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
-        let sec_header = PusTcSecondaryHeader::new_simple(3, 1);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(3, 1));
         let ping_tc =
             PusTcCreator::new_no_app_data(sp_header, sec_header, CreatorConfig::default());
         let token = test_harness.start_verification(&ping_tc);
@@ -370,7 +370,7 @@ mod tests {
     fn test_sending_custom_subservice() {
         let mut test_harness = Pus17HandlerWithStoreTester::new(0);
         let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
-        let sec_header = PusTcSecondaryHeader::new_simple(17, 200);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(17, 200));
         let ping_tc =
             PusTcCreator::new_no_app_data(sp_header, sec_header, CreatorConfig::default());
         let token = test_harness.start_verification(&ping_tc);

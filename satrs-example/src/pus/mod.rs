@@ -113,7 +113,7 @@ impl PusTcDistributor {
             .verif_reporter
             .acceptance_success(&self.tm_sender, init_token, self.stamp_helper.stamp())
             .expect("Acceptance success failure");
-        let service = PusServiceId::try_from(pus_tc.service());
+        let service = PusServiceId::try_from(pus_tc.service_type_id());
         let tc_in_memory: TcInMemory = if let Some(store_addr) = addr_opt {
             PacketInPool::new(sender_id, store_addr).into()
         } else {
@@ -535,7 +535,7 @@ pub(crate) mod tests {
     use satrs::pus::test_util::TEST_COMPONENT_ID_0;
     use satrs::pus::{MpscTmAsVecSender, PusTmVariant};
     use satrs::request::RequestId;
-    use satrs::spacepackets::ecss::CreatorConfig;
+    use satrs::spacepackets::ecss::{CreatorConfig, MessageTypeId};
     use satrs::{
         pus::{
             verification::test_util::TestVerificationReporter, ActivePusRequestStd,
@@ -597,7 +597,7 @@ pub(crate) mod tests {
             time_stamp: &[u8],
         ) -> (verification::RequestId, ActivePusRequestStd) {
             let sp_header = SpHeader::new_from_apid(apid);
-            let sec_header_dummy = PusTcSecondaryHeader::new_simple(0, 0);
+            let sec_header_dummy = PusTcSecondaryHeader::new_simple(MessageTypeId::new(0, 0));
             let init = self.verif_reporter.start_verification(&PusTcCreator::new(
                 sp_header,
                 sec_header_dummy,

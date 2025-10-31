@@ -161,7 +161,7 @@ impl PusTcToRequestConverter<ActivePusActionRequestStd, ActionRequest> for Actio
         verif_reporter: &impl VerificationReportingProvider,
         time_stamp: &[u8],
     ) -> Result<(ActivePusActionRequestStd, ActionRequest), Self::Error> {
-        let subservice = tc.subservice();
+        let subservice = tc.message_subtype_id();
         let user_data = tc.user_data();
         if user_data.len() < 8 {
             verif_reporter
@@ -277,7 +277,7 @@ mod tests {
     use satrs::pus::verification::test_util::TestVerificationReporter;
     use satrs::pus::{verification, EcssTcVecCacher};
     use satrs::request::MessageMetadata;
-    use satrs::spacepackets::ecss::CreatorConfig;
+    use satrs::spacepackets::ecss::{CreatorConfig, MessageTypeId};
     use satrs::tmtc::PacketAsVec;
     use satrs::ComponentId;
     use satrs::{
@@ -450,7 +450,7 @@ mod tests {
         );
         // Create a basic action request and verify forwarding.
         let sp_header = SpHeader::new_from_apid(TEST_APID);
-        let sec_header = PusTcSecondaryHeader::new_simple(8, 128);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(8, 128));
         let action_id = 5_u32;
         let mut app_data: [u8; 8] = [0; 8];
         app_data[0..4].copy_from_slice(&TEST_UNIQUE_ID_1.as_u32().to_be_bytes());
@@ -492,7 +492,7 @@ mod tests {
             TEST_COMPONENT_ID_1.id(),
         );
         // Create a basic action request and verify forwarding.
-        let sec_header = PusTcSecondaryHeader::new_simple(8, 128);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(8, 128));
         let action_id = 5_u32;
         let mut app_data: [u8; 8] = [0; 8];
         // Invalid ID, routing should fail.
@@ -518,7 +518,7 @@ mod tests {
             TEST_COMPONENT_ID_0.raw(),
             ActionRequestConverter::default(),
         );
-        let sec_header = PusTcSecondaryHeader::new_simple(8, 128);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(8, 128));
         let action_id = 5_u32;
         let mut app_data: [u8; 8] = [0; 8];
         // Invalid ID, routing should fail.
@@ -554,7 +554,7 @@ mod tests {
     fn converter_action_req_with_data() {
         let mut testbench =
             PusConverterTestbench::new(TEST_COMPONENT_ID_0.id(), ActionRequestConverter::default());
-        let sec_header = PusTcSecondaryHeader::new_simple(8, 128);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(8, 128));
         let action_id = 5_u32;
         let mut app_data: [u8; 16] = [0; 16];
         // Invalid ID, routing should fail.

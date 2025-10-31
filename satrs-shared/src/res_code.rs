@@ -14,6 +14,7 @@ pub struct ResultU16 {
 }
 
 impl ResultU16 {
+    #[inline]
     pub const fn new(group_id: u8, unique_id: u8) -> Self {
         Self {
             group_id,
@@ -21,18 +22,22 @@ impl ResultU16 {
         }
     }
 
-    pub fn raw(&self) -> u16 {
+    #[inline]
+    pub const fn raw(&self) -> u16 {
         ((self.group_id as u16) << 8) | self.unique_id as u16
     }
 
-    pub fn group_id(&self) -> u8 {
+    #[inline]
+    pub const fn group_id(&self) -> u8 {
         self.group_id
     }
 
-    pub fn unique_id(&self) -> u8 {
+    #[inline]
+    pub const fn unique_id(&self) -> u8 {
         self.unique_id
     }
 
+    #[inline]
     pub fn from_be_bytes(bytes: [u8; 2]) -> Self {
         Self::from(u16::from_be_bytes(bytes))
     }
@@ -51,6 +56,7 @@ impl From<ResultU16> for EcssEnumU16 {
 }
 
 impl UnsignedEnum for ResultU16 {
+    #[inline]
     fn size(&self) -> usize {
         core::mem::size_of::<u16>()
     }
@@ -67,12 +73,14 @@ impl UnsignedEnum for ResultU16 {
         Ok(self.size())
     }
 
-    fn value(&self) -> u64 {
+    #[inline]
+    fn value_raw(&self) -> u64 {
         self.raw() as u64
     }
 }
 
 impl EcssEnumeration for ResultU16 {
+    #[inline]
     fn pfc(&self) -> u8 {
         16
     }

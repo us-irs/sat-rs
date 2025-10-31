@@ -164,7 +164,7 @@ impl PusTcToRequestConverter<ActivePusRequestStd, HkRequest> for HkRequestConver
                 found: 4,
             });
         }
-        let subservice = tc.subservice();
+        let subservice = tc.message_subtype_id();
         let target_id_and_apid = UniqueApidTargetId::from_pus_tc(tc).expect("invalid tc format");
         let unique_id = u32::from_be_bytes(tc.user_data()[4..8].try_into().unwrap());
 
@@ -308,7 +308,7 @@ mod tests {
         TEST_COMPONENT_ID_0, TEST_COMPONENT_ID_1, TEST_UNIQUE_ID_0, TEST_UNIQUE_ID_1,
     };
     use satrs::request::MessageMetadata;
-    use satrs::spacepackets::ecss::CreatorConfig;
+    use satrs::spacepackets::ecss::{CreatorConfig, MessageTypeId};
     use satrs::{
         hk::HkRequestVariant,
         pus::test_util::TEST_APID,
@@ -340,8 +340,7 @@ mod tests {
 
         let hk_req = PusTcCreator::new_simple(
             sp_header,
-            3,
-            Subservice::TcGenerateOneShotHk as u8,
+            MessageTypeId::new(3, Subservice::TcGenerateOneShotHk as u8),
             &app_data,
             CreatorConfig::default(),
         );
@@ -380,16 +379,14 @@ mod tests {
         };
         let tc0 = PusTcCreator::new_simple(
             sp_header,
-            3,
-            Subservice::TcEnableHkGeneration as u8,
+            MessageTypeId::new(3, Subservice::TcEnableHkGeneration as u8),
             &app_data,
             CreatorConfig::default(),
         );
         generic_check(&tc0);
         let tc1 = PusTcCreator::new_simple(
             sp_header,
-            3,
-            Subservice::TcEnableDiagGeneration as u8,
+            MessageTypeId::new(3, Subservice::TcEnableDiagGeneration as u8),
             &app_data,
             CreatorConfig::default(),
         );
@@ -419,16 +416,14 @@ mod tests {
         };
         let tc0 = PusTcCreator::new_simple(
             sp_header,
-            3,
-            Subservice::TcDisableHkGeneration as u8,
+            MessageTypeId::new(3, Subservice::TcDisableHkGeneration as u8),
             &app_data,
             CreatorConfig::default(),
         );
         generic_check(&tc0);
         let tc1 = PusTcCreator::new_simple(
             sp_header,
-            3,
-            Subservice::TcDisableDiagGeneration as u8,
+            MessageTypeId::new(3, Subservice::TcDisableDiagGeneration as u8),
             &app_data,
             CreatorConfig::default(),
         );
@@ -462,16 +457,14 @@ mod tests {
         };
         let tc0 = PusTcCreator::new_simple(
             sp_header,
-            3,
-            Subservice::TcModifyHkCollectionInterval as u8,
+            MessageTypeId::new(3, Subservice::TcModifyHkCollectionInterval as u8),
             &app_data,
             CreatorConfig::default(),
         );
         generic_check(&tc0);
         let tc1 = PusTcCreator::new_simple(
             sp_header,
-            3,
-            Subservice::TcModifyDiagCollectionInterval as u8,
+            MessageTypeId::new(3, Subservice::TcModifyDiagCollectionInterval as u8),
             &app_data,
             CreatorConfig::default(),
         );

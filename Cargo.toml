@@ -6,6 +6,7 @@ members = [
     "satrs-example",
     "satrs-minisim",
     "satrs-shared",
+    "embedded-examples/embedded-client",
 ]
 
 exclude = [

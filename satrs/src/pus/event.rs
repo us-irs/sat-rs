@@ -4,6 +4,7 @@ use spacepackets::ByteConversionError;
 use spacepackets::SpHeader;
 use spacepackets::ecss::CreatorConfig;
 use spacepackets::ecss::EcssEnumeration;
+use spacepackets::ecss::MessageTypeId;
 use spacepackets::ecss::tm::PusTmCreator;
 use spacepackets::ecss::tm::PusTmSecondaryHeader;
 
@@ -110,8 +111,12 @@ impl EventReportCreator {
             src_data_len += aux_data.len();
         }
         source_buffer_large_enough(src_data_buf.len(), src_data_len)?;
-        let sec_header =
-            PusTmSecondaryHeader::new(5, subservice.into(), 0, self.dest_id, time_stamp);
+        let sec_header = PusTmSecondaryHeader::new(
+            MessageTypeId::new(5, subservice.into()),
+            0,
+            self.dest_id,
+            time_stamp,
+        );
         let mut current_idx = 0;
         event_id.write_to_be_bytes(&mut src_data_buf[0..event_id.size()])?;
         current_idx += event_id.size();

@@ -9,49 +9,33 @@ default-run = "satrs-stm32f3-disco-rtic"
 [dependencies]
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
-defmt = "0.3"
-defmt-brtt = { version = "0.1", default-features = false, features = ["rtt"] }
-panic-probe = { version = "0.3", features = ["print-defmt"] }
-embedded-hal = "0.2.7"
+defmt = "1"
+defmt-rtt = { version = "1" }
+panic-probe = { version = "1", features = ["print-defmt"] }
+embedded-hal = "1"
 cortex-m-semihosting = "0.5.0"
+embassy-stm32 = { version = "0.4", features = ["defmt", "stm32f303vc", "unstable-pac"] }
 enumset = "1"
-heapless = "0.8"
+heapless = "0.9"
+spacepackets = { version = "0.17", git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git", default-features = false, features = ["defmt", "serde"] }
+static_cell = "2"
+cobs = { version = "0.5", default-features = false, features = ["defmt"] }
+postcard = { version = "1" }
+arbitrary-int = "2"
+thiserror = { version = "2", default-features = false }
+serde = { version = "1", default-features = false, features = ["derive"] }
 
-[dependencies.rtic]
-version = "2"
-features = ["thumbv7-backend"]
+rtic = { version = "2", features = ["thumbv7-backend"] }
+rtic-sync = { version = "1" }
+rtic-monotonics = { version = "2", features = ["cortex-m-systick"] }
 
-[dependencies.rtic-monotonics]
-version = "2"
-features = ["cortex-m-systick"]
-
-[dependencies.cobs]
-version = "0.3"
-default-features = false
-
-[dependencies.stm32f3xx-hal]
-git = "https://github.com/robamu/stm32f3xx-hal"
-version = "0.11.0-alpha.0"
-features = ["stm32f303xc", "rt", "enumset"]
-branch = "complete-dma-update"
-# Can be used in workspace to develop and update HAL
-# path = "../stm32f3xx-hal"
-
-[dependencies.stm32f3-discovery]
-git = "https://github.com/robamu/stm32f3-discovery"
-version = "0.8.0-alpha.0"
-branch = "complete-dma-update-hal"
-# Can be used in workspace to develop and update BSP
-# path = "../stm32f3-discovery"
-
-[dependencies.satrs]
-# path = "satrs"
-version = "0.2"
-default-features = false
-features = ["defmt"]
+#[dependencies.satrs]
+# path = "../../satrs"
+#default-features = false
+# features = ["defmt"]
 
 [dev-dependencies]
-defmt-test = "0.3"
+defmt-test = "0.4"
 
 # cargo test
 [profile.test]

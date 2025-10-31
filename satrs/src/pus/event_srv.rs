@@ -60,11 +60,11 @@ impl<
             .tc_in_mem_converter_mut()
             .cache(&ecss_tc_and_token.tc_in_memory)?;
         let tc = self.service_helper.tc_in_mem_converter().convert()?;
-        let subservice = tc.subservice();
+        let subservice = tc.message_subtype_id();
         let srv = Subservice::try_from(subservice);
         if srv.is_err() {
             return Ok(DirectPusPacketHandlerResult::CustomSubservice(
-                tc.subservice(),
+                tc.message_subtype_id(),
                 ecss_tc_and_token.token,
             ));
         }
@@ -121,7 +121,7 @@ impl<
             | Subservice::TmMediumSeverityReport
             | Subservice::TmHighSeverityReport => {
                 return Err(PusPacketHandlingError::RequestConversion(
-                    GenericConversionError::WrongService(tc.subservice()),
+                    GenericConversionError::WrongService(tc.message_subtype_id()),
                 ));
             }
             Subservice::TcEnableEventGeneration => {
@@ -147,8 +147,8 @@ mod tests {
     use arbitrary_int::traits::Integer as _;
     use arbitrary_int::u14;
     use delegate::delegate;
-    use spacepackets::ecss::CreatorConfig;
     use spacepackets::ecss::event::Subservice;
+    use spacepackets::ecss::{CreatorConfig, MessageTypeId};
     use spacepackets::time::{TimeWriter, cds};
     use spacepackets::util::UnsignedEnum;
     use spacepackets::{
@@ -246,7 +246,7 @@ mod tests {
         event_req_receiver: mpsc::Receiver<EventRequestWithToken>,
     ) {
         let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
-        let sec_header = PusTcSecondaryHeader::new_simple(5, subservice as u8);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(5, subservice as u8));
         let mut app_data = [0; 4];
         TEST_EVENT_0
             .write_to_be_bytes(&mut app_data)
@@ -311,7 +311,7 @@ mod tests {
         let (event_request_tx, _) = mpsc::channel();
         let mut test_harness = Pus5HandlerWithStoreTester::new(event_request_tx);
         let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
-        let sec_header = PusTcSecondaryHeader::new_simple(5, 200);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(5, 200));
         let ping_tc =
             PusTcCreator::new_no_app_data(sp_header, sec_header, CreatorConfig::default());
         let token = test_harness.start_verification(&ping_tc);
@@ -331,8 +331,10 @@ mod tests {
         let (event_request_tx, _) = mpsc::channel();
         let mut test_harness = Pus5HandlerWithStoreTester::new(event_request_tx);
         let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
-        let sec_header =
-            PusTcSecondaryHeader::new_simple(5, Subservice::TcEnableEventGeneration as u8);
+        let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(
+            5,
+            Subservice::TcEnableEventGeneration as u8,
+        ));
         let ping_tc =
             PusTcCreator::new(sp_header, sec_header, &[0, 1, 2], CreatorConfig::default());
         let token = test_harness.start_verification(&ping_tc);

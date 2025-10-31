@@ -23,7 +23,7 @@
 //! use satrs::request::UniqueApidTargetId;
 //! use spacepackets::ecss::PusPacket;
 //! use spacepackets::SpHeader;
-//! use spacepackets::ecss::tc::{PusTcCreator, PusTcSecondaryHeader, CreatorConfig};
+//! use spacepackets::ecss::tc::{MessageTypeId, PusTcCreator, PusTcSecondaryHeader, CreatorConfig};
 //! use spacepackets::ecss::tm::PusTmReader;
 //! use arbitrary_int::{u11, u21};
 //!
@@ -41,7 +41,7 @@
 //! let cfg = VerificationReporterConfig::new(TEST_APID, 1, 2, 8);
 //! let mut  reporter = VerificationReporter::new(TEST_COMPONENT_ID.id(), &cfg);
 //!
-//! let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
+//! let tc_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(17, 1));
 //! let pus_tc_0 = PusTcCreator::new_no_app_data(
 //!     SpHeader::new_from_apid(TEST_APID),
 //!     tc_header,
@@ -67,11 +67,11 @@
 //!     }
 //!     let pus_tm = PusTmReader::new(&tm_buf[0..tm_len], 7).expect("Error reading verification TM");
 //!     if packet_idx == 0 {
-//!         assert_eq!(pus_tm.subservice(), 1);
+//!         assert_eq!(pus_tm.message_subtype_id(), 1);
 //!     } else if packet_idx == 1 {
-//!         assert_eq!(pus_tm.subservice(), 3);
+//!         assert_eq!(pus_tm.message_subtype_id(), 3);
 //!     } else if packet_idx == 2 {
-//!         assert_eq!(pus_tm.subservice(), 7);
+//!         assert_eq!(pus_tm.message_subtype_id(), 7);
 //!     }
 //!     packet_idx += 1;
 //! }
@@ -94,7 +94,7 @@ use serde::{Deserialize, Serialize};
 use spacepackets::SpHeader;
 use spacepackets::ecss::tc::IsPusTelecommand;
 use spacepackets::ecss::tm::{PusTmCreator, PusTmSecondaryHeader};
-use spacepackets::ecss::{CreatorConfig, EcssEnumeration};
+use spacepackets::ecss::{CreatorConfig, EcssEnumeration, MessageTypeId};
 use spacepackets::{ByteConversionError, CcsdsPacket, PacketId, PacketSequenceControl};
 
 pub use spacepackets::ecss::verification::*;
@@ -507,9 +507,7 @@ impl VerificationReportCreator {
         self.dest_id = dest_id;
     }
 
-    /// Initialize verification handling by passing a TC reference. This returns a token required
-    /// to call the acceptance functions
-    pub fn read_request_id_from_tc(pus_tc: &(impl CcsdsPacket + IsPusTelecommand)) -> RequestId {
+    pub fn read_request_id(&self, pus_tc: &(impl CcsdsPacket + IsPusTelecommand)) -> RequestId {
         RequestId::new(pus_tc)
     }
 
@@ -822,8 +820,12 @@ impl VerificationReportCreator {
         time_stamp: &'time [u8],
         source_data_len: usize,
     ) -> PusTmCreator<'time, 'src_data> {
-        let tm_sec_header =
-            PusTmSecondaryHeader::new(1, subservice, msg_counter, self.dest_id, time_stamp);
+        let tm_sec_header = PusTmSecondaryHeader::new(
+            MessageTypeId::new(1, subservice),
+            msg_counter,
+            self.dest_id,
+            time_stamp,
+        );
         PusTmCreator::new(
             sp_header,
             tm_sec_header,
@@ -897,7 +899,7 @@ pub mod alloc_mod {
     > {
         owner_id: ComponentId,
         source_data_buf: RefCell<alloc::vec::Vec<u8>>,
-        pub reporter_creator: VerificationReportCreator,
+        pub report_creator: VerificationReportCreator,
         pub tm_hook: VerificationHookInstance,
     }
 
@@ -913,7 +915,7 @@ pub mod alloc_mod {
                         + cfg.fail_code_field_width
                         + cfg.max_fail_data_len
                 ]),
-                reporter_creator: reporter,
+                report_creator: reporter,
                 tm_hook: DummyVerificationHook::default(),
             }
         }
@@ -937,7 +939,7 @@ pub mod alloc_mod {
                         + cfg.fail_code_field_width
                         + cfg.max_fail_data_len
                 ]),
-                reporter_creator: reporter,
+                report_creator: reporter,
                 tm_hook,
             }
         }
@@ -946,9 +948,7 @@ pub mod alloc_mod {
             &self,
             pus_tc: &(impl CcsdsPacket + IsPusTelecommand),
         ) -> VerificationToken<TcStateNone> {
-            VerificationToken::<TcStateNone>::new(
-                VerificationReportCreator::read_request_id_from_tc(pus_tc),
-            )
+            VerificationToken::<TcStateNone>::new(self.report_creator.read_request_id(pus_tc))
         }
 
         pub fn start_verification_with_req_id(
@@ -959,7 +959,7 @@ pub mod alloc_mod {
         }
 
         delegate!(
-            to self.reporter_creator {
+            to self.report_creator {
                 pub fn set_apid(&mut self, apid: u11);
                 pub fn apid(&self) -> u11;
                 pub fn dest_id(&self) -> u16;
@@ -976,7 +976,7 @@ pub mod alloc_mod {
         for VerificationReporter<VerificationHookInstance>
     {
         delegate!(
-            to self.reporter_creator {
+            to self.report_creator {
                 fn set_apid(&mut self, apid: Apid);
                 fn apid(&self) -> Apid;
             }
@@ -1002,7 +1002,7 @@ pub mod alloc_mod {
         ) -> Result<VerificationToken<TcStateAccepted>, EcssTmtcError> {
             let mut source_data_buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .acceptance_success(
                     source_data_buf.as_mut_slice(),
                     &token.request_id(),
@@ -1025,7 +1025,7 @@ pub mod alloc_mod {
         ) -> Result<(), EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .acceptance_failure(
                     buf.as_mut_slice(),
                     &token.request_id(),
@@ -1050,7 +1050,7 @@ pub mod alloc_mod {
         ) -> Result<VerificationToken<TcStateStarted>, EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .start_success(
                     buf.as_mut_slice(),
                     &token.request_id(),
@@ -1076,7 +1076,7 @@ pub mod alloc_mod {
         ) -> Result<(), EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .start_failure(
                     buf.as_mut_slice(),
                     &token.request_id(),
@@ -1102,7 +1102,7 @@ pub mod alloc_mod {
         ) -> Result<(), EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .step_success(
                     buf.as_mut_slice(),
                     &token.request_id(),
@@ -1129,7 +1129,7 @@ pub mod alloc_mod {
         ) -> Result<(), EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .step_failure(buf.as_mut_slice(), token, u14::ZERO, 0, params)
                 .map_err(PusError::ByteConversion)?;
             self.tm_hook.modify_tm(&mut tm_creator);
@@ -1150,7 +1150,7 @@ pub mod alloc_mod {
         ) -> Result<(), EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .completion_success(
                     buf.as_mut_slice(),
                     &token.request_id(),
@@ -1176,7 +1176,7 @@ pub mod alloc_mod {
         ) -> Result<(), EcssTmtcError> {
             let mut buf = self.source_data_buf.borrow_mut();
             let mut tm_creator = self
-                .reporter_creator
+                .report_creator
                 .completion_failure(
                     buf.as_mut_slice(),
                     &token.request_id(),
@@ -1427,7 +1427,7 @@ pub mod test_util {
                 token.request_id(),
                 VerificationReportInfo::AcceptanceFailure(FailureData {
                     sender: self.owner_id(),
-                    error_enum: params.failure_code.value(),
+                    error_enum: params.failure_code.value_raw(),
                     fail_data: params.failure_data.to_vec(),
                     time_stamp: params.time_stamp.to_vec(),
                 }),
@@ -1464,7 +1464,7 @@ pub mod test_util {
                 token.request_id(),
                 VerificationReportInfo::StartedFailure(FailureData {
                     sender: self.owner_id(),
-                    error_enum: params.failure_code.value(),
+                    error_enum: params.failure_code.value_raw(),
                     fail_data: params.failure_data.to_vec(),
                     time_stamp: params.time_stamp.to_vec(),
                 }),
@@ -1486,7 +1486,7 @@ pub mod test_util {
                         sender: self.owner_id(),
                         time_stamp: time_stamp.to_vec(),
                     },
-                    step: step.value() as u16,
+                    step: step.value_raw() as u16,
                 },
             ));
             Ok(())
@@ -1502,7 +1502,7 @@ pub mod test_util {
                 token.request_id(),
                 VerificationReportInfo::StepFailure(FailureData {
                     sender: self.owner_id(),
-                    error_enum: params.common.failure_code.value(),
+                    error_enum: params.common.failure_code.value_raw(),
                     fail_data: params.common.failure_data.to_vec(),
                     time_stamp: params.common.time_stamp.to_vec(),
                 }),
@@ -1536,7 +1536,7 @@ pub mod test_util {
                 token.request_id(),
                 VerificationReportInfo::CompletionFailure(FailureData {
                     sender: self.owner_id(),
-                    error_enum: params.failure_code.value(),
+                    error_enum: params.failure_code.value_raw(),
                     fail_data: params.failure_data.to_vec(),
                     time_stamp: params.time_stamp.to_vec(),
                 }),
@@ -1731,8 +1731,8 @@ pub mod tests {
     use arbitrary_int::{u11, u14};
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};
     use spacepackets::ecss::{
-        CreatorConfig, EcssEnumU8, EcssEnumU16, EcssEnumU32, EcssEnumeration, PusError, PusPacket,
-        WritablePusPacket,
+        CreatorConfig, EcssEnumU8, EcssEnumU16, EcssEnumU32, EcssEnumeration, MessageTypeId,
+        PusError, PusPacket, WritablePusPacket,
     };
     use spacepackets::util::UnsignedEnum;
     use spacepackets::{ByteConversionError, SpHeader};
@@ -1783,7 +1783,7 @@ pub mod tests {
                     panic!("TestSender: Can not deal with addresses");
                 }
                 PusTmVariant::Direct(tm) => {
-                    assert_eq!(PusPacket::service(&tm), 1);
+                    assert_eq!(PusPacket::service_type_id(&tm), 1);
                     assert!(!tm.source_data().is_empty());
                     let mut time_stamp = [0; 7];
                     time_stamp.clone_from_slice(&tm.timestamp()[0..7]);
@@ -2102,7 +2102,7 @@ pub mod tests {
 
     fn create_generic_ping() -> PusTcCreator<'static> {
         let sph = SpHeader::new_for_unseg_tc(TEST_APID, u14::new(0x34), 0);
-        let tc_header = PusTcSecondaryHeader::new_simple(17, 1);
+        let tc_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(17, 1));
         PusTcCreator::new(sph, tc_header, &[], CreatorConfig::default())
     }
 

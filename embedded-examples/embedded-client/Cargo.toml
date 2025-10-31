@@ -1,0 +1,18 @@
+[package]
+name = "embedded-client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serialport = "4"
+toml = "0.9"
+serde = { version = "1", features = ["derive"] }
+satrs-stm32f3-disco-rtic = { path = "../stm32f3-disco-rtic" }
+spacepackets = { git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git", version = "0.17" }
+tmtc-utils = { git = "https://egit.irs.uni-stuttgart.de/rust/tmtc-utils.git", version = "0.1" }
+postcard = { version = "1", features = ["alloc"] }
+cobs = "0.5"
+fern = "0.7"
+humantime = "2"
+log = "0.4"
