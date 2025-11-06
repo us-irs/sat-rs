@@ -40,7 +40,6 @@ features = ["cortex-m-systick"]
 
 [dependencies.satrs]
 path = "../../satrs"
-# version = "0.2"
 default-features = false
 features = ["defmt", "heapless"]
 

@@ -29,11 +29,6 @@ rtic = { version = "2", features = ["thumbv7-backend"] }
 rtic-sync = { version = "1" }
 rtic-monotonics = { version = "2", features = ["cortex-m-systick"] }
 
-#[dependencies.satrs]
-# path = "../../satrs"
-#default-features = false
-# features = ["defmt"]
-
 [dev-dependencies]
 defmt-test = "0.4"
 
