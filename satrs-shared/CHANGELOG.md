@@ -54,6 +54,7 @@ Allow `spacepackets` range starting with v0.10 and v0.11.
 
 Initial release.
 
-[unreleased]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-shared-v0.2.3...HEAD
+[unreleased]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-shared-v0.2.4...HEAD
+[v0.2.3]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-shared-v0.2.3...satrs-shared-v0.2.4
 [v0.2.3]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-shared-v0.2.1...satrs-shared-v0.2.3
 [v0.2.2]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-shared-v0.2.1...satrs-shared-v0.2.2
