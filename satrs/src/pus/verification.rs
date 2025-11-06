@@ -567,7 +567,7 @@ impl VerificationReportCreator {
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         let tm_creator = self.success_verification_no_step(
             src_data_buf,
-            Subservice::TmAcceptanceSuccess.into(),
+            MessageSubtypeId::TmAcceptanceSuccess.into(),
             request_id,
             seq_count,
             msg_count,
@@ -587,7 +587,7 @@ impl VerificationReportCreator {
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.failure_verification_no_step(
             src_data_buf,
-            Subservice::TmAcceptanceFailure.into(),
+            MessageSubtypeId::TmAcceptanceFailure.into(),
             request_id,
             seq_count,
             msg_count,
@@ -609,7 +609,7 @@ impl VerificationReportCreator {
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         let tm_creator = self.success_verification_no_step(
             src_data_buf,
-            Subservice::TmStartSuccess.into(),
+            MessageSubtypeId::TmStartSuccess.into(),
             request_id,
             seq_count,
             msg_count,
@@ -632,7 +632,7 @@ impl VerificationReportCreator {
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.failure_verification_no_step(
             src_data_buf,
-            Subservice::TmStartFailure.into(),
+            MessageSubtypeId::TmStartFailure.into(),
             request_id,
             seq_count,
             msg_count,
@@ -655,7 +655,7 @@ impl VerificationReportCreator {
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.create_pus_verif_success_tm(
             src_data_buf,
-            Subservice::TmStepSuccess.into(),
+            MessageSubtypeId::TmStepSuccess.into(),
             seq_count,
             msg_count,
             request_id,
@@ -678,7 +678,7 @@ impl VerificationReportCreator {
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.create_pus_verif_fail_tm(
             src_data_buf,
-            Subservice::TmStepFailure.into(),
+            MessageSubtypeId::TmStepFailure.into(),
             seq_count,
             msg_count,
             &token.request_id(),
@@ -701,7 +701,7 @@ impl VerificationReportCreator {
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.success_verification_no_step(
             src_data_buf,
-            Subservice::TmCompletionSuccess.into(),
+            MessageSubtypeId::TmCompletionSuccess.into(),
             request_id,
             seq_counter,
             msg_counter,
@@ -723,7 +723,7 @@ impl VerificationReportCreator {
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.failure_verification_no_step(
             src_data_buf,
-            Subservice::TmCompletionFailure.into(),
+            MessageSubtypeId::TmCompletionFailure.into(),
             request_id,
             seq_count,
             msg_count,

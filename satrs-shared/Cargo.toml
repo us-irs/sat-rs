@@ -1,7 +1,7 @@
 [package]
 name = "satrs-shared"
 description = "Components shared by multiple sat-rs crates"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 authors = ["Robin Mueller <muellerr@irs.uni-stuttgart.de>"]
 homepage = "https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/"
@@ -11,7 +11,7 @@ license = "Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-spacepackets = { version = "0.17", git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git", default-features = false }
+spacepackets = { version = "0.17", default-features = false }
 serde = { version = "1", default-features = false, optional = true }
 defmt = {version = "1", optional = true }
 

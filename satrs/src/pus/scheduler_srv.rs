@@ -80,7 +80,7 @@ impl<
             .cache(&ecss_tc_and_token.tc_in_memory)?;
         let tc = self.service_helper.tc_in_mem_converter().convert()?;
         let subservice = PusPacket::message_subtype_id(&tc);
-        let standard_subservice = scheduling::Subservice::try_from(subservice);
+        let standard_subservice = scheduling::MessageSubtypeId::try_from(subservice);
         if standard_subservice.is_err() {
             return Ok(DirectPusPacketHandlerResult::CustomSubservice(
                 subservice,
@@ -88,7 +88,7 @@ impl<
             ));
         }
         match standard_subservice.unwrap() {
-            scheduling::Subservice::TcEnableScheduling => {
+            scheduling::MessageSubtypeId::TcEnableScheduling => {
                 let opt_started_token = match self.service_helper.verif_reporter().start_success(
                     &self.service_helper.common.tm_sender,
                     ecss_tc_and_token.token,
@@ -117,7 +117,7 @@ impl<
                     ));
                 }
             }
-            scheduling::Subservice::TcDisableScheduling => {
+            scheduling::MessageSubtypeId::TcDisableScheduling => {
                 let opt_started_token = match self.service_helper.verif_reporter().start_success(
                     &self.service_helper.common.tm_sender,
                     ecss_tc_and_token.token,
@@ -147,7 +147,7 @@ impl<
                     ));
                 }
             }
-            scheduling::Subservice::TcResetScheduling => {
+            scheduling::MessageSubtypeId::TcResetScheduling => {
                 let start_token = self
                     .service_helper
                     .verif_reporter()
@@ -171,7 +171,7 @@ impl<
                     )
                     .expect("Error sending completion success");
             }
-            scheduling::Subservice::TcInsertActivity => {
+            scheduling::MessageSubtypeId::TcInsertActivity => {
                 let start_token = self
                     .service_helper
                     .common
@@ -264,7 +264,7 @@ mod tests {
     use arbitrary_int::u14;
     use delegate::delegate;
     use spacepackets::SpHeader;
-    use spacepackets::ecss::scheduling::Subservice;
+    use spacepackets::ecss::scheduling::MessageSubtypeId;
     use spacepackets::ecss::tc::PusTcSecondaryHeader;
     use spacepackets::ecss::{CreatorConfig, MessageTypeId, WritablePusPacket};
     use spacepackets::time::TimeWriter;
@@ -386,7 +386,7 @@ mod tests {
 
     fn generic_subservice_send(
         test_harness: &mut Pus11HandlerWithStoreTester,
-        subservice: Subservice,
+        subservice: MessageSubtypeId,
     ) {
         let reply_header = SpHeader::new_for_unseg_tm(TEST_APID, u14::ZERO, 0);
         let tc_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(11, subservice as u8));
@@ -411,7 +411,7 @@ mod tests {
         let mut test_harness = Pus11HandlerWithStoreTester::new();
         test_harness.handler.scheduler_mut().disable();
         assert!(!test_harness.handler.scheduler().is_enabled());
-        generic_subservice_send(&mut test_harness, Subservice::TcEnableScheduling);
+        generic_subservice_send(&mut test_harness, MessageSubtypeId::TcEnableScheduling);
         assert!(test_harness.handler.scheduler().is_enabled());
         assert_eq!(test_harness.handler.scheduler().enabled_count, 1);
     }
@@ -421,7 +421,7 @@ mod tests {
         let mut test_harness = Pus11HandlerWithStoreTester::new();
         test_harness.handler.scheduler_mut().enable();
         assert!(test_harness.handler.scheduler().is_enabled());
-        generic_subservice_send(&mut test_harness, Subservice::TcDisableScheduling);
+        generic_subservice_send(&mut test_harness, MessageSubtypeId::TcDisableScheduling);
         assert!(!test_harness.handler.scheduler().is_enabled());
         assert_eq!(test_harness.handler.scheduler().disabled_count, 1);
     }
@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn test_reset_scheduler_tc() {
         let mut test_harness = Pus11HandlerWithStoreTester::new();
-        generic_subservice_send(&mut test_harness, Subservice::TcResetScheduling);
+        generic_subservice_send(&mut test_harness, MessageSubtypeId::TcResetScheduling);
         assert_eq!(test_harness.handler.scheduler().reset_count, 1);
     }
 
@@ -449,7 +449,7 @@ mod tests {
         reply_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(
             11,
-            Subservice::TcInsertActivity as u8,
+            MessageSubtypeId::TcInsertActivity as u8,
         ));
         let enable_scheduling = PusTcCreator::new(
             reply_header,

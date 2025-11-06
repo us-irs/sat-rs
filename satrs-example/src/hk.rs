@@ -55,7 +55,7 @@ impl PusHkHelper {
         buf: &'b mut [u8],
     ) -> Result<PusTmCreator<'a, 'b>, ByteConversionError> {
         let sec_header = PusTmSecondaryHeader::new(
-            MessageTypeId::new(3, hk::Subservice::TmHkPacket as u8),
+            MessageTypeId::new(3, hk::MessageSubtypeId::TmHkPacket as u8),
             0,
             0,
             timestamp,
