@@ -4,7 +4,7 @@ use crate::pus::verification::TcStateToken;
 use crate::pus::{DirectPusPacketHandlerResult, PartialPusHandlingError, PusPacketHandlingError};
 use crate::queue::GenericSendError;
 use spacepackets::ecss::PusPacket;
-use spacepackets::ecss::event::Subservice;
+use spacepackets::ecss::event::MessageSubtypeId;
 use std::sync::mpsc::Sender;
 
 use super::verification::VerificationReportingProvider;
@@ -61,7 +61,7 @@ impl<
             .cache(&ecss_tc_and_token.tc_in_memory)?;
         let tc = self.service_helper.tc_in_mem_converter().convert()?;
         let subservice = tc.message_subtype_id();
-        let srv = Subservice::try_from(subservice);
+        let srv = MessageSubtypeId::try_from(subservice);
         if srv.is_err() {
             return Ok(DirectPusPacketHandlerResult::CustomSubservice(
                 tc.message_subtype_id(),
@@ -116,21 +116,21 @@ impl<
             };
 
         match srv.unwrap() {
-            Subservice::TmInfoReport
-            | Subservice::TmLowSeverityReport
-            | Subservice::TmMediumSeverityReport
-            | Subservice::TmHighSeverityReport => {
+            MessageSubtypeId::TmInfoReport
+            | MessageSubtypeId::TmLowSeverityReport
+            | MessageSubtypeId::TmMediumSeverityReport
+            | MessageSubtypeId::TmHighSeverityReport => {
                 return Err(PusPacketHandlingError::RequestConversion(
                     GenericConversionError::WrongService(tc.message_subtype_id()),
                 ));
             }
-            Subservice::TcEnableEventGeneration => {
+            MessageSubtypeId::TcEnableEventGeneration => {
                 handle_enable_disable_request(true)?;
             }
-            Subservice::TcDisableEventGeneration => {
+            MessageSubtypeId::TcDisableEventGeneration => {
                 handle_enable_disable_request(false)?;
             }
-            Subservice::TcReportDisabledList | Subservice::TmDisabledEventsReport => {
+            MessageSubtypeId::TcReportDisabledList | MessageSubtypeId::TmDisabledEventsReport => {
                 return Ok(DirectPusPacketHandlerResult::SubserviceNotImplemented(
                     subservice,
                     ecss_tc_and_token.token,
@@ -147,7 +147,7 @@ mod tests {
     use arbitrary_int::traits::Integer as _;
     use arbitrary_int::u14;
     use delegate::delegate;
-    use spacepackets::ecss::event::Subservice;
+    use spacepackets::ecss::event::MessageSubtypeId;
     use spacepackets::ecss::{CreatorConfig, MessageTypeId};
     use spacepackets::time::{TimeWriter, cds};
     use spacepackets::util::UnsignedEnum;
@@ -241,7 +241,7 @@ mod tests {
 
     fn event_test(
         test_harness: &mut (impl PusTestHarness + SimplePusPacketHandler),
-        subservice: Subservice,
+        subservice: MessageSubtypeId,
         expected_event_req: EventRequest,
         event_req_receiver: mpsc::Receiver<EventRequestWithToken>,
     ) {
@@ -272,7 +272,7 @@ mod tests {
         let mut test_harness = Pus5HandlerWithStoreTester::new(event_request_tx);
         event_test(
             &mut test_harness,
-            Subservice::TcEnableEventGeneration,
+            MessageSubtypeId::TcEnableEventGeneration,
             EventRequest::Enable(TEST_EVENT_0),
             event_request_rx,
         );
@@ -284,7 +284,7 @@ mod tests {
         let mut test_harness = Pus5HandlerWithStoreTester::new(event_request_tx);
         event_test(
             &mut test_harness,
-            Subservice::TcDisableEventGeneration,
+            MessageSubtypeId::TcDisableEventGeneration,
             EventRequest::Disable(TEST_EVENT_0),
             event_request_rx,
         );
@@ -333,7 +333,7 @@ mod tests {
         let sp_header = SpHeader::new_for_unseg_tc(TEST_APID, u14::ZERO, 0);
         let sec_header = PusTcSecondaryHeader::new_simple(MessageTypeId::new(
             5,
-            Subservice::TcEnableEventGeneration as u8,
+            MessageSubtypeId::TcEnableEventGeneration as u8,
         ));
         let ping_tc =
             PusTcCreator::new(sp_header, sec_header, &[0, 1, 2], CreatorConfig::default());

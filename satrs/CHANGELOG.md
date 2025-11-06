@@ -8,10 +8,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 # [unreleased]
 
-# [v0.3.0-alpha.3] 2025-09-??
+# [v0.3.0-alpha.3] 2025-11-06
 
 - Bump `sat-rs` edition to 2024.
-- Bumped `spacepackets` to v0.16
+- Bumped `spacepackets` to v0.17
 - `ComponentId` is u32 now
 - Simplified TCP servers
 

@@ -31,7 +31,7 @@ impl EventReportCreator {
         src_data_buf: &'src_data mut [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.generate_and_send_generic_tm(
-            Subservice::TmInfoReport,
+            MessageSubtypeId::TmInfoReport,
             time_stamp,
             event_id,
             params,
@@ -47,7 +47,7 @@ impl EventReportCreator {
         src_data_buf: &'src_data mut [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.generate_and_send_generic_tm(
-            Subservice::TmLowSeverityReport,
+            MessageSubtypeId::TmLowSeverityReport,
             time_stamp,
             event_id,
             params,
@@ -63,7 +63,7 @@ impl EventReportCreator {
         buf: &'src_data mut [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.generate_and_send_generic_tm(
-            Subservice::TmMediumSeverityReport,
+            MessageSubtypeId::TmMediumSeverityReport,
             time_stamp,
             event_id,
             params,
@@ -79,7 +79,7 @@ impl EventReportCreator {
         src_data_buf: &'src_data mut [u8],
     ) -> Result<PusTmCreator<'time, 'src_data>, ByteConversionError> {
         self.generate_and_send_generic_tm(
-            Subservice::TmHighSeverityReport,
+            MessageSubtypeId::TmHighSeverityReport,
             time_stamp,
             event_id,
             params,
@@ -89,7 +89,7 @@ impl EventReportCreator {
 
     fn generate_and_send_generic_tm<'time, 'src_data>(
         &self,
-        subservice: Subservice,
+        subservice: MessageSubtypeId,
         time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
         params: Option<&'src_data [u8]>,
@@ -100,7 +100,7 @@ impl EventReportCreator {
 
     fn generate_generic_event_tm<'time, 'src_data>(
         &self,
-        subservice: Subservice,
+        subservice: MessageSubtypeId,
         time_stamp: &'time [u8],
         event_id: impl EcssEnumeration,
         params: Option<&'src_data [u8]>,
@@ -333,12 +333,12 @@ mod tests {
         }
     }
 
-    fn severity_to_subservice(severity: Severity) -> Subservice {
+    fn severity_to_subservice(severity: Severity) -> MessageSubtypeId {
         match severity {
-            Severity::Info => Subservice::TmInfoReport,
-            Severity::Low => Subservice::TmLowSeverityReport,
-            Severity::Medium => Subservice::TmMediumSeverityReport,
-            Severity::High => Subservice::TmHighSeverityReport,
+            Severity::Info => MessageSubtypeId::TmInfoReport,
+            Severity::Low => MessageSubtypeId::TmLowSeverityReport,
+            Severity::Medium => MessageSubtypeId::TmMediumSeverityReport,
+            Severity::High => MessageSubtypeId::TmHighSeverityReport,
         }
     }
 

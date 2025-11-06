@@ -1,4 +1,4 @@
-all: check build embedded test fmt clippy docs
+all: check build embedded test check-fmt clippy docs
 
 check:
   cargo check
@@ -15,6 +15,9 @@ embedded:
   cargo check -p satrs --target=thumbv7em-none-eabihf --no-default-features
 
 fmt:
+  cargo fmt --all
+
+check-fmt:
   cargo fmt --all -- --check
 
 clippy:

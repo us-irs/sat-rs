@@ -9,7 +9,7 @@ use clap::Parser;
 use cobs::CobsDecoderOwned;
 use satrs_stm32f3_disco_rtic::Request;
 use spacepackets::{CcsdsPacketCreatorOwned, CcsdsPacketReader, SpHeader};
-use tmtc_utils::transport::{PacketTransport, serial::PacketTransportSerialCobs};
+use tmtc_utils::transport::serial::PacketTransportSerialCobs;
 
 #[derive(Parser, Debug)]
 struct Cli {

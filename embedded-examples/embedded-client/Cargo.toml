@@ -9,7 +9,7 @@ serialport = "4"
 toml = "0.9"
 serde = { version = "1", features = ["derive"] }
 satrs-stm32f3-disco-rtic = { path = "../stm32f3-disco-rtic" }
-spacepackets = { git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git", version = "0.17" }
+spacepackets = { version = "0.17" }
 tmtc-utils = { git = "https://egit.irs.uni-stuttgart.de/rust/tmtc-utils.git", version = "0.1" }
 postcard = { version = "1", features = ["alloc"] }
 cobs = "0.5"
