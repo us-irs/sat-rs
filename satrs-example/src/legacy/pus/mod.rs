@@ -39,6 +39,7 @@ pub fn create_verification_reporter(owner_id: ComponentId, apid: Apid) -> Verifi
     VerificationReporter::new(owner_id, &verif_cfg)
 }
 
+/*
 /// Simple router structure which forwards PUS telecommands to dedicated handlers.
 pub struct PusTcMpscRouter {
     pub test_tc_sender: mpsc::SyncSender<EcssTcAndToken>,
@@ -187,6 +188,7 @@ impl PusTcDistributor {
         Ok(HandlingStatus::HandledOne)
     }
 }
+*/
 
 pub trait TargetedPusService {
     const SERVICE_ID: u8;

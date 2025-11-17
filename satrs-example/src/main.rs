@@ -18,6 +18,7 @@ use interface::{
 };
 use log::info;
 use logger::setup_logger;
+/*
 use pus::{
     action::create_action_service,
     event::create_event_service,
@@ -28,6 +29,7 @@ use pus::{
     test::create_test_service,
     PusTcDistributor, PusTcMpscRouter,
 };
+*/
 use requests::GenericRequestRouter;
 use satrs::{
     hal::std::{tcp_server::ServerConfig, udp_server::UdpTcServer},
@@ -78,7 +80,7 @@ mod events;
 mod hk;
 mod interface;
 mod logger;
-mod pus;
+//mod pus;
 mod requests;
 mod spi;
 mod tmtc;
@@ -177,6 +179,7 @@ fn main() {
             let tc_releaser = TcReleaser::Heap(tc_source_tx.clone());
         }
     }
+    /*
     let pus_router = PusTcMpscRouter {
         test_tc_sender: pus_test_tx,
         event_tc_sender: pus_event_tx,
@@ -233,6 +236,7 @@ fn main() {
         pus_scheduler_service,
         pus_mode_service,
     );
+    */
 
     cfg_if::cfg_if! {
         if #[cfg(not(feature = "heap_tmtc"))] {

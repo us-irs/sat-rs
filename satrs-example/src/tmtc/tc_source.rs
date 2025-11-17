@@ -2,8 +2,12 @@ use satrs::{
     pool::PoolProvider,
     pus::HandlingStatus,
     tmtc::{PacketAsVec, PacketInPool, SharedPacketPool},
+    ComponentId,
 };
-use std::sync::mpsc::{self, TryRecvError};
+use std::{
+    collections::HashMap,
+    sync::mpsc::{self, TryRecvError},
+};
 
 use crate::pus::PusTcDistributor;
 
@@ -65,18 +69,24 @@ impl TcSourceTaskStatic {
     }
 }
 
+pub type CcsdsDistributorDyn = HashMap<ComponentId, std::sync::mpsc::SyncSender<PacketAsVec>>;
+pub type CcsdsDistributorStatic = HashMap<ComponentId, std::sync::mpsc::SyncSender<PacketInPool>>;
+
 // TC source components where the heap is the backing memory of the received telecommands.
 pub struct TcSourceTaskDynamic {
     pub tc_receiver: mpsc::Receiver<PacketAsVec>,
-    pus_distributor: PusTcDistributor,
+    ccsds_distributor: CcsdsDistributorDyn,
 }
 
 #[allow(dead_code)]
 impl TcSourceTaskDynamic {
-    pub fn new(tc_receiver: mpsc::Receiver<PacketAsVec>, pus_receiver: PusTcDistributor) -> Self {
+    pub fn new(
+        tc_receiver: mpsc::Receiver<PacketAsVec>,
+        ccsds_distributor: CcsdsDistributorDyn,
+    ) -> Self {
         Self {
             tc_receiver,
-            pus_distributor: pus_receiver,
+            ccsds_distributor,
         }
     }
 
