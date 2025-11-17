@@ -25,10 +25,6 @@ use spacepackets::ecss::tm::PusTmCreator;
 use spacepackets::{ByteConversionError, SpHeader};
 
 pub mod action;
-pub mod event;
-pub mod event_man;
-#[cfg(feature = "std")]
-pub mod event_srv;
 pub mod mode;
 pub mod scheduler;
 #[cfg(feature = "std")]

@@ -50,7 +50,7 @@
 //! show how the event management modules can be integrated into a more complex software.
 use crate::{
     ComponentId,
-    events::{Event, EventId, GroupId},
+    legacy::events::{Event, EventId, GroupId},
     queue::GenericSendError,
 };
 use core::marker::PhantomData;
@@ -96,6 +96,7 @@ impl<EventInstance: Event> EventMessage<EventInstance> {
 pub trait EventSender<EventInstance: Event> {
     type Error;
 
+    /// Destination component ID.
     fn target_id(&self) -> ComponentId;
 
     fn send(&self, message: EventMessage<EventInstance>) -> Result<(), Self::Error>;
@@ -317,7 +318,7 @@ pub mod alloc_mod {
     use alloc::vec::Vec;
     use hashbrown::HashMap;
 
-    use crate::events::EventErasedAlloc;
+    use crate::legacy::events::EventErasedAlloc;
 
     use super::*;
 
@@ -460,7 +461,7 @@ pub mod alloc_mod {
 #[cfg(feature = "std")]
 pub mod std_mod {
     use crate::{
-        events::{EventErasedAlloc, EventErasedHeapless},
+        legacy::events::{EventErasedAlloc, EventErasedHeapless},
         queue::GenericReceiveError,
     };
 
@@ -577,7 +578,7 @@ mod tests {
     use arbitrary_int::u14;
 
     use super::*;
-    use crate::events::{EventErasedAlloc, Severity};
+    use crate::legacy::events::{EventErasedAlloc, Severity};
     use crate::pus::test_util::{TEST_COMPONENT_ID_0, TEST_COMPONENT_ID_1};
     use std::sync::mpsc;
 

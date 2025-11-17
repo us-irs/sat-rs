@@ -1,7 +1,23 @@
+extern crate alloc;
+
+pub use models::ComponentId;
 use satrs::spacepackets::time::cds::CdsTime;
 
 pub mod config;
-pub mod ids;
+
+/// Simple type modelling packet stored in the heap. This structure is intended to
+/// be used when sending a packet via a message queue, so it also contains the sender ID.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct PacketAsVec {
+    pub sender_id: ComponentId,
+    pub packet: Vec<u8>,
+}
+
+impl PacketAsVec {
+    pub fn new(sender_id: ComponentId, packet: Vec<u8>) -> Self {
+        Self { sender_id, packet }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum DeviceMode {

@@ -1,10 +1,10 @@
 use std::{f32::consts::PI, sync::mpsc, time::Duration};
 
+use models::pcdu::SwitchStateBinary;
 use nexosim::{
     model::{Context, Model},
     ports::Output,
 };
-use satrs::power::SwitchStateBinary;
 use satrs_minisim::{
     acs::{
         lis3mdl::MgmLis3MdlReply, MgmReplyCommon, MgmReplyProvider, MgmSensorValuesMicroTesla,
@@ -179,13 +179,12 @@ impl Model for MagnetorquerModel {}
 pub mod tests {
     use std::time::Duration;
 
-    use satrs::power::SwitchStateBinary;
+    use models::pcdu::{SwitchId, SwitchStateBinary};
     use satrs_minisim::{
         acs::{
             lis3mdl::{self, MgmLis3MdlReply},
             MgmRequestLis3Mdl, MgtDipole, MgtHkSet, MgtReply, MgtRequest,
         },
-        eps::PcduSwitch,
         SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimRequest,
     };
 
@@ -215,7 +214,7 @@ pub mod tests {
     #[test]
     fn test_basic_mgm_request_switched_on() {
         let mut sim_testbench = SimTestbench::new();
-        switch_device_on(&mut sim_testbench, PcduSwitch::Mgm);
+        switch_device_on(&mut sim_testbench, SwitchId::Mgm0);
 
         let mut request = SimRequest::new_with_epoch_time(MgmRequestLis3Mdl::RequestSensorData);
         sim_testbench
@@ -279,7 +278,7 @@ pub mod tests {
     #[test]
     fn test_basic_mgt_request_is_on() {
         let mut sim_testbench = SimTestbench::new();
-        switch_device_on(&mut sim_testbench, PcduSwitch::Mgt);
+        switch_device_on(&mut sim_testbench, SwitchId::Mgt);
         let request = SimRequest::new_with_epoch_time(MgtRequest::RequestHk);
 
         sim_testbench
@@ -324,7 +323,7 @@ pub mod tests {
     #[test]
     fn test_basic_mgt_request_is_on_and_torquing() {
         let mut sim_testbench = SimTestbench::new();
-        switch_device_on(&mut sim_testbench, PcduSwitch::Mgt);
+        switch_device_on(&mut sim_testbench, SwitchId::Mgt);
         let commanded_dipole = MgtDipole {
             x: -200,
             y: 200,

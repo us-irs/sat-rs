@@ -4,7 +4,9 @@ members = [
     "satrs",
     "satrs-mib",
     "satrs-example",
-    "satrs-minisim",
+    "satrs-example/models",
+    "satrs-example/client",
+    "satrs-example/minisim",
     "satrs-shared",
     "embedded-examples/embedded-client",
 ]

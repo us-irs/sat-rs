@@ -15,8 +15,8 @@ use satrs::spacepackets::ecss::tc::PusTcReader;
 use satrs::spacepackets::ecss::PusPacket;
 use satrs::ComponentId;
 use satrs_example::config::tmtc_err;
-use satrs_example::ids;
 
+/*
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum CompositeRequest {
@@ -153,3 +153,4 @@ impl PusRequestRouter<ModeRequest> for GenericRequestRouter {
         Err(GenericRoutingError::UnknownTargetId(target_id))
     }
 }
+*/

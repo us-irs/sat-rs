@@ -1,0 +1,33 @@
+use models::{ccsds::CcsdsTmPacketOwned, control, ComponentId, Event, Message};
+
+use crate::ccsds::pack_ccsds_tm_packet_for_now;
+
+pub struct EventManager {
+    pub ctrl_rx: std::sync::mpsc::Receiver<control::Event>,
+    pub tm_tx: std::sync::mpsc::SyncSender<CcsdsTmPacketOwned>,
+}
+
+impl EventManager {
+    pub fn periodic_operation(&mut self) {
+        if let Ok(event) = self.ctrl_rx.try_recv() {
+            self.event_to_tm(ComponentId::Controller, &Event::ControllerEvent(event));
+        }
+    }
+
+    pub fn event_to_tm(
+        &mut self,
+        sender_id: ComponentId,
+        event: &(impl serde::Serialize + Message),
+    ) {
+        match pack_ccsds_tm_packet_for_now(sender_id, None, event) {
+            Ok(packet) => {
+                if let Err(e) = self.tm_tx.send(packet) {
+                    log::warn!("error sending event TM packet: {:?}", e);
+                }
+            }
+            Err(e) => {
+                log::warn!("error packing event TM packet: {:?}", e);
+            }
+        }
+    }
+}

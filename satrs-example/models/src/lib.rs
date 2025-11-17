@@ -1,0 +1,172 @@
+extern crate alloc;
+use spacepackets::{
+    CcsdsPacketIdAndPsc,
+    time::cds::{CdsTime, MIN_CDS_FIELD_LEN},
+};
+
+pub mod ccsds;
+pub mod control;
+pub mod mgm;
+pub mod pcdu;
+
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    num_enum::TryFromPrimitive,
+    num_enum::IntoPrimitive,
+)]
+#[repr(u64)]
+pub enum ComponentId {
+    Controller,
+
+    AcsSubsystem,
+    AcsMgmAssembly,
+    AcsMgm0,
+    AcsMgm1,
+
+    EpsSubsystem,
+    EpsPcdu,
+
+    UdpServer,
+    TcpServer,
+    EventManager,
+
+    Ground,
+}
+
+#[derive(Debug, PartialEq, Eq, strum::EnumIter)]
+#[bitbybit::bitenum(u11)]
+pub enum Apid {
+    Tmtc = 1,
+    Cfdp = 2,
+
+    Acs = 3,
+    Eps = 6,
+}
+
+#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Event {
+    ControllerEvent(control::Event),
+}
+
+impl Message for Event {
+    fn message_type(&self) -> MessageType {
+        MessageType::Event
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub struct TmHeader {
+    pub sender_id: ComponentId,
+    pub target_id: ComponentId,
+    pub message_type: MessageType,
+    /// Telemetry can either be sent unsolicited, or as a response to telecommands.
+    pub tc_id: Option<CcsdsPacketIdAndPsc>,
+    /// Raw CDS short timestamp.
+    pub timestamp: Option<[u8; 7]>,
+}
+
+impl TmHeader {
+    pub fn new(
+        sender_id: ComponentId,
+        target_id: ComponentId,
+        message_type: MessageType,
+        tc_id: Option<CcsdsPacketIdAndPsc>,
+        cds_timestamp: &CdsTime,
+    ) -> Self {
+        // Can not fail, CDS short always requires 7 bytes.
+        let mut stamp_buf: [u8; MIN_CDS_FIELD_LEN] = [0; MIN_CDS_FIELD_LEN];
+        cds_timestamp.write_to_bytes(&mut stamp_buf).unwrap();
+        Self {
+            sender_id,
+            target_id,
+            tc_id,
+            message_type,
+            timestamp: Some(stamp_buf),
+        }
+    }
+    pub fn new_for_unsolicited_tm(
+        sender_id: ComponentId,
+        target_id: ComponentId,
+        message_type: MessageType,
+        cds_timestamp: &CdsTime,
+    ) -> Self {
+        Self::new(sender_id, target_id, message_type, None, cds_timestamp)
+    }
+
+    pub fn new_for_tc_response(
+        sender_id: ComponentId,
+        target_id: ComponentId,
+        message_type: MessageType,
+        tc_id: CcsdsPacketIdAndPsc,
+        cds_timestamp: &CdsTime,
+    ) -> Self {
+        Self::new(
+            sender_id,
+            target_id,
+            message_type,
+            Some(tc_id),
+            cds_timestamp,
+        )
+    }
+
+    pub fn from_bytes_postcard(data: &[u8]) -> Result<(Self, &[u8]), postcard::Error> {
+        postcard::take_from_bytes::<TmHeader>(data)
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub struct TcHeader {
+    pub target_id: ComponentId,
+    pub request_type: MessageType,
+}
+
+impl TcHeader {
+    pub fn new(target_id: ComponentId, request_type: MessageType) -> Self {
+        Self {
+            target_id,
+            request_type,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MessageType {
+    Ping,
+    Mode,
+    Hk,
+    Action,
+    Event,
+    Verification,
+}
+
+pub trait Message {
+    fn message_type(&self) -> MessageType;
+}
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub enum DeviceMode {
+    Off = 0,
+    On = 1,
+    Normal = 2,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum HkRequestType {
+    OneShot,
+    EnablePeriodic(core::time::Duration),
+    DisablePeriodic,
+    ModifyInterval(core::time::Duration),
+}
+
+#[cfg(test)]
+mod tests {}

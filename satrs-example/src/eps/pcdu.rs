@@ -1,43 +1,118 @@
 use std::{
     cell::RefCell,
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     sync::{mpsc, Arc, Mutex},
 };
 
 use derive_new::new;
+use models::{
+    ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned},
+    pcdu::{
+        self, SwitchId, SwitchMapBinary, SwitchMapBinaryWrapper, SwitchRequest, SwitchState,
+        SwitchStateBinary, SwitchesBitfield,
+    },
+    ComponentId,
+};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use satrs::{
-    hk::{HkRequest, HkRequestVariant},
     mode::{
         ModeAndSubmode, ModeError, ModeProvider, ModeReply, ModeRequestHandler,
         ModeRequestHandlerMpscBounded,
     },
     mode_tree::{ModeChild, ModeNode},
-    power::SwitchRequest,
-    pus::{EcssTmSender, PusTmVariant},
     queue::GenericSendError,
-    request::{GenericMessage, MessageMetadata, UniqueApidTargetId},
-    spacepackets::ByteConversionError,
+    request::{GenericMessage, MessageMetadata},
+    spacepackets::CcsdsPacketIdAndPsc,
 };
-use satrs_example::{
-    config::components::NO_SENDER,
-    ids::{eps::PCDU, generic_pus::PUS_MODE},
-    DeviceMode, TimestampHelper,
-};
+use satrs_example::{config::components::NO_SENDER, DeviceMode, TimestampHelper};
 use satrs_minisim::{
-    eps::{
-        PcduReply, PcduRequest, PcduSwitch, SwitchMap, SwitchMapBinaryWrapper, SwitchMapWrapper,
-    },
+    eps::{PcduReply, PcduRequest},
     SerializableSimMsgPayload, SimReply, SimRequest,
 };
 use serde::{Deserialize, Serialize};
+use strum::IntoEnumIterator as _;
 
-use crate::{
-    hk::PusHkHelper,
-    pus::hk::{HkReply, HkReplyVariant},
-    requests::CompositeRequest,
-    tmtc::sender::TmTcSender,
-};
+use crate::ccsds::pack_ccsds_tm_packet_for_now;
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SwitchSet {
+    pub valid: bool,
+    pub switch_map: SwitchMap,
+}
+
+impl SwitchSet {
+    pub fn new(switch_map: SwitchMap) -> Self {
+        Self {
+            valid: true,
+            switch_map,
+        }
+    }
+
+    pub fn new_with_init_switches_unknown() -> Self {
+        let wrapper = SwitchMapWrapper::default();
+        Self::new(wrapper.0)
+    }
+
+    pub fn as_bitfield(&self) -> Option<SwitchesBitfield> {
+        for entry in SwitchId::iter() {
+            if !self.switch_map.contains_key(&entry) {
+                return None;
+            }
+        }
+        Some(
+            SwitchesBitfield::builder()
+                .with_magnetorquer(*self.switch_map.get(&SwitchId::Mgt).unwrap() == SwitchState::On)
+                .with_mgm1(*self.switch_map.get(&SwitchId::Mgm1).unwrap() == SwitchState::On)
+                .with_mgm0(*self.switch_map.get(&SwitchId::Mgm0).unwrap() == SwitchState::On)
+                .build(),
+        )
+    }
+
+    #[allow(dead_code)]
+    pub fn set_switch_state(&mut self, switch_id: SwitchId, state: SwitchState) -> bool {
+        if !self.switch_map.contains_key(&switch_id) {
+            return false;
+        }
+        *self.switch_map.get_mut(&switch_id).unwrap() = state;
+        true
+    }
+}
+
+pub type SwitchMap = HashMap<SwitchId, SwitchState>;
+
+pub struct SwitchMapWrapper(pub SwitchMap);
+
+impl Default for SwitchMapWrapper {
+    fn default() -> Self {
+        let mut switch_map = SwitchMap::default();
+        for entry in SwitchId::iter() {
+            switch_map.insert(entry, SwitchState::Unknown);
+        }
+        Self(switch_map)
+    }
+}
+
+impl SwitchMapWrapper {
+    #[allow(dead_code)]
+    pub fn new_with_init_switches_off() -> Self {
+        let mut switch_map = SwitchMap::default();
+        for entry in SwitchId::iter() {
+            switch_map.insert(entry, SwitchState::Off);
+        }
+        Self(switch_map)
+    }
+
+    pub fn from_binary_switch_map_ref(switch_map: &SwitchMapBinary) -> Self {
+        Self(
+            switch_map
+                .iter()
+                .map(|(key, value)| (*key, SwitchState::from(*value)))
+                .collect(),
+        )
+    }
+}
+
+pub type SharedSwitchSet = Arc<Mutex<SwitchSet>>;
 
 pub trait SerialInterface {
     type Error: core::fmt::Debug;
@@ -194,44 +269,47 @@ pub enum OpCode {
     PollAndRecvReplies = 1,
 }
 
-#[derive(Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct SwitchSet {
-    pub valid: bool,
-    pub switch_map: SwitchMap,
-}
-
-pub type SharedSwitchSet = Arc<Mutex<SwitchSet>>;
-
 /// Example PCDU device handler.
-#[derive(new)]
 #[allow(clippy::too_many_arguments)]
 pub struct PcduHandler<ComInterface: SerialInterface> {
-    id: UniqueApidTargetId,
     dev_str: &'static str,
     mode_node: ModeRequestHandlerMpscBounded,
-    composite_request_rx: mpsc::Receiver<GenericMessage<CompositeRequest>>,
-    hk_reply_tx: mpsc::SyncSender<GenericMessage<HkReply>>,
     switch_request_rx: mpsc::Receiver<GenericMessage<SwitchRequest>>,
-    tm_sender: TmTcSender,
+    tc_rx: std::sync::mpsc::Receiver<CcsdsTcPacketOwned>,
+    tm_tx: mpsc::SyncSender<CcsdsTmPacketOwned>,
     pub com_interface: ComInterface,
     shared_switch_map: Arc<Mutex<SwitchSet>>,
-    #[new(value = "PusHkHelper::new(id)")]
-    hk_helper: PusHkHelper,
-    #[new(value = "ModeAndSubmode::new(satrs_example::DeviceMode::Off as u32, 0)")]
     mode_and_submode: ModeAndSubmode,
-    #[new(default)]
     stamp_helper: TimestampHelper,
-    #[new(value = "[0; 256]")]
-    tm_buf: [u8; 256],
 }
 
 impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
+    pub fn new(
+        mode_node: ModeRequestHandlerMpscBounded,
+        tc_rx: std::sync::mpsc::Receiver<CcsdsTcPacketOwned>,
+        tm_tx: std::sync::mpsc::SyncSender<CcsdsTmPacketOwned>,
+        switch_request_rx: mpsc::Receiver<GenericMessage<SwitchRequest>>,
+        com_interface: ComInterface,
+        shared_switch_map: Arc<Mutex<SwitchSet>>,
+    ) -> Self {
+        Self {
+            dev_str: "PCDU",
+            mode_node,
+            tc_rx,
+            switch_request_rx,
+            tm_tx,
+            com_interface,
+            shared_switch_map,
+            mode_and_submode: ModeAndSubmode::new(0, 0),
+            stamp_helper: TimestampHelper::default(),
+        }
+    }
     pub fn periodic_operation(&mut self, op_code: OpCode) {
         match op_code {
             OpCode::RegularOp => {
                 self.stamp_helper.update_from_now();
                 // Handle requests.
-                self.handle_composite_requests();
+                self.handle_telecommands();
                 self.handle_mode_requests();
                 self.handle_switch_requests();
                 // Poll the switch states and/or telemetry regularly here.
@@ -246,75 +324,87 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
         }
     }
 
-    pub fn handle_composite_requests(&mut self) {
+    pub fn handle_telecommands(&mut self) {
         loop {
-            match self.composite_request_rx.try_recv() {
-                Ok(ref msg) => match &msg.message {
-                    CompositeRequest::Hk(hk_request) => {
-                        self.handle_hk_request(&msg.requestor_info, hk_request)
-                    }
-                    // TODO: This object does not have actions (yet).. Still send back completion failure
-                    // reply.
-                    CompositeRequest::Action(_action_req) => {}
-                },
-
-                Err(e) => {
-                    if e != mpsc::TryRecvError::Empty {
-                        log::warn!(
-                            "{}: failed to receive composite request: {:?}",
-                            self.dev_str,
-                            e
-                        );
-                    } else {
-                        break;
+            match self.tc_rx.try_recv() {
+                Ok(packet) => {
+                    let tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&packet.sp_header);
+                    match postcard::from_bytes::<pcdu::request::Request>(&packet.payload) {
+                        Ok(request) => {
+                            log::info!(
+                                "received request {:?} with TC ID {:#010x}",
+                                request,
+                                tc_id.raw()
+                            );
+                            match request {
+                                pcdu::request::Request::Ping => {
+                                    self.send_tm(Some(tc_id), pcdu::response::Response::Ok)
+                                }
+                                pcdu::request::Request::GetSwitches => self.send_tm(
+                                    Some(tc_id),
+                                    pcdu::response::Response::Switches(
+                                        self.shared_switch_map
+                                            .lock()
+                                            .unwrap()
+                                            .as_bitfield()
+                                            .expect("could not build switches response"),
+                                    ),
+                                ),
+                                pcdu::request::Request::EnableSwitches(switches) => {
+                                    self.handle_switches_bitfield_request(
+                                        switches,
+                                        SwitchStateBinary::On,
+                                    );
+                                }
+                                pcdu::request::Request::DisableSwitches(switches) => {
+                                    self.handle_switches_bitfield_request(
+                                        switches,
+                                        SwitchStateBinary::Off,
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("failed to deserialize request: {}", e);
+                        }
                     }
                 }
+                Err(e) => match e {
+                    std::sync::mpsc::TryRecvError::Empty => break,
+                    std::sync::mpsc::TryRecvError::Disconnected => {
+                        log::warn!("packet sender disconnected")
+                    }
+                },
             }
         }
     }
 
-    pub fn handle_hk_request(&mut self, requestor_info: &MessageMetadata, hk_request: &HkRequest) {
-        match hk_request.variant {
-            HkRequestVariant::OneShot => {
-                if hk_request.unique_id == SetId::SwitcherSet as u32 {
-                    if let Ok(hk_tm) = self.hk_helper.generate_hk_report_packet(
-                        self.stamp_helper.stamp(),
-                        SetId::SwitcherSet as u32,
-                        &mut |hk_buf| {
-                            // Send TM down as JSON.
-                            let switch_map_snapshot = self
-                                .shared_switch_map
-                                .lock()
-                                .expect("failed to lock switch map")
-                                .clone();
-                            let switch_map_json = serde_json::to_string(&switch_map_snapshot)
-                                .expect("failed to serialize switch map");
-                            if switch_map_json.len() > hk_buf.len() {
-                                log::error!("switch map JSON too large for HK buffer");
-                                return Err(ByteConversionError::ToSliceTooSmall {
-                                    found: hk_buf.len(),
-                                    expected: switch_map_json.len(),
-                                });
-                            }
-                            Ok(switch_map_json.len())
-                        },
-                        &mut self.tm_buf,
-                    ) {
-                        self.tm_sender
-                            .send_tm(self.id.id(), PusTmVariant::Direct(hk_tm))
-                            .expect("failed to send HK TM");
-                        self.hk_reply_tx
-                            .send(GenericMessage::new(
-                                *requestor_info,
-                                HkReply::new(hk_request.unique_id, HkReplyVariant::Ack),
-                            ))
-                            .expect("failed to send HK reply");
-                    }
+    pub fn handle_switches_bitfield_request(
+        &mut self,
+        switches: SwitchesBitfield,
+        state: SwitchStateBinary,
+    ) {
+        if switches.mgm0() {
+            self.handle_device_switching(SwitchId::Mgm0, state);
+        }
+        if switches.mgm1() {
+            self.handle_device_switching(SwitchId::Mgm1, state);
+        }
+        if switches.magnetorquer() {
+            self.handle_device_switching(SwitchId::Mgt, state);
+        }
+    }
+
+    pub fn send_tm(&self, tc_id: Option<CcsdsPacketIdAndPsc>, response: pcdu::response::Response) {
+        match pack_ccsds_tm_packet_for_now(ComponentId::EpsPcdu, tc_id, &response) {
+            Ok(packet) => {
+                if let Err(e) = self.tm_tx.send(packet) {
+                    log::warn!("failed to send TM packet: {}", e);
                 }
             }
-            HkRequestVariant::EnablePeriodic => todo!(),
-            HkRequestVariant::DisablePeriodic => todo!(),
-            HkRequestVariant::ModifyCollectionInterval(_) => todo!(),
+            Err(e) => {
+                log::warn!("failed to pack TM packet: {}", e);
+            }
         }
     }
 
@@ -357,22 +447,26 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
         }
     }
 
+    pub fn handle_device_switching(&mut self, switch_id: SwitchId, state: SwitchStateBinary) {
+        let pcdu_req = PcduRequest::SwitchDevice {
+            switch: switch_id,
+            state,
+        };
+        let pcdu_req_ser = serde_json::to_string(&pcdu_req).unwrap();
+        self.com_interface
+            .send(pcdu_req_ser.as_bytes())
+            .expect("failed to send switch request to PCDU");
+    }
+
     pub fn handle_switch_requests(&mut self) {
         loop {
             match self.switch_request_rx.try_recv() {
-                Ok(switch_req) => match PcduSwitch::try_from(switch_req.message.switch_id()) {
-                    Ok(pcdu_switch) => {
-                        let pcdu_req = PcduRequest::SwitchDevice {
-                            switch: pcdu_switch,
-                            state: switch_req.message.target_state(),
-                        };
-                        let pcdu_req_ser = serde_json::to_string(&pcdu_req).unwrap();
-                        self.com_interface
-                            .send(pcdu_req_ser.as_bytes())
-                            .expect("failed to send switch request to PCDU");
-                    }
-                    Err(e) => todo!("failed to convert switch ID {:?} to typed PCDU switch", e),
-                },
+                Ok(switch_req) => {
+                    self.handle_device_switching(
+                        switch_req.message.switch_id(),
+                        switch_req.message.target_state(),
+                    );
+                }
                 Err(e) => match e {
                     mpsc::TryRecvError::Empty => break,
                     mpsc::TryRecvError::Disconnected => {
@@ -450,7 +544,7 @@ impl<ComInterface: SerialInterface> ModeRequestHandler for PcduHandler<ComInterf
             if requestor.sender_id() == NO_SENDER {
                 return Ok(());
             }
-            if requestor.sender_id() != PUS_MODE.id() {
+            if requestor.sender_id() != ComponentId::Ground as u32 {
                 log::warn!(
                     "can not send back mode reply to sender {}",
                     requestor.sender_id()
@@ -467,7 +561,7 @@ impl<ComInterface: SerialInterface> ModeRequestHandler for PcduHandler<ComInterf
         requestor: MessageMetadata,
         reply: ModeReply,
     ) -> Result<(), Self::Error> {
-        if requestor.sender_id() != PUS_MODE.id() {
+        if requestor.sender_id() != ComponentId::Ground as u32 {
             log::warn!(
                 "can not send back mode reply to sender {}",
                 requestor.sender_id()
@@ -490,7 +584,7 @@ impl<ComInterface: SerialInterface> ModeRequestHandler for PcduHandler<ComInterf
 
 impl<ComInterface: SerialInterface> ModeNode for PcduHandler<ComInterface> {
     fn id(&self) -> satrs::ComponentId {
-        PCDU.into()
+        ComponentId::EpsPcdu as u32
     }
 }
 
@@ -506,12 +600,8 @@ impl<ComInterface: SerialInterface> ModeChild for PcduHandler<ComInterface> {
 mod tests {
     use std::sync::mpsc;
 
-    use arbitrary_int::u21;
-    use satrs::{
-        mode::ModeRequest, power::SwitchStateBinary, request::GenericMessage, tmtc::PacketAsVec,
-    };
-    use satrs_example::ids::{self, Apid};
-    use satrs_minisim::eps::SwitchMapBinary;
+    use models::pcdu::{SwitchMapBinary, SwitchStateBinary};
+    use satrs::{mode::ModeRequest, request::GenericMessage};
 
     use super::*;
 
@@ -550,13 +640,13 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     pub struct PcduTestbench {
         pub mode_request_tx: mpsc::SyncSender<GenericMessage<ModeRequest>>,
         pub mode_reply_rx_to_pus: mpsc::Receiver<GenericMessage<ModeReply>>,
         pub mode_reply_rx_to_parent: mpsc::Receiver<GenericMessage<ModeReply>>,
-        pub composite_request_tx: mpsc::Sender<GenericMessage<CompositeRequest>>,
-        pub hk_reply_rx: mpsc::Receiver<GenericMessage<HkReply>>,
-        pub tm_rx: mpsc::Receiver<PacketAsVec>,
+        pub tc_tx: mpsc::SyncSender<CcsdsTcPacketOwned>,
+        pub tm_rx: mpsc::Receiver<CcsdsTmPacketOwned>,
         pub switch_request_tx: mpsc::Sender<GenericMessage<SwitchRequest>>,
         pub handler: PcduHandler<SerialInterfaceTest>,
     }
@@ -564,33 +654,30 @@ mod tests {
     impl PcduTestbench {
         pub fn new() -> Self {
             let (mode_request_tx, mode_request_rx) = mpsc::sync_channel(5);
-            let (mode_reply_tx_to_pus, mode_reply_rx_to_pus) = mpsc::sync_channel(5);
+            let (_mode_reply_tx_to_pus, mode_reply_rx_to_pus) = mpsc::sync_channel(5);
             let (mode_reply_tx_to_parent, mode_reply_rx_to_parent) = mpsc::sync_channel(5);
-            let mode_node = ModeRequestHandlerMpscBounded::new(PCDU.into(), mode_request_rx);
-            let (composite_request_tx, composite_request_rx) = mpsc::channel();
-            let (hk_reply_tx, hk_reply_rx) = mpsc::sync_channel(10);
-            let (tm_tx, tm_rx) = mpsc::sync_channel::<PacketAsVec>(5);
+            let mode_node =
+                ModeRequestHandlerMpscBounded::new(ComponentId::EpsPcdu as u32, mode_request_rx);
+            let (tc_tx, tc_rx) = mpsc::sync_channel(5);
+            let (tm_tx, tm_rx) = mpsc::sync_channel(5);
             let (switch_request_tx, switch_reqest_rx) = mpsc::channel();
-            let shared_switch_map = Arc::new(Mutex::new(SwitchSet::default()));
+            let shared_switch_map =
+                Arc::new(Mutex::new(SwitchSet::new_with_init_switches_unknown()));
             let mut handler = PcduHandler::new(
-                UniqueApidTargetId::new(Apid::Eps.raw_value(), u21::new(0)),
-                "TEST_PCDU",
                 mode_node,
-                composite_request_rx,
-                hk_reply_tx,
+                tc_rx,
+                tm_tx.clone(),
                 switch_reqest_rx,
-                TmTcSender::Heap(tm_tx.clone()),
                 SerialInterfaceTest::default(),
                 shared_switch_map,
             );
-            handler.add_mode_parent(ids::eps::SUBSYSTEM.into(), mode_reply_tx_to_parent);
-            handler.add_mode_parent(PUS_MODE.into(), mode_reply_tx_to_pus);
+            handler.add_mode_parent(ComponentId::EpsSubsystem as u32, mode_reply_tx_to_parent);
+            //handler.add_mode_parent(PUS_MODE.into(), mode_reply_tx_to_pus);
             Self {
                 mode_request_tx,
                 mode_reply_rx_to_pus,
                 mode_reply_rx_to_parent,
-                composite_request_tx,
-                hk_reply_rx,
+                tc_tx,
                 tm_rx,
                 switch_request_tx,
                 handler,
@@ -610,7 +697,7 @@ mod tests {
         pub fn verify_switch_req_was_sent(
             &self,
             expected_queue_len: usize,
-            switch_id: PcduSwitch,
+            switch_id: SwitchId,
             target_state: SwitchStateBinary,
         ) {
             // Check that there is now communication happening.
@@ -679,7 +766,7 @@ mod tests {
         testbench
             .mode_request_tx
             .send(GenericMessage::new(
-                MessageMetadata::new(0, PUS_MODE.id()),
+                MessageMetadata::new(0, ComponentId::Ground as u32),
                 ModeRequest::SetMode {
                     mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
                     forced: false,
@@ -687,7 +774,7 @@ mod tests {
             ))
             .expect("failed to send mode request");
         let switch_map_shared = testbench.handler.shared_switch_map.lock().unwrap();
-        assert!(!switch_map_shared.valid);
+        assert!(switch_map_shared.valid);
         drop(switch_map_shared);
         testbench.handler.periodic_operation(OpCode::RegularOp);
         testbench
@@ -714,7 +801,7 @@ mod tests {
         testbench
             .mode_request_tx
             .send(GenericMessage::new(
-                MessageMetadata::new(0, PUS_MODE.id()),
+                MessageMetadata::new(0, ComponentId::Ground as u32),
                 ModeRequest::SetMode {
                     mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
                     forced: false,
@@ -724,8 +811,8 @@ mod tests {
         testbench
             .switch_request_tx
             .send(GenericMessage::new(
-                MessageMetadata::new(0, ids::acs::MGM0.id()),
-                SwitchRequest::new(0, SwitchStateBinary::On),
+                MessageMetadata::new(0, ComponentId::AcsMgm0 as u32),
+                SwitchRequest::new(SwitchId::Mgm0, SwitchStateBinary::On),
             ))
             .expect("failed to send switch request");
         testbench.handler.periodic_operation(OpCode::RegularOp);
@@ -733,11 +820,11 @@ mod tests {
             .handler
             .periodic_operation(OpCode::PollAndRecvReplies);
 
-        testbench.verify_switch_req_was_sent(2, PcduSwitch::Mgm, SwitchStateBinary::On);
+        testbench.verify_switch_req_was_sent(2, SwitchId::Mgm0, SwitchStateBinary::On);
         testbench.verify_switch_info_req_was_sent(1);
         let mut switch_map = SwitchMapBinaryWrapper::default().0;
         *switch_map
-            .get_mut(&PcduSwitch::Mgm)
+            .get_mut(&SwitchId::Mgm0)
             .expect("switch state setting failed") = SwitchStateBinary::On;
         testbench.verify_switch_reply_received(1, switch_map);
 

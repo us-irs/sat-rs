@@ -1,14 +1,11 @@
 use std::{sync::mpsc, time::Duration};
 
+use models::pcdu::{SwitchId, SwitchMapBinaryWrapper, SwitchStateBinary};
 use nexosim::{
     model::{Context, Model},
     ports::Output,
 };
-use satrs::power::SwitchStateBinary;
-use satrs_minisim::{
-    eps::{PcduReply, PcduSwitch, SwitchMapBinaryWrapper},
-    SimReply,
-};
+use satrs_minisim::{eps::PcduReply, SimReply};
 
 pub const SWITCH_INFO_DELAY_MS: u64 = 10;
 
@@ -45,10 +42,7 @@ impl PcduModel {
         self.reply_sender.send(reply).unwrap();
     }
 
-    pub async fn switch_device(
-        &mut self,
-        switch_and_target_state: (PcduSwitch, SwitchStateBinary),
-    ) {
+    pub async fn switch_device(&mut self, switch_and_target_state: (SwitchId, SwitchStateBinary)) {
         let val = self
             .switcher_map
             .0
@@ -56,12 +50,13 @@ impl PcduModel {
             .unwrap_or_else(|| panic!("switch {:?} not found", switch_and_target_state.0));
         *val = switch_and_target_state.1;
         match switch_and_target_state.0 {
-            PcduSwitch::Mgm => {
+            SwitchId::Mgm0 => {
                 self.mgm_0_switch.send(switch_and_target_state.1).await;
             }
-            PcduSwitch::Mgt => {
+            SwitchId::Mgt => {
                 self.mgt_switch.send(switch_and_target_state.1).await;
             }
+            SwitchId::Mgm1 => todo!(),
         }
     }
 }
@@ -73,16 +68,16 @@ pub(crate) mod tests {
     use super::*;
     use std::time::Duration;
 
+    use models::pcdu::SwitchMapBinary;
     use satrs_minisim::{
-        eps::{PcduRequest, SwitchMapBinary},
-        SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimRequest,
+        eps::PcduRequest, SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimRequest,
     };
 
     use crate::test_helpers::SimTestbench;
 
     fn switch_device(
         sim_testbench: &mut SimTestbench,
-        switch: PcduSwitch,
+        switch: SwitchId,
         target: SwitchStateBinary,
     ) {
         let request = SimRequest::new_with_epoch_time(PcduRequest::SwitchDevice {
@@ -97,10 +92,10 @@ pub(crate) mod tests {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn switch_device_off(sim_testbench: &mut SimTestbench, switch: PcduSwitch) {
+    pub(crate) fn switch_device_off(sim_testbench: &mut SimTestbench, switch: SwitchId) {
         switch_device(sim_testbench, switch, SwitchStateBinary::Off);
     }
-    pub(crate) fn switch_device_on(sim_testbench: &mut SimTestbench, switch: PcduSwitch) {
+    pub(crate) fn switch_device_on(sim_testbench: &mut SimTestbench, switch: SwitchId) {
         switch_device(sim_testbench, switch, SwitchStateBinary::On);
     }
 
@@ -128,7 +123,7 @@ pub(crate) mod tests {
         }
     }
 
-    fn test_pcdu_switching_single_switch(switch: PcduSwitch, target: SwitchStateBinary) {
+    fn test_pcdu_switching_single_switch(switch: SwitchId, target: SwitchStateBinary) {
         let mut sim_testbench = SimTestbench::new();
         switch_device(&mut sim_testbench, switch, target);
         let mut switcher_map = get_all_off_switch_map();
@@ -165,17 +160,17 @@ pub(crate) mod tests {
 
     #[test]
     fn test_pcdu_switching_mgm_on() {
-        test_pcdu_switching_single_switch(PcduSwitch::Mgm, SwitchStateBinary::On);
+        test_pcdu_switching_single_switch(SwitchId::Mgm0, SwitchStateBinary::On);
     }
 
     #[test]
     fn test_pcdu_switching_mgt_on() {
-        test_pcdu_switching_single_switch(PcduSwitch::Mgt, SwitchStateBinary::On);
+        test_pcdu_switching_single_switch(SwitchId::Mgt, SwitchStateBinary::On);
     }
 
     #[test]
     fn test_pcdu_switching_mgt_off() {
-        test_pcdu_switching_single_switch(PcduSwitch::Mgt, SwitchStateBinary::On);
-        test_pcdu_switching_single_switch(PcduSwitch::Mgt, SwitchStateBinary::Off);
+        test_pcdu_switching_single_switch(SwitchId::Mgt, SwitchStateBinary::On);
+        test_pcdu_switching_single_switch(SwitchId::Mgt, SwitchStateBinary::Off);
     }
 }

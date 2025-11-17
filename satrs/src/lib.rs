@@ -9,8 +9,6 @@
 //!
 //! The core modules of this crate include
 //!
-//!  - The [event manager][event_man] module which provides a publish and
-//!    and subscribe to route events.
 //!  - The [pus] module which provides special support for projects using
 //!    the [ECSS PUS C standard](https://ecss.nl/standard/ecss-e-st-70-41c-space-engineering-telemetry-and-telecommand-packet-utilization-15-april-2016/).
 #![no_std]
@@ -27,15 +25,12 @@ pub mod ccsds;
 #[cfg(feature = "alloc")]
 pub mod dev_mgmt;
 pub mod encoding;
-pub mod event_man;
-pub mod event_man_legacy;
-pub mod events;
-pub mod events_legacy;
 #[cfg(feature = "std")]
 pub mod executable;
 pub mod hal;
 pub mod health;
 pub mod hk;
+pub mod legacy;
 pub mod mode;
 #[cfg(feature = "std")]
 pub mod mode_tree;

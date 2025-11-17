@@ -91,11 +91,8 @@ impl SimUdpServer {
             self.sender_addr = Some(src);
 
             let sim_req = SimRequest::from_raw_data(&self.req_buf[..bytes_read]);
-            if sim_req.is_err() {
-                log::warn!(
-                    "received UDP request with invalid format: {}",
-                    sim_req.unwrap_err()
-                );
+            if let Err(e) = sim_req {
+                log::warn!("received UDP request with invalid format: {}", e);
                 return processed_requests;
             }
             self.request_sender.send(sim_req.unwrap()).unwrap();
