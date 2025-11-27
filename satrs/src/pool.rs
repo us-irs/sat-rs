@@ -155,71 +155,32 @@ impl Display for StoreIdError {
 #[cfg(feature = "std")]
 impl Error for StoreIdError {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum PoolError {
     /// Requested data block is too large
+    #[error("data to store with size {0} is too large")]
     DataTooLarge(usize),
     /// The store is full. Contains the index of the full subpool
+    #[error("store does not have any capacity")]
     StoreFull(u16),
     /// The store can not hold any data.
+    #[error("store does not have any capacity")]
     NoCapacity,
     /// Store ID is invalid. This also includes partial errors where only the subpool is invalid
+    #[error("invalid store ID: {0}, address: {1:?}")]
     InvalidStoreId(StoreIdError, Option<PoolAddr>),
     /// Valid subpool and packet index, but no data is stored at the given address
+    #[error("no data exists at address {0:?}")]
     DataDoesNotExist(PoolAddr),
-    ByteConversionError(spacepackets::ByteConversionError),
+    #[error("byte conversion error: {0}")]
+    ByteConversion(#[from] ByteConversionError),
+    #[error("lock error")]
     LockError,
     /// Internal or configuration errors
+    #[error("lock error")]
     InternalError(u32),
-}
-
-impl Display for PoolError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            PoolError::DataTooLarge(size) => {
-                write!(f, "data to store with size {size} is too large")
-            }
-            PoolError::NoCapacity => {
-                write!(f, "store does not have any capacity")
-            }
-            PoolError::StoreFull(u16) => {
-                write!(f, "store is too full. index for full subpool: {u16}")
-            }
-            PoolError::InvalidStoreId(id_e, addr) => {
-                write!(f, "invalid store ID: {id_e}, address: {addr:?}")
-            }
-            PoolError::DataDoesNotExist(addr) => {
-                write!(f, "no data exists at address {addr:?}")
-            }
-            PoolError::InternalError(e) => {
-                write!(f, "internal error: {e}")
-            }
-            PoolError::ByteConversionError(e) => {
-                write!(f, "store error: {e}")
-            }
-            PoolError::LockError => {
-                write!(f, "lock error")
-            }
-        }
-    }
-}
-
-impl From<ByteConversionError> for PoolError {
-    fn from(value: ByteConversionError) -> Self {
-        Self::ByteConversionError(value)
-    }
-}
-
-#[cfg(feature = "std")]
-impl Error for PoolError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        if let PoolError::InvalidStoreId(e, _) = self {
-            return Some(e);
-        }
-        None
-    }
 }
 
 /// Generic trait for pool providers which provide memory pools for variable sized packet data.

@@ -3,7 +3,7 @@
 //! The core data structure of this module is the [PusScheduler]. This structure can be used
 //! to perform the scheduling of telecommands like specified in the ECSS standard.
 use arbitrary_int::{u11, u14};
-use core::fmt::{Debug, Display, Formatter};
+use core::fmt::Debug;
 use core::time::Duration;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -12,8 +12,6 @@ use spacepackets::ecss::tc::{GenericPusTcSecondaryHeader, IsPusTelecommand, PusT
 use spacepackets::ecss::{PusError, PusPacket, WritablePusPacket};
 use spacepackets::time::{CcsdsTimeProvider, TimeReader, TimeWriter, TimestampError, UnixTime};
 use spacepackets::{ByteConversionError, CcsdsPacket};
-#[cfg(feature = "std")]
-use std::error::Error;
 
 use crate::pool::{PoolError, PoolProvider};
 #[cfg(feature = "alloc")]
@@ -144,107 +142,39 @@ impl<TimeProvider: CcsdsTimeProvider + Clone> TimeWindow<TimeProvider> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ScheduleError {
-    PusError(PusError),
+    #[error("pus error: {0}")]
+    PusError(#[from] PusError),
     /// The release time is within the time-margin added on top of the current time.
     /// The first parameter is the current time, the second one the time margin, and the third one
     /// the release time.
+    #[error("release time in margin")]
     ReleaseTimeInTimeMargin {
         current_time: UnixTime,
         time_margin: Duration,
         release_time: UnixTime,
     },
     /// Nested time-tagged commands are not allowed.
+    #[error("nested scheduled tc")]
     NestedScheduledTc,
-    StoreError(PoolError),
+    #[error("store error")]
+    Pool(#[from] PoolError),
+    #[error("tc data empty")]
     TcDataEmpty,
-    TimestampError(TimestampError),
+    #[error("timestamp error: {0}")]
+    TimestampError(#[from] TimestampError),
+    #[error("wrong subservice number {0}")]
     WrongSubservice(u8),
+    #[error("wrong service number {0}")]
     WrongService(u8),
-    ByteConversionError(ByteConversionError),
-}
-
-impl Display for ScheduleError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            ScheduleError::PusError(e) => {
-                write!(f, "Pus Error: {e}")
-            }
-            ScheduleError::ReleaseTimeInTimeMargin {
-                current_time,
-                time_margin,
-                release_time,
-            } => {
-                write!(
-                    f,
-                    "time margin too short, current time: {current_time:?}, time margin: {time_margin:?}, release time: {release_time:?}"
-                )
-            }
-            ScheduleError::NestedScheduledTc => {
-                write!(f, "nested scheduling is not allowed")
-            }
-            ScheduleError::StoreError(e) => {
-                write!(f, "pus scheduling: {e}")
-            }
-            ScheduleError::TcDataEmpty => {
-                write!(f, "empty TC data field")
-            }
-            ScheduleError::TimestampError(e) => {
-                write!(f, "pus scheduling: {e}")
-            }
-            ScheduleError::WrongService(srv) => {
-                write!(f, "pus scheduling: wrong service number {srv}")
-            }
-            ScheduleError::WrongSubservice(subsrv) => {
-                write!(f, "pus scheduling: wrong subservice number {subsrv}")
-            }
-            ScheduleError::ByteConversionError(e) => {
-                write!(f, "pus scheduling: {e}")
-            }
-        }
-    }
-}
-
-impl From<PusError> for ScheduleError {
-    fn from(e: PusError) -> Self {
-        Self::PusError(e)
-    }
-}
-
-impl From<PoolError> for ScheduleError {
-    fn from(e: PoolError) -> Self {
-        Self::StoreError(e)
-    }
-}
-
-impl From<TimestampError> for ScheduleError {
-    fn from(e: TimestampError) -> Self {
-        Self::TimestampError(e)
-    }
-}
-impl From<ByteConversionError> for ScheduleError {
-    fn from(e: ByteConversionError) -> Self {
-        Self::ByteConversionError(e)
-    }
-}
-
-#[cfg(feature = "std")]
-impl Error for ScheduleError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            ScheduleError::PusError(e) => Some(e),
-            ScheduleError::StoreError(e) => Some(e),
-            ScheduleError::TimestampError(e) => Some(e),
-            ScheduleError::ByteConversionError(e) => Some(e),
-            _ => None,
-        }
-    }
+    #[error("byte conversion error: {0}")]
+    ByteConversionError(#[from] ByteConversionError),
 }
 
 /// Generic trait for scheduler objects which are able to schedule ECSS PUS C packets.
-pub trait PusSchedulerProvider {
+pub trait PusScheduler {
     type TimeProvider: CcsdsTimeProvider + TimeReader;
 
     fn reset(&mut self, store: &mut (impl PoolProvider + ?Sized)) -> Result<(), PoolError>;
@@ -405,7 +335,7 @@ pub mod alloc_mod {
     ///
     /// Currently, sub-schedules and groups are not supported.
     #[derive(Debug)]
-    pub struct PusScheduler {
+    pub struct PusSchedulerAlloc {
         // TODO: Use MonotonicTime from tai-time crate instead of UnixTime and cache leap seconds.
         // TODO: Introduce optional limit of commands stored in the TC map. If a limit is set,
         // there will be a check for each insertion whether the map is full, making the memory
@@ -415,7 +345,8 @@ pub mod alloc_mod {
         time_margin: Duration,
         enabled: bool,
     }
-    impl PusScheduler {
+
+    impl PusSchedulerAlloc {
         /// Create a new PUS scheduler.
         ///
         /// # Arguments
@@ -427,7 +358,7 @@ pub mod alloc_mod {
         /// * `tc_buf_size` - Buffer for temporary storage of telecommand packets. This buffer
         ///   should be large enough to accomodate the largest expected TC packets.
         pub fn new(init_current_time: UnixTime, time_margin: Duration) -> Self {
-            PusScheduler {
+            PusSchedulerAlloc {
                 tc_map: Default::default(),
                 current_time: init_current_time,
                 time_margin,
@@ -449,10 +380,12 @@ pub mod alloc_mod {
             num_entries
         }
 
+        #[inline]
         pub fn update_time(&mut self, current_time: UnixTime) {
             self.current_time = current_time;
         }
 
+        #[inline]
         pub fn current_time(&self) -> &UnixTime {
             &self.current_time
         }
@@ -798,7 +731,7 @@ pub mod alloc_mod {
         }
     }
 
-    impl PusSchedulerProvider for PusScheduler {
+    impl PusScheduler for PusSchedulerAlloc {
         type TimeProvider = cds::CdsTime;
 
         /// This will disable the scheduler and clear the schedule as specified in 6.11.4.4.
@@ -982,7 +915,8 @@ mod tests {
 
     #[test]
     fn test_enable_api() {
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         assert!(scheduler.is_enabled());
         scheduler.disable();
         assert!(!scheduler.is_enabled());
@@ -996,7 +930,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
 
         let mut buf: [u8; 32] = [0; 32];
         let tc_info_0 = ping_tc_to_store(&mut pool, &mut buf, u14::new(0), &[]);
@@ -1038,7 +973,8 @@ mod tests {
 
     #[test]
     fn insert_multi_with_same_time() {
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
 
         scheduler
             .insert_unwrapped_and_stored_tc(
@@ -1097,7 +1033,8 @@ mod tests {
 
     #[test]
     fn test_time_update() {
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let time = UnixTime::new(1, 2_000_000);
         scheduler.update_time(time);
         assert_eq!(scheduler.current_time(), &time);
@@ -1151,7 +1088,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
 
         let mut buf: [u8; 32] = [0; 32];
         let tc_info_0 = ping_tc_to_store(&mut pool, &mut buf, u14::ZERO, &[]);
@@ -1219,7 +1157,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
 
         let mut buf: [u8; 32] = [0; 32];
         let tc_info_0 = ping_tc_to_store(&mut pool, &mut buf, u14::ZERO, &[]);
@@ -1279,7 +1218,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
 
         scheduler.disable();
 
@@ -1344,7 +1284,8 @@ mod tests {
 
     #[test]
     fn insert_unwrapped_tc() {
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
 
         let mut pool = StaticMemoryPool::new(StaticPoolConfig::new_from_subpool_cfg_tuples(
             vec![(10, 32), (5, 64)],
@@ -1394,7 +1335,8 @@ mod tests {
 
     #[test]
     fn insert_wrapped_tc() {
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
 
         let mut pool = StaticMemoryPool::new(StaticPoolConfig::new_from_subpool_cfg_tuples(
             vec![(10, 32), (5, 64)],
@@ -1446,7 +1388,8 @@ mod tests {
 
     #[test]
     fn insert_wrong_service() {
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
 
         let mut pool = StaticMemoryPool::new(StaticPoolConfig::new_from_subpool_cfg_tuples(
             vec![(10, 32), (5, 64)],
@@ -1471,7 +1414,8 @@ mod tests {
 
     #[test]
     fn insert_wrong_subservice() {
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
 
         let mut pool = StaticMemoryPool::new(StaticPoolConfig::new_from_subpool_cfg_tuples(
             vec![(10, 32), (5, 64)],
@@ -1496,7 +1440,8 @@ mod tests {
 
     #[test]
     fn insert_wrapped_tc_faulty_app_data() {
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let mut pool = StaticMemoryPool::new(StaticPoolConfig::new_from_subpool_cfg_tuples(
             vec![(10, 32), (5, 64)],
             false,
@@ -1513,7 +1458,8 @@ mod tests {
 
     #[test]
     fn insert_doubly_wrapped_time_tagged_cmd() {
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let mut pool = StaticMemoryPool::new(StaticPoolConfig::new_from_subpool_cfg_tuples(
             vec![(10, 32), (5, 64)],
             false,
@@ -1531,7 +1477,7 @@ mod tests {
 
     #[test]
     fn test_ctor_from_current() {
-        let scheduler = PusScheduler::new_with_current_init_time(Duration::from_secs(5))
+        let scheduler = PusSchedulerAlloc::new_with_current_init_time(Duration::from_secs(5))
             .expect("creation from current time failed");
         let current_time = scheduler.current_time;
         assert!(current_time.as_secs() > 0);
@@ -1539,7 +1485,8 @@ mod tests {
 
     #[test]
     fn test_update_from_current() {
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         assert_eq!(scheduler.current_time.as_secs(), 0);
         scheduler
             .update_time_from_now()
@@ -1549,7 +1496,8 @@ mod tests {
 
     #[test]
     fn release_time_within_time_margin() {
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
 
         let mut pool = StaticMemoryPool::new(StaticPoolConfig::new_from_subpool_cfg_tuples(
             vec![(10, 32), (5, 64)],
@@ -1582,7 +1530,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
         let tc_info_0 = ping_tc_to_store(&mut pool, &mut buf, u14::ZERO, &[]);
         scheduler
@@ -1619,7 +1568,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
         let tc_info_0 = ping_tc_to_store(&mut pool, &mut buf, u14::ZERO, &[]);
         scheduler
@@ -1645,7 +1595,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
         let tc_info_0 = ping_tc_to_store(&mut pool, &mut buf, u14::ZERO, &[]);
         scheduler
@@ -1666,7 +1617,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
         let tc_info_0 = ping_tc_to_store(&mut pool, &mut buf, u14::ZERO, &[]);
         scheduler
@@ -1687,7 +1639,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let mut buf: [u8; 32] = [0; 32];
         let tc_info_0 = ping_tc_to_store(&mut pool, &mut buf, u14::ZERO, &[]);
         scheduler
@@ -1729,7 +1682,8 @@ mod tests {
 
     #[test]
     fn insert_full_store_test() {
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
 
         let mut pool = StaticMemoryPool::new(StaticPoolConfig::new_from_subpool_cfg_tuples(
             vec![(1, 64)],
@@ -1745,7 +1699,7 @@ mod tests {
         assert!(insert_res.is_err());
         let err = insert_res.unwrap_err();
         match err {
-            ScheduleError::StoreError(e) => match e {
+            ScheduleError::Pool(e) => match e {
                 PoolError::StoreFull(_) => {}
                 _ => panic!("unexpected store error {e}"),
             },
@@ -1755,7 +1709,7 @@ mod tests {
 
     fn insert_command_with_release_time(
         pool: &mut StaticMemoryPool,
-        scheduler: &mut PusScheduler,
+        scheduler: &mut PusSchedulerAlloc,
         seq_count: u14,
         release_secs: u64,
     ) -> TcInfo {
@@ -1774,7 +1728,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let tc_info_0 = insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 50);
         let tc_info_1 = insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 100);
         assert_eq!(scheduler.num_scheduled_telecommands(), 2);
@@ -1806,7 +1761,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let _ = insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 50);
         let tc_info_1 = insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 100);
         let tc_info_2 = insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 150);
@@ -1841,7 +1797,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let tc_info_0 = insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 50);
         let tc_info_1 = insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 100);
         let _ = insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 150);
@@ -1876,7 +1833,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let _ = insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 50);
         let tc_info_1 = insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 100);
         let tc_info_2 = insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 150);
@@ -1917,7 +1875,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 50);
         insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 100);
         assert_eq!(scheduler.num_scheduled_telecommands(), 2);
@@ -1946,7 +1905,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 50);
         let cmd_0_to_delete =
             insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 100);
@@ -1973,7 +1933,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let cmd_0_to_delete =
             insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 50);
         let cmd_1_to_delete =
@@ -2001,7 +1962,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
         let cmd_out_of_range_0 =
             insert_command_with_release_time(&mut pool, &mut scheduler, u14::ZERO, 50);
         let cmd_0_to_delete =
@@ -2039,7 +2001,8 @@ mod tests {
             vec![(10, 32), (5, 64)],
             false,
         ));
-        let mut scheduler = PusScheduler::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
+        let mut scheduler =
+            PusSchedulerAlloc::new(UnixTime::new_only_secs(0), Duration::from_secs(5));
 
         let mut buf: [u8; 32] = [0; 32];
         let tc_info_0 = ping_tc_to_store(&mut pool, &mut buf, u14::ZERO, &[]);

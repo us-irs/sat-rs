@@ -1,4 +1,4 @@
-use super::scheduler::PusSchedulerProvider;
+use super::scheduler::PusScheduler;
 use super::verification::{VerificationReporter, VerificationReportingProvider};
 use super::{
     CacheAndReadRawEcssTc, DirectPusPacketHandlerResult, EcssTcInSharedPoolCacher, EcssTcReceiver,
@@ -26,11 +26,11 @@ pub struct PusSchedServiceHandler<
     TmSender: EcssTmSender,
     TcInMemConverter: CacheAndReadRawEcssTc,
     VerificationReporter: VerificationReportingProvider,
-    PusScheduler: PusSchedulerProvider,
+    PusSchedulerInstance: PusScheduler,
 > {
     pub service_helper:
         PusServiceHelper<TcReceiver, TmSender, TcInMemConverter, VerificationReporter>,
-    scheduler: PusScheduler,
+    scheduler: PusSchedulerInstance,
 }
 
 impl<
@@ -38,7 +38,7 @@ impl<
     TmSender: EcssTmSender,
     TcInMemConverter: CacheAndReadRawEcssTc,
     VerificationReporter: VerificationReportingProvider,
-    Scheduler: PusSchedulerProvider,
+    Scheduler: PusScheduler,
 > PusSchedServiceHandler<TcReceiver, TmSender, TcInMemConverter, VerificationReporter, Scheduler>
 {
     pub fn new(
@@ -254,7 +254,7 @@ mod tests {
     use crate::pus::{DirectPusPacketHandlerResult, MpscTcReceiver, PusPacketHandlingError};
     use crate::pus::{
         EcssTcInSharedPoolCacher,
-        scheduler::{self, PusSchedulerProvider, TcInfo},
+        scheduler::{self, PusScheduler, TcInfo},
         tests::PusServiceHandlerWithSharedStoreCommon,
         verification::{RequestId, TcStateAccepted, VerificationToken},
     };
@@ -349,7 +349,7 @@ mod tests {
         inserted_tcs: VecDeque<TcInfo>,
     }
 
-    impl PusSchedulerProvider for TestScheduler {
+    impl PusScheduler for TestScheduler {
         type TimeProvider = cds::CdsTime;
 
         fn reset(
