@@ -22,7 +22,7 @@ use satrs::{
 use satrs_example::{
     config::components::NO_SENDER,
     ids::{eps::PCDU, generic_pus::PUS_MODE},
-    DeviceMode, TimestampHelper,
+    CcsdsTmPacketOwned, DeviceMode, TimestampHelper,
 };
 use satrs_minisim::{
     eps::{
@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     hk::PusHkHelper,
-    pus::hk::{HkReply, HkReplyVariant},
+    //pus::hk::{HkReply, HkReplyVariant},
     requests::CompositeRequest,
     tmtc::sender::TmTcSender,
 };
@@ -210,7 +210,8 @@ pub struct PcduHandler<ComInterface: SerialInterface> {
     dev_str: &'static str,
     mode_node: ModeRequestHandlerMpscBounded,
     composite_request_rx: mpsc::Receiver<GenericMessage<CompositeRequest>>,
-    hk_reply_tx: mpsc::SyncSender<GenericMessage<HkReply>>,
+    //hk_reply_tx: mpsc::SyncSender<GenericMessage<HkReply>>,
+    hk_tx: std::sync::mpsc::SyncSender<CcsdsTmPacketOwned>,
     switch_request_rx: mpsc::Receiver<GenericMessage<SwitchRequest>>,
     tm_sender: TmTcSender,
     pub com_interface: ComInterface,
@@ -303,12 +304,15 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
                         self.tm_sender
                             .send_tm(self.id.id(), PusTmVariant::Direct(hk_tm))
                             .expect("failed to send HK TM");
+                        // TODO: Fix
+                        /*
                         self.hk_reply_tx
                             .send(GenericMessage::new(
                                 *requestor_info,
                                 HkReply::new(hk_request.unique_id, HkReplyVariant::Ack),
                             ))
                             .expect("failed to send HK reply");
+                        */
                     }
                 }
             }
@@ -555,7 +559,8 @@ mod tests {
         pub mode_reply_rx_to_pus: mpsc::Receiver<GenericMessage<ModeReply>>,
         pub mode_reply_rx_to_parent: mpsc::Receiver<GenericMessage<ModeReply>>,
         pub composite_request_tx: mpsc::Sender<GenericMessage<CompositeRequest>>,
-        pub hk_reply_rx: mpsc::Receiver<GenericMessage<HkReply>>,
+        //pub hk_reply_rx: mpsc::Receiver<GenericMessage<HkReply>>,
+        pub hk_rx: std::sync::mpsc::Receiver<CcsdsTmPacketOwned>,
         pub tm_rx: mpsc::Receiver<PacketAsVec>,
         pub switch_request_tx: mpsc::Sender<GenericMessage<SwitchRequest>>,
         pub handler: PcduHandler<SerialInterfaceTest>,
@@ -568,7 +573,7 @@ mod tests {
             let (mode_reply_tx_to_parent, mode_reply_rx_to_parent) = mpsc::sync_channel(5);
             let mode_node = ModeRequestHandlerMpscBounded::new(PCDU.into(), mode_request_rx);
             let (composite_request_tx, composite_request_rx) = mpsc::channel();
-            let (hk_reply_tx, hk_reply_rx) = mpsc::sync_channel(10);
+            let (hk_tx, hk_rx) = mpsc::sync_channel(10);
             let (tm_tx, tm_rx) = mpsc::sync_channel::<PacketAsVec>(5);
             let (switch_request_tx, switch_reqest_rx) = mpsc::channel();
             let shared_switch_map = Arc::new(Mutex::new(SwitchSet::default()));
@@ -577,7 +582,7 @@ mod tests {
                 "TEST_PCDU",
                 mode_node,
                 composite_request_rx,
-                hk_reply_tx,
+                hk_tx,
                 switch_reqest_rx,
                 TmTcSender::Heap(tm_tx.clone()),
                 SerialInterfaceTest::default(),
@@ -590,7 +595,7 @@ mod tests {
                 mode_reply_rx_to_pus,
                 mode_reply_rx_to_parent,
                 composite_request_tx,
-                hk_reply_rx,
+                hk_rx,
                 tm_rx,
                 switch_request_tx,
                 handler,

@@ -5,17 +5,13 @@ use std::{
 
 use arbitrary_int::{u11, u14};
 use log::info;
-use satrs::{
-    pool::PoolProvider,
-    spacepackets::{
-        ecss::{tm::PusTmZeroCopyWriter, PusPacket},
-        seq_count::SequenceCounter,
-        seq_count::SequenceCounterCcsdsSimple,
-        time::cds::MIN_CDS_FIELD_LEN,
-        CcsdsPacket,
-    },
-    tmtc::{PacketAsVec, PacketInPool, SharedPacketPool},
+use satrs::spacepackets::{
+    ecss::{tm::PusTmZeroCopyWriter, PusPacket},
+    seq_count::SequenceCounter,
+    seq_count::SequenceCounterCcsdsSimple,
+    CcsdsPacket,
 };
+use satrs_example::CcsdsTmPacketOwned;
 
 use crate::interface::tcp::SyncTcpTmSource;
 
@@ -83,6 +79,7 @@ impl TmFunnelCommon {
     }
 }
 
+/*
 pub struct TmSinkStatic {
     common: TmFunnelCommon,
     shared_tm_store: SharedPacketPool,
@@ -130,19 +127,20 @@ impl TmSinkStatic {
         }
     }
 }
+*/
 
-pub struct TmSinkDynamic {
+pub struct TmSink {
     common: TmFunnelCommon,
-    tm_funnel_rx: mpsc::Receiver<PacketAsVec>,
-    tm_server_tx: mpsc::SyncSender<PacketAsVec>,
+    tm_funnel_rx: mpsc::Receiver<CcsdsTmPacketOwned>,
+    tm_server_tx: mpsc::SyncSender<CcsdsTmPacketOwned>,
 }
 
-#[allow(dead_code)]
-impl TmSinkDynamic {
+//#[allow(dead_code)]
+impl TmSink {
     pub fn new(
         sync_tm_tcp_source: SyncTcpTmSource,
-        tm_funnel_rx: mpsc::Receiver<PacketAsVec>,
-        tm_server_tx: mpsc::SyncSender<PacketAsVec>,
+        tm_funnel_rx: mpsc::Receiver<CcsdsTmPacketOwned>,
+        tm_server_tx: mpsc::SyncSender<CcsdsTmPacketOwned>,
     ) -> Self {
         Self {
             common: TmFunnelCommon::new(sync_tm_tcp_source),
@@ -153,13 +151,21 @@ impl TmSinkDynamic {
 
     pub fn operation(&mut self) {
         if let Ok(mut tm) = self.tm_funnel_rx.recv() {
+            //let tm_raw = tm.to_vec();
+            tm.sp_header.set_seq_count(
+                self.common
+                    .seq_counter_map
+                    .get_and_increment(tm.sp_header.apid()),
+            );
             // Read the TM, set sequence counter and message counter, and finally update
             // the CRC.
+            /*
             let zero_copy_writer =
-                PusTmZeroCopyWriter::new(&mut tm.packet, MIN_CDS_FIELD_LEN, true)
+                PusTmZeroCopyWriter::new(&mut tm_raw, MIN_CDS_FIELD_LEN, true)
                     .expect("Creating TM zero copy writer failed");
             self.common.apply_packet_processing(zero_copy_writer);
-            self.common.sync_tm_tcp_source.add_tm(&tm.packet);
+            */
+            self.common.sync_tm_tcp_source.add_tm(&tm.to_vec().unwrap());
             self.tm_server_tx
                 .send(tm)
                 .expect("Sending TM to server failed");
@@ -167,12 +173,13 @@ impl TmSinkDynamic {
     }
 }
 
-#[allow(dead_code)]
-pub enum TmSink {
-    Static(TmSinkStatic),
-    Heap(TmSinkDynamic),
-}
+//#[allow(dead_code)]
+//pub enum TmSink {
+//Static(TmSinkStatic),
+//Heap(TmSinkDynamic),
+//}
 
+/*
 impl TmSink {
     pub fn operation(&mut self) {
         match self {
@@ -181,3 +188,4 @@ impl TmSink {
         }
     }
 }
+*/

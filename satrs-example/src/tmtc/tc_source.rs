@@ -1,17 +1,12 @@
-use satrs::{
-    pool::PoolProvider,
-    pus::HandlingStatus,
-    tmtc::{PacketAsVec, PacketInPool, SharedPacketPool},
-    ComponentId,
-};
+use satrs::pus::HandlingStatus;
+use satrs_example::{CcsdsTcPacketOwned, ComponentId};
 use std::{
     collections::HashMap,
     sync::mpsc::{self, TryRecvError},
 };
 
-use crate::pus::PusTcDistributor;
-
 // TC source components where static pools are the backing memory of the received telecommands.
+/*
 pub struct TcSourceTaskStatic {
     shared_tc_pool: SharedPacketPool,
     tc_receiver: mpsc::Receiver<PacketInPool>,
@@ -68,21 +63,21 @@ impl TcSourceTaskStatic {
         }
     }
 }
+*/
 
-pub type CcsdsDistributorDyn = HashMap<ComponentId, std::sync::mpsc::SyncSender<PacketAsVec>>;
-pub type CcsdsDistributorStatic = HashMap<ComponentId, std::sync::mpsc::SyncSender<PacketInPool>>;
+pub type CcsdsDistributor = HashMap<ComponentId, std::sync::mpsc::SyncSender<CcsdsTcPacketOwned>>;
 
 // TC source components where the heap is the backing memory of the received telecommands.
-pub struct TcSourceTaskDynamic {
-    pub tc_receiver: mpsc::Receiver<PacketAsVec>,
-    ccsds_distributor: CcsdsDistributorDyn,
+pub struct TcSourceTask {
+    pub tc_receiver: mpsc::Receiver<CcsdsTcPacketOwned>,
+    ccsds_distributor: CcsdsDistributor,
 }
 
-#[allow(dead_code)]
-impl TcSourceTaskDynamic {
+//#[allow(dead_code)]
+impl TcSourceTask {
     pub fn new(
-        tc_receiver: mpsc::Receiver<PacketAsVec>,
-        ccsds_distributor: CcsdsDistributorDyn,
+        tc_receiver: mpsc::Receiver<CcsdsTcPacketOwned>,
+        ccsds_distributor: CcsdsDistributor,
     ) -> Self {
         Self {
             tc_receiver,
@@ -98,10 +93,16 @@ impl TcSourceTaskDynamic {
         // Right now, we only expect ECSS PUS packets.
         // If packets like CFDP are expected, we might have to check the APID first.
         match self.tc_receiver.try_recv() {
-            Ok(packet_as_vec) => {
-                self.pus_distributor
-                    .handle_tc_packet_vec(packet_as_vec)
-                    .ok();
+            Ok(packet) => {
+                if let Some(sender) = self.ccsds_distributor.get(&packet.tc_header.target_id) {
+                    sender.send(packet).ok();
+                } else {
+                    log::warn!(
+                        "no TC handler for target ID {:?}",
+                        packet.tc_header.target_id
+                    );
+                    // TODO: Send a dedicated TM packet.
+                }
                 HandlingStatus::HandledOne
             }
             Err(e) => match e {
@@ -111,21 +112,6 @@ impl TcSourceTaskDynamic {
                     HandlingStatus::Empty
                 }
             },
-        }
-    }
-}
-
-#[allow(dead_code)]
-pub enum TcSourceTask {
-    Static(TcSourceTaskStatic),
-    Heap(TcSourceTaskDynamic),
-}
-
-impl TcSourceTask {
-    pub fn periodic_operation(&mut self) {
-        match self {
-            TcSourceTask::Static(task) => task.periodic_operation(),
-            TcSourceTask::Heap(task) => task.periodic_operation(),
         }
     }
 }

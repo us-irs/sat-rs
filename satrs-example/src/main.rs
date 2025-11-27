@@ -140,6 +140,7 @@ fn main() {
 
     // This helper structure is used by all telecommand providers which need to send telecommands
     // to the TC source.
+    /*
     cfg_if::cfg_if! {
         if #[cfg(not(feature = "heap_tmtc"))] {
             let tc_sender_with_shared_pool =
@@ -150,6 +151,7 @@ fn main() {
             let tc_in_mem_converter = EcssTcCacher::Heap(EcssTcVecCacher::default());
         }
     }
+    */
 
     // Create event handling components
     // These sender handles are used to send event requests, for example to enable or disable
@@ -172,6 +174,7 @@ fn main() {
     let (pus_hk_reply_tx, pus_hk_reply_rx) = mpsc::sync_channel(50);
     let (pus_mode_reply_tx, pus_mode_reply_rx) = mpsc::sync_channel(30);
 
+    /*
     cfg_if::cfg_if! {
         if #[cfg(not(feature = "heap_tmtc"))] {
             let tc_releaser = TcReleaser::Static(tc_sender_with_shared_pool.clone());
@@ -179,6 +182,7 @@ fn main() {
             let tc_releaser = TcReleaser::Heap(tc_source_tx.clone());
         }
     }
+    */
     /*
     let pus_router = PusTcMpscRouter {
         test_tc_sender: pus_test_tx,
@@ -238,29 +242,39 @@ fn main() {
     );
     */
 
-    cfg_if::cfg_if! {
-        if #[cfg(not(feature = "heap_tmtc"))] {
-            let mut tmtc_task = TcSourceTask::Static(TcSourceTaskStatic::new(
-                shared_tc_pool_wrapper.clone(),
-                tc_source_rx,
-                PusTcDistributor::new(tm_sender.clone(), pus_router),
-            ));
-            let tc_sender = TmTcSender::Static(tc_sender_with_shared_pool);
-            let udp_tm_handler = StaticUdpTmHandler {
-                tm_rx: tm_server_rx,
-                tm_store: shared_tm_pool.clone(),
-            };
-        } else if #[cfg(feature = "heap_tmtc")] {
-            let mut tmtc_task = TcSourceTask::Heap(TcSourceTaskDynamic::new(
-                tc_source_rx,
-                PusTcDistributor::new(tm_sender.clone(), pus_router),
-            ));
-            let tc_sender = TmTcSender::Heap(tc_source_tx.clone());
-            let udp_tm_handler = DynamicUdpTmHandler {
-                tm_rx: tm_server_rx,
-            };
+    /*
+        cfg_if::cfg_if! {
+            if #[cfg(not(feature = "heap_tmtc"))] {
+                let mut tmtc_task = TcSourceTask::Static(TcSourceTaskStatic::new(
+                    shared_tc_pool_wrapper.clone(),
+                    tc_source_rx,
+                    PusTcDistributor::new(tm_sender.clone(), pus_router),
+                ));
+                let tc_sender = TmTcSender::Static(tc_sender_with_shared_pool);
+                let udp_tm_handler = StaticUdpTmHandler {
+                    tm_rx: tm_server_rx,
+                    tm_store: shared_tm_pool.clone(),
+                };
+            } else if #[cfg(feature = "heap_tmtc")] {
+                let mut tmtc_task = TcSourceTask::Heap(TcSourceTaskDynamic::new(
+                    tc_source_rx,
+                    PusTcDistributor::new(tm_sender.clone(), pus_router),
+                ));
+                let tc_sender = TmTcSender::Heap(tc_source_tx.clone());
+                let udp_tm_handler = DynamicUdpTmHandler {
+                    tm_rx: tm_server_rx,
+                };
+            }
         }
-    }
+    */
+    let mut tmtc_task = TcSourceTask::new(
+        tc_source_rx,
+        //PusTcDistributor::new(tm_sender.clone(), pus_router),
+    );
+    let tc_sender = TmTcSender::Heap(tc_source_tx.clone());
+    let udp_tm_handler = DynamicUdpTmHandler {
+        tm_rx: tm_server_rx,
+    };
 
     let sock_addr = SocketAddr::new(IpAddr::V4(OBSW_SERVER_ADDR), SERVER_PORT);
     let udp_tc_server = UdpTcServer::new(UDP_SERVER.id(), sock_addr, 2048, tc_sender.clone())
@@ -286,22 +300,25 @@ fn main() {
     )
     .expect("tcp server creation failed");
 
-    cfg_if::cfg_if! {
-        if #[cfg(not(feature = "heap_tmtc"))] {
-            let mut tm_sink = TmSink::Static(TmSinkStatic::new(
-                shared_tm_pool_wrapper,
-                sync_tm_tcp_source,
-                tm_sink_rx,
-                tm_server_tx,
-            ));
-        } else if #[cfg(feature = "heap_tmtc")] {
-            let mut tm_sink = TmSink::Heap(TmSinkDynamic::new(
-                sync_tm_tcp_source,
-                tm_sink_rx,
-                tm_server_tx,
-            ));
+    /*
+        cfg_if::cfg_if! {
+            if #[cfg(not(feature = "heap_tmtc"))] {
+                let mut tm_sink = TmSink::Static(TmSinkStatic::new(
+                    shared_tm_pool_wrapper,
+                    sync_tm_tcp_source,
+                    tm_sink_rx,
+                    tm_server_tx,
+                ));
+            } else if #[cfg(feature = "heap_tmtc")] {
+                let mut tm_sink = TmSink::Heap(TmSinkDynamic::new(
+                    sync_tm_tcp_source,
+                    tm_sink_rx,
+                    tm_server_tx,
+                ));
+            }
         }
-    }
+    */
+    let mut tm_sink = TmSink::new(sync_tm_tcp_source, tm_sink_rx, tm_server_tx);
 
     let shared_switch_set = Arc::new(Mutex::default());
     let (switch_request_tx, switch_request_rx) = mpsc::sync_channel(20);
@@ -311,63 +328,65 @@ fn main() {
     let shared_mgm_1_set = Arc::default();
     let mgm_0_mode_node = ModeRequestHandlerMpscBounded::new(MGM0.into(), mgm_0_handler_mode_rx);
     let mgm_1_mode_node = ModeRequestHandlerMpscBounded::new(MGM1.into(), mgm_1_handler_mode_rx);
-    let (mgm_0_spi_interface, mgm_1_spi_interface) =
-        if let Some(sim_client) = opt_sim_client.as_mut() {
-            sim_client
-                .add_reply_recipient(satrs_minisim::SimComponent::Mgm0Lis3Mdl, mgm_0_sim_reply_tx);
-            sim_client
-                .add_reply_recipient(satrs_minisim::SimComponent::Mgm1Lis3Mdl, mgm_1_sim_reply_tx);
-            (
-                SpiSimInterfaceWrapper::Sim(SpiSimInterface {
-                    sim_request_tx: sim_request_tx.clone(),
-                    sim_reply_rx: mgm_0_sim_reply_rx,
-                }),
-                SpiSimInterfaceWrapper::Sim(SpiSimInterface {
-                    sim_request_tx: sim_request_tx.clone(),
-                    sim_reply_rx: mgm_1_sim_reply_rx,
-                }),
-            )
-        } else {
-            (
-                SpiSimInterfaceWrapper::Dummy(SpiDummyInterface::default()),
-                SpiSimInterfaceWrapper::Dummy(SpiDummyInterface::default()),
-            )
-        };
-    let mut mgm_0_handler = MgmHandlerLis3Mdl::new(
-        MGM0,
-        "MGM_0",
-        mgm_0_mode_node,
-        mgm_0_handler_composite_rx,
-        pus_hk_reply_tx.clone(),
-        switch_helper.clone(),
-        tm_sender.clone(),
-        mgm_0_spi_interface,
-        shared_mgm_0_set,
-    );
-    let mut mgm_1_handler = MgmHandlerLis3Mdl::new(
-        MGM1,
-        "MGM_1",
-        mgm_1_mode_node,
-        mgm_1_handler_composite_rx,
-        pus_hk_reply_tx.clone(),
-        switch_helper.clone(),
-        tm_sender.clone(),
-        mgm_1_spi_interface,
-        shared_mgm_1_set,
-    );
-    // Connect PUS service to device handlers.
-    connect_mode_nodes(
-        &mut pus_stack.mode_srv,
-        mgm_0_handler_mode_tx,
-        &mut mgm_0_handler,
-        pus_mode_reply_tx.clone(),
-    );
-    connect_mode_nodes(
-        &mut pus_stack.mode_srv,
-        mgm_1_handler_mode_tx,
-        &mut mgm_1_handler,
-        pus_mode_reply_tx.clone(),
-    );
+    /*
+        let (mgm_0_spi_interface, mgm_1_spi_interface) =
+            if let Some(sim_client) = opt_sim_client.as_mut() {
+                sim_client
+                    .add_reply_recipient(satrs_minisim::SimComponent::Mgm0Lis3Mdl, mgm_0_sim_reply_tx);
+                sim_client
+                    .add_reply_recipient(satrs_minisim::SimComponent::Mgm1Lis3Mdl, mgm_1_sim_reply_tx);
+                (
+                    SpiSimInterfaceWrapper::Sim(SpiSimInterface {
+                        sim_request_tx: sim_request_tx.clone(),
+                        sim_reply_rx: mgm_0_sim_reply_rx,
+                    }),
+                    SpiSimInterfaceWrapper::Sim(SpiSimInterface {
+                        sim_request_tx: sim_request_tx.clone(),
+                        sim_reply_rx: mgm_1_sim_reply_rx,
+                    }),
+                )
+            } else {
+                (
+                    SpiSimInterfaceWrapper::Dummy(SpiDummyInterface::default()),
+                    SpiSimInterfaceWrapper::Dummy(SpiDummyInterface::default()),
+                )
+            };
+        let mut mgm_0_handler = MgmHandlerLis3Mdl::new(
+            MGM0,
+            "MGM_0",
+            mgm_0_mode_node,
+            mgm_0_handler_composite_rx,
+            pus_hk_reply_tx.clone(),
+            switch_helper.clone(),
+            tm_sender.clone(),
+            mgm_0_spi_interface,
+            shared_mgm_0_set,
+        );
+        let mut mgm_1_handler = MgmHandlerLis3Mdl::new(
+            MGM1,
+            "MGM_1",
+            mgm_1_mode_node,
+            mgm_1_handler_composite_rx,
+            pus_hk_reply_tx.clone(),
+            switch_helper.clone(),
+            tm_sender.clone(),
+            mgm_1_spi_interface,
+            shared_mgm_1_set,
+        );
+        // Connect PUS service to device handlers.
+        connect_mode_nodes(
+            &mut pus_stack.mode_srv,
+            mgm_0_handler_mode_tx,
+            &mut mgm_0_handler,
+            pus_mode_reply_tx.clone(),
+        );
+        connect_mode_nodes(
+            &mut pus_stack.mode_srv,
+            mgm_1_handler_mode_tx,
+            &mut mgm_1_handler,
+            pus_mode_reply_tx.clone(),
+        );
+    */
 
     let pcdu_serial_interface = if let Some(sim_client) = opt_sim_client.as_mut() {
         sim_client.add_reply_recipient(satrs_minisim::SimComponent::Pcdu, pcdu_sim_reply_tx);
@@ -390,12 +409,14 @@ fn main() {
         pcdu_serial_interface,
         shared_switch_set,
     );
+    /*
     connect_mode_nodes(
         &mut pus_stack.mode_srv,
         pcdu_handler_mode_tx.clone(),
         &mut pcdu_handler,
         pus_mode_reply_tx,
     );
+    */
 
     // The PCDU is a critical component which should be in normal mode immediately.
     pcdu_handler_mode_tx
@@ -459,8 +480,8 @@ fn main() {
     let jh_aocs = thread::Builder::new()
         .name("sat-rs aocs".to_string())
         .spawn(move || loop {
-            mgm_0_handler.periodic_operation();
-            mgm_1_handler.periodic_operation();
+            //mgm_0_handler.periodic_operation();
+            //mgm_1_handler.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_AOCS));
         })
         .unwrap();

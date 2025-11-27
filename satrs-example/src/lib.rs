@@ -1,7 +1,114 @@
-use satrs::spacepackets::time::cds::CdsTime;
+extern crate alloc;
+
+use satrs::spacepackets::{
+    ccsds_packet_len_for_user_data_len_with_checksum, time::cds::CdsTime, CcsdsPacketCreationError,
+    CcsdsPacketCreatorWithReservedData, CcsdsPacketIdAndPsc, SpacePacketHeader,
+};
 
 pub mod config;
 pub mod ids;
+
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    num_enum::TryFromPrimitive,
+    num_enum::IntoPrimitive,
+)]
+#[repr(u64)]
+pub enum ComponentId {
+    Pcdu,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MessageType {
+    Ping,
+    Mode,
+    Hk,
+    Action,
+    Verification,
+}
+
+/// Unserialized owned TM packet which can be cloned and sent around.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CcsdsTmPacketOwned {
+    pub sp_header: SpacePacketHeader,
+    pub tm_header: TmHeader,
+    pub payload: alloc::vec::Vec<u8>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CcsdsCreationError {
+    #[error("CCSDS packet creation error: {0}")]
+    CcsdsPacketCreation(#[from] CcsdsPacketCreationError),
+    #[error("postcard error: {0}")]
+    Postcard(#[from] postcard::Error),
+    #[error("timestamp generation error")]
+    Time,
+}
+
+impl CcsdsTmPacketOwned {
+    pub fn write_to_bytes(&self, buf: &mut [u8]) -> Result<usize, CcsdsCreationError> {
+        let response_len =
+            postcard::experimental::serialized_size(&self.tm_header)? + self.payload.len();
+        let mut ccsds_tm = CcsdsPacketCreatorWithReservedData::new_tm_with_checksum(
+            self.sp_header,
+            response_len,
+            buf,
+        )?;
+        let user_data = ccsds_tm.packet_data_mut();
+        let ser_len = postcard::to_slice(&self.tm_header, user_data)?.len();
+        user_data[ser_len..ser_len + self.payload.len()].copy_from_slice(&self.payload);
+        let ccsds_packet_len = ccsds_tm.finish();
+        Ok(ccsds_packet_len)
+    }
+
+    pub fn len_written(&self) -> usize {
+        ccsds_packet_len_for_user_data_len_with_checksum(
+            postcard::experimental::serialized_size(&self.tm_header).unwrap() as usize
+                + postcard::experimental::serialized_size(&self.payload).unwrap() as usize,
+        )
+        .unwrap()
+    }
+
+    pub fn to_vec(&self) -> Result<alloc::vec::Vec<u8>, CcsdsCreationError> {
+        let mut buf = alloc::vec![0u8; self.len_written()];
+        let len = self.write_to_bytes(&mut buf)?;
+        buf.truncate(len);
+        Ok(buf)
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub struct TmHeader {
+    pub sender_id: ComponentId,
+    pub target_id: ComponentId,
+    pub message_type: MessageType,
+    /// Telemetry can either be sent unsolicited, or as a response to telecommands.
+    pub tc_id: Option<CcsdsPacketIdAndPsc>,
+    /// Raw CDS short timestamp.
+    pub timestamp: Option<[u8; 7]>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub struct TcHeader {
+    pub target_id: ComponentId,
+    pub request_type: MessageType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CcsdsTcPacketOwned {
+    pub sp_header: SpacePacketHeader,
+    pub tc_header: TcHeader,
+    pub payload: alloc::vec::Vec<u8>,
+}
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum DeviceMode {
