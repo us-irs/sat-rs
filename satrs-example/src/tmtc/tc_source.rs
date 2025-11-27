@@ -1,5 +1,9 @@
-use satrs::pus::HandlingStatus;
-use satrs_example::{CcsdsTcPacketOwned, ComponentId};
+use satrs::{
+    pus::HandlingStatus,
+    spacepackets::{CcsdsPacketReader, ChecksumType},
+    tmtc::PacketAsVec,
+};
+use satrs_example::{CcsdsTcPacketOwned, ComponentId, TcHeader};
 use std::{
     collections::HashMap,
     sync::mpsc::{self, TryRecvError},
@@ -69,14 +73,14 @@ pub type CcsdsDistributor = HashMap<ComponentId, std::sync::mpsc::SyncSender<Ccs
 
 // TC source components where the heap is the backing memory of the received telecommands.
 pub struct TcSourceTask {
-    pub tc_receiver: mpsc::Receiver<CcsdsTcPacketOwned>,
+    pub tc_receiver: mpsc::Receiver<PacketAsVec>,
     ccsds_distributor: CcsdsDistributor,
 }
 
 //#[allow(dead_code)]
 impl TcSourceTask {
     pub fn new(
-        tc_receiver: mpsc::Receiver<CcsdsTcPacketOwned>,
+        tc_receiver: mpsc::Receiver<PacketAsVec>,
         ccsds_distributor: CcsdsDistributor,
     ) -> Self {
         Self {
@@ -94,13 +98,38 @@ impl TcSourceTask {
         // If packets like CFDP are expected, we might have to check the APID first.
         match self.tc_receiver.try_recv() {
             Ok(packet) => {
-                if let Some(sender) = self.ccsds_distributor.get(&packet.tc_header.target_id) {
-                    sender.send(packet).ok();
-                } else {
+                let ccsds_tc_reader_result =
+                    CcsdsPacketReader::new(&packet.packet, Some(ChecksumType::WithCrc16));
+                if ccsds_tc_reader_result.is_err() {
                     log::warn!(
-                        "no TC handler for target ID {:?}",
-                        packet.tc_header.target_id
+                        "received invalid CCSDS TC packet: {:?}",
+                        ccsds_tc_reader_result.err()
                     );
+                    // TODO: Send a dedicated TM packet.
+                    return HandlingStatus::HandledOne;
+                }
+                let ccsds_tc_reader = ccsds_tc_reader_result.unwrap();
+                let tc_header_result =
+                    postcard::take_from_bytes::<TcHeader>(ccsds_tc_reader.user_data());
+                if tc_header_result.is_err() {
+                    log::warn!(
+                        "received CCSDS TC packet with invalid TC header: {:?}",
+                        tc_header_result.err()
+                    );
+                    // TODO: Send a dedicated TM packet.
+                    return HandlingStatus::HandledOne;
+                }
+                let (tc_header, payload) = tc_header_result.unwrap();
+                if let Some(sender) = self.ccsds_distributor.get(&tc_header.target_id) {
+                    sender
+                        .send(CcsdsTcPacketOwned {
+                            sp_header: *ccsds_tc_reader.sp_header(),
+                            tc_header,
+                            payload: payload.to_vec(),
+                        })
+                        .ok();
+                } else {
+                    log::warn!("no TC handler for target ID {:?}", tc_header.target_id);
                     // TODO: Send a dedicated TM packet.
                 }
                 HandlingStatus::HandledOne

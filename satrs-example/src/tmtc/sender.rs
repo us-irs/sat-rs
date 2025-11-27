@@ -1,10 +1,8 @@
 use std::{cell::RefCell, collections::VecDeque, sync::mpsc};
 
 use satrs::{
-    pus::EcssTmSender,
     queue::GenericSendError,
-    spacepackets::ecss::WritablePusPacket,
-    tmtc::{PacketAsVec, PacketHandler, PacketSenderWithSharedPool},
+    tmtc::{PacketAsVec, PacketHandler},
     ComponentId,
 };
 
@@ -14,8 +12,7 @@ pub struct MockSender(pub RefCell<VecDeque<PacketAsVec>>);
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum TmTcSender {
-    Static(PacketSenderWithSharedPool),
-    Heap(mpsc::SyncSender<PacketAsVec>),
+    Normal(mpsc::SyncSender<PacketAsVec>),
     Mock(MockSender),
 }
 
@@ -29,6 +26,7 @@ impl TmTcSender {
     }
 }
 
+/*
 impl EcssTmSender for TmTcSender {
     fn send_tm(
         &self,
@@ -36,7 +34,7 @@ impl EcssTmSender for TmTcSender {
         tm: satrs::pus::PusTmVariant,
     ) -> Result<(), satrs::pus::EcssTmtcError> {
         match self {
-            TmTcSender::Static(sync_sender) => sync_sender.send_tm(sender_id, tm),
+            //TmTcSender::Static(sync_sender) => sync_sender.send_tm(sender_id, tm),
             TmTcSender::Heap(sync_sender) => match tm {
                 satrs::pus::PusTmVariant::InStore(_) => panic!("can not send TM in store"),
                 satrs::pus::PusTmVariant::Direct(pus_tm_creator) => sync_sender
@@ -47,19 +45,15 @@ impl EcssTmSender for TmTcSender {
         }
     }
 }
+*/
 
 impl PacketHandler for TmTcSender {
     type Error = GenericSendError;
 
     fn handle_packet(&self, sender_id: ComponentId, packet: &[u8]) -> Result<(), Self::Error> {
         match self {
-            TmTcSender::Static(packet_sender_with_shared_pool) => {
-                if let Err(e) = packet_sender_with_shared_pool.handle_packet(sender_id, packet) {
-                    log::error!("Error sending packet via Static TM/TC sender: {:?}", e);
-                }
-            }
-            TmTcSender::Heap(sync_sender) => {
-                if let Err(e) = sync_sender.handle_packet(sender_id, packet) {
+            TmTcSender::Normal(sync_sender) => {
+                if let Err(e) = sync_sender.send(PacketAsVec::new(sender_id, packet.to_vec())) {
                     log::error!("Error sending packet via Heap TM/TC sender: {:?}", e);
                 }
             }

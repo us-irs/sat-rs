@@ -5,11 +5,13 @@ use std::{
 
 use arbitrary_int::{u11, u14};
 use log::info;
-use satrs::spacepackets::{
-    ecss::{tm::PusTmZeroCopyWriter, PusPacket},
-    seq_count::SequenceCounter,
-    seq_count::SequenceCounterCcsdsSimple,
-    CcsdsPacket,
+use satrs::{
+    spacepackets::{
+        ecss::{tm::PusTmZeroCopyWriter, PusPacket},
+        seq_count::{SequenceCounter, SequenceCounterCcsdsSimple},
+        CcsdsPacket,
+    },
+    tmtc::PacketAsVec,
 };
 use satrs_example::CcsdsTmPacketOwned;
 
@@ -165,7 +167,7 @@ impl TmSink {
                     .expect("Creating TM zero copy writer failed");
             self.common.apply_packet_processing(zero_copy_writer);
             */
-            self.common.sync_tm_tcp_source.add_tm(&tm.to_vec().unwrap());
+            self.common.sync_tm_tcp_source.add_tm(&tm.to_vec());
             self.tm_server_tx
                 .send(tm)
                 .expect("Sending TM to server failed");

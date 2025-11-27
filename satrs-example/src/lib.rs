@@ -42,6 +42,20 @@ pub struct CcsdsTmPacketOwned {
     pub payload: alloc::vec::Vec<u8>,
 }
 
+/// Simple type modelling packet stored in the heap. This structure is intended to
+/// be used when sending a packet via a message queue, so it also contains the sender ID.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct PacketAsVec {
+    pub sender_id: ComponentId,
+    pub packet: Vec<u8>,
+}
+
+impl PacketAsVec {
+    pub fn new(sender_id: ComponentId, packet: Vec<u8>) -> Self {
+        Self { sender_id, packet }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CcsdsCreationError {
     #[error("CCSDS packet creation error: {0}")]
@@ -76,11 +90,11 @@ impl CcsdsTmPacketOwned {
         .unwrap()
     }
 
-    pub fn to_vec(&self) -> Result<alloc::vec::Vec<u8>, CcsdsCreationError> {
+    pub fn to_vec(&self) -> alloc::vec::Vec<u8> {
         let mut buf = alloc::vec![0u8; self.len_written()];
-        let len = self.write_to_bytes(&mut buf)?;
+        let len = self.write_to_bytes(&mut buf).unwrap();
         buf.truncate(len);
-        Ok(buf)
+        buf
     }
 }
 

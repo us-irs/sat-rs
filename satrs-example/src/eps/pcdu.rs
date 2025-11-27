@@ -32,12 +32,7 @@ use satrs_minisim::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    hk::PusHkHelper,
-    //pus::hk::{HkReply, HkReplyVariant},
-    requests::CompositeRequest,
-    tmtc::sender::TmTcSender,
-};
+use crate::{hk::PusHkHelper, requests::CompositeRequest};
 
 pub trait SerialInterface {
     type Error: core::fmt::Debug;
@@ -213,7 +208,7 @@ pub struct PcduHandler<ComInterface: SerialInterface> {
     //hk_reply_tx: mpsc::SyncSender<GenericMessage<HkReply>>,
     hk_tx: std::sync::mpsc::SyncSender<CcsdsTmPacketOwned>,
     switch_request_rx: mpsc::Receiver<GenericMessage<SwitchRequest>>,
-    tm_sender: TmTcSender,
+    tm_tx: mpsc::SyncSender<CcsdsTmPacketOwned>,
     pub com_interface: ComInterface,
     shared_switch_map: Arc<Mutex<SwitchSet>>,
     #[new(value = "PusHkHelper::new(id)")]
@@ -274,7 +269,7 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
         }
     }
 
-    pub fn handle_hk_request(&mut self, requestor_info: &MessageMetadata, hk_request: &HkRequest) {
+    pub fn handle_hk_request(&mut self, _requestor_info: &MessageMetadata, hk_request: &HkRequest) {
         match hk_request.variant {
             HkRequestVariant::OneShot => {
                 if hk_request.unique_id == SetId::SwitcherSet as u32 {
@@ -301,11 +296,11 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
                         },
                         &mut self.tm_buf,
                     ) {
-                        self.tm_sender
-                            .send_tm(self.id.id(), PusTmVariant::Direct(hk_tm))
-                            .expect("failed to send HK TM");
                         // TODO: Fix
                         /*
+                        self.tm_sender
+                            .send(self.id.id(), PusTmVariant::Direct(hk_tm))
+                            .expect("failed to send HK TM");
                         self.hk_reply_tx
                             .send(GenericMessage::new(
                                 *requestor_info,
@@ -511,9 +506,7 @@ mod tests {
     use std::sync::mpsc;
 
     use arbitrary_int::u21;
-    use satrs::{
-        mode::ModeRequest, power::SwitchStateBinary, request::GenericMessage, tmtc::PacketAsVec,
-    };
+    use satrs::{mode::ModeRequest, power::SwitchStateBinary, request::GenericMessage};
     use satrs_example::ids::{self, Apid};
     use satrs_minisim::eps::SwitchMapBinary;
 
@@ -561,7 +554,7 @@ mod tests {
         pub composite_request_tx: mpsc::Sender<GenericMessage<CompositeRequest>>,
         //pub hk_reply_rx: mpsc::Receiver<GenericMessage<HkReply>>,
         pub hk_rx: std::sync::mpsc::Receiver<CcsdsTmPacketOwned>,
-        pub tm_rx: mpsc::Receiver<PacketAsVec>,
+        pub tm_rx: mpsc::Receiver<CcsdsTmPacketOwned>,
         pub switch_request_tx: mpsc::Sender<GenericMessage<SwitchRequest>>,
         pub handler: PcduHandler<SerialInterfaceTest>,
     }
@@ -574,7 +567,7 @@ mod tests {
             let mode_node = ModeRequestHandlerMpscBounded::new(PCDU.into(), mode_request_rx);
             let (composite_request_tx, composite_request_rx) = mpsc::channel();
             let (hk_tx, hk_rx) = mpsc::sync_channel(10);
-            let (tm_tx, tm_rx) = mpsc::sync_channel::<PacketAsVec>(5);
+            let (tm_tx, tm_rx) = mpsc::sync_channel(5);
             let (switch_request_tx, switch_reqest_rx) = mpsc::channel();
             let shared_switch_map = Arc::new(Mutex::new(SwitchSet::default()));
             let mut handler = PcduHandler::new(
@@ -584,7 +577,8 @@ mod tests {
                 composite_request_rx,
                 hk_tx,
                 switch_reqest_rx,
-                TmTcSender::Heap(tm_tx.clone()),
+                tm_tx.clone(),
+                //TmTcSender::Normal(tm_tx.clone()),
                 SerialInterfaceTest::default(),
                 shared_switch_map,
             );
