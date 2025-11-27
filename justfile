@@ -14,11 +14,11 @@ test:
 embedded:
   cargo check -p satrs --target=thumbv7em-none-eabihf --no-default-features
 
-fmt:
-  cargo fmt --all
-
 check-fmt:
   cargo fmt --all -- --check
+
+fmt:
+  cargo fmt --all
 
 clippy:
   cargo clippy -- -D warnings

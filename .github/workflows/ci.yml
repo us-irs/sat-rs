@@ -11,6 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install libudev-dev on Ubuntu
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: sudo apt update && sudo apt install -y libudev-dev
       - run: cargo check
       # Check example with static pool configuration
       - run: cargo check -p satrs-example --no-default-features
@@ -23,6 +26,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install nextest
         uses: taiki-e/install-action@nextest
+      - run: sudo apt update && sudo apt install -y libudev-dev
       - run: cargo nextest run --all-features
       - run: cargo test --doc --all-features
 
@@ -57,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-      - run: RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc -p satrs --all-features
+      - run: RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc -p satrs --all-features --no-deps
 
   clippy:
     name: Clippy
@@ -67,4 +71,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - run: sudo apt update && sudo apt install -y libudev-dev
       - run: cargo clippy -- -D warnings

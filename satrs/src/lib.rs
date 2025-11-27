@@ -23,6 +23,7 @@ extern crate downcast_rs;
 extern crate std;
 
 pub mod action;
+pub mod ccsds;
 #[cfg(feature = "alloc")]
 pub mod dev_mgmt;
 pub mod encoding;
