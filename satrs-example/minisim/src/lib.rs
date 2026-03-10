@@ -1,5 +1,4 @@
 use nexosim::time::MonotonicTime;
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -162,73 +161,7 @@ impl From<SimRequestError> for SimCtrlReply {
 
 pub mod eps {
     use super::*;
-    use satrs::power::{SwitchState, SwitchStateBinary};
-    use std::collections::HashMap;
-    use strum::{EnumIter, IntoEnumIterator};
-
-    pub type SwitchMap = HashMap<PcduSwitch, SwitchState>;
-    pub type SwitchMapBinary = HashMap<PcduSwitch, SwitchStateBinary>;
-
-    pub struct SwitchMapWrapper(pub SwitchMap);
-    pub struct SwitchMapBinaryWrapper(pub SwitchMapBinary);
-
-    #[derive(
-        Debug,
-        Copy,
-        Clone,
-        PartialEq,
-        Eq,
-        Serialize,
-        Deserialize,
-        Hash,
-        EnumIter,
-        IntoPrimitive,
-        TryFromPrimitive,
-    )]
-    #[repr(u16)]
-    pub enum PcduSwitch {
-        Mgm = 0,
-        Mgt = 1,
-    }
-
-    impl Default for SwitchMapBinaryWrapper {
-        fn default() -> Self {
-            let mut switch_map = SwitchMapBinary::default();
-            for entry in PcduSwitch::iter() {
-                switch_map.insert(entry, SwitchStateBinary::Off);
-            }
-            Self(switch_map)
-        }
-    }
-
-    impl Default for SwitchMapWrapper {
-        fn default() -> Self {
-            let mut switch_map = SwitchMap::default();
-            for entry in PcduSwitch::iter() {
-                switch_map.insert(entry, SwitchState::Unknown);
-            }
-            Self(switch_map)
-        }
-    }
-
-    impl SwitchMapWrapper {
-        pub fn new_with_init_switches_off() -> Self {
-            let mut switch_map = SwitchMap::default();
-            for entry in PcduSwitch::iter() {
-                switch_map.insert(entry, SwitchState::Off);
-            }
-            Self(switch_map)
-        }
-
-        pub fn from_binary_switch_map_ref(switch_map: &SwitchMapBinary) -> Self {
-            Self(
-                switch_map
-                    .iter()
-                    .map(|(key, value)| (*key, SwitchState::from(*value)))
-                    .collect(),
-            )
-        }
-    }
+    use models::pcdu::{SwitchId, SwitchMapBinary, SwitchStateBinary};
 
     #[derive(Debug, Copy, Clone)]
     #[repr(u8)]
@@ -240,7 +173,7 @@ pub mod eps {
     #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
     pub enum PcduRequest {
         SwitchDevice {
-            switch: PcduSwitch,
+            switch: SwitchId,
             state: SwitchStateBinary,
         },
         RequestSwitchInfo,
@@ -264,7 +197,7 @@ pub mod eps {
 pub mod acs {
     use std::time::Duration;
 
-    use satrs::power::SwitchStateBinary;
+    use models::pcdu::SwitchStateBinary;
 
     use super::*;
 

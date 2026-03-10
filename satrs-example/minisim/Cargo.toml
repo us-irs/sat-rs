@@ -15,12 +15,10 @@ strum = { version = "0.27", features = ["derive"] }
 num_enum = "0.7"
 humantime = "2"
 tai-time = { version = "0.3", features = ["serde"] }
+nexosim = { version = "0.3.1" }
 
-[dependencies.nexosim]
-version = "0.3.1"
-
-[dependencies.satrs]
-path = "../satrs"
+satrs = { path = "../../satrs" }
+models = { path = "../models" }
 
 [dev-dependencies]
 delegate = "0.13"

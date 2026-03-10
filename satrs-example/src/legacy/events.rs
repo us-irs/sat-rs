@@ -1,6 +1,3 @@
-use std::sync::mpsc::{self};
-
-use crate::pus::create_verification_reporter;
 use arbitrary_int::traits::Integer as _;
 use arbitrary_int::u11;
 use satrs::event_man_legacy::{EventMessageU32, EventRoutingError};
@@ -34,6 +31,7 @@ impl EventTmHook for EventApidSetter {
     }
 }
 
+/*
 /// The PUS event handler subscribes for all events and converts them into ECSS PUS 5 event
 /// packets. It also handles the verification completion of PUS event service requests.
 pub struct PusEventHandler<TmSender: EcssTmSender> {
@@ -292,3 +290,4 @@ mod tests {
         // TODO: Add test.
     }
 }
+*/

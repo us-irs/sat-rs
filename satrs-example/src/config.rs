@@ -7,13 +7,10 @@ use satrs::{
 use satrs_mib::res_code::ResultU16Info;
 use satrs_mib::resultcode;
 use std::{collections::HashSet, net::Ipv4Addr};
-use strum::IntoEnumIterator;
+use strum::IntoEnumIterator as _;
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use satrs::{
-    events_legacy::{EventU32TypedSev, SeverityInfo},
-    pool::{StaticMemoryPool, StaticPoolConfig},
-};
+use satrs::pool::{StaticMemoryPool, StaticPoolConfig};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
@@ -39,19 +36,17 @@ pub enum GroupId {
 pub const OBSW_SERVER_ADDR: Ipv4Addr = Ipv4Addr::UNSPECIFIED;
 pub const SERVER_PORT: u16 = 7301;
 
-pub const TEST_EVENT: EventU32TypedSev<SeverityInfo> = EventU32TypedSev::<SeverityInfo>::new(0, 0);
-
 lazy_static! {
     pub static ref PACKET_ID_VALIDATOR: HashSet<PacketId> = {
         let mut set = HashSet::new();
-        for id in crate::ids::Apid::iter() {
+        for id in models::Apid::iter() {
             set.insert(PacketId::new(PacketType::Tc, true, u11::new(id as u16)));
         }
         set
     };
     pub static ref APID_VALIDATOR: HashSet<u16> = {
         let mut set = HashSet::new();
-        for id in crate::ids::Apid::iter() {
+        for id in models::Apid::iter() {
             set.insert(id as u16);
         }
         set
@@ -175,6 +170,6 @@ pub mod pool {
 pub mod tasks {
     pub const FREQ_MS_UDP_TMTC: u64 = 200;
     pub const FREQ_MS_AOCS: u64 = 500;
-    pub const FREQ_MS_PUS_STACK: u64 = 200;
+    pub const FREQ_MS_CONTROLLER: u64 = 200;
     pub const SIM_CLIENT_IDLE_DELAY_MS: u64 = 5;
 }

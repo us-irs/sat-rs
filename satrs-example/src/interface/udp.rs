@@ -1,66 +1,29 @@
 #![allow(dead_code)]
+use std::collections::VecDeque;
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 
-use log::{info, warn};
+use log::warn;
+use models::ccsds::CcsdsTmPacketOwned;
 use satrs::hal::std::udp_server::{ReceiveResult, UdpTcServer};
 use satrs::pus::HandlingStatus;
 use satrs::queue::GenericSendError;
-use satrs::tmtc::PacketAsVec;
-
-use satrs::pool::{PoolProviderWithGuards, SharedStaticMemoryPool};
-use satrs::tmtc::PacketInPool;
 
 use crate::tmtc::sender::TmTcSender;
 
-pub trait UdpTmHandler {
+pub trait UdpTmHandlerProvider {
     fn send_tm_to_udp_client(&mut self, socket: &UdpSocket, recv_addr: &SocketAddr);
 }
 
-pub struct StaticUdpTmHandler {
-    pub tm_rx: mpsc::Receiver<PacketInPool>,
-    pub tm_store: SharedStaticMemoryPool,
+pub struct UdpTmHandlerWithChannel {
+    pub tm_rx: mpsc::Receiver<CcsdsTmPacketOwned>,
 }
 
-impl UdpTmHandler for StaticUdpTmHandler {
-    fn send_tm_to_udp_client(&mut self, socket: &UdpSocket, &recv_addr: &SocketAddr) {
-        while let Ok(pus_tm_in_pool) = self.tm_rx.try_recv() {
-            let store_lock = self.tm_store.write();
-            if store_lock.is_err() {
-                warn!("Locking TM store failed");
-                continue;
-            }
-            let mut store_lock = store_lock.unwrap();
-            let pg = store_lock.read_with_guard(pus_tm_in_pool.store_addr);
-            let read_res = pg.read_as_vec();
-            if read_res.is_err() {
-                warn!("Error reading TM pool data");
-                continue;
-            }
-            let buf = read_res.unwrap();
-            let result = socket.send_to(&buf, recv_addr);
-            if let Err(e) = result {
-                warn!("Sending TM with UDP socket failed: {e}")
-            }
-        }
-    }
-}
-
-pub struct DynamicUdpTmHandler {
-    pub tm_rx: mpsc::Receiver<PacketAsVec>,
-}
-
-impl UdpTmHandler for DynamicUdpTmHandler {
+impl UdpTmHandlerProvider for UdpTmHandlerWithChannel {
     fn send_tm_to_udp_client(&mut self, socket: &UdpSocket, recv_addr: &SocketAddr) {
         while let Ok(tm) = self.tm_rx.try_recv() {
-            if tm.packet.len() > 9 {
-                let service = tm.packet[7];
-                let subservice = tm.packet[8];
-                info!("Sending PUS TM[{service},{subservice}]")
-            } else {
-                info!("Sending PUS TM");
-            }
-            let result = socket.send_to(&tm.packet, recv_addr);
+            log::debug!("sending TM from sender {:?}", tm.tm_header.sender_id);
+            let result = socket.send_to(&tm.to_vec(), recv_addr);
             if let Err(e) = result {
                 warn!("Sending TM with UDP socket failed: {e}")
             }
@@ -68,12 +31,49 @@ impl UdpTmHandler for DynamicUdpTmHandler {
     }
 }
 
-pub struct UdpTmtcServer<TmHandler: UdpTmHandler> {
-    pub udp_tc_server: UdpTcServer<TmTcSender, GenericSendError>,
-    pub tm_handler: TmHandler,
+#[derive(Default, Debug, Clone)]
+pub struct TestTmHandler {
+    addrs_to_send_to: Arc<Mutex<VecDeque<SocketAddr>>>,
 }
 
-impl<TmHandler: UdpTmHandler> UdpTmtcServer<TmHandler> {
+impl UdpTmHandlerProvider for TestTmHandler {
+    fn send_tm_to_udp_client(&mut self, _socket: &UdpSocket, recv_addr: &SocketAddr) {
+        self.addrs_to_send_to.lock().unwrap().push_back(*recv_addr);
+    }
+}
+
+pub enum UdpTmHandler {
+    Normal(UdpTmHandlerWithChannel),
+    Test(TestTmHandler),
+}
+
+impl From<UdpTmHandlerWithChannel> for UdpTmHandler {
+    fn from(handler: UdpTmHandlerWithChannel) -> Self {
+        UdpTmHandler::Normal(handler)
+    }
+}
+
+impl From<TestTmHandler> for UdpTmHandler {
+    fn from(handler: TestTmHandler) -> Self {
+        UdpTmHandler::Test(handler)
+    }
+}
+
+impl UdpTmHandlerProvider for UdpTmHandler {
+    fn send_tm_to_udp_client(&mut self, socket: &UdpSocket, recv_addr: &SocketAddr) {
+        match self {
+            UdpTmHandler::Normal(handler) => handler.send_tm_to_udp_client(socket, recv_addr),
+            UdpTmHandler::Test(handler) => handler.send_tm_to_udp_client(socket, recv_addr),
+        }
+    }
+}
+
+pub struct UdpTmtcServer {
+    pub udp_tc_server: UdpTcServer<TmTcSender, GenericSendError>,
+    pub tm_handler: UdpTmHandler,
+}
+
+impl UdpTmtcServer {
     pub fn periodic_operation(&mut self) {
         loop {
             if self.poll_tc_server() == HandlingStatus::Empty {
@@ -107,15 +107,12 @@ impl<TmHandler: UdpTmHandler> UdpTmtcServer<TmHandler> {
 
 #[cfg(test)]
 mod tests {
+    use std::net::IpAddr;
     use std::net::Ipv4Addr;
-    use std::{
-        collections::VecDeque,
-        net::IpAddr,
-        sync::{Arc, Mutex},
-    };
 
     use arbitrary_int::traits::Integer as _;
     use arbitrary_int::u14;
+    use models::Apid;
     use satrs::spacepackets::ecss::{CreatorConfig, MessageTypeId};
     use satrs::{
         spacepackets::{
@@ -125,24 +122,12 @@ mod tests {
         ComponentId,
     };
     use satrs_example::config::OBSW_SERVER_ADDR;
-    use satrs_example::ids;
 
-    use crate::tmtc::sender::{MockSender, TmTcSender};
+    use crate::tmtc::sender::MockSender;
 
     use super::*;
 
     const UDP_SERVER_ID: ComponentId = 0x05;
-
-    #[derive(Default, Debug, Clone)]
-    pub struct TestTmHandler {
-        addrs_to_send_to: Arc<Mutex<VecDeque<SocketAddr>>>,
-    }
-
-    impl UdpTmHandler for TestTmHandler {
-        fn send_tm_to_udp_client(&mut self, _socket: &UdpSocket, recv_addr: &SocketAddr) {
-            self.addrs_to_send_to.lock().unwrap().push_back(*recv_addr);
-        }
-    }
 
     #[test]
     fn test_basic() {
@@ -154,7 +139,7 @@ mod tests {
         let tm_handler_calls = tm_handler.addrs_to_send_to.clone();
         let mut udp_dyn_server = UdpTmtcServer {
             udp_tc_server,
-            tm_handler,
+            tm_handler: tm_handler.into(),
         };
         udp_dyn_server.periodic_operation();
         let queue = udp_dyn_server
@@ -179,9 +164,9 @@ mod tests {
         let tm_handler_calls = tm_handler.addrs_to_send_to.clone();
         let mut udp_dyn_server = UdpTmtcServer {
             udp_tc_server,
-            tm_handler,
+            tm_handler: tm_handler.into(),
         };
-        let sph = SpHeader::new_for_unseg_tc(ids::Apid::GenericPus.raw_value(), u14::ZERO, 0);
+        let sph = SpHeader::new_for_unseg_tc(Apid::Tmtc.raw_value(), u14::ZERO, 0);
         let ping_tc = PusTcCreator::new_simple(
             sph,
             MessageTypeId::new(17, 1),

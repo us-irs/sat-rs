@@ -50,7 +50,7 @@
 //! The [PUS event](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example/src/pus/event.rs)
 //! module and the generic [events module](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-example/src/events.rs)
 //! show how the event management modules can be integrated into a more complex software.
-use crate::events_legacy::{EventU16, EventU32, GenericEvent, LargestEventRaw, LargestGroupIdRaw};
+use crate::legacy::events_legacy::{EventU16, EventU32, GenericEvent, LargestEventRaw, LargestGroupIdRaw};
 use crate::params::Params;
 use crate::queue::GenericSendError;
 use core::fmt::Debug;
@@ -588,8 +588,8 @@ pub mod std_mod {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event_man_legacy::EventManager;
-    use crate::events_legacy::{EventU32, GenericEvent, Severity};
+    use crate::legacy::event_man_legacy::EventManager;
+    use crate::legacy::events_legacy::{EventU32, GenericEvent, Severity};
     use crate::params::{ParamsHeapless, ParamsRaw};
     use crate::pus::test_util::{TEST_COMPONENT_ID_0, TEST_COMPONENT_ID_1};
     use std::format;
