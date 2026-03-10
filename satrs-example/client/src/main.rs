@@ -1,7 +1,7 @@
 use anyhow::bail;
 use arbitrary_int::u11;
 use clap::Parser as _;
-use models::{Apid, MessageType, TcHeader};
+use models::{Apid, MessageType, TcHeader, mgm::request::HkRequest};
 use satrs_example::config::{OBSW_SERVER_ADDR, SERVER_PORT};
 use spacepackets::{CcsdsPacketIdAndPsc, SpacePacketHeader};
 use std::{
@@ -19,6 +19,41 @@ pub struct Cli {
     ping: bool,
     #[arg(short, long)]
     test_event: bool,
+
+    #[command(subcommand)]
+    commands: Option<Commands>,
+}
+
+#[derive(clap::Subcommand)]
+enum Commands {
+    Mgm0(MgmArgs),
+    Mgm1(MgmArgs),
+}
+
+impl Commands {
+    #[inline]
+    pub fn target_id(&self) -> models::ComponentId {
+        match self {
+            Commands::Mgm0(_mgm_args) => models::ComponentId::AcsMgm0,
+            Commands::Mgm1(_mgm_args) => models::ComponentId::AcsMgm1,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, clap::Parser)]
+struct MgmArgs {
+    #[arg(short, long)]
+    ping: bool,
+    #[arg(long)]
+    request_hk: bool,
+    #[arg(short, long)]
+    mode: Option<ModeSelect>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, clap::ValueEnum)]
+pub enum ModeSelect {
+    Off,
+    Normal,
 }
 
 fn setup_logger(level: log::LevelFilter) -> Result<(), fern::InitError> {
@@ -76,6 +111,66 @@ fn main() -> anyhow::Result<()> {
         let request_packet = request.to_vec();
         client.send_to(&request_packet, addr).unwrap();
     }
+    if let Some(cmd) = cli.commands {
+        let target_id = cmd.target_id();
+        match cmd {
+            Commands::Mgm0(args) | Commands::Mgm1(args) => {
+                if args.ping {
+                    let request = models::ccsds::CcsdsTcPacketOwned::new_with_request(
+                        SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
+                        TcHeader::new(cmd.target_id(), models::MessageType::Ping),
+                        models::mgm::request::Request::Ping,
+                    );
+                    let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
+                    log::info!(
+                        "sending {:?} ping request with TC ID {:#010x}",
+                        target_id,
+                        sent_tc_id.raw()
+                    );
+                    let request_packet = request.to_vec();
+                    client.send_to(&request_packet, addr).unwrap();
+                }
+                if args.request_hk {
+                    let request = models::ccsds::CcsdsTcPacketOwned::new_with_request(
+                        SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
+                        TcHeader::new(target_id, models::MessageType::Hk),
+                        models::mgm::request::Request::Hk(HkRequest {
+                            id: models::mgm::request::HkId::Sensor,
+                            req_type: models::HkRequestType::OneShot,
+                        }),
+                    );
+                    let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
+                    log::info!(
+                        "sending {:?} HK request with TC ID {:#010x}",
+                        target_id,
+                        sent_tc_id.raw()
+                    );
+                    let request_packet = request.to_vec();
+                    client.send_to(&request_packet, addr).unwrap();
+                }
+                if let Some(mode) = args.mode {
+                    let dev_mode = match mode {
+                        ModeSelect::Off => models::DeviceMode::Off,
+                        ModeSelect::Normal => models::DeviceMode::Normal,
+                    };
+
+                    let request = models::ccsds::CcsdsTcPacketOwned::new_with_request(
+                        SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
+                        TcHeader::new(target_id, models::MessageType::Mode),
+                        models::mgm::request::Request::Mode(dev_mode),
+                    );
+                    let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
+                    log::info!(
+                        "sending {:?} HK request with TC ID {:#010x}",
+                        target_id,
+                        sent_tc_id.raw()
+                    );
+                    let request_packet = request.to_vec();
+                    client.send_to(&request_packet, addr).unwrap();
+                }
+            }
+        }
+    }
 
     let mut recv_buf: Box<[u8; 2048]> = Box::new([0; 2048]);
     log::info!("entering listening loop");
@@ -102,7 +197,6 @@ fn main() -> anyhow::Result<()> {
 fn handle_raw_tm_packet(data: &[u8]) -> anyhow::Result<()> {
     match spacepackets::CcsdsPacketReader::new_with_checksum(data) {
         Ok(packet) => {
-            //let (tm_header, response, remainder) = unpack_tm_header_and_response(&packet)?;
             let tm_header_result =
                 postcard::take_from_bytes::<models::TmHeader>(packet.user_data());
             if let Err(e) = tm_header_result {
@@ -145,8 +239,16 @@ fn handle_raw_tm_packet(data: &[u8]) -> anyhow::Result<()> {
                 }
                 models::ComponentId::AcsSubsystem => todo!(),
                 models::ComponentId::AcsMgmAssembly => todo!(),
-                models::ComponentId::AcsMgm0 => todo!(),
-                models::ComponentId::AcsMgm1 => todo!(),
+                models::ComponentId::AcsMgm0 => {
+                    let response =
+                        postcard::from_bytes::<models::mgm::response::Response>(remainder);
+                    log::info!("Received response from MGM0: {:?}", response.unwrap());
+                }
+                models::ComponentId::AcsMgm1 => {
+                    let response =
+                        postcard::from_bytes::<models::mgm::response::Response>(remainder);
+                    log::info!("Received response from MGM1: {:?}", response.unwrap());
+                }
                 models::ComponentId::EpsSubsystem => todo!(),
                 models::ComponentId::UdpServer => todo!(),
                 models::ComponentId::TcpServer => todo!(),

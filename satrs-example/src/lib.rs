@@ -1,5 +1,7 @@
 extern crate alloc;
 
+use std::time::{Duration, Instant};
+
 pub use models::ComponentId;
 use satrs::spacepackets::time::cds::CdsTime;
 
@@ -17,13 +19,6 @@ impl PacketAsVec {
     pub fn new(sender_id: ComponentId, packet: Vec<u8>) -> Self {
         Self { sender_id, packet }
     }
-}
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub enum DeviceMode {
-    Off = 0,
-    On = 1,
-    Normal = 2,
 }
 
 pub struct TimestampHelper {
@@ -52,5 +47,46 @@ impl Default for TimestampHelper {
             stamper: CdsTime::now_with_u16_days().expect("creating time stamper failed"),
             time_stamp: Default::default(),
         }
+    }
+}
+
+/// Helper structure for periodic HK generation of a single set.
+#[derive(Debug)]
+pub struct HkHelperSingleSet {
+    pub enabled: bool,
+    pub frequency: Duration,
+    pub last_generated: Option<Instant>,
+}
+
+impl HkHelperSingleSet {
+    #[inline]
+    pub const fn new(enabled: bool, init_frequency: Duration) -> Self {
+        Self {
+            enabled,
+            frequency: init_frequency,
+            last_generated: None,
+        }
+    }
+
+    #[inline]
+    pub const fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Check whether a new HK packet needs to be generated.
+    pub fn needs_generation(&mut self) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        if self.last_generated.is_none() {
+            self.last_generated = Some(Instant::now());
+            return true;
+        }
+        let last_generated = self.last_generated.unwrap();
+        if Instant::now() - last_generated >= self.frequency {
+            self.last_generated = Some(Instant::now());
+            return true;
+        }
+        false
     }
 }

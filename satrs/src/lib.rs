@@ -29,14 +29,12 @@ pub mod encoding;
 pub mod executable;
 pub mod hal;
 pub mod health;
-pub mod hk;
 pub mod legacy;
 pub mod mode;
 #[cfg(feature = "std")]
 pub mod mode_tree;
 pub mod params;
 pub mod pool;
-pub mod power;
 pub mod pus;
 pub mod queue;
 pub mod request;

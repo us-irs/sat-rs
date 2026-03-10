@@ -16,27 +16,29 @@ use interface::{
 };
 use log::info;
 use logger::setup_logger;
-use models::ComponentId;
+use models::{ComponentId, DeviceMode};
 use satrs::{
     hal::std::{tcp_server::ServerConfig, udp_server::UdpTcServer},
-    mode::{Mode, ModeAndSubmode, ModeRequest, ModeRequestHandlerMpscBounded},
+    mode::{Mode, ModeAndSubmode, ModeRequest},
     pus::HandlingStatus,
     request::{GenericMessage, MessageMetadata},
     spacepackets::time::cds::CdsTime,
 };
-use satrs_example::{
-    config::{
-        components::NO_SENDER,
-        tasks::{FREQ_MS_AOCS, FREQ_MS_CONTROLLER, FREQ_MS_UDP_TMTC, SIM_CLIENT_IDLE_DELAY_MS},
-        OBSW_SERVER_ADDR, PACKET_ID_VALIDATOR, SERVER_PORT,
-    },
-    DeviceMode,
+use satrs_example::config::{
+    components::NO_SENDER,
+    tasks::{FREQ_MS_AOCS, FREQ_MS_CONTROLLER, FREQ_MS_UDP_TMTC, SIM_CLIENT_IDLE_DELAY_MS},
+    OBSW_SERVER_ADDR, PACKET_ID_VALIDATOR, SERVER_PORT,
 };
 use tmtc::sender::TmTcSender;
 use tmtc::{tc_source::TcSourceTask, tm_sink::TmSink};
 
 use crate::{
-    acs::mgm::{MgmHandlerLis3Mdl, SpiDummyInterface, SpiSimInterface, SpiSimInterfaceWrapper},
+    acs::{
+        mgm::{
+            self, MgmHandlerLis3Mdl, SpiDummyInterface, SpiSimInterface, SpiSimInterfaceWrapper,
+        },
+        mgm_assembly,
+    },
     control::Controller,
     eps::pcdu::SwitchSet,
     event_manager::EventManager,
@@ -73,9 +75,13 @@ fn main() {
     let (pcdu_handler_tc_tx, pcdu_handler_tc_rx) = mpsc::sync_channel(30);
     let (controller_tc_tx, controller_tc_rx) = mpsc::sync_channel(10);
 
-    let (_mgm_0_handler_mode_tx, mgm_0_handler_mode_rx) = mpsc::sync_channel(5);
-    let (_mgm_1_handler_mode_tx, mgm_1_handler_mode_rx) = mpsc::sync_channel(5);
-    let (pcdu_handler_mode_tx, pcdu_handler_mode_rx) = mpsc::sync_channel(5);
+    // These message handles need to go into the MGM assembly.
+    let (mgm_0_mode_request_tx, mgm_0_mode_request_rx) = mpsc::sync_channel(5);
+    let (mgm_1_mode_request_tx, mgm_1_mode_request_rx) = mpsc::sync_channel(5);
+    let (mgm_0_mode_report_tx, mgm_0_mode_report_rx) = mpsc::sync_channel(5);
+    let (mgm_1_mode_report_tx, mgm_1_mode_report_rx) = mpsc::sync_channel(5);
+
+    let (pcdu_handler_mode_tx, _pcdu_handler_mode_rx) = mpsc::sync_channel(5);
 
     let (event_ctrl_tx, event_ctrl_rx) = mpsc::sync_channel(10);
     let mut event_manager = EventManager {
@@ -134,10 +140,6 @@ fn main() {
 
     let shared_mgm_0_set = Arc::default();
     let shared_mgm_1_set = Arc::default();
-    let mgm_0_mode_node =
-        ModeRequestHandlerMpscBounded::new(ComponentId::AcsMgm0 as u32, mgm_0_handler_mode_rx);
-    let mgm_1_mode_node =
-        ModeRequestHandlerMpscBounded::new(ComponentId::AcsMgm1 as u32, mgm_1_handler_mode_rx);
     let (mgm_0_spi_interface, mgm_1_spi_interface) =
         if let Some(sim_client) = opt_sim_client.as_mut() {
             sim_client
@@ -163,23 +165,35 @@ fn main() {
     let mut mgm_0_handler = MgmHandlerLis3Mdl::new(
         ComponentId::AcsMgm0,
         "MGM_0",
-        mgm_0_mode_node,
         mgm_0_handler_tc_rx,
         tm_sink_tx.clone(),
         switch_helper.clone(),
         mgm_0_spi_interface,
         shared_mgm_0_set,
+        mgm::ModeLeafHelper {
+            request_rx: mgm_0_mode_request_rx,
+            report_tx: mgm_0_mode_report_tx,
+        },
     );
     let mut mgm_1_handler = MgmHandlerLis3Mdl::new(
         ComponentId::AcsMgm1,
         "MGM_1",
-        mgm_1_mode_node,
         mgm_1_handler_tc_rx,
         tm_sink_tx.clone(),
         switch_helper.clone(),
         mgm_1_spi_interface,
         shared_mgm_1_set,
+        mgm::ModeLeafHelper {
+            request_rx: mgm_1_mode_request_rx,
+            report_tx: mgm_1_mode_report_tx,
+        },
     );
+    let mut mgm_assembly = mgm_assembly::Assembly {
+        helper: mgm_assembly::QueueHelper {
+            request_tx: [mgm_0_mode_request_tx, mgm_1_mode_request_tx],
+            report_rx: [mgm_0_mode_report_rx, mgm_1_mode_report_rx],
+        },
+    };
     // Connect PUS service to device handlers.
     /*
     connect_mode_nodes(
@@ -205,10 +219,9 @@ fn main() {
     } else {
         SerialSimInterfaceWrapper::Dummy(SerialInterfaceDummy::default())
     };
-    let pcdu_mode_node =
-        ModeRequestHandlerMpscBounded::new(ComponentId::EpsPcdu as u32, pcdu_handler_mode_rx);
+    //let pcdu_mode_node =
+    //ModeRequestHandlerMpscBounded::new(ComponentId::EpsPcdu as u32, pcdu_handler_mode_rx);
     let mut pcdu_handler = PcduHandler::new(
-        pcdu_mode_node,
         pcdu_handler_tc_rx,
         tm_sink_tx.clone(),
         switch_request_rx,
@@ -288,6 +301,7 @@ fn main() {
         .spawn(move || loop {
             mgm_0_handler.periodic_operation();
             mgm_1_handler.periodic_operation();
+            mgm_assembly.periodic_operation();
             thread::sleep(Duration::from_millis(FREQ_MS_AOCS));
         })
         .unwrap();

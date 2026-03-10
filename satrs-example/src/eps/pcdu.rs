@@ -11,20 +11,11 @@ use models::{
         self, SwitchId, SwitchMapBinary, SwitchMapBinaryWrapper, SwitchRequest, SwitchState,
         SwitchStateBinary, SwitchesBitfield,
     },
-    ComponentId,
+    ComponentId, DeviceMode,
 };
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use satrs::{
-    mode::{
-        ModeAndSubmode, ModeError, ModeProvider, ModeReply, ModeRequestHandler,
-        ModeRequestHandlerMpscBounded,
-    },
-    mode_tree::{ModeChild, ModeNode},
-    queue::GenericSendError,
-    request::{GenericMessage, MessageMetadata},
-    spacepackets::CcsdsPacketIdAndPsc,
-};
-use satrs_example::{config::components::NO_SENDER, DeviceMode, TimestampHelper};
+use satrs::{request::GenericMessage, spacepackets::CcsdsPacketIdAndPsc};
+use satrs_example::TimestampHelper;
 use satrs_minisim::{
     eps::{PcduReply, PcduRequest},
     SerializableSimMsgPayload, SimReply, SimRequest,
@@ -273,19 +264,17 @@ pub enum OpCode {
 #[allow(clippy::too_many_arguments)]
 pub struct PcduHandler<ComInterface: SerialInterface> {
     dev_str: &'static str,
-    mode_node: ModeRequestHandlerMpscBounded,
     switch_request_rx: mpsc::Receiver<GenericMessage<SwitchRequest>>,
     tc_rx: std::sync::mpsc::Receiver<CcsdsTcPacketOwned>,
     tm_tx: mpsc::SyncSender<CcsdsTmPacketOwned>,
     pub com_interface: ComInterface,
     shared_switch_map: Arc<Mutex<SwitchSet>>,
-    mode_and_submode: ModeAndSubmode,
+    mode: DeviceMode,
     stamp_helper: TimestampHelper,
 }
 
 impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
     pub fn new(
-        mode_node: ModeRequestHandlerMpscBounded,
         tc_rx: std::sync::mpsc::Receiver<CcsdsTcPacketOwned>,
         tm_tx: std::sync::mpsc::SyncSender<CcsdsTmPacketOwned>,
         switch_request_rx: mpsc::Receiver<GenericMessage<SwitchRequest>>,
@@ -294,27 +283,27 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
     ) -> Self {
         Self {
             dev_str: "PCDU",
-            mode_node,
+            //mode_node,
             tc_rx,
             switch_request_rx,
             tm_tx,
             com_interface,
             shared_switch_map,
-            mode_and_submode: ModeAndSubmode::new(0, 0),
             stamp_helper: TimestampHelper::default(),
+            mode: DeviceMode::Off,
         }
     }
+
     pub fn periodic_operation(&mut self, op_code: OpCode) {
         match op_code {
             OpCode::RegularOp => {
                 self.stamp_helper.update_from_now();
                 // Handle requests.
                 self.handle_telecommands();
-                self.handle_mode_requests();
+                //self.handle_mode_requests();
                 self.handle_switch_requests();
                 // Poll the switch states and/or telemetry regularly here.
-                if self.mode() == DeviceMode::Normal as u32 || self.mode() == DeviceMode::On as u32
-                {
+                if self.mode() == DeviceMode::Normal || self.mode() == DeviceMode::On {
                     self.handle_periodic_commands();
                 }
             }
@@ -322,6 +311,11 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
                 self.poll_and_handle_replies();
             }
         }
+    }
+
+    #[inline]
+    pub fn mode(&self) -> DeviceMode {
+        self.mode
     }
 
     pub fn handle_telecommands(&mut self) {
@@ -361,6 +355,9 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
                                         switches,
                                         SwitchStateBinary::Off,
                                     );
+                                }
+                                pcdu::request::Request::Mode(device_mode) => {
+                                    self.switch_mode(tc_id, device_mode)
                                 }
                             }
                         }
@@ -408,6 +405,33 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
         }
     }
 
+    fn switch_mode(&mut self, requestor: CcsdsPacketIdAndPsc, mode: DeviceMode) {
+        log::info!("{}: transitioning to mode {:?}", self.dev_str, mode);
+        self.mode = mode;
+        if self.mode() == DeviceMode::Off {
+            self.shared_switch_map.lock().unwrap().valid = false;
+        }
+        log::info!("{} announcing mode: {:?}", self.dev_str, self.mode);
+        self.send_telemetry(Some(requestor), pcdu::response::Response::Ok);
+    }
+
+    pub fn send_telemetry(
+        &self,
+        tc_id: Option<CcsdsPacketIdAndPsc>,
+        response: pcdu::response::Response,
+    ) {
+        match pack_ccsds_tm_packet_for_now(ComponentId::EpsPcdu, tc_id, &response) {
+            Ok(packet) => {
+                if let Err(e) = self.tm_tx.send(packet) {
+                    log::warn!("failed to send TM packet: {}", e);
+                }
+            }
+            Err(e) => {
+                log::warn!("failed to pack TM packet: {}", e);
+            }
+        }
+    }
+
     pub fn handle_periodic_commands(&self) {
         let pcdu_req = PcduRequest::RequestSwitchInfo;
         let pcdu_req_ser = serde_json::to_string(&pcdu_req).unwrap();
@@ -416,6 +440,7 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
         }
     }
 
+    /*
     pub fn handle_mode_requests(&mut self) {
         loop {
             // TODO: Only allow one set mode request per cycle?
@@ -446,6 +471,7 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
             }
         }
     }
+    */
 
     pub fn handle_device_switching(&mut self, switch_id: SwitchId, state: SwitchStateBinary) {
         let pcdu_req = PcduRequest::SwitchDevice {
@@ -500,110 +526,32 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
     }
 }
 
-impl<ComInterface: SerialInterface> ModeProvider for PcduHandler<ComInterface> {
-    fn mode_and_submode(&self) -> ModeAndSubmode {
-        self.mode_and_submode
-    }
-}
-
-impl<ComInterface: SerialInterface> ModeRequestHandler for PcduHandler<ComInterface> {
-    type Error = ModeError;
-    fn start_transition(
-        &mut self,
-        requestor: MessageMetadata,
-        mode_and_submode: ModeAndSubmode,
-        _forced: bool,
-    ) -> Result<(), satrs::mode::ModeError> {
-        log::info!(
-            "{}: transitioning to mode {:?}",
-            self.dev_str,
-            mode_and_submode
-        );
-        self.mode_and_submode = mode_and_submode;
-        if mode_and_submode.mode() == DeviceMode::Off as u32 {
-            self.shared_switch_map.lock().unwrap().valid = false;
-        }
-        self.handle_mode_reached(Some(requestor))?;
-        Ok(())
-    }
-
-    fn announce_mode(&self, _requestor_info: Option<MessageMetadata>, _recursive: bool) {
-        log::info!(
-            "{} announcing mode: {:?}",
-            self.dev_str,
-            self.mode_and_submode
-        );
-    }
-
-    fn handle_mode_reached(
-        &mut self,
-        requestor: Option<MessageMetadata>,
-    ) -> Result<(), Self::Error> {
-        self.announce_mode(requestor, false);
-        if let Some(requestor) = requestor {
-            if requestor.sender_id() == NO_SENDER {
-                return Ok(());
-            }
-            if requestor.sender_id() != ComponentId::Ground as u32 {
-                log::warn!(
-                    "can not send back mode reply to sender {}",
-                    requestor.sender_id()
-                );
-            } else {
-                self.send_mode_reply(requestor, ModeReply::ModeReply(self.mode_and_submode()))?;
-            }
-        }
-        Ok(())
-    }
-
-    fn send_mode_reply(
-        &self,
-        requestor: MessageMetadata,
-        reply: ModeReply,
-    ) -> Result<(), Self::Error> {
-        if requestor.sender_id() != ComponentId::Ground as u32 {
-            log::warn!(
-                "can not send back mode reply to sender {}",
-                requestor.sender_id()
-            );
-        }
-        self.mode_node
-            .send_mode_reply(requestor, reply)
-            .map_err(|_| GenericSendError::RxDisconnected)?;
-        Ok(())
-    }
-
-    fn handle_mode_info(
-        &mut self,
-        _requestor_info: MessageMetadata,
-        _info: ModeAndSubmode,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-impl<ComInterface: SerialInterface> ModeNode for PcduHandler<ComInterface> {
-    fn id(&self) -> satrs::ComponentId {
-        ComponentId::EpsPcdu as u32
-    }
-}
-
-impl<ComInterface: SerialInterface> ModeChild for PcduHandler<ComInterface> {
-    type Sender = mpsc::SyncSender<GenericMessage<ModeReply>>;
-
-    fn add_mode_parent(&mut self, id: satrs::ComponentId, reply_sender: Self::Sender) {
-        self.mode_node.add_message_target(id, reply_sender);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
 
-    use models::pcdu::{SwitchMapBinary, SwitchStateBinary};
-    use satrs::{mode::ModeRequest, request::GenericMessage};
+    use arbitrary_int::u11;
+    use models::{
+        pcdu::{SwitchMapBinary, SwitchStateBinary},
+        Apid, TcHeader,
+    };
+    use satrs::{
+        mode::{ModeReply, ModeRequest},
+        request::{GenericMessage, MessageMetadata},
+        spacepackets::SpacePacketHeader,
+    };
 
     use super::*;
+
+    pub fn create_request_tc(
+        request: models::pcdu::request::Request,
+    ) -> models::ccsds::CcsdsTcPacketOwned {
+        models::ccsds::CcsdsTcPacketOwned::new_with_request(
+            SpacePacketHeader::new_from_apid(u11::new(Apid::Eps as u16)),
+            TcHeader::new(ComponentId::EpsPcdu, request.message_type()),
+            request,
+        )
+    }
 
     #[derive(Default)]
     pub struct SerialInterfaceTest {
@@ -643,7 +591,6 @@ mod tests {
     #[allow(dead_code)]
     pub struct PcduTestbench {
         pub mode_request_tx: mpsc::SyncSender<GenericMessage<ModeRequest>>,
-        pub mode_reply_rx_to_pus: mpsc::Receiver<GenericMessage<ModeReply>>,
         pub mode_reply_rx_to_parent: mpsc::Receiver<GenericMessage<ModeReply>>,
         pub tc_tx: mpsc::SyncSender<CcsdsTcPacketOwned>,
         pub tm_rx: mpsc::Receiver<CcsdsTmPacketOwned>,
@@ -653,29 +600,23 @@ mod tests {
 
     impl PcduTestbench {
         pub fn new() -> Self {
-            let (mode_request_tx, mode_request_rx) = mpsc::sync_channel(5);
-            let (_mode_reply_tx_to_pus, mode_reply_rx_to_pus) = mpsc::sync_channel(5);
-            let (mode_reply_tx_to_parent, mode_reply_rx_to_parent) = mpsc::sync_channel(5);
-            let mode_node =
-                ModeRequestHandlerMpscBounded::new(ComponentId::EpsPcdu as u32, mode_request_rx);
+            let (mode_request_tx, _mode_request_rx) = mpsc::sync_channel(5);
+            let (_mode_reply_tx_to_parent, mode_reply_rx_to_parent) = mpsc::sync_channel(5);
             let (tc_tx, tc_rx) = mpsc::sync_channel(5);
             let (tm_tx, tm_rx) = mpsc::sync_channel(5);
             let (switch_request_tx, switch_reqest_rx) = mpsc::channel();
             let shared_switch_map =
                 Arc::new(Mutex::new(SwitchSet::new_with_init_switches_unknown()));
-            let mut handler = PcduHandler::new(
-                mode_node,
+            let handler = PcduHandler::new(
+                //mode_node,
                 tc_rx,
                 tm_tx.clone(),
                 switch_reqest_rx,
                 SerialInterfaceTest::default(),
                 shared_switch_map,
             );
-            handler.add_mode_parent(ComponentId::EpsSubsystem as u32, mode_reply_tx_to_parent);
-            //handler.add_mode_parent(PUS_MODE.into(), mode_reply_tx_to_pus);
             Self {
                 mode_request_tx,
-                mode_reply_rx_to_pus,
                 mode_reply_rx_to_parent,
                 tc_tx,
                 tm_rx,
@@ -738,11 +679,7 @@ mod tests {
             testbench.handler.com_interface.reply_queue.borrow().len(),
             0
         );
-        assert_eq!(
-            testbench.handler.mode_and_submode().mode(),
-            DeviceMode::Off as u32
-        );
-        assert_eq!(testbench.handler.mode_and_submode().submode(), 0_u16);
+        assert_eq!(testbench.handler.mode(), DeviceMode::Off);
         testbench.handler.periodic_operation(OpCode::RegularOp);
         testbench
             .handler
@@ -753,26 +690,18 @@ mod tests {
             testbench.handler.com_interface.reply_queue.borrow().len(),
             0
         );
-        assert_eq!(
-            testbench.handler.mode_and_submode().mode(),
-            DeviceMode::Off as u32
-        );
-        assert_eq!(testbench.handler.mode_and_submode().submode(), 0_u16);
+        assert_eq!(testbench.handler.mode(), DeviceMode::Off);
     }
 
     #[test]
     fn test_normal_mode() {
         let mut testbench = PcduTestbench::new();
         testbench
-            .mode_request_tx
-            .send(GenericMessage::new(
-                MessageMetadata::new(0, ComponentId::Ground as u32),
-                ModeRequest::SetMode {
-                    mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
-                    forced: false,
-                },
-            ))
-            .expect("failed to send mode request");
+            .tc_tx
+            .send(create_request_tc(pcdu::request::Request::Mode(
+                DeviceMode::Normal,
+            )))
+            .unwrap();
         let switch_map_shared = testbench.handler.shared_switch_map.lock().unwrap();
         assert!(switch_map_shared.valid);
         drop(switch_map_shared);
@@ -781,11 +710,7 @@ mod tests {
             .handler
             .periodic_operation(OpCode::PollAndRecvReplies);
         // Check correctness of mode.
-        assert_eq!(
-            testbench.handler.mode_and_submode().mode(),
-            DeviceMode::Normal as u32
-        );
-        assert_eq!(testbench.handler.mode_and_submode().submode(), 0);
+        assert_eq!(testbench.handler.mode(), DeviceMode::Normal);
 
         testbench.verify_switch_info_req_was_sent(1);
         testbench.verify_switch_reply_received(1, SwitchMapBinaryWrapper::default().0);
@@ -799,15 +724,11 @@ mod tests {
     fn test_switch_request_handling() {
         let mut testbench = PcduTestbench::new();
         testbench
-            .mode_request_tx
-            .send(GenericMessage::new(
-                MessageMetadata::new(0, ComponentId::Ground as u32),
-                ModeRequest::SetMode {
-                    mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as u32, 0),
-                    forced: false,
-                },
-            ))
-            .expect("failed to send mode request");
+            .tc_tx
+            .send(create_request_tc(pcdu::request::Request::Mode(
+                DeviceMode::Normal,
+            )))
+            .unwrap();
         testbench
             .switch_request_tx
             .send(GenericMessage::new(
