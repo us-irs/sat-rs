@@ -2,6 +2,8 @@ use models::{ccsds::CcsdsTmPacketOwned, control, ComponentId, Event, Message};
 
 use crate::ccsds::pack_ccsds_tm_packet_for_now;
 
+// TODO: We should add the capability to enable/disable the TM generation of individual events and
+// event groups as well.
 pub struct EventManager {
     pub ctrl_rx: std::sync::mpsc::Receiver<control::Event>,
     pub tm_tx: std::sync::mpsc::SyncSender<CcsdsTmPacketOwned>,

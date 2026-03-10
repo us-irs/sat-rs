@@ -1112,7 +1112,6 @@ mod tests {
         let mut buf = [0; 1];
         praw.write_to_be_bytes(&mut buf)
             .expect("writing to buffer failed");
-        buf[0] = 200;
     }
 
     #[test]
