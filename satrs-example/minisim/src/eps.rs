@@ -43,6 +43,11 @@ impl PcduModel {
     }
 
     pub async fn switch_device(&mut self, switch_and_target_state: (SwitchId, SwitchStateBinary)) {
+        log::info!(
+            "switching {:?} to {:?}",
+            switch_and_target_state.0,
+            switch_and_target_state.1
+        );
         let val = self
             .switcher_map
             .0
