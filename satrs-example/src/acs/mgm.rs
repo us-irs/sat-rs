@@ -183,6 +183,15 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
         self.mode_helpers.current
     }
 
+    #[inline]
+    pub fn switch_id(&self) -> SwitchId {
+        match self.id {
+            ComponentId::AcsMgm0 => SwitchId::Mgm0,
+            ComponentId::AcsMgm1 => SwitchId::Mgm1,
+            _ => panic!("unexpected component id"),
+        }
+    }
+
     pub fn periodic_operation(&mut self) {
         // Update current time.
         self.stamp_helper.update_from_now();
@@ -364,9 +373,10 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
         let target_mode = self.mode_helpers.target.unwrap();
         if target_mode == DeviceMode::On || target_mode == DeviceMode::Normal {
             if self.mode_helpers.transition_state == TransitionState::Idle {
+                // TODO: Switch ID for MGM1..
                 let result = self
                     .switch_helper
-                    .send_switch_on_cmd(MessageMetadata::new(0, self.id as u32), SwitchId::Mgm0);
+                    .send_switch_on_cmd(MessageMetadata::new(0, self.id as u32), self.switch_id());
                 if result.is_err() {
                     // Could not send switch command.. still continue with transition.
                     log::error!("failed to send switch on command");
@@ -374,7 +384,7 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
                 self.mode_helpers.transition_state = TransitionState::PowerSwitching;
             }
             if self.mode_helpers.transition_state == TransitionState::PowerSwitching
-                && self.switch_helper.is_switch_on(SwitchId::Mgm0)
+                && self.switch_helper.is_switch_on(self.switch_id())
             {
                 self.mode_helpers.transition_state = TransitionState::Done;
             }

@@ -190,25 +190,10 @@ fn main() {
     );
     let mut mgm_assembly = mgm_assembly::Assembly {
         helper: mgm_assembly::QueueHelper {
-            request_tx: [mgm_0_mode_request_tx, mgm_1_mode_request_tx],
-            report_rx: [mgm_0_mode_report_rx, mgm_1_mode_report_rx],
+            request_tx_queues: [mgm_0_mode_request_tx, mgm_1_mode_request_tx],
+            report_rx_queues: [mgm_0_mode_report_rx, mgm_1_mode_report_rx],
         },
     };
-    // Connect PUS service to device handlers.
-    /*
-    connect_mode_nodes(
-        &mut pus_stack.mode_srv,
-        mgm_0_handler_mode_tx,
-        &mut mgm_0_handler,
-        pus_mode_reply_tx.clone(),
-    );
-    connect_mode_nodes(
-        &mut pus_stack.mode_srv,
-        mgm_1_handler_mode_tx,
-        &mut mgm_1_handler,
-        pus_mode_reply_tx.clone(),
-    );
-    */
 
     let pcdu_serial_interface = if let Some(sim_client) = opt_sim_client.as_mut() {
         sim_client.add_reply_recipient(satrs_minisim::SimComponent::Pcdu, pcdu_sim_reply_tx);
@@ -219,23 +204,14 @@ fn main() {
     } else {
         SerialSimInterfaceWrapper::Dummy(SerialInterfaceDummy::default())
     };
-    //let pcdu_mode_node =
-    //ModeRequestHandlerMpscBounded::new(ComponentId::EpsPcdu as u32, pcdu_handler_mode_rx);
     let mut pcdu_handler = PcduHandler::new(
         pcdu_handler_tc_rx,
         tm_sink_tx.clone(),
         switch_request_rx,
         pcdu_serial_interface,
         shared_switch_set,
+        DeviceMode::Normal,
     );
-    /*
-    connect_mode_nodes(
-        &mut pus_stack.mode_srv,
-        pcdu_handler_mode_tx.clone(),
-        &mut pcdu_handler,
-        pus_mode_reply_tx,
-    );
-    */
 
     // The PCDU is a critical component which should be in normal mode immediately.
     pcdu_handler_mode_tx

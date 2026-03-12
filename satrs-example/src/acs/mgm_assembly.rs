@@ -17,8 +17,8 @@ pub enum ModeReport {
 
 /// Helper component for communication with a parent component, which is usually as assembly.
 pub struct QueueHelper {
-    pub request_tx: [mpsc::SyncSender<super::mgm_assembly::ModeRequest>; 2],
-    pub report_rx: [mpsc::Receiver<super::mgm_assembly::ModeReport>; 2],
+    pub request_tx_queues: [mpsc::SyncSender<super::mgm_assembly::ModeRequest>; 2],
+    pub report_rx_queues: [mpsc::Receiver<super::mgm_assembly::ModeReport>; 2],
 }
 
 pub struct Assembly {
@@ -31,8 +31,8 @@ impl Assembly {
     }
 
     pub fn handle_mode_queue(&mut self) {
-        loop {
-            for rx in &mut self.helper.report_rx {
+        for rx in &mut self.helper.report_rx_queues {
+            loop {
                 match rx.try_recv() {
                     // TODO: Do something with the report.
                     Ok(report) => match report {

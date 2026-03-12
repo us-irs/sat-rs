@@ -280,17 +280,18 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
         switch_request_rx: mpsc::Receiver<GenericMessage<SwitchRequest>>,
         com_interface: ComInterface,
         shared_switch_map: Arc<Mutex<SwitchSet>>,
+        init_mode: DeviceMode,
     ) -> Self {
         Self {
             dev_str: "PCDU",
-            //mode_node,
             tc_rx,
             switch_request_rx,
             tm_tx,
             com_interface,
             shared_switch_map,
             stamp_helper: TimestampHelper::default(),
-            mode: DeviceMode::Off,
+            // Start in normal mode by default. Assume that the PCDU itself is on by default.
+            mode: init_mode,
         }
     }
 
@@ -300,7 +301,6 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
                 self.stamp_helper.update_from_now();
                 // Handle requests.
                 self.handle_telecommands();
-                //self.handle_mode_requests();
                 self.handle_switch_requests();
                 // Poll the switch states and/or telemetry regularly here.
                 if self.mode() == DeviceMode::Normal || self.mode() == DeviceMode::On {
@@ -608,12 +608,12 @@ mod tests {
             let shared_switch_map =
                 Arc::new(Mutex::new(SwitchSet::new_with_init_switches_unknown()));
             let handler = PcduHandler::new(
-                //mode_node,
                 tc_rx,
                 tm_tx.clone(),
                 switch_reqest_rx,
                 SerialInterfaceTest::default(),
                 shared_switch_map,
+                DeviceMode::Off,
             );
             Self {
                 mode_request_tx,
