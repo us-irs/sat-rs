@@ -46,7 +46,7 @@ impl TmSink {
     }
 
     pub fn operation(&mut self) {
-        if let Ok(mut tm) = self.tm_funnel_rx.recv() {
+        if let Ok(mut tm) = self.tm_funnel_rx.try_recv() {
             tm.sp_header
                 .set_seq_count(self.seq_counter_map.get_and_increment(tm.sp_header.apid()));
             self.sync_tm_tcp_source.add_tm(&tm.to_vec());

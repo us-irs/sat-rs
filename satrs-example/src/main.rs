@@ -1,6 +1,10 @@
 use std::{
     net::{IpAddr, SocketAddr},
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::Duration,
 };
@@ -52,10 +56,16 @@ mod event_manager;
 mod interface;
 mod logger;
 mod tmtc;
-
 fn main() {
+    static KILL_SIGNAL: AtomicBool = AtomicBool::new(false);
+
     setup_logger().expect("setting up logging with fern failed");
     println!("Runng OBSW example");
+    ctrlc::set_handler(move || {
+        log::info!("Received Ctrl-C, shutting down");
+        KILL_SIGNAL.store(true, Ordering::Relaxed);
+    })
+    .expect("Error setting Ctrl-C handler");
 
     let (tc_source_tx, tc_source_rx) = mpsc::sync_channel(50);
     let (tm_sink_tx, tm_sink_rx) = mpsc::sync_channel(50);
@@ -242,6 +252,9 @@ fn main() {
         .spawn(move || {
             info!("Running UDP server on port {SERVER_PORT}");
             loop {
+                if KILL_SIGNAL.load(Ordering::Relaxed) {
+                    break;
+                }
                 udp_tmtc_server.periodic_operation();
                 tc_source.periodic_operation();
                 thread::sleep(Duration::from_millis(FREQ_MS_UDP_TMTC));
@@ -255,6 +268,9 @@ fn main() {
         .spawn(move || {
             info!("Running TCP server on port {SERVER_PORT}");
             loop {
+                if KILL_SIGNAL.load(Ordering::Relaxed) {
+                    break;
+                }
                 tcp_server.periodic_operation();
             }
         })
@@ -265,6 +281,9 @@ fn main() {
         .name("TM SINK".to_string())
         .spawn(move || {
             loop {
+                if KILL_SIGNAL.load(Ordering::Relaxed) {
+                    break;
+                }
                 tm_sink.operation();
             }
         })
@@ -278,6 +297,9 @@ fn main() {
                 .name("SIM ADAPTER".to_string())
                 .spawn(move || {
                     loop {
+                        if KILL_SIGNAL.load(Ordering::Relaxed) {
+                            break;
+                        }
                         if sim_client.operation() == HandlingStatus::Empty {
                             std::thread::sleep(Duration::from_millis(SIM_CLIENT_IDLE_DELAY_MS));
                         }
@@ -292,6 +314,9 @@ fn main() {
         .name("AOCS".to_string())
         .spawn(move || {
             loop {
+                if KILL_SIGNAL.load(Ordering::Relaxed) {
+                    break;
+                }
                 mgm_0_handler.periodic_operation();
                 mgm_1_handler.periodic_operation();
                 mgm_assembly.periodic_operation();
@@ -305,6 +330,9 @@ fn main() {
         .name("EPS".to_string())
         .spawn(move || {
             loop {
+                if KILL_SIGNAL.load(Ordering::Relaxed) {
+                    break;
+                }
                 // TODO: We should introduce something like a fixed timeslot helper to allow a more
                 // declarative API. It would also be very useful for the AOCS task.
                 //
@@ -325,6 +353,9 @@ fn main() {
         .name("CTRL".to_string())
         .spawn(move || {
             loop {
+                if KILL_SIGNAL.load(Ordering::Relaxed) {
+                    break;
+                }
                 controller.periodic_operation();
                 event_manager.periodic_operation();
                 thread::sleep(Duration::from_millis(FREQ_MS_CONTROLLER));
