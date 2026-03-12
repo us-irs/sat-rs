@@ -163,7 +163,6 @@ pub enum DeviceMode {
     On = 1,
     /// Normal operation mode where periodic polling might be done as well.
     Normal = 2,
-    Unknown = 3,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

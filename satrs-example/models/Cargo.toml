@@ -8,8 +8,8 @@ serde = { version = "1", features = ["derive"] }
 spacepackets = { version = "0.17", git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git", default-features = false }
 satrs = { path = "../../satrs" }
 num_enum = { version = "0.7" }
-strum = { version = "0.27", features = ["derive"] }
+strum = { version = "0.28", features = ["derive"] }
 postcard = { version = "1" }
 thiserror = { version = "2" }
-bitbybit = "1.4"
+bitbybit = "2"
 arbitrary-int = "2"

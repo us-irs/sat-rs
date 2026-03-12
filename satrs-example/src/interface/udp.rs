@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use std::collections::VecDeque;
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 use log::warn;
 use models::ccsds::CcsdsTmPacketOwned;
@@ -115,11 +115,11 @@ mod tests {
     use models::Apid;
     use satrs::spacepackets::ecss::{CreatorConfig, MessageTypeId};
     use satrs::{
-        spacepackets::{
-            ecss::{tc::PusTcCreator, WritablePusPacket},
-            SpHeader,
-        },
         ComponentId,
+        spacepackets::{
+            SpHeader,
+            ecss::{WritablePusPacket, tc::PusTcCreator},
+        },
     };
     use satrs_example::config::OBSW_SERVER_ADDR;
 

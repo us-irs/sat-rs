@@ -1,8 +1,8 @@
 use arbitrary_int::u11;
-use models::{ccsds::CcsdsTmPacketOwned, Apid, ComponentId, Message, TmHeader};
+use models::{Apid, ComponentId, Message, TmHeader, ccsds::CcsdsTmPacketOwned};
 use satrs::spacepackets::{
-    time::{cds::CdsTime, StdTimestampError},
     CcsdsPacketIdAndPsc, SpHeader,
+    time::{StdTimestampError, cds::CdsTime},
 };
 use serde::Serialize;
 

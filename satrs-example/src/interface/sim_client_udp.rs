@@ -7,8 +7,8 @@ use std::{
 
 use satrs::pus::HandlingStatus;
 use satrs_minisim::{
-    udp::SIM_CTRL_PORT, SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimReply,
-    SimRequest,
+    SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimReply, SimRequest,
+    udp::SIM_CTRL_PORT,
 };
 use satrs_minisim::{SimCtrlReply, SimCtrlRequest};
 
@@ -187,16 +187,17 @@ pub mod tests {
         collections::HashMap,
         net::{SocketAddr, UdpSocket},
         sync::{
+            Arc,
             atomic::{AtomicBool, Ordering},
-            mpsc, Arc,
+            mpsc,
         },
         time::Duration,
     };
 
     use satrs_minisim::{
-        eps::{PcduReply, PcduRequest},
         SerializableSimMsgPayload, SimComponent, SimCtrlReply, SimCtrlRequest, SimMessageProvider,
         SimReply, SimRequest,
+        eps::{PcduReply, PcduRequest},
     };
 
     use super::SimClientUdp;

@@ -1,13 +1,13 @@
 use std::{
     net::{IpAddr, SocketAddr},
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     thread,
     time::Duration,
 };
 
 use eps::{
-    pcdu::{PcduHandler, SerialInterfaceDummy, SerialInterfaceToSim, SerialSimInterfaceWrapper},
     PowerSwitchHelper,
+    pcdu::{PcduHandler, SerialInterfaceDummy, SerialInterfaceToSim, SerialSimInterfaceWrapper},
 };
 use interface::{
     sim_client_udp::create_sim_client,
@@ -24,10 +24,13 @@ use satrs::{
     request::{GenericMessage, MessageMetadata},
     spacepackets::time::cds::CdsTime,
 };
-use satrs_example::config::{
-    components::NO_SENDER,
-    tasks::{FREQ_MS_AOCS, FREQ_MS_CONTROLLER, FREQ_MS_UDP_TMTC, SIM_CLIENT_IDLE_DELAY_MS},
-    OBSW_SERVER_ADDR, PACKET_ID_VALIDATOR, SERVER_PORT,
+use satrs_example::{
+    TmtcQueues,
+    config::{
+        OBSW_SERVER_ADDR, PACKET_ID_VALIDATOR, SERVER_PORT,
+        components::NO_SENDER,
+        tasks::{FREQ_MS_AOCS, FREQ_MS_CONTROLLER, FREQ_MS_UDP_TMTC, SIM_CLIENT_IDLE_DELAY_MS},
+    },
 };
 use tmtc::sender::TmTcSender;
 use tmtc::{tc_source::TcSourceTask, tm_sink::TmSink};
@@ -66,6 +69,7 @@ fn main() {
 
     let (mgm_0_handler_tc_tx, mgm_0_handler_tc_rx) = mpsc::sync_channel(10);
     let (mgm_1_handler_tc_tx, mgm_1_handler_tc_rx) = mpsc::sync_channel(10);
+    let (_mgm_assembly_tc_tx, mgm_assembly_tc_rx) = mpsc::sync_channel(10);
     let (pcdu_handler_tc_tx, pcdu_handler_tc_rx) = mpsc::sync_channel(30);
     let (controller_tc_tx, controller_tc_rx) = mpsc::sync_channel(10);
 
@@ -145,25 +149,27 @@ fn main() {
             sim_client
                 .add_reply_recipient(satrs_minisim::SimComponent::Mgm1Lis3Mdl, mgm_1_sim_reply_tx);
             (
-                mgm::SpiInterface::Sim(mgm::SpiSimInterface {
+                mgm::SpiCommunication::Sim(mgm::SpiSimInterface {
                     sim_request_tx: sim_request_tx.clone(),
                     sim_reply_rx: mgm_0_sim_reply_rx,
                 }),
-                mgm::SpiInterface::Sim(mgm::SpiSimInterface {
+                mgm::SpiCommunication::Sim(mgm::SpiSimInterface {
                     sim_request_tx: sim_request_tx.clone(),
                     sim_reply_rx: mgm_1_sim_reply_rx,
                 }),
             )
         } else {
             (
-                mgm::SpiInterface::Dummy(mgm::SpiDummyInterface::default()),
-                mgm::SpiInterface::Dummy(mgm::SpiDummyInterface::default()),
+                mgm::SpiCommunication::Dummy(mgm::SpiDummyInterface::default()),
+                mgm::SpiCommunication::Dummy(mgm::SpiDummyInterface::default()),
             )
         };
     let mut mgm_0_handler = mgm::MgmHandlerLis3Mdl::new(
         mgm::MgmId::_0,
-        mgm_0_handler_tc_rx,
-        tm_sink_tx.clone(),
+        TmtcQueues {
+            tc_rx: mgm_0_handler_tc_rx,
+            tm_tx: tm_sink_tx.clone(),
+        },
         switch_helper.clone(),
         mgm_0_spi_interface,
         shared_mgm_0_set,
@@ -174,8 +180,10 @@ fn main() {
     );
     let mut mgm_1_handler = mgm::MgmHandlerLis3Mdl::new(
         mgm::MgmId::_1,
-        mgm_1_handler_tc_rx,
-        tm_sink_tx.clone(),
+        TmtcQueues {
+            tc_rx: mgm_1_handler_tc_rx,
+            tm_tx: tm_sink_tx.clone(),
+        },
         switch_helper.clone(),
         mgm_1_spi_interface,
         shared_mgm_1_set,
@@ -192,6 +200,10 @@ fn main() {
         mgm_assembly::ChildrenQueueHelper {
             request_tx_queues: [mgm_0_mode_request_tx, mgm_1_mode_request_tx],
             report_rx_queues: [mgm_0_mode_report_rx, mgm_1_mode_report_rx],
+        },
+        TmtcQueues {
+            tc_rx: mgm_assembly_tc_rx,
+            tm_tx: tm_sink_tx.clone(),
         },
     );
 
@@ -251,8 +263,10 @@ fn main() {
     info!("Starting TM funnel task");
     let jh_tm_funnel = thread::Builder::new()
         .name("TM SINK".to_string())
-        .spawn(move || loop {
-            tm_sink.operation();
+        .spawn(move || {
+            loop {
+                tm_sink.operation();
+            }
         })
         .unwrap();
 
@@ -262,9 +276,11 @@ fn main() {
         opt_jh_sim_client = Some(
             thread::Builder::new()
                 .name("SIM ADAPTER".to_string())
-                .spawn(move || loop {
-                    if sim_client.operation() == HandlingStatus::Empty {
-                        std::thread::sleep(Duration::from_millis(SIM_CLIENT_IDLE_DELAY_MS));
+                .spawn(move || {
+                    loop {
+                        if sim_client.operation() == HandlingStatus::Empty {
+                            std::thread::sleep(Duration::from_millis(SIM_CLIENT_IDLE_DELAY_MS));
+                        }
                     }
                 })
                 .unwrap(),
@@ -274,39 +290,45 @@ fn main() {
     info!("Starting AOCS thread");
     let jh_aocs = thread::Builder::new()
         .name("AOCS".to_string())
-        .spawn(move || loop {
-            mgm_0_handler.periodic_operation();
-            mgm_1_handler.periodic_operation();
-            mgm_assembly.periodic_operation();
-            thread::sleep(Duration::from_millis(FREQ_MS_AOCS));
+        .spawn(move || {
+            loop {
+                mgm_0_handler.periodic_operation();
+                mgm_1_handler.periodic_operation();
+                mgm_assembly.periodic_operation();
+                thread::sleep(Duration::from_millis(FREQ_MS_AOCS));
+            }
         })
         .unwrap();
 
     info!("Starting EPS thread");
     let jh_eps = thread::Builder::new()
         .name("EPS".to_string())
-        .spawn(move || loop {
-            // TODO: We should introduce something like a fixed timeslot helper to allow a more
-            // declarative API. It would also be very useful for the AOCS task.
-            //
-            // TODO: The fixed timeslot handler exists.. use it.
-            // TODO: Why not just use sync code in the PCDU handler, and fully delay there?
-            pcdu_handler.periodic_operation(crate::eps::pcdu::OpCode::RegularOp);
-            thread::sleep(Duration::from_millis(50));
-            pcdu_handler.periodic_operation(crate::eps::pcdu::OpCode::PollAndRecvReplies);
-            thread::sleep(Duration::from_millis(50));
-            pcdu_handler.periodic_operation(crate::eps::pcdu::OpCode::PollAndRecvReplies);
-            thread::sleep(Duration::from_millis(300));
+        .spawn(move || {
+            loop {
+                // TODO: We should introduce something like a fixed timeslot helper to allow a more
+                // declarative API. It would also be very useful for the AOCS task.
+                //
+                // TODO: The fixed timeslot handler exists.. use it.
+                // TODO: Why not just use sync code in the PCDU handler, and fully delay there?
+                pcdu_handler.periodic_operation(crate::eps::pcdu::OpCode::RegularOp);
+                thread::sleep(Duration::from_millis(50));
+                pcdu_handler.periodic_operation(crate::eps::pcdu::OpCode::PollAndRecvReplies);
+                thread::sleep(Duration::from_millis(50));
+                pcdu_handler.periodic_operation(crate::eps::pcdu::OpCode::PollAndRecvReplies);
+                thread::sleep(Duration::from_millis(300));
+            }
         })
         .unwrap();
 
     info!("Starting controller thread");
     let jh_controller_thread = thread::Builder::new()
         .name("CTRL".to_string())
-        .spawn(move || loop {
-            controller.periodic_operation();
-            event_manager.periodic_operation();
-            thread::sleep(Duration::from_millis(FREQ_MS_CONTROLLER));
+        .spawn(move || {
+            loop {
+                controller.periodic_operation();
+                event_manager.periodic_operation();
+                thread::sleep(Duration::from_millis(FREQ_MS_CONTROLLER));
+            }
         })
         .unwrap();
 

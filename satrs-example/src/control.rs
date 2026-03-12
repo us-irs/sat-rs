@@ -1,6 +1,7 @@
 use models::{
+    ComponentId,
     ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned},
-    control, ComponentId,
+    control,
 };
 use satrs::spacepackets::CcsdsPacketIdAndPsc;
 

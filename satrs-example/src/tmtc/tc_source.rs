@@ -1,4 +1,4 @@
-use models::{ccsds::CcsdsTcPacketOwned, ComponentId, TcHeader};
+use models::{ComponentId, TcHeader, ccsds::CcsdsTcPacketOwned};
 use satrs::{
     pus::HandlingStatus,
     spacepackets::{CcsdsPacketReader, ChecksumType},

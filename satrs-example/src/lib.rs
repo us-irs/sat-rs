@@ -1,9 +1,13 @@
 extern crate alloc;
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::mpsc,
+    time::{Duration, Instant},
+};
 
 pub use models::ComponentId;
-use satrs::spacepackets::{time::cds::CdsTime, CcsdsPacketIdAndPsc};
+use models::ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned};
+use satrs::spacepackets::{CcsdsPacketIdAndPsc, time::cds::CdsTime};
 
 pub mod config;
 
@@ -91,16 +95,13 @@ impl HkHelperSingleSet {
     }
 }
 
-#[derive(Default, Debug, PartialEq, Eq)]
-pub enum TransitionState {
-    #[default]
-    Idle,
-    PowerSwitching,
-    Done,
+pub struct TmtcQueues {
+    pub tc_rx: mpsc::Receiver<CcsdsTcPacketOwned>,
+    pub tm_tx: mpsc::SyncSender<CcsdsTmPacketOwned>,
 }
 
 #[derive(Debug)]
-pub struct ModeHelper<Mode> {
+pub struct ModeHelper<Mode, TransitionState> {
     pub current: Mode,
     pub target: Option<Mode>,
     pub tc_id: Option<CcsdsPacketIdAndPsc>,
@@ -109,7 +110,7 @@ pub struct ModeHelper<Mode> {
     pub transition_state: TransitionState,
 }
 
-impl<Mode: Copy + Clone> ModeHelper<Mode> {
+impl<Mode: Copy + Clone, TransitionState: Default> ModeHelper<Mode, TransitionState> {
     pub fn new(init_mode: Mode, timeout: Duration) -> Self {
         Self {
             current: init_mode,
@@ -124,7 +125,12 @@ impl<Mode: Copy + Clone> ModeHelper<Mode> {
     pub fn start(&mut self, target: Mode) {
         self.target = Some(target);
         self.transition_start = Some(Instant::now());
-        self.transition_state = TransitionState::Idle;
+        self.transition_state = TransitionState::default();
+    }
+
+    #[inline]
+    pub fn transition_active(&self) -> bool {
+        self.target.is_some()
     }
 
     pub fn timed_out(&self) -> bool {
@@ -146,6 +152,7 @@ impl<Mode: Copy + Clone> ModeHelper<Mode> {
         } else {
             self.target = None;
         }
+        self.transition_state = Default::default();
         self.transition_start = None;
     }
 }
