@@ -1,9 +1,9 @@
 use std::{cell::RefCell, collections::VecDeque, sync::mpsc};
 
 use satrs::{
+    ComponentId,
     queue::GenericSendError,
     tmtc::{PacketAsVec, PacketHandler},
-    ComponentId,
 };
 
 #[derive(Default, Debug, Clone)]

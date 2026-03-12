@@ -129,15 +129,13 @@ impl TcpTask {
     }
 
     pub fn periodic_operation(&mut self) {
-        loop {
-            let result = self
-                .0
-                .handle_all_connections(Some(Duration::from_millis(400)));
-            match result {
-                Ok(_conn_result) => (),
-                Err(e) => {
-                    warn!("TCP server error: {e:?}");
-                }
+        let result = self
+            .0
+            .handle_all_connections(Some(Duration::from_millis(400)));
+        match result {
+            Ok(_conn_result) => (),
+            Err(e) => {
+                warn!("TCP server error: {e:?}");
             }
         }
     }

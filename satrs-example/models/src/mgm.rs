@@ -1,5 +1,11 @@
 pub mod request {
-    use crate::{HkRequestType, Message};
+    use crate::{DeviceMode, HkRequestType, Message};
+
+    #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum ModeRequest {
+        SetMode(DeviceMode),
+        ReadMode,
+    }
 
     #[derive(Debug, PartialEq, Eq, Clone, Copy, serde::Serialize, serde::Deserialize)]
     pub enum HkId {
@@ -16,7 +22,7 @@ pub mod request {
     pub enum Request {
         Ping,
         Hk(HkRequest),
-        Mode(crate::DeviceMode),
+        Mode(ModeRequest),
     }
 
     impl Request {
@@ -44,17 +50,26 @@ pub struct MgmData {
 }
 
 pub mod response {
-    use crate::{Message, mgm::MgmData};
+    use crate::{DeviceMode, Message, mgm::MgmData};
 
     #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
     pub enum HkResponse {
         MgmData(MgmData),
     }
 
+    #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
+    pub enum ModeResponse {
+        /// New mode has been set.
+        Mode(DeviceMode),
+        /// Setting a mode timed out.
+        SetModeTimeout,
+    }
+
     #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
     pub enum Response {
         Ok,
         Hk(HkResponse),
+        Mode(ModeResponse),
     }
 
     impl Response {
@@ -62,6 +77,7 @@ pub mod response {
             match self {
                 Response::Ok => crate::MessageType::Verification,
                 Response::Hk(_hk_response) => crate::MessageType::Hk,
+                Response::Mode(_mode_failure) => crate::MessageType::Mode,
             }
         }
     }

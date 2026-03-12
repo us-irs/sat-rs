@@ -1,25 +1,23 @@
-use models::ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned};
 use models::mgm::MgmData;
+use models::mgm::request::ModeRequest;
+use models::mgm::response::ModeResponse;
 use models::pcdu::SwitchId;
-use models::{mgm, ComponentId, DeviceMode, HkRequestType};
+use models::{ComponentId, DeviceMode, HkRequestType, mgm};
 use satrs::spacepackets::CcsdsPacketIdAndPsc;
-use satrs_example::{HkHelperSingleSet, TimestampHelper};
-use satrs_minisim::acs::lis3mdl::{
-    MgmLis3MdlReply, MgmLis3RawValues, FIELD_LSB_PER_GAUSS_4_SENS, GAUSS_TO_MICROTESLA_FACTOR,
-};
+use satrs_example::{HkHelperSingleSet, ModeHelper, TimestampHelper, TmtcQueues};
 use satrs_minisim::acs::MgmRequestLis3Mdl;
+use satrs_minisim::acs::lis3mdl::{
+    FIELD_LSB_PER_GAUSS_4_SENS, GAUSS_TO_MICROTESLA_FACTOR, MgmLis3MdlReply, MgmLis3RawValues,
+};
 use satrs_minisim::{SerializableSimMsgPayload, SimReply, SimRequest};
-use std::fmt::Debug;
-use std::sync::mpsc::{self};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use satrs::request::MessageMetadata;
 
-use crate::acs::mgm_assembly;
 use crate::ccsds::pack_ccsds_tm_packet_for_now;
 use crate::eps::PowerSwitchHelper;
-use crate::spi::SpiInterface;
 
 pub const NR_OF_DATA_AND_CFG_REGISTERS: usize = 14;
 
@@ -27,6 +25,29 @@ pub const NR_OF_DATA_AND_CFG_REGISTERS: usize = 14;
 pub const X_LOWBYTE_IDX: usize = 9;
 pub const Y_LOWBYTE_IDX: usize = 11;
 pub const Z_LOWBYTE_IDX: usize = 13;
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum MgmId {
+    _0,
+    _1,
+}
+
+impl MgmId {
+    pub const fn str(&self) -> &str {
+        match self {
+            MgmId::_0 => "MGM 0",
+            MgmId::_1 => "MGM 1",
+        }
+    }
+
+    #[inline]
+    pub const fn component_id(&self) -> ComponentId {
+        match self {
+            MgmId::_0 => ComponentId::AcsMgm0,
+            MgmId::_1 => ComponentId::AcsMgm1,
+        }
+    }
+}
 
 #[derive(Default, Debug, PartialEq, Eq)]
 pub enum TransitionState {
@@ -41,14 +62,26 @@ pub struct SpiDummyInterface {
     pub dummy_values: MgmLis3RawValues,
 }
 
-impl SpiInterface for SpiDummyInterface {
-    type Error = ();
-
-    fn transfer(&mut self, _tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error> {
+impl SpiDummyInterface {
+    fn transfer(&mut self, _tx: &[u8], rx: &mut [u8]) {
         rx[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2].copy_from_slice(&self.dummy_values.x.to_le_bytes());
         rx[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2].copy_from_slice(&self.dummy_values.y.to_be_bytes());
         rx[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2].copy_from_slice(&self.dummy_values.z.to_be_bytes());
-        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct TestSpiInterface {
+    pub call_count: u32,
+    pub next_mgm_data: MgmLis3RawValues,
+}
+
+impl TestSpiInterface {
+    fn transfer(&mut self, _tx: &[u8], rx: &mut [u8]) {
+        rx[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2].copy_from_slice(&self.next_mgm_data.x.to_le_bytes());
+        rx[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2].copy_from_slice(&self.next_mgm_data.y.to_le_bytes());
+        rx[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2].copy_from_slice(&self.next_mgm_data.z.to_le_bytes());
+        self.call_count += 1;
     }
 }
 
@@ -57,11 +90,9 @@ pub struct SpiSimInterface {
     pub sim_reply_rx: mpsc::Receiver<SimReply>,
 }
 
-impl SpiInterface for SpiSimInterface {
-    type Error = ();
-
+impl SpiSimInterface {
     // Right now, we only support requesting sensor data and not configuration of the sensor.
-    fn transfer(&mut self, _tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error> {
+    fn transfer(&mut self, _tx: &[u8], rx: &mut [u8]) {
         let mgm_sensor_request = MgmRequestLis3Mdl::RequestSensorData;
         if let Err(e) = self
             .sim_request_tx
@@ -84,22 +115,22 @@ impl SpiInterface for SpiSimInterface {
                 log::warn!("MGM LIS3 SIM reply timeout: {e}");
             }
         }
-        Ok(())
     }
 }
 
-pub enum SpiSimInterfaceWrapper {
+pub enum SpiCommunication {
     Dummy(SpiDummyInterface),
     Sim(SpiSimInterface),
+    #[allow(dead_code)]
+    Test(TestSpiInterface),
 }
 
-impl SpiInterface for SpiSimInterfaceWrapper {
-    type Error = ();
-
-    fn transfer(&mut self, tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error> {
+impl SpiCommunication {
+    fn transfer(&mut self, tx: &[u8], rx: &mut [u8]) {
         match self {
-            SpiSimInterfaceWrapper::Dummy(dummy) => dummy.transfer(tx, rx),
-            SpiSimInterfaceWrapper::Sim(sim_if) => sim_if.transfer(tx, rx),
+            SpiCommunication::Dummy(dummy) => dummy.transfer(tx, rx),
+            SpiCommunication::Sim(sim_if) => sim_if.transfer(tx, rx),
+            SpiCommunication::Test(test_if) => test_if.transfer(tx, rx),
         }
     }
 }
@@ -110,67 +141,43 @@ pub struct BufWrapper {
     rx_buf: [u8; 32],
 }
 
-pub struct ModeHelpers {
-    current: DeviceMode,
-    target: Option<DeviceMode>,
-    tc_id: Option<CcsdsPacketIdAndPsc>,
-    transition_state: TransitionState,
-}
-
-impl Default for ModeHelpers {
-    fn default() -> Self {
-        Self {
-            current: DeviceMode::Off,
-            target: Default::default(),
-            tc_id: Default::default(),
-            transition_state: Default::default(),
-        }
-    }
-}
-
 /// Helper component for communication with a parent component, which is usually as assembly.
 pub struct ModeLeafHelper {
-    pub request_rx: mpsc::Receiver<super::mgm_assembly::ModeRequest>,
-    pub report_tx: mpsc::SyncSender<super::mgm_assembly::ModeReport>,
+    pub request_rx: mpsc::Receiver<ModeRequest>,
+    pub report_tx: mpsc::SyncSender<ModeResponse>,
 }
 
 /// Example MGM device handler strongly based on the LIS3MDL MEMS device.
-pub struct MgmHandlerLis3Mdl<ComInterface: SpiInterface> {
-    id: ComponentId,
-    dev_str: &'static str,
-    tc_rx: mpsc::Receiver<CcsdsTcPacketOwned>,
-    tm_tx: mpsc::SyncSender<CcsdsTmPacketOwned>,
+pub struct MgmHandlerLis3Mdl {
+    id: MgmId,
     switch_helper: PowerSwitchHelper,
-    pub com_interface: ComInterface,
+    tmtc_queues: TmtcQueues,
+    pub spi_com: SpiCommunication,
     shared_mgm_set: Arc<Mutex<MgmData>>,
     buffers: BufWrapper,
     stamp_helper: TimestampHelper,
     hk_helper: HkHelperSingleSet,
-    mode_helpers: ModeHelpers,
+    mode_helpers: ModeHelper<DeviceMode, TransitionState>,
     mode_leaf_helper: ModeLeafHelper,
 }
 
-impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
-    #[allow(clippy::too_many_arguments)]
+impl MgmHandlerLis3Mdl {
     pub fn new(
-        id: ComponentId,
-        dev_str: &'static str,
-        tc_rx: mpsc::Receiver<CcsdsTcPacketOwned>,
-        tm_tx: mpsc::SyncSender<CcsdsTmPacketOwned>,
+        id: MgmId,
+        tmtc_queues: TmtcQueues,
         switch_helper: PowerSwitchHelper,
-        com_interface: ComInterface,
+        spi_com: SpiCommunication,
         shared_mgm_set: Arc<Mutex<MgmData>>,
         mode_leaf_helper: ModeLeafHelper,
+        mode_timeout: Duration
     ) -> Self {
         Self {
             id,
-            dev_str,
-            tc_rx,
-            tm_tx,
+            tmtc_queues,
             switch_helper,
-            com_interface,
+            spi_com,
             shared_mgm_set,
-            mode_helpers: ModeHelpers::default(),
+            mode_helpers: ModeHelper::new(DeviceMode::Off, mode_timeout),
             buffers: BufWrapper::default(),
             stamp_helper: TimestampHelper::default(),
             hk_helper: HkHelperSingleSet::new(false, Duration::from_millis(200)),
@@ -186,9 +193,8 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
     #[inline]
     pub fn switch_id(&self) -> SwitchId {
         match self.id {
-            ComponentId::AcsMgm0 => SwitchId::Mgm0,
-            ComponentId::AcsMgm1 => SwitchId::Mgm1,
-            _ => panic!("unexpected component id"),
+            MgmId::_0 => SwitchId::Mgm0,
+            MgmId::_1 => SwitchId::Mgm1,
         }
     }
 
@@ -207,7 +213,7 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
 
         // Poll sensor before checking and generating HK.
         if self.mode() == DeviceMode::Normal {
-            log::trace!("polling LIS3MDL sensor {}", self.dev_str);
+            log::trace!("polling LIS3MDL sensor {}", self.id.str());
             self.poll_sensor();
         }
 
@@ -219,7 +225,7 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
 
     pub fn handle_telecommands(&mut self) {
         loop {
-            match self.tc_rx.try_recv() {
+            match self.tmtc_queues.tc_rx.try_recv() {
                 Ok(packet) => {
                     let tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&packet.sp_header);
                     match postcard::from_bytes::<mgm::request::Request>(&packet.payload) {
@@ -236,10 +242,18 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
                                 mgm::request::Request::Hk(hk_request) => {
                                     self.handle_hk_request(Some(tc_id), &hk_request)
                                 }
-                                mgm::request::Request::Mode(device_mode) => {
-                                    self.mode_helpers.tc_id = Some(tc_id);
-                                    self.start_transition(device_mode, false);
-                                }
+                                mgm::request::Request::Mode(device_mode) => match device_mode {
+                                    ModeRequest::SetMode(device_mode) => {
+                                        self.mode_helpers.tc_commander = Some(tc_id);
+                                        self.start_transition(device_mode, false);
+                                    }
+                                    ModeRequest::ReadMode => self.send_telemetry(
+                                        Some(tc_id),
+                                        mgm::response::Response::Mode(ModeResponse::Mode(
+                                            self.mode(),
+                                        )),
+                                    ),
+                                },
                             }
                         }
                         Err(e) => {
@@ -261,10 +275,8 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
         loop {
             match self.mode_leaf_helper.request_rx.try_recv() {
                 Ok(request) => match request {
-                    mgm_assembly::ModeRequest::SetMode(device_mode) => {
-                        self.start_transition(device_mode, false)
-                    }
-                    mgm_assembly::ModeRequest::ReadMode => self.report_mode_to_parent(),
+                    ModeRequest::SetMode(device_mode) => self.start_transition(device_mode, false),
+                    ModeRequest::ReadMode => self.report_mode_to_parent(),
                 },
                 Err(e) => match e {
                     std::sync::mpsc::TryRecvError::Empty => break,
@@ -281,9 +293,9 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
         tc_id: Option<CcsdsPacketIdAndPsc>,
         response: mgm::response::Response,
     ) {
-        match pack_ccsds_tm_packet_for_now(self.id, tc_id, &response) {
+        match pack_ccsds_tm_packet_for_now(self.id.component_id(), tc_id, &response) {
             Ok(packet) => {
-                if let Err(e) = self.tm_tx.send(packet) {
+                if let Err(e) = self.tmtc_queues.tm_tx.send(packet) {
                     log::warn!("failed to send TM packet: {}", e);
                 }
             }
@@ -327,12 +339,10 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
     pub fn poll_sensor(&mut self) {
         // Communicate with the device. This is actually how to read the data from the LIS3 device
         // SPI interface.
-        self.com_interface
-            .transfer(
-                &self.buffers.tx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
-                &mut self.buffers.rx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
-            )
-            .expect("failed to transfer data");
+        self.spi_com.transfer(
+            &self.buffers.tx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
+            &mut self.buffers.rx_buf[0..NR_OF_DATA_AND_CFG_REGISTERS + 1],
+        );
         let x_raw = i16::from_le_bytes(
             self.buffers.rx_buf[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2]
                 .try_into()
@@ -358,12 +368,11 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
     }
 
     fn start_transition(&mut self, target_mode: DeviceMode, _forced: bool) {
-        log::info!("{}: transitioning to mode {:?}", self.dev_str, target_mode);
+        log::info!("{}: transitioning to mode {:?}", self.id.str(), target_mode);
         if target_mode == DeviceMode::Off {
             self.shared_mgm_set.lock().unwrap().valid = false;
         }
-        self.mode_helpers.transition_state = TransitionState::Idle;
-        self.mode_helpers.target = Some(target_mode);
+        self.mode_helpers.start(target_mode);
     }
 
     pub fn handle_mode_transition(&mut self) {
@@ -373,7 +382,6 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
         let target_mode = self.mode_helpers.target.unwrap();
         if target_mode == DeviceMode::On || target_mode == DeviceMode::Normal {
             if self.mode_helpers.transition_state == TransitionState::Idle {
-                // TODO: Switch ID for MGM1..
                 let result = self
                     .switch_helper
                     .send_switch_on_cmd(MessageMetadata::new(0, self.id as u32), self.switch_id());
@@ -383,37 +391,59 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
                 }
                 self.mode_helpers.transition_state = TransitionState::PowerSwitching;
             }
-            if self.mode_helpers.transition_state == TransitionState::PowerSwitching
-                && self.switch_helper.is_switch_on(self.switch_id())
-            {
-                self.mode_helpers.transition_state = TransitionState::Done;
+            if self.mode_helpers.transition_state == TransitionState::PowerSwitching {
+                if self.switch_helper.is_switch_on(self.switch_id()) {
+                    log::info!("switch is on");
+                    self.mode_helpers.transition_state = TransitionState::Done;
+                } else if self.mode_helpers.timed_out() {
+                    self.handle_mode_transition_failure();
+                }
             }
             if self.mode_helpers.transition_state == TransitionState::Done {
-                self.mode_helpers.current = self.mode_helpers.target.unwrap();
                 self.handle_mode_reached();
-                self.mode_helpers.transition_state = TransitionState::Idle;
             }
         }
     }
 
+    // Should be called to complete a mode transition which failed.
+    fn handle_mode_transition_failure(&mut self) {
+        let tc_commander = self.mode_helpers.finish(false);
+        if tc_commander.is_some() {
+            self.send_telemetry(
+                tc_commander,
+                mgm::response::Response::Mode(ModeResponse::SetModeTimeout),
+            );
+        }
+        self.mode_leaf_helper
+            .report_tx
+            .send(ModeResponse::SetModeTimeout)
+            .unwrap();
+    }
+
+    // Should be called to complete a mode transition successfully.
     fn handle_mode_reached(&mut self) {
-        self.mode_helpers.target = None;
-        log::info!(
-            "{} announcing mode: {:?}",
-            self.dev_str,
-            self.mode_helpers.current
-        );
-        if let Some(requestor) = self.mode_helpers.tc_id {
+        let tc_commander = self.mode_helpers.finish(true);
+        self.announce_mode();
+        if let Some(requestor) = tc_commander {
             self.send_mode_tm(requestor);
         }
         // Inform our parent about mode changes.
         self.report_mode_to_parent();
     }
 
+    fn announce_mode(&self) {
+        log::info!(
+            "{} announcing mode: {:?}",
+            self.id.str(),
+            self.mode_helpers.current
+        );
+        // TODO: Event?
+    }
+
     fn report_mode_to_parent(&self) {
         self.mode_leaf_helper
             .report_tx
-            .send(mgm_assembly::ModeReport::Mode(self.mode_helpers.current))
+            .send(ModeResponse::Mode(self.mode_helpers.current))
             .unwrap();
     }
 
@@ -425,15 +455,16 @@ impl<ComInterface: SpiInterface> MgmHandlerLis3Mdl<ComInterface> {
 #[cfg(test)]
 mod tests {
     use std::sync::{
-        mpsc::{self, TryRecvError},
         Arc,
+        mpsc::{self, TryRecvError},
     };
 
     use arbitrary_int::u11;
     use models::{
+        Apid, ComponentId, TcHeader,
+        ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned},
         mgm::request::HkRequest,
         pcdu::{SwitchRequest, SwitchState, SwitchStateBinary},
-        Apid, ComponentId, TcHeader,
     };
     use satrs::{request::GenericMessage, spacepackets::SpacePacketHeader};
     use satrs_minisim::acs::lis3mdl::MgmLis3RawValues;
@@ -468,36 +499,15 @@ mod tests {
         )
     }
 
-    #[derive(Default)]
-    pub struct TestSpiInterface {
-        pub call_count: u32,
-        pub next_mgm_data: MgmLis3RawValues,
-    }
-
-    impl SpiInterface for TestSpiInterface {
-        type Error = ();
-
-        fn transfer(&mut self, _tx: &[u8], rx: &mut [u8]) -> Result<(), Self::Error> {
-            rx[X_LOWBYTE_IDX..X_LOWBYTE_IDX + 2]
-                .copy_from_slice(&self.next_mgm_data.x.to_le_bytes());
-            rx[Y_LOWBYTE_IDX..Y_LOWBYTE_IDX + 2]
-                .copy_from_slice(&self.next_mgm_data.y.to_le_bytes());
-            rx[Z_LOWBYTE_IDX..Z_LOWBYTE_IDX + 2]
-                .copy_from_slice(&self.next_mgm_data.z.to_le_bytes());
-            self.call_count += 1;
-            Ok(())
-        }
-    }
-
     #[allow(dead_code)]
     pub struct MgmTestbench {
-        pub assembly_mode_request_tx: mpsc::SyncSender<mgm_assembly::ModeRequest>,
-        pub mode_report_rx: mpsc::Receiver<mgm_assembly::ModeReport>,
+        pub assembly_mode_request_tx: mpsc::SyncSender<ModeRequest>,
+        pub mode_report_rx: mpsc::Receiver<ModeResponse>,
         pub shared_switch_set: SharedSwitchSet,
         pub tc_tx: mpsc::SyncSender<CcsdsTcPacketOwned>,
         pub tm_rx: mpsc::Receiver<CcsdsTmPacketOwned>,
         pub switch_rx: mpsc::Receiver<GenericMessage<SwitchRequest>>,
-        pub handler: MgmHandlerLis3Mdl<TestSpiInterface>,
+        pub handler: MgmHandlerLis3Mdl,
     }
 
     impl MgmTestbench {
@@ -517,12 +527,10 @@ mod tests {
             let switch_map = SwitchSet::new(switch_map);
             let shared_switch_set = SharedSwitchSet::new(Mutex::new(switch_map));
             let handler = MgmHandlerLis3Mdl::new(
-                ComponentId::AcsMgm0,
-                "TEST_MGM",
-                tc_rx,
-                tm_tx,
+                MgmId::_0,
+                TmtcQueues { tc_rx, tm_tx },
                 PowerSwitchHelper::new(switcher_tx, shared_switch_set.clone()),
-                TestSpiInterface::default(),
+                SpiCommunication::Test(TestSpiInterface::default()),
                 shared_mgm_set,
                 mode_leaf_helper,
             );
@@ -536,16 +544,25 @@ mod tests {
                 tc_tx,
             }
         }
+
+        pub fn test_spi_interface(&mut self) -> &mut TestSpiInterface {
+            match &mut self.handler.spi_com {
+                SpiCommunication::Dummy(_) | SpiCommunication::Sim(_) => {
+                    panic!("unexpected SPI interface")
+                }
+                SpiCommunication::Test(test_spi_interface) => test_spi_interface,
+            }
+        }
     }
 
     #[test]
     fn test_basic_handler() {
         let mut testbench = MgmTestbench::new();
-        assert_eq!(testbench.handler.com_interface.call_count, 0);
+        assert_eq!(testbench.test_spi_interface().call_count, 0);
         assert_eq!(testbench.handler.mode(), DeviceMode::Off);
         testbench.handler.periodic_operation();
         // Handler is OFF, no changes expected.
-        assert_eq!(testbench.handler.com_interface.call_count, 0);
+        assert_eq!(testbench.test_spi_interface().call_count, 0);
         assert_eq!(testbench.handler.mode(), DeviceMode::Off);
     }
 
@@ -556,7 +573,7 @@ mod tests {
             .tc_tx
             .send(create_request_tc(
                 MgmSelect::_0,
-                mgm::request::Request::Mode(DeviceMode::Normal),
+                mgm::request::Request::Mode(ModeRequest::SetMode(DeviceMode::Normal)),
             ))
             .unwrap();
         testbench.handler.periodic_operation();
@@ -587,7 +604,7 @@ mod tests {
             .expect("failed to deserialize mode reply");
         matches!(response, models::mgm::response::Response::Ok);
         // The device should have been polled once.
-        assert_eq!(testbench.handler.com_interface.call_count, 1);
+        assert_eq!(testbench.test_spi_interface().call_count, 1);
         let mgm_set = *testbench.handler.shared_mgm_set.lock().unwrap();
         assert!(mgm_set.x < 0.001);
         assert!(mgm_set.y < 0.001);
@@ -605,12 +622,12 @@ mod tests {
             y: -1000,
             z: 1000,
         };
-        testbench.handler.com_interface.next_mgm_data = raw_values;
+        testbench.test_spi_interface().next_mgm_data = raw_values;
         testbench
             .tc_tx
             .send(create_request_tc(
                 MgmSelect::_0,
-                mgm::request::Request::Mode(DeviceMode::Normal),
+                mgm::request::Request::Mode(ModeRequest::SetMode(DeviceMode::Normal)),
             ))
             .unwrap();
         testbench.handler.periodic_operation();
@@ -694,7 +711,7 @@ mod tests {
             .tc_tx
             .send(create_request_tc(
                 MgmSelect::_0,
-                mgm::request::Request::Mode(DeviceMode::Normal),
+                mgm::request::Request::Mode(ModeRequest::SetMode(DeviceMode::Normal)),
             ))
             .unwrap();
         // This simulates one cycle for the power switch to update.

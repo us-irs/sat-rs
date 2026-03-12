@@ -1,24 +1,24 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
 };
 
 use derive_new::new;
 use models::{
+    ComponentId, DeviceMode,
     ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned},
     pcdu::{
         self, SwitchId, SwitchMapBinary, SwitchMapBinaryWrapper, SwitchRequest, SwitchState,
         SwitchStateBinary, SwitchesBitfield,
     },
-    ComponentId, DeviceMode,
 };
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use satrs::{request::GenericMessage, spacepackets::CcsdsPacketIdAndPsc};
 use satrs_example::TimestampHelper;
 use satrs_minisim::{
-    eps::{PcduReply, PcduRequest},
     SerializableSimMsgPayload, SimReply, SimRequest,
+    eps::{PcduReply, PcduRequest},
 };
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator as _;
@@ -532,8 +532,8 @@ mod tests {
 
     use arbitrary_int::u11;
     use models::{
-        pcdu::{SwitchMapBinary, SwitchStateBinary},
         Apid, TcHeader,
+        pcdu::{SwitchMapBinary, SwitchStateBinary},
     };
     use satrs::{
         mode::{ModeReply, ModeRequest},

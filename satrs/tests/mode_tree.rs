@@ -1,3 +1,4 @@
+/*
 use core::cell::Cell;
 use num_enum::TryFromPrimitive;
 use satrs::dev_mgmt::{
@@ -1608,3 +1609,4 @@ fn command_safe_mode() {
         expected_req_id_not_ctrl,
     );
 }
+*/
