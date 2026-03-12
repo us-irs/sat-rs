@@ -52,9 +52,15 @@ pub mod response {
     }
 
     #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
+    pub enum ModeFailure {
+        Timeout,
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
     pub enum Response {
         Ok,
         Hk(HkResponse),
+        ModeFailure(ModeFailure),
     }
 
     impl Response {
@@ -62,6 +68,7 @@ pub mod response {
             match self {
                 Response::Ok => crate::MessageType::Verification,
                 Response::Hk(_hk_response) => crate::MessageType::Hk,
+                Response::ModeFailure(_mode_failure) => crate::MessageType::Mode,
             }
         }
     }

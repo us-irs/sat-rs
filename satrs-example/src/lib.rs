@@ -3,7 +3,7 @@ extern crate alloc;
 use std::time::{Duration, Instant};
 
 pub use models::ComponentId;
-use satrs::spacepackets::time::cds::CdsTime;
+use satrs::spacepackets::{time::cds::CdsTime, CcsdsPacketIdAndPsc};
 
 pub mod config;
 
@@ -88,5 +88,64 @@ impl HkHelperSingleSet {
             return true;
         }
         false
+    }
+}
+
+#[derive(Default, Debug, PartialEq, Eq)]
+pub enum TransitionState {
+    #[default]
+    Idle,
+    PowerSwitching,
+    Done,
+}
+
+#[derive(Debug)]
+pub struct ModeHelper<Mode> {
+    pub current: Mode,
+    pub target: Option<Mode>,
+    pub tc_id: Option<CcsdsPacketIdAndPsc>,
+    pub transition_start: Option<Instant>,
+    pub timeout: Duration,
+    pub transition_state: TransitionState,
+}
+
+impl<Mode: Copy + Clone> ModeHelper<Mode> {
+    pub fn new(init_mode: Mode, timeout: Duration) -> Self {
+        Self {
+            current: init_mode,
+            target: Default::default(),
+            tc_id: Default::default(),
+            transition_start: None,
+            timeout,
+            transition_state: Default::default(),
+        }
+    }
+
+    pub fn start(&mut self, target: Mode) {
+        self.target = Some(target);
+        self.transition_start = Some(Instant::now());
+        self.transition_state = TransitionState::Idle;
+    }
+
+    pub fn timed_out(&self) -> bool {
+        if self.target.is_none() {
+            return false;
+        }
+        if let Some(transition_start) = self.transition_start {
+            return Instant::now() - transition_start >= self.timeout;
+        }
+        false
+    }
+
+    pub fn finish(&mut self, success: bool) {
+        if self.target.is_none() {
+            return;
+        }
+        if success {
+            self.current = self.target.take().unwrap();
+        } else {
+            self.target = None;
+        }
+        self.transition_start = None;
     }
 }

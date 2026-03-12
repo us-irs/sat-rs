@@ -152,11 +152,18 @@ pub trait Message {
     fn message_type(&self) -> MessageType;
 }
 
+/// Generic device mode which covers the requirements of most devices.
+///
+/// The states are related both to the physical and the logical state of the device. Some
+/// device handlers control the power supply of their own device and an off state might also
+/// mean that the device is physically off.
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Copy, Clone)]
 pub enum DeviceMode {
     Off = 0,
     On = 1,
+    /// Normal operation mode where periodic polling might be done as well.
     Normal = 2,
+    Unknown = 3,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
