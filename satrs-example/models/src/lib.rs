@@ -152,7 +152,7 @@ pub trait Message {
     fn message_type(&self) -> MessageType;
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Copy, Clone)]
 pub enum DeviceMode {
     Off = 0,
     On = 1,
@@ -163,8 +163,10 @@ pub enum DeviceMode {
 #[non_exhaustive]
 pub enum HkRequestType {
     OneShot,
+    /// Enable periodic HK generation with a specified frequency.
     EnablePeriodic(core::time::Duration),
     DisablePeriodic,
+    /// Modify periodic HK generation interval.
     ModifyInterval(core::time::Duration),
 }
 

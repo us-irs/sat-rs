@@ -1,5 +1,5 @@
 pub mod request {
-    use crate::HkRequestType;
+    use crate::{HkRequestType, Message};
 
     #[derive(Debug, PartialEq, Eq, Clone, Copy, serde::Serialize, serde::Deserialize)]
     pub enum HkId {
@@ -16,6 +16,22 @@ pub mod request {
     pub enum Request {
         Ping,
         Hk(HkRequest),
+        Mode(crate::DeviceMode),
+    }
+
+    impl Request {
+        fn message_type(&self) -> crate::MessageType {
+            match self {
+                Request::Ping => crate::MessageType::Verification,
+                Request::Hk(_hk_request) => crate::MessageType::Hk,
+                Request::Mode(_mode) => crate::MessageType::Mode,
+            }
+        }
+    }
+    impl Message for Request {
+        fn message_type(&self) -> crate::MessageType {
+            self.message_type()
+        }
     }
 }
 
@@ -41,12 +57,18 @@ pub mod response {
         Hk(HkResponse),
     }
 
-    impl Message for Response {
+    impl Response {
         fn message_type(&self) -> crate::MessageType {
             match self {
                 Response::Ok => crate::MessageType::Verification,
                 Response::Hk(_hk_response) => crate::MessageType::Hk,
             }
+        }
+    }
+
+    impl Message for Response {
+        fn message_type(&self) -> crate::MessageType {
+            self.message_type()
         }
     }
 }

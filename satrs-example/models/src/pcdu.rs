@@ -93,14 +93,36 @@ impl SwitchRequest {
 }
 
 pub mod request {
+    use crate::{DeviceMode, Message};
+
     use super::*;
 
     #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
     pub enum Request {
+        Mode(DeviceMode),
         Ping,
         GetSwitches,
         EnableSwitches(SwitchesBitfield),
         DisableSwitches(SwitchesBitfield),
+    }
+
+    impl Request {
+        pub fn message_type(&self) -> crate::MessageType {
+            match self {
+                Request::Mode(_mode) => crate::MessageType::Mode,
+                Request::Ping => crate::MessageType::Verification,
+                Request::GetSwitches => crate::MessageType::Action,
+                Request::EnableSwitches(_switches) | Request::DisableSwitches(_switches) => {
+                    crate::MessageType::Action
+                }
+            }
+        }
+    }
+
+    impl Message for Request {
+        fn message_type(&self) -> crate::MessageType {
+            self.message_type()
+        }
     }
 }
 
