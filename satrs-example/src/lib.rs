@@ -152,6 +152,7 @@ impl<Mode: Copy + Clone, TransitionState: Default> ModeHelper<Mode, TransitionSt
         } else {
             self.target = None;
         }
+        self.tc_id = None;
         self.transition_state = Default::default();
         self.transition_start = None;
     }

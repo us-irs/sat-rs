@@ -215,6 +215,7 @@ fn main() {
             tc_rx: mgm_assembly_tc_rx,
             tm_tx: tm_sink_tx.clone(),
         },
+        Duration::from_millis(300),
     );
 
     let pcdu_serial_interface = if let Some(sim_client) = opt_sim_client.as_mut() {

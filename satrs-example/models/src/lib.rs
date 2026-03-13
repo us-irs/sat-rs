@@ -1,4 +1,6 @@
 extern crate alloc;
+use core::str::FromStr;
+
 use spacepackets::{
     CcsdsPacketIdAndPsc,
     time::cds::{CdsTime, MIN_CDS_FIELD_LEN},
@@ -7,6 +9,7 @@ use spacepackets::{
 pub mod ccsds;
 pub mod control;
 pub mod mgm;
+pub mod mgm_assembly;
 pub mod pcdu;
 
 #[derive(
@@ -163,6 +166,19 @@ pub enum DeviceMode {
     On = 1,
     /// Normal operation mode where periodic polling might be done as well.
     Normal = 2,
+}
+
+impl FromStr for DeviceMode {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "off" => Ok(DeviceMode::Off),
+            "on" => Ok(DeviceMode::On),
+            "normal" => Ok(DeviceMode::Normal),
+            _ => Err(()),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

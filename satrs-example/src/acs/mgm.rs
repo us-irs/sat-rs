@@ -56,11 +56,13 @@ pub enum TransitionState {
     Done,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum ModeRequest {
     SetMode(DeviceMode),
     ReadMode,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum ModeReport {
     /// New mode has been set.
     Mode(DeviceMode),
@@ -406,6 +408,7 @@ impl MgmHandlerLis3Mdl {
         }
     }
 
+    // Should be called to complete a mode transition which failed.
     fn handle_mode_transition_failure(&mut self) {
         self.mode_helpers.finish(false);
         if let Some(requestor) = self.mode_helpers.tc_id {
@@ -420,18 +423,24 @@ impl MgmHandlerLis3Mdl {
             .unwrap();
     }
 
+    // Should be called to complete a mode transition successfully.
     fn handle_mode_reached(&mut self) {
-        self.mode_helpers.finish(true);
-        log::info!(
-            "{} announcing mode: {:?}",
-            self.id.str(),
-            self.mode_helpers.current
-        );
+        self.announce_mode();
         if let Some(requestor) = self.mode_helpers.tc_id {
             self.send_mode_tm(requestor);
         }
         // Inform our parent about mode changes.
         self.report_mode_to_parent();
+        self.mode_helpers.finish(true);
+    }
+
+    fn announce_mode(&self) {
+        log::info!(
+            "{} announcing mode: {:?}",
+            self.id.str(),
+            self.mode_helpers.current
+        );
+        // TODO: Event?
     }
 
     fn report_mode_to_parent(&self) {
