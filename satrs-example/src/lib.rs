@@ -1,9 +1,13 @@
 extern crate alloc;
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::mpsc,
+    time::{Duration, Instant},
+};
 
 pub use models::ComponentId;
-use satrs::spacepackets::time::cds::CdsTime;
+use models::ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned};
+use satrs::spacepackets::{CcsdsPacketIdAndPsc, time::cds::CdsTime};
 
 pub mod config;
 
@@ -88,5 +92,66 @@ impl HkHelperSingleSet {
             return true;
         }
         false
+    }
+}
+
+pub struct TmtcQueues {
+    pub tc_rx: mpsc::Receiver<CcsdsTcPacketOwned>,
+    pub tm_tx: mpsc::SyncSender<CcsdsTmPacketOwned>,
+}
+
+#[derive(Debug)]
+pub struct ModeHelper<Mode, TransitionState> {
+    pub current: Mode,
+    pub target: Option<Mode>,
+    pub tc_commander: Option<CcsdsPacketIdAndPsc>,
+    pub transition_start: Option<Instant>,
+    pub timeout: Duration,
+    pub transition_state: TransitionState,
+}
+
+impl<Mode: Copy + Clone, TransitionState: Default> ModeHelper<Mode, TransitionState> {
+    pub fn new(init_mode: Mode, timeout: Duration) -> Self {
+        Self {
+            current: init_mode,
+            target: Default::default(),
+            tc_commander: Default::default(),
+            transition_start: None,
+            timeout,
+            transition_state: Default::default(),
+        }
+    }
+
+    pub fn start(&mut self, target: Mode) {
+        self.target = Some(target);
+        self.transition_start = Some(Instant::now());
+        self.transition_state = TransitionState::default();
+    }
+
+    #[inline]
+    pub fn transition_active(&self) -> bool {
+        self.target.is_some()
+    }
+
+    pub fn timed_out(&self) -> bool {
+        if self.target.is_none() {
+            return false;
+        }
+        if let Some(transition_start) = self.transition_start {
+            return Instant::now() - transition_start >= self.timeout;
+        }
+        false
+    }
+
+    pub fn finish(&mut self, success: bool) -> Option<CcsdsPacketIdAndPsc> {
+        self.target?;
+        if success {
+            self.current = self.target.take().unwrap();
+        } else {
+            self.target = None;
+        }
+        self.transition_state = Default::default();
+        self.transition_start = None;
+        self.tc_commander.take()
     }
 }

@@ -28,6 +28,7 @@ pub struct Cli {
 enum Commands {
     Mgm0(MgmArgs),
     Mgm1(MgmArgs),
+    MgmAssy(MgmAssemblyArgs),
 }
 
 impl Commands {
@@ -36,6 +37,7 @@ impl Commands {
         match self {
             Commands::Mgm0(_mgm_args) => models::ComponentId::AcsMgm0,
             Commands::Mgm1(_mgm_args) => models::ComponentId::AcsMgm1,
+            Commands::MgmAssy(_mgm_assembly_args) => models::ComponentId::AcsMgmAssembly,
         }
     }
 }
@@ -47,11 +49,26 @@ struct MgmArgs {
     #[arg(long)]
     request_hk: bool,
     #[arg(short, long)]
-    mode: Option<ModeSelect>,
+    mode: Option<DeviceModeSelect>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, clap::Parser)]
+struct MgmAssemblyArgs {
+    #[arg(short, long)]
+    ping: bool,
+    #[arg(short, long)]
+    mode: Option<AssemblyModeSelect>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, clap::ValueEnum)]
-pub enum ModeSelect {
+pub enum DeviceModeSelect {
+    Off,
+    Normal,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, clap::ValueEnum)]
+pub enum AssemblyModeSelect {
+    NoModeKeeping,
     Off,
     Normal,
 }
@@ -150,14 +167,62 @@ fn main() -> anyhow::Result<()> {
                 }
                 if let Some(mode) = args.mode {
                     let dev_mode = match mode {
-                        ModeSelect::Off => models::DeviceMode::Off,
-                        ModeSelect::Normal => models::DeviceMode::Normal,
+                        DeviceModeSelect::Off => models::DeviceMode::Off,
+                        DeviceModeSelect::Normal => models::DeviceMode::Normal,
                     };
 
                     let request = models::ccsds::CcsdsTcPacketOwned::new_with_request(
                         SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
                         TcHeader::new(target_id, models::MessageType::Mode),
-                        models::mgm::request::Request::Mode(dev_mode),
+                        models::mgm::request::Request::Mode(
+                            models::mgm::request::ModeRequest::SetMode(dev_mode),
+                        ),
+                    );
+                    let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
+                    log::info!(
+                        "sending {:?} HK request with TC ID {:#010x}",
+                        target_id,
+                        sent_tc_id.raw()
+                    );
+                    let request_packet = request.to_vec();
+                    client.send_to(&request_packet, addr).unwrap();
+                }
+            }
+            Commands::MgmAssy(mgm_assembly_args) => {
+                if mgm_assembly_args.ping {
+                    let request = models::ccsds::CcsdsTcPacketOwned::new_with_request(
+                        SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
+                        TcHeader::new(cmd.target_id(), models::MessageType::Ping),
+                        models::mgm::request::Request::Ping,
+                    );
+                    let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
+                    log::info!(
+                        "sending {:?} ping request with TC ID {:#010x}",
+                        target_id,
+                        sent_tc_id.raw()
+                    );
+                    let request_packet = request.to_vec();
+                    client.send_to(&request_packet, addr).unwrap();
+                }
+                if let Some(mode) = mgm_assembly_args.mode {
+                    let assembly_mode = match mode {
+                        AssemblyModeSelect::NoModeKeeping => {
+                            models::mgm_assembly::AssemblyMode::NoModeKeeping
+                        }
+                        AssemblyModeSelect::Off => {
+                            models::mgm_assembly::AssemblyMode::Device(models::DeviceMode::Off)
+                        }
+                        AssemblyModeSelect::Normal => {
+                            models::mgm_assembly::AssemblyMode::Device(models::DeviceMode::Normal)
+                        }
+                    };
+
+                    let request = models::ccsds::CcsdsTcPacketOwned::new_with_request(
+                        SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
+                        TcHeader::new(target_id, models::MessageType::Mode),
+                        models::mgm_assembly::request::Request::Mode(
+                            models::mgm_assembly::request::ModeRequest::SetMode(assembly_mode),
+                        ),
                     );
                     let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
                     log::info!(
@@ -238,7 +303,14 @@ fn handle_raw_tm_packet(data: &[u8]) -> anyhow::Result<()> {
                     log::info!("Received response from controller: {:?}", response.unwrap());
                 }
                 models::ComponentId::AcsSubsystem => todo!(),
-                models::ComponentId::AcsMgmAssembly => todo!(),
+                models::ComponentId::AcsMgmAssembly => {
+                    let response =
+                        postcard::from_bytes::<models::mgm_assembly::response::Response>(remainder);
+                    log::info!(
+                        "Received response from MGM Assembly: {:?}",
+                        response.unwrap()
+                    );
+                }
                 models::ComponentId::AcsMgm0 => {
                     let response =
                         postcard::from_bytes::<models::mgm::response::Response>(remainder);

@@ -169,7 +169,7 @@ pub mod pool {
 
 pub mod tasks {
     pub const FREQ_MS_UDP_TMTC: u64 = 200;
-    pub const FREQ_MS_AOCS: u64 = 500;
+    pub const FREQ_MS_AOCS: u64 = 200;
     pub const FREQ_MS_CONTROLLER: u64 = 200;
     pub const SIM_CLIENT_IDLE_DELAY_MS: u64 = 5;
 }
