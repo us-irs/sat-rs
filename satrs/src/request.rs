@@ -85,8 +85,9 @@ impl fmt::Display for UniqueApidTargetId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "Target and APID ID with  APID {:#03x} and target {}",
-            self.apid, self.unique_id
+            "Target and APID ID with  APID {:#05x} and target {}",
+            self.apid.value(),
+            self.unique_id
         )
     }
 }

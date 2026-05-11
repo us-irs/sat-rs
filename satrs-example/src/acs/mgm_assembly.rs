@@ -2,7 +2,7 @@ use std::{sync::mpsc, time::Duration};
 
 use models::{
     ComponentId, DeviceMode,
-    mgm_assembly::{AssemblyMode, request, response},
+    acs::mgm_assembly::{Mode, request, response},
 };
 use satrs::spacepackets::CcsdsPacketIdAndPsc;
 use satrs_example::{ModeHelper, TmtcQueues};
@@ -11,13 +11,13 @@ use crate::ccsds::pack_ccsds_tm_packet_for_now;
 
 pub struct ParentQueueHelper {
     pub request_rx: mpsc::Receiver<request::ModeRequest>,
-    pub report_tx: mpsc::SyncSender<response::ModeReport>,
+    pub report_tx: mpsc::SyncSender<response::ModeResponse>,
 }
 
 /// Helper component for communication with a parent component, which is usually as assembly.
 pub struct ChildrenQueueHelper {
-    pub request_tx_queues: [mpsc::SyncSender<models::mgm::request::ModeRequest>; 2],
-    pub report_rx_queues: [mpsc::Receiver<models::mgm::response::ModeResponse>; 2],
+    pub request_tx_queues: [mpsc::SyncSender<models::acs::mgm::request::ModeRequest>; 2],
+    pub report_rx_queues: [mpsc::Receiver<models::acs::mgm::response::ModeResponse>; 2],
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -35,7 +35,7 @@ pub struct MgmInfo {
 
 /// MGM assembly component.
 pub struct Assembly {
-    mode_helper: ModeHelper<AssemblyMode, TransitionState>,
+    mode_helper: ModeHelper<Mode, TransitionState>,
     /// This boolean is used for the distinction between transitions commanded by the parent
     /// or by ground, and transitions which were commanded autonomously as part of children
     /// mode keeping.
@@ -56,7 +56,7 @@ impl Assembly {
         mode_timeout: Duration,
     ) -> Self {
         Self {
-            mode_helper: ModeHelper::new(AssemblyMode::NoModeKeeping, mode_timeout),
+            mode_helper: ModeHelper::new(Mode::NoModeKeeping, mode_timeout),
             mode_keeping_transition: false,
             tmtc_queues,
             mgm_modes: [MgmInfo::default(); 2],
@@ -80,21 +80,21 @@ impl Assembly {
             match self.tmtc_queues.tc_rx.try_recv() {
                 Ok(packet) => {
                     let tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&packet.sp_header);
-                    match postcard::from_bytes::<models::mgm_assembly::request::Request>(
+                    match postcard::from_bytes::<models::acs::mgm_assembly::request::Request>(
                         &packet.payload,
                     ) {
                         Ok(request) => match request {
-                            models::mgm_assembly::request::Request::Ping => {
+                            models::acs::mgm_assembly::request::Request::Ping => {
                                 self.send_telemetry(Some(tc_id), response::Response::Ok)
                             }
-                            models::mgm_assembly::request::Request::Mode(request) => {
+                            models::acs::mgm_assembly::request::Request::Mode(request) => {
                                 match request {
                                     request::ModeRequest::SetMode(assembly_mode) => {
                                         self.start_transition(false, assembly_mode, Some(tc_id))
                                     }
                                     request::ModeRequest::ReadMode => self.send_telemetry(
                                         Some(tc_id),
-                                        response::Response::Mode(response::ModeReport::Mode(
+                                        response::Response::Mode(response::ModeResponse::Mode(
                                             self.mode(),
                                         )),
                                     ),
@@ -117,7 +117,7 @@ impl Assembly {
     pub fn send_telemetry(
         &self,
         tc_id: Option<CcsdsPacketIdAndPsc>,
-        response: models::mgm_assembly::response::Response,
+        response: models::acs::mgm_assembly::response::Response,
     ) {
         match pack_ccsds_tm_packet_for_now(Self::ID, tc_id, &response) {
             Ok(packet) => {
@@ -136,17 +136,17 @@ impl Assembly {
             match self.parent_queues.request_rx.try_recv() {
                 Ok(request) => match request {
                     request::ModeRequest::SetMode(assembly_mode) => match assembly_mode {
-                        AssemblyMode::Device(_device_mode) => {
+                        Mode::Device(_device_mode) => {
                             self.start_transition(false, assembly_mode, None);
                         }
-                        AssemblyMode::NoModeKeeping => {
-                            self.mode_helper.current = AssemblyMode::NoModeKeeping;
+                        Mode::NoModeKeeping => {
+                            self.mode_helper.current = Mode::NoModeKeeping;
                         }
                     },
                     request::ModeRequest::ReadMode => self
                         .parent_queues
                         .report_tx
-                        .send(response::ModeReport::Mode(self.mode_helper.current))
+                        .send(response::ModeResponse::Mode(self.mode_helper.current))
                         .unwrap(),
                 },
                 Err(e) => match e {
@@ -165,12 +165,12 @@ impl Assembly {
             loop {
                 match rx.try_recv() {
                     Ok(report) => match report {
-                        models::mgm::response::ModeResponse::Mode(device_mode) => {
+                        models::acs::mgm::response::ModeResponse::Mode(device_mode) => {
                             self.mgm_modes[idx].mode = Some(device_mode);
                             self.mgm_modes[idx].reply_received = true;
                             mode_report_received = true;
                         }
-                        models::mgm::response::ModeResponse::SetModeTimeout => {
+                        models::acs::mgm::response::ModeResponse::SetModeTimeout => {
                             // Ignore, handle this with our own timeout.
                             log::warn!("MGM {} mode timeout", idx);
                         }
@@ -191,23 +191,23 @@ impl Assembly {
         // Transition is active, check for completion.
         if self.mode_helper.transition_active()
             && self.mgm_modes.iter().all(|i| i.reply_received)
-            && let AssemblyMode::Device(device_mode) = self.mode_helper.target.unwrap()
+            && let Mode::Device(device_mode) = self.mode_helper.target.unwrap()
         {
             // If at least one child reached the correct mode, we are done.
             if self.mgm_modes.iter().any(|i| i.mode == Some(device_mode)) {
                 self.handle_mode_reached(true);
             } else {
                 let report = if self.mode_keeping_transition {
-                    response::ModeReport::CanNotKeepMode(self.mgm_modes.map(|info| info.mode))
+                    response::ModeResponse::CanNotKeepMode(self.mgm_modes.map(|info| info.mode))
                 } else {
-                    response::ModeReport::WrongMode(self.mgm_modes.map(|info| info.mode))
+                    response::ModeResponse::WrongMode(self.mgm_modes.map(|info| info.mode))
                 };
                 self.handle_mode_transition_failure(report);
             }
         }
 
         // Mode keeping active: Check children modes.
-        if let AssemblyMode::Device(device_mode) = self.mode_helper.current
+        if let Mode::Device(device_mode) = self.mode_helper.current
             && self
                 .mgm_modes
                 .iter()
@@ -226,8 +226,8 @@ impl Assembly {
         }
         let target = self.mode_helper.target.unwrap();
         let device_mode = match target {
-            AssemblyMode::Device(device_mode) => device_mode,
-            AssemblyMode::NoModeKeeping => {
+            Mode::Device(device_mode) => device_mode,
+            Mode::NoModeKeeping => {
                 self.handle_mode_reached(true);
                 return;
             }
@@ -240,9 +240,9 @@ impl Assembly {
             && self.mode_helper.timed_out()
         {
             let report = if self.mode_keeping_transition {
-                response::ModeReport::CanNotKeepMode(self.mgm_modes.map(|info| info.mode))
+                response::ModeResponse::CanNotKeepMode(self.mgm_modes.map(|info| info.mode))
             } else {
-                response::ModeReport::SetModeTimeout(self.mgm_modes.map(|info| info.mode))
+                response::ModeResponse::SetModeTimeout(self.mgm_modes.map(|info| info.mode))
             };
             self.handle_mode_transition_failure(report);
         }
@@ -256,15 +256,15 @@ impl Assembly {
         }
         self.parent_queues
             .report_tx
-            .send(response::ModeReport::Mode(self.mode_helper.current))
+            .send(response::ModeResponse::Mode(self.mode_helper.current))
             .unwrap();
     }
 
-    pub fn handle_mode_transition_failure(&mut self, report: response::ModeReport) {
+    pub fn handle_mode_transition_failure(&mut self, report: response::ModeResponse) {
         if self.mode_helper.tc_commander.is_some() {
             self.send_telemetry(
                 self.mode_helper.tc_commander,
-                response::Response::Mode(response::ModeReport::SetModeTimeout(
+                response::Response::Mode(response::ModeResponse::SetModeTimeout(
                     self.mgm_modes.map(|info| info.mode),
                 )),
             );
@@ -275,7 +275,7 @@ impl Assembly {
 
     pub fn command_children(&self, mode: DeviceMode) {
         for tx in &self.children_queues.request_tx_queues {
-            tx.send(models::mgm::request::ModeRequest::SetMode(mode))
+            tx.send(models::acs::mgm::request::ModeRequest::SetMode(mode))
                 .unwrap();
         }
     }
@@ -283,7 +283,7 @@ impl Assembly {
     pub fn start_transition(
         &mut self,
         mode_keeping: bool,
-        target: AssemblyMode,
+        target: Mode,
         tc_id: Option<CcsdsPacketIdAndPsc>,
     ) {
         self.mode_keeping_transition = mode_keeping;
@@ -304,7 +304,7 @@ impl Assembly {
     }
 
     #[inline]
-    pub fn mode(&self) -> AssemblyMode {
+    pub fn mode(&self) -> Mode {
         self.mode_helper.current
     }
 
@@ -322,8 +322,8 @@ mod tests {
     use arbitrary_int::u11;
     use models::{
         Apid, Message, MessageType, TcHeader,
+        acs::mgm_assembly,
         ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned},
-        mgm_assembly,
     };
     use satrs::spacepackets::SpacePacketHeader;
 
@@ -331,9 +331,9 @@ mod tests {
 
     pub struct Testbench {
         subsystem_req_tx: mpsc::SyncSender<request::ModeRequest>,
-        subsystem_report_rx: mpsc::Receiver<response::ModeReport>,
-        mgm_request_rx: [mpsc::Receiver<models::mgm::request::ModeRequest>; 2],
-        mgm_report_tx: [mpsc::SyncSender<models::mgm::response::ModeResponse>; 2],
+        subsystem_report_rx: mpsc::Receiver<response::ModeResponse>,
+        mgm_request_rx: [mpsc::Receiver<models::acs::mgm::request::ModeRequest>; 2],
+        mgm_report_tx: [mpsc::SyncSender<models::acs::mgm::response::ModeResponse>; 2],
         tc_tx: mpsc::SyncSender<CcsdsTcPacketOwned>,
         tm_rx: mpsc::Receiver<CcsdsTmPacketOwned>,
         assembly: Assembly,
@@ -396,7 +396,7 @@ mod tests {
     }
 
     pub fn create_request_tc(
-        request: models::mgm_assembly::request::Request,
+        request: models::acs::mgm_assembly::request::Request,
     ) -> models::ccsds::CcsdsTcPacketOwned {
         models::ccsds::CcsdsTcPacketOwned::new_with_request(
             SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
@@ -411,7 +411,7 @@ mod tests {
         tb.assert_all_queues_empty();
         tb.assembly.periodic_operation();
         tb.assert_all_queues_empty();
-        assert_eq!(tb.assembly.mode(), AssemblyMode::NoModeKeeping);
+        assert_eq!(tb.assembly.mode(), Mode::NoModeKeeping);
     }
 
     #[test]
@@ -419,7 +419,7 @@ mod tests {
         let mut tb = Testbench::new();
         tb.tc_tx
             .send(create_request_tc(mgm_assembly::request::Request::Mode(
-                request::ModeRequest::SetMode(AssemblyMode::Device(DeviceMode::Normal)),
+                request::ModeRequest::SetMode(Mode::Device(DeviceMode::Normal)),
             )))
             .unwrap();
         tb.assembly.periodic_operation();
@@ -429,13 +429,13 @@ mod tests {
             let request = rx.try_recv().unwrap();
             assert_eq!(
                 request,
-                models::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
+                models::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
             );
         }
 
         // Confirm the mode is set.
         for tx in tb.mgm_report_tx.iter() {
-            tx.send(models::mgm::response::ModeResponse::Mode(
+            tx.send(models::acs::mgm::response::ModeResponse::Mode(
                 DeviceMode::Normal,
             ))
             .unwrap();
@@ -443,7 +443,7 @@ mod tests {
 
         tb.assembly.periodic_operation();
         assert!(!tb.assembly.mode_transition_active());
-        assert_eq!(tb.assembly.mode(), AssemblyMode::Device(DeviceMode::Normal));
+        assert_eq!(tb.assembly.mode(), Mode::Device(DeviceMode::Normal));
 
         let response = tb.tm_rx.try_recv().unwrap();
         assert_eq!(response.tm_header.sender_id, Assembly::ID);
@@ -456,7 +456,7 @@ mod tests {
     fn test_parent_commanded_transition() {
         let mut tb = Testbench::new();
         tb.subsystem_req_tx
-            .send(request::ModeRequest::SetMode(AssemblyMode::Device(
+            .send(request::ModeRequest::SetMode(Mode::Device(
                 DeviceMode::Normal,
             )))
             .unwrap();
@@ -467,13 +467,13 @@ mod tests {
             let request = rx.try_recv().unwrap();
             assert_eq!(
                 request,
-                models::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
+                models::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
             );
         }
 
         // Confirm the mode is set.
         for tx in tb.mgm_report_tx.iter() {
-            tx.send(models::mgm::response::ModeResponse::Mode(
+            tx.send(models::acs::mgm::response::ModeResponse::Mode(
                 DeviceMode::Normal,
             ))
             .unwrap();
@@ -481,12 +481,12 @@ mod tests {
 
         tb.assembly.periodic_operation();
         assert!(!tb.assembly.mode_transition_active());
-        assert_eq!(tb.assembly.mode(), AssemblyMode::Device(DeviceMode::Normal));
+        assert_eq!(tb.assembly.mode(), Mode::Device(DeviceMode::Normal));
 
         let report = tb.subsystem_report_rx.try_recv().unwrap();
         assert_eq!(
             report,
-            response::ModeReport::Mode(AssemblyMode::Device(DeviceMode::Normal))
+            response::ModeResponse::Mode(Mode::Device(DeviceMode::Normal))
         );
     }
 
@@ -494,7 +494,7 @@ mod tests {
     fn test_one_mgm_is_sufficient() {
         let mut tb = Testbench::new();
         tb.subsystem_req_tx
-            .send(request::ModeRequest::SetMode(AssemblyMode::Device(
+            .send(request::ModeRequest::SetMode(Mode::Device(
                 DeviceMode::Normal,
             )))
             .unwrap();
@@ -505,28 +505,30 @@ mod tests {
             let request = rx.try_recv().unwrap();
             assert_eq!(
                 request,
-                models::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
+                models::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
             );
         }
 
         // One device is sufficient.
         tb.mgm_report_tx[0]
-            .send(models::mgm::response::ModeResponse::Mode(
+            .send(models::acs::mgm::response::ModeResponse::Mode(
                 DeviceMode::Normal,
             ))
             .unwrap();
         tb.mgm_report_tx[1]
-            .send(models::mgm::response::ModeResponse::Mode(DeviceMode::Off))
+            .send(models::acs::mgm::response::ModeResponse::Mode(
+                DeviceMode::Off,
+            ))
             .unwrap();
 
         tb.assembly.periodic_operation();
         assert!(!tb.assembly.mode_transition_active());
-        assert_eq!(tb.assembly.mode(), AssemblyMode::Device(DeviceMode::Normal));
+        assert_eq!(tb.assembly.mode(), Mode::Device(DeviceMode::Normal));
 
         let report = tb.subsystem_report_rx.try_recv().unwrap();
         assert_eq!(
             report,
-            response::ModeReport::Mode(AssemblyMode::Device(DeviceMode::Normal))
+            response::ModeResponse::Mode(Mode::Device(DeviceMode::Normal))
         );
     }
 
@@ -534,7 +536,7 @@ mod tests {
     fn test_mode_commanding_fails() {
         let mut tb = Testbench::new();
         tb.subsystem_req_tx
-            .send(request::ModeRequest::SetMode(AssemblyMode::Device(
+            .send(request::ModeRequest::SetMode(Mode::Device(
                 DeviceMode::Normal,
             )))
             .unwrap();
@@ -545,24 +547,26 @@ mod tests {
             let request = rx.try_recv().unwrap();
             assert_eq!(
                 request,
-                models::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
+                models::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
             );
         }
 
         // Confirm the mode is set.
         for tx in tb.mgm_report_tx.iter() {
-            tx.send(models::mgm::response::ModeResponse::Mode(DeviceMode::Off))
-                .unwrap();
+            tx.send(models::acs::mgm::response::ModeResponse::Mode(
+                DeviceMode::Off,
+            ))
+            .unwrap();
         }
 
         tb.assembly.periodic_operation();
         assert!(!tb.assembly.mode_transition_active());
-        assert_eq!(tb.assembly.mode(), AssemblyMode::NoModeKeeping);
+        assert_eq!(tb.assembly.mode(), Mode::NoModeKeeping);
 
         let report = tb.subsystem_report_rx.try_recv().unwrap();
         assert_eq!(
             report,
-            response::ModeReport::WrongMode([Some(DeviceMode::Off), Some(DeviceMode::Off)])
+            response::ModeResponse::WrongMode([Some(DeviceMode::Off), Some(DeviceMode::Off)])
         );
     }
 
@@ -570,7 +574,7 @@ mod tests {
     fn test_mode_keeping_fails() {
         let mut tb = Testbench::new();
         tb.subsystem_req_tx
-            .send(request::ModeRequest::SetMode(AssemblyMode::Device(
+            .send(request::ModeRequest::SetMode(Mode::Device(
                 DeviceMode::Normal,
             )))
             .unwrap();
@@ -581,13 +585,13 @@ mod tests {
             let request = rx.try_recv().unwrap();
             assert_eq!(
                 request,
-                models::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
+                models::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
             );
         }
 
         // Confirm the mode is set.
         for tx in tb.mgm_report_tx.iter() {
-            tx.send(models::mgm::response::ModeResponse::Mode(
+            tx.send(models::acs::mgm::response::ModeResponse::Mode(
                 DeviceMode::Normal,
             ))
             .unwrap();
@@ -595,17 +599,19 @@ mod tests {
 
         tb.assembly.periodic_operation();
         assert!(!tb.assembly.mode_transition_active());
-        assert_eq!(tb.assembly.mode(), AssemblyMode::Device(DeviceMode::Normal));
+        assert_eq!(tb.assembly.mode(), Mode::Device(DeviceMode::Normal));
 
         let report = tb.subsystem_report_rx.try_recv().unwrap();
         assert_eq!(
             report,
-            response::ModeReport::Mode(AssemblyMode::Device(DeviceMode::Normal))
+            response::ModeResponse::Mode(Mode::Device(DeviceMode::Normal))
         );
 
         for tx in tb.mgm_report_tx.iter() {
-            tx.send(models::mgm::response::ModeResponse::Mode(DeviceMode::Off))
-                .unwrap();
+            tx.send(models::acs::mgm::response::ModeResponse::Mode(
+                DeviceMode::Off,
+            ))
+            .unwrap();
         }
         // This should start mode keeping.
         tb.assembly.periodic_operation();
@@ -615,20 +621,22 @@ mod tests {
             let request = rx.try_recv().unwrap();
             assert_eq!(
                 request,
-                models::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
+                models::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
             );
         }
 
         // Let the mode keeping fail.
         for tx in tb.mgm_report_tx.iter() {
-            tx.send(models::mgm::response::ModeResponse::Mode(DeviceMode::Off))
-                .unwrap();
+            tx.send(models::acs::mgm::response::ModeResponse::Mode(
+                DeviceMode::Off,
+            ))
+            .unwrap();
         }
         tb.assembly.periodic_operation();
         let report = tb.subsystem_report_rx.try_recv().unwrap();
         assert_eq!(
             report,
-            response::ModeReport::CanNotKeepMode([Some(DeviceMode::Off), Some(DeviceMode::Off)])
+            response::ModeResponse::CanNotKeepMode([Some(DeviceMode::Off), Some(DeviceMode::Off)])
         );
     }
 }

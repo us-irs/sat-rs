@@ -6,10 +6,9 @@ use spacepackets::{
     time::cds::{CdsTime, MIN_CDS_FIELD_LEN},
 };
 
+pub mod acs;
 pub mod ccsds;
 pub mod control;
-pub mod mgm;
-pub mod mgm_assembly;
 pub mod pcdu;
 
 #[derive(
@@ -30,8 +29,10 @@ pub enum ComponentId {
 
     AcsSubsystem,
     AcsMgmAssembly,
+    AcsController,
     AcsMgm0,
     AcsMgm1,
+    AcsMgt,
 
     EpsSubsystem,
     EpsPcdu,
@@ -160,7 +161,18 @@ pub trait Message {
 /// The states are related both to the physical and the logical state of the device. Some
 /// device handlers control the power supply of their own device and an off state might also
 /// mean that the device is physically off.
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    PartialEq,
+    Eq,
+    Copy,
+    Clone,
+    num_enum::IntoPrimitive,
+    num_enum::TryFromPrimitive,
+)]
+#[repr(u32)]
 pub enum DeviceMode {
     Off = 0,
     On = 1,

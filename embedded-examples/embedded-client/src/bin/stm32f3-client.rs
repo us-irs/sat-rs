@@ -66,6 +66,6 @@ fn main() -> anyhow::Result<()> {
 
 fn create_stm32f3_tc(request: &stm32f3::Request) -> CcsdsPacketCreatorOwned {
     let req_raw = postcard::to_allocvec(&request).unwrap();
-    let sp_header = SpHeader::new_from_apid(satrs_stm32f3_disco_rtic::APID);
+    let sp_header = SpHeader::new_from_apid(embedded_models::stm32f3::PUS_APID);
     CcsdsPacketCreatorOwned::new_tc_with_checksum(sp_header, &req_raw).unwrap()
 }
