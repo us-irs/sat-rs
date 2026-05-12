@@ -188,7 +188,7 @@ fn main() {
             request_rx: mgm_0_mode_request_rx,
             report_tx: mgm_0_mode_report_tx,
         },
-        Duration::from_millis(1000)
+        Duration::from_millis(1000),
     );
     let mut mgm_1_handler = mgm::MgmHandlerLis3Mdl::new(
         mgm::MgmId::_1,
@@ -203,7 +203,7 @@ fn main() {
             request_rx: mgm_1_mode_request_rx,
             report_tx: mgm_1_mode_report_tx,
         },
-        Duration::from_millis(1000)
+        Duration::from_millis(1000),
     );
     let mut mgm_assembly = mgm_assembly::Assembly::new(
         mgm_assembly::ParentQueueHelper {

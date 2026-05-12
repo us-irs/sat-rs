@@ -14,37 +14,28 @@ name = "integration"
 harness = false
 
 [dependencies]
+embedded-models = { path = "../models", features = ["defmt"] }
+
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+arbitrary-int = "2"
 cortex-m-rt = "0.7"
 defmt = "1"
-defmt-brtt = { version = "0.1", default-features = false, features = ["rtt"] }
+defmt-rtt = "1"
 panic-probe = { version = "1", features = ["print-defmt"] }
-cortex-m-semihosting = "0.5.0"
-# TODO: Replace with embassy-hal.
-stm32h7xx-hal = { version="0.16", features= ["stm32h743v", "ethernet"] }
-embedded-alloc = "0.6"
-rtic-sync = { version = "1", features = ["defmt-03"] }
+embedded-alloc = "0.7"
+static_cell = "2"
+rtic = { version = "2", features = ["thumbv7-backend"] }
+spacepackets = { version = "0.17", default-features = false, features = ["defmt"] }
+postcard = "1"
 
-[dependencies.smoltcp]
-version = "0.12"
-default-features = false
-features = ["medium-ethernet", "proto-ipv4", "socket-raw", "socket-dhcpv4", "socket-udp", "defmt"]
+embassy-stm32 =  { git = "https://github.com/embassy-rs/embassy.git", rev = "dd8e4c14e53f088bae27c5d841ab7a4fa338a52c", version = "0.6", features = ["stm32h743zi", "memory-x", "defmt", "time-driver-any"]}
 
-[dependencies.rtic]
-version = "2"
-features = ["thumbv7-backend"]
-
-[dependencies.rtic-monotonics]
-version = "2"
-features = ["cortex-m-systick"]
-
-[dependencies.satrs]
-path = "../../satrs"
-default-features = false
-features = ["defmt", "heapless"]
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "dd8e4c14e53f088bae27c5d841ab7a4fa338a52c", version = "0.5", features = ["defmt-timestamp-uptime-ms", "generic-queue-16"] }
+embassy-net = { git = "https://github.com/embassy-rs/embassy.git", rev = "dd8e4c14e53f088bae27c5d841ab7a4fa338a52c", version = "0.9", features = ["medium-ethernet", "proto-ipv4", "tcp", "udp", "auto-icmp-echo-reply", "dhcpv4", "defmt"] }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "dd8e4c14e53f088bae27c5d841ab7a4fa338a52c" }
 
 [dev-dependencies]
-defmt-test = "0.4"
+defmt-test = "0.5"
 
 # cargo build/run
 [profile.dev]

@@ -1,11 +1,13 @@
 #![no_main]
 #![no_std]
 
-use satrs_stm32h7_nucleo_rtic as _; // global logger + panicking-behavior + memory layout
+// global logger + panicking-behavior + memory layout
+use satrs_stm32h7_nucleo_rtic as _;
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
-    defmt::println!("Hello, world!");
-
-    satrs_stm32h7_nucleo_rtic::exit()
+    loop {
+        defmt::println!("Hello, world!");
+        cortex_m::asm::delay(100_000_000);
+    }
 }

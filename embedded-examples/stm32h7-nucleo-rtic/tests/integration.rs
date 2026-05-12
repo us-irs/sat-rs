@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use stm32h7_testapp as _; // memory layout + panic handler
+use satrs_stm32h7_nucleo_rtic as _; // memory layout + panic handler
 
 // See https://crates.io/crates/defmt-test/0.3.0 for more documentation (e.g. about the 'state'
 // feature)

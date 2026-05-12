@@ -3,422 +3,215 @@
 extern crate alloc;
 
 use rtic::app;
-use rtic_monotonics::systick::prelude::*;
-use satrs::pool::{PoolAddr, PoolProvider, StaticHeaplessMemoryPool};
-use satrs::static_subpool;
 // global logger + panicking-behavior + memory layout
+use embassy_stm32::bind_interrupts;
 use satrs_stm32h7_nucleo_rtic as _;
-use smoltcp::socket::udp::UdpMetadata;
-use smoltcp::socket::{dhcpv4, udp};
 
 use core::mem::MaybeUninit;
 use embedded_alloc::LlffHeap as Heap;
-use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet, SocketStorage};
-use smoltcp::wire::{HardwareAddress, IpAddress, IpCidr};
-use stm32h7xx_hal::ethernet;
 
 const DEFAULT_BLINK_FREQ_MS: u32 = 1000;
 const PORT: u16 = 7301;
 
 const HEAP_SIZE: usize = 131_072;
 
-const TC_SOURCE_CHANNEL_DEPTH: usize = 16;
-pub type SharedPool = StaticHeaplessMemoryPool<3>;
-pub type TcSourceChannel = rtic_sync::channel::Channel<PoolAddr, TC_SOURCE_CHANNEL_DEPTH>;
-pub type TcSourceTx = rtic_sync::channel::Sender<'static, PoolAddr, TC_SOURCE_CHANNEL_DEPTH>;
-pub type TcSourceRx = rtic_sync::channel::Receiver<'static, PoolAddr, TC_SOURCE_CHANNEL_DEPTH>;
-
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
-
-systick_monotonic!(Mono, 1000);
-
-// We place the memory pool buffers inside the larger AXISRAM.
-pub const SUBPOOL_SMALL_NUM_BLOCKS: u16 = 32;
-pub const SUBPOOL_SMALL_BLOCK_SIZE: usize = 32;
-pub const SUBPOOL_MEDIUM_NUM_BLOCKS: u16 = 16;
-pub const SUBPOOL_MEDIUM_BLOCK_SIZE: usize = 128;
-pub const SUBPOOL_LARGE_NUM_BLOCKS: u16 = 8;
-pub const SUBPOOL_LARGE_BLOCK_SIZE: usize = 2048;
-
-// This data will be held by Net through a mutable reference
-pub struct NetStorageStatic<'a> {
-    socket_storage: [SocketStorage<'a>; 8],
-}
-// MaybeUninit allows us write code that is correct even if STORE is not
-// initialised by the runtime
-static mut STORE: MaybeUninit<NetStorageStatic> = MaybeUninit::uninit();
-
-static mut UDP_RX_META: [udp::PacketMetadata; 12] = [udp::PacketMetadata::EMPTY; 12];
-static mut UDP_RX: [u8; 2048] = [0; 2048];
-static mut UDP_TX_META: [udp::PacketMetadata; 12] = [udp::PacketMetadata::EMPTY; 12];
-static mut UDP_TX: [u8; 2048] = [0; 2048];
 
 /// Locally administered MAC address
 const MAC_ADDRESS: [u8; 6] = [0x02, 0x00, 0x11, 0x22, 0x33, 0x44];
 
-pub struct Net {
-    iface: Interface,
-    ethdev: ethernet::EthernetDMA<4, 4>,
-    dhcp_handle: SocketHandle,
-}
+const TC_QUEUE_DEPTH: usize = 32;
+const TM_QUEUE_DEPTH: usize = 32;
 
-impl Net {
-    pub fn new(
-        sockets: &mut SocketSet<'static>,
-        mut ethdev: ethernet::EthernetDMA<4, 4>,
-        ethernet_addr: HardwareAddress,
-    ) -> Self {
-        let config = Config::new(ethernet_addr);
-        let mut iface = Interface::new(
-            config,
-            &mut ethdev,
-            smoltcp::time::Instant::from_millis(Mono::now().duration_since_epoch().to_millis()),
-        );
-        // Create sockets
-        let dhcp_socket = dhcpv4::Socket::new();
-        iface.update_ip_addrs(|addrs| {
-            let _ = addrs.push(IpCidr::new(IpAddress::v4(192, 168, 1, 99), 0));
-        });
-
-        let dhcp_handle = sockets.add(dhcp_socket);
-        Net {
-            iface,
-            ethdev,
-            dhcp_handle,
-        }
-    }
-
-    /// Polls on the ethernet interface. You should refer to the smoltcp
-    /// documentation for poll() to understand how to call poll efficiently
-    pub fn poll<'a>(&mut self, sockets: &'a mut SocketSet) -> bool {
-        let uptime = Mono::now().duration_since_epoch();
-        let timestamp = smoltcp::time::Instant::from_millis(uptime.to_millis());
-
-        self.iface.poll(timestamp, &mut self.ethdev, sockets)
-    }
-
-    pub fn poll_dhcp<'a>(&mut self, sockets: &'a mut SocketSet) -> Option<dhcpv4::Event<'a>> {
-        let opt_event = sockets.get_mut::<dhcpv4::Socket>(self.dhcp_handle).poll();
-        if let Some(event) = &opt_event {
-            match event {
-                dhcpv4::Event::Deconfigured => {
-                    defmt::info!("DHCP lost configuration");
-                    self.iface.update_ip_addrs(|addrs| addrs.clear());
-                    self.iface.routes_mut().remove_default_ipv4_route();
-                }
-                dhcpv4::Event::Configured(config) => {
-                    defmt::info!("DHCP configuration acquired");
-                    defmt::info!("IP address: {}", config.address);
-                    self.iface.update_ip_addrs(|addrs| {
-                        addrs.clear();
-                        addrs.push(IpCidr::Ipv4(config.address)).unwrap();
-                    });
-
-                    if let Some(router) = config.router {
-                        defmt::debug!("Default gateway: {}", router);
-                        self.iface
-                            .routes_mut()
-                            .add_default_ipv4_route(router)
-                            .unwrap();
-                    } else {
-                        defmt::debug!("Default gateway: None");
-                        self.iface.routes_mut().remove_default_ipv4_route();
-                    }
-                }
-            }
-        }
-        opt_event
-    }
-}
-
-pub struct UdpNet {
-    udp_handle: SocketHandle,
-    last_client: Option<UdpMetadata>,
-    tc_source_tx: TcSourceTx,
-}
-
-impl UdpNet {
-    pub fn new<'sockets>(sockets: &mut SocketSet<'sockets>, tc_source_tx: TcSourceTx) -> Self {
-        // SAFETY: The RX and TX buffers are passed here and not used anywhere else.
-        let udp_rx_buffer =
-            smoltcp::socket::udp::PacketBuffer::new(unsafe { &mut UDP_RX_META[..] }, unsafe {
-                &mut UDP_RX[..]
-            });
-        let udp_tx_buffer =
-            smoltcp::socket::udp::PacketBuffer::new(unsafe { &mut UDP_TX_META[..] }, unsafe {
-                &mut UDP_TX[..]
-            });
-        let udp_socket = smoltcp::socket::udp::Socket::new(udp_rx_buffer, udp_tx_buffer);
-
-        let udp_handle = sockets.add(udp_socket);
-        Self {
-            udp_handle,
-            last_client: None,
-            tc_source_tx,
-        }
-    }
-
-    pub fn poll<'sockets>(
-        &mut self,
-        sockets: &'sockets mut SocketSet,
-        shared_pool: &mut SharedPool,
-    ) {
-        let socket = sockets.get_mut::<udp::Socket>(self.udp_handle);
-        if !socket.is_open() {
-            if let Err(e) = socket.bind(PORT) {
-                defmt::warn!("binding UDP socket failed: {}", e);
-            }
-        }
-        loop {
-            match socket.recv() {
-                Ok((data, client)) => {
-                    match shared_pool.add(data) {
-                        Ok(store_addr) => {
-                            if let Err(e) = self.tc_source_tx.try_send(store_addr) {
-                                defmt::warn!("TC source channel is full: {}", e);
-                            }
-                        }
-                        Err(e) => {
-                            defmt::warn!("could not add UDP packet to shared pool: {}", e);
-                        }
-                    }
-                    self.last_client = Some(client);
-                    // TODO: Implement packet wiretapping.
-                }
-                Err(e) => match e {
-                    udp::RecvError::Exhausted => {
-                        break;
-                    }
-                    udp::RecvError::Truncated => {
-                        defmt::warn!("UDP packet was truncacted");
-                    }
-                },
-            };
-        }
-    }
-}
-
-#[app(device = stm32h7xx_hal::stm32, peripherals = true)]
+#[app(device = embassy_stm32, peripherals = false)]
 mod app {
-    use core::ptr::addr_of_mut;
 
     use super::*;
-    use rtic_monotonics::fugit::MillisDurationU32;
-    use satrs::spacepackets::ecss::tc::PusTcReader;
-    use stm32h7xx_hal::ethernet::{EthernetMAC, PHY};
-    use stm32h7xx_hal::gpio::{Output, Pin};
-    use stm32h7xx_hal::prelude::*;
-    use stm32h7xx_hal::stm32::Interrupt;
+    use arbitrary_int::u14;
+    use embassy_net::udp::UdpSocket;
+    use embassy_net::StackResources;
+    use embassy_stm32::eth;
+    use embassy_stm32::gpio;
+    use embassy_stm32::peripherals;
+    use embassy_stm32::rng;
+    use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+    use embassy_time::Duration;
+    use embassy_time::Timer;
+    use embassy_time::WithTimeout as _;
+    use embedded_models::create_tm_packet;
+    use embedded_models::stm32h7;
+    use embedded_models::tm_size;
+    use embedded_models::TmHeader;
+    use spacepackets::CcsdsPacketCreationError;
+    use spacepackets::CcsdsPacketIdAndPsc;
+    use spacepackets::CcsdsPacketReader;
+    use spacepackets::SpHeader;
+    use static_cell::StaticCell;
+
+    bind_interrupts!(struct Irqs {
+        ETH => eth::InterruptHandler;
+        RNG => rng::InterruptHandler<peripherals::RNG>;
+    });
+
+    type Device = eth::Ethernet<
+        'static,
+        peripherals::ETH,
+        eth::GenericPhy<eth::Sma<'static, peripherals::ETH_SMA>>,
+    >;
 
     struct BlinkyLeds {
-        led1: Pin<'B', 7, Output>,
-        led2: Pin<'B', 14, Output>,
+        led1: gpio::Output<'static>,
+        led2: gpio::Output<'static>,
     }
 
     #[local]
     struct Local {
+        net_runner: embassy_net::Runner<'static, Device>,
+        net_stack: embassy_net::Stack<'static>,
         leds: BlinkyLeds,
-        link_led: Pin<'B', 0, Output>,
-        net: Net,
-        udp: UdpNet,
-        tc_source_rx: TcSourceRx,
-        phy: ethernet::phy::LAN8742A<EthernetMAC>,
+        link_led: gpio::Output<'static>,
+        tc_rx: embassy_sync::channel::Receiver<
+            'static,
+            NoopRawMutex,
+            alloc::vec::Vec<u8>,
+            TC_QUEUE_DEPTH,
+        >,
+        tc_tx: embassy_sync::channel::Sender<
+            'static,
+            NoopRawMutex,
+            alloc::vec::Vec<u8>,
+            TC_QUEUE_DEPTH,
+        >,
+        tm_rx: embassy_sync::channel::Receiver<
+            'static,
+            NoopRawMutex,
+            alloc::vec::Vec<u8>,
+            TM_QUEUE_DEPTH,
+        >,
+        tm_tx: embassy_sync::channel::Sender<
+            'static,
+            NoopRawMutex,
+            alloc::vec::Vec<u8>,
+            TM_QUEUE_DEPTH,
+        >,
     }
 
     #[shared]
     struct Shared {
-        blink_freq: MillisDurationU32,
-        eth_link_up: bool,
-        sockets: SocketSet<'static>,
-        shared_pool: SharedPool,
+        sequence_count: u14,
+        blink_freq: embassy_time::Duration,
     }
 
     #[init]
-    fn init(mut cx: init::Context) -> (Shared, Local) {
+    fn init(_cx: init::Context) -> (Shared, Local) {
         defmt::println!("Starting sat-rs demo application for the STM32H743ZIT");
 
-        let pwr = cx.device.PWR.constrain();
-        let pwrcfg = pwr.freeze();
+        let mut config = embassy_stm32::Config::default();
+        {
+            use embassy_stm32::rcc::*;
+            config.rcc.hsi = Some(HSIPrescaler::Div1);
+            config.rcc.csi = true;
+            config.rcc.hsi48 = Some(Default::default()); // needed for RNG
+            config.rcc.pll1 = Some(Pll {
+                source: PllSource::Hsi,
+                prediv: PllPreDiv::Div4,
+                mul: PllMul::Mul50,
+                fracn: None,
+                divp: Some(PllDiv::Div2),
+                divq: None,
+                divr: None,
+            });
+            config.rcc.sys = Sysclk::Pll1P; // 400 Mhz
+            config.rcc.ahb_pre = AHBPrescaler::Div2; // 200 Mhz
+            config.rcc.apb1_pre = APBPrescaler::Div2; // 100 Mhz
+            config.rcc.apb2_pre = APBPrescaler::Div2; // 100 Mhz
+            config.rcc.apb3_pre = APBPrescaler::Div2; // 100 Mhz
+            config.rcc.apb4_pre = APBPrescaler::Div2; // 100 Mhz
+            config.rcc.voltage_scale = VoltageScale::Scale1;
+        }
+        let periphs = embassy_stm32::init(config);
 
-        let rcc = cx.device.RCC.constrain();
-        // Try to keep the clock configuration similar to one used in STM examples:
-        // https://github.com/STMicroelectronics/STM32CubeH7/blob/master/Projects/NUCLEO-H743ZI/Examples/GPIO/GPIO_EXTI/Src/main.c
-        let ccdr = rcc
-            .sys_ck(400.MHz())
-            .hclk(200.MHz())
-            .use_hse(8.MHz())
-            .bypass_hse()
-            .pclk1(100.MHz())
-            .pclk2(100.MHz())
-            .pclk3(100.MHz())
-            .pclk4(100.MHz())
-            .freeze(pwrcfg, &cx.device.SYSCFG);
-
-        // Initialize the systick interrupt & obtain the token to prove that we did
-        Mono::start(cx.core.SYST, ccdr.clocks.sys_ck().to_Hz());
-
-        // Those are used in the smoltcp of the stm32h7xx-hal , I am not fully sure what they are
-        // good for.
-        cx.core.SCB.enable_icache();
-        cx.core.DWT.enable_cycle_counter();
-
-        let gpioa = cx.device.GPIOA.split(ccdr.peripheral.GPIOA);
-        let gpiob = cx.device.GPIOB.split(ccdr.peripheral.GPIOB);
-        let gpioc = cx.device.GPIOC.split(ccdr.peripheral.GPIOC);
-        let gpiog = cx.device.GPIOG.split(ccdr.peripheral.GPIOG);
-
-        let link_led = gpiob.pb0.into_push_pull_output();
-        let mut led1 = gpiob.pb7.into_push_pull_output();
-        let mut led2 = gpiob.pb14.into_push_pull_output();
+        let link_led = gpio::Output::new(periphs.PB0, gpio::Level::Low, gpio::Speed::Medium);
+        let mut led1 = gpio::Output::new(periphs.PB7, gpio::Level::Low, gpio::Speed::Medium);
+        let mut led2 = gpio::Output::new(periphs.PB14, gpio::Level::Low, gpio::Speed::Medium);
 
         // Criss-cross pattern looks cooler.
         led1.set_high();
         led2.set_low();
         let leds = BlinkyLeds { led1, led2 };
 
-        let rmii_ref_clk = gpioa.pa1.into_alternate::<11>();
-        let rmii_mdio = gpioa.pa2.into_alternate::<11>();
-        let rmii_mdc = gpioc.pc1.into_alternate::<11>();
-        let rmii_crs_dv = gpioa.pa7.into_alternate::<11>();
-        let rmii_rxd0 = gpioc.pc4.into_alternate::<11>();
-        let rmii_rxd1 = gpioc.pc5.into_alternate::<11>();
-        let rmii_tx_en = gpiog.pg11.into_alternate::<11>();
-        let rmii_txd0 = gpiog.pg13.into_alternate::<11>();
-        let rmii_txd1 = gpiob.pb13.into_alternate::<11>();
-
-        let mac_addr = smoltcp::wire::EthernetAddress::from_bytes(&MAC_ADDRESS);
-
-        /// Ethernet descriptor rings are a global singleton
-        #[link_section = ".sram3.eth"]
-        static mut DES_RING: MaybeUninit<ethernet::DesRing<4, 4>> = MaybeUninit::uninit();
-
-        let (eth_dma, eth_mac) = ethernet::new(
-            cx.device.ETHERNET_MAC,
-            cx.device.ETHERNET_MTL,
-            cx.device.ETHERNET_DMA,
-            (
-                rmii_ref_clk,
-                rmii_mdio,
-                rmii_mdc,
-                rmii_crs_dv,
-                rmii_rxd0,
-                rmii_rxd1,
-                rmii_tx_en,
-                rmii_txd0,
-                rmii_txd1,
-            ),
-            // SAFETY: We do not move the returned DMA struct across thread boundaries, so this
-            // should be safe according to the docs.
-            unsafe { DES_RING.assume_init_mut() },
-            mac_addr,
-            ccdr.peripheral.ETH1MAC,
-            &ccdr.clocks,
-        );
-        // Initialise ethernet PHY...
-        let mut lan8742a = ethernet::phy::LAN8742A::new(eth_mac.set_phy_addr(0));
-        lan8742a.phy_reset();
-        lan8742a.phy_init();
-
-        unsafe {
-            ethernet::enable_interrupt();
-            cx.core.NVIC.set_priority(Interrupt::ETH, 196); // Mid prio
-            cortex_m::peripheral::NVIC::unmask(Interrupt::ETH);
-        }
-
-        // unsafe: mutable reference to static storage, we only do this once
-        let store = unsafe {
-            let store_ptr = STORE.as_mut_ptr();
-
-            // Initialise the socket_storage field. Using `write` instead of
-            // assignment via `=` to not call `drop` on the old, uninitialised
-            // value
-            addr_of_mut!((*store_ptr).socket_storage).write([SocketStorage::EMPTY; 8]);
-
-            // Now that all fields are initialised we can safely use
-            // assume_init_mut to return a mutable reference to STORE
-            STORE.assume_init_mut()
-        };
-
-        let (tc_source_tx, tc_source_rx) =
-            rtic_sync::make_channel!(PoolAddr, TC_SOURCE_CHANNEL_DEPTH);
-
-        let mut sockets = SocketSet::new(&mut store.socket_storage[..]);
-        let net = Net::new(&mut sockets, eth_dma, mac_addr.into());
-        let udp = UdpNet::new(&mut sockets, tc_source_tx);
-
-        let mut shared_pool: SharedPool = StaticHeaplessMemoryPool::new(true);
-        static_subpool!(
-            SUBPOOL_SMALL,
-            SUBPOOL_SMALL_SIZES,
-            SUBPOOL_SMALL_NUM_BLOCKS as usize,
-            SUBPOOL_SMALL_BLOCK_SIZE,
-            link_section = ".axisram"
-        );
-        static_subpool!(
-            SUBPOOL_MEDIUM,
-            SUBPOOL_MEDIUM_SIZES,
-            SUBPOOL_MEDIUM_NUM_BLOCKS as usize,
-            SUBPOOL_MEDIUM_BLOCK_SIZE,
-            link_section = ".axisram"
-        );
-        static_subpool!(
-            SUBPOOL_LARGE,
-            SUBPOOL_LARGE_SIZES,
-            SUBPOOL_LARGE_NUM_BLOCKS as usize,
-            SUBPOOL_LARGE_BLOCK_SIZE,
-            link_section = ".axisram"
+        static PACKETS: StaticCell<eth::PacketQueue<4, 4>> = StaticCell::new();
+        // warning: Not all STM32H7 devices have the exact same pins here
+        // for STM32H747XIH, replace p.PB13 for PG12
+        let device = eth::Ethernet::new(
+            PACKETS.init(eth::PacketQueue::<4, 4>::new()),
+            periphs.ETH,
+            Irqs,
+            periphs.PA1,  // ref_clk
+            periphs.PA7,  // CRS_DV: Carrier Sense
+            periphs.PC4,  // RX_D0: Received Bit 0
+            periphs.PC5,  // RX_D1: Received Bit 1
+            periphs.PG13, // TX_D0: Transmit Bit 0
+            periphs.PB13, // TX_D1: Transmit Bit 1
+            periphs.PG11, // TX_EN: Transmit Enable
+            MAC_ADDRESS,
+            periphs.ETH_SMA,
+            periphs.PA2, // mdio
+            periphs.PC1, // mdc
         );
 
-        shared_pool
-            .grow(
-                SUBPOOL_SMALL.get_mut().unwrap(),
-                SUBPOOL_SMALL_SIZES.get_mut().unwrap(),
-                SUBPOOL_SMALL_NUM_BLOCKS,
-                true,
-            )
-            .expect("growing heapless memory pool failed");
-        shared_pool
-            .grow(
-                SUBPOOL_MEDIUM.get_mut().unwrap(),
-                SUBPOOL_MEDIUM_SIZES.get_mut().unwrap(),
-                SUBPOOL_MEDIUM_NUM_BLOCKS,
-                true,
-            )
-            .expect("growing heapless memory pool failed");
-        shared_pool
-            .grow(
-                SUBPOOL_LARGE.get_mut().unwrap(),
-                SUBPOOL_LARGE_SIZES.get_mut().unwrap(),
-                SUBPOOL_LARGE_NUM_BLOCKS,
-                true,
-            )
-            .expect("growing heapless memory pool failed");
+        let config = embassy_net::Config::dhcpv4(embassy_net::DhcpConfig::default());
+
+        // Generate random seed.
+        let mut rng = rng::Rng::new(periphs.RNG, Irqs);
+        let mut seed = [0; 8];
+        rng.fill_bytes(&mut seed);
+        let seed = u64::from_le_bytes(seed);
+
+        // Init network stack
+        static RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
+        let (stack, runner) =
+            embassy_net::new(device, config, RESOURCES.init(StackResources::new()), seed);
 
         // Set up global allocator. Use AXISRAM for the heap.
         #[link_section = ".axisram"]
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
         unsafe { HEAP.init(&raw mut HEAP_MEM as usize, HEAP_SIZE) }
 
-        eth_link_check::spawn().expect("eth link check failed");
+        static TC_CHANNEL: static_cell::ConstStaticCell<
+            embassy_sync::channel::Channel<NoopRawMutex, alloc::vec::Vec<u8>, TC_QUEUE_DEPTH>,
+        > = static_cell::ConstStaticCell::new(embassy_sync::channel::Channel::new());
+        let tc_channel = TC_CHANNEL.take();
+        let tc_sender = tc_channel.sender();
+        let tc_receiver = tc_channel.receiver();
+
+        static TM_CHANNEL: static_cell::ConstStaticCell<
+            embassy_sync::channel::Channel<NoopRawMutex, alloc::vec::Vec<u8>, TM_QUEUE_DEPTH>,
+        > = static_cell::ConstStaticCell::new(embassy_sync::channel::Channel::new());
+        let tm_channel = TM_CHANNEL.take();
+        let tm_sender = tm_channel.sender();
+        let tm_receiver = tm_channel.receiver();
+
+        net_lib_task::spawn().expect("spawning net library task failed");
+        net_app_task::spawn().expect("spawning net application task failed");
         blinky::spawn().expect("spawning blink task failed");
-        udp_task::spawn().expect("spawning UDP task failed");
-        tc_source_task::spawn().expect("spawning TC source task failed");
+        tc_handler::spawn().expect("spawning TC handler task failed");
 
         (
             Shared {
-                blink_freq: MillisDurationU32::from_ticks(DEFAULT_BLINK_FREQ_MS),
-                eth_link_up: false,
-                sockets,
-                shared_pool,
+                blink_freq: Duration::from_millis(DEFAULT_BLINK_FREQ_MS as u64),
+                sequence_count: u14::new(0),
             },
             Local {
                 link_led,
                 leds,
-                net,
-                udp,
-                tc_source_rx,
-                phy: lan8742a,
+                net_runner: runner,
+                net_stack: stack,
+                tc_tx: tc_sender,
+                tc_rx: tc_receiver,
+                tm_tx: tm_sender,
+                tm_rx: tm_receiver,
             },
         )
     }
@@ -430,94 +223,164 @@ mod app {
             leds.led1.toggle();
             leds.led2.toggle();
             let current_blink_freq = cx.shared.blink_freq.lock(|current| *current);
-            Mono::delay(current_blink_freq).await;
+            Timer::after_millis(current_blink_freq.as_millis()).await;
         }
     }
 
-    /// This task checks for the network link.
-    #[task(local=[link_led, phy], shared=[eth_link_up])]
-    async fn eth_link_check(mut cx: eth_link_check::Context) {
-        let phy = cx.local.phy;
-        let link_led = cx.local.link_led;
+    #[task(local=[net_runner])]
+    async fn net_lib_task(cx: net_lib_task::Context) {
+        cx.local.net_runner.run().await;
+    }
+
+    #[task(local = [net_stack, link_led, tc_tx, tm_rx])]
+    async fn net_app_task(cx: net_app_task::Context) {
+        pub const MTU: usize = 1500;
+
+        // Ensure those are in the data section by making them static.
+        static RX_UDP_META: static_cell::ConstStaticCell<[embassy_net::udp::PacketMetadata; 8]> =
+            static_cell::ConstStaticCell::new([embassy_net::udp::PacketMetadata::EMPTY; 8]);
+        static TX_UDP_META: static_cell::ConstStaticCell<[embassy_net::udp::PacketMetadata; 8]> =
+            static_cell::ConstStaticCell::new([embassy_net::udp::PacketMetadata::EMPTY; 8]);
+        static TX_UDP_BUFS: static_cell::ConstStaticCell<[u8; MTU]> =
+            static_cell::ConstStaticCell::new([0; MTU]);
+        static RX_UDP_BUFS: static_cell::ConstStaticCell<[u8; MTU]> =
+            static_cell::ConstStaticCell::new([0; MTU]);
+
+        let rx_udp_meta = RX_UDP_META.take();
+        let rx_udp_bufs = RX_UDP_BUFS.take();
+        let tx_udp_meta = TX_UDP_META.take();
+        let tx_udp_bufs = TX_UDP_BUFS.take();
+
+        let mut rx_buffer = [0; MTU];
+
         loop {
-            let link_was_up = cx.shared.eth_link_up.lock(|link_up| *link_up);
-            if phy.poll_link() {
-                if !link_was_up {
-                    link_led.set_high();
-                    cx.shared.eth_link_up.lock(|link_up| *link_up = true);
-                    defmt::info!("Ethernet link up");
+            cx.local.net_stack.wait_link_up().await;
+            cx.local.link_led.set_high();
+            defmt::info!("Network link is up");
+
+            // Ensure DHCP configuration is up before trying connect
+            cx.local.net_stack.wait_config_up().await;
+
+            let config = cx.local.net_stack.config_v4();
+            defmt::info!("Network task initialized, config: {}", config);
+
+            let mut udp = UdpSocket::new(
+                cx.local.net_stack.clone(),
+                rx_udp_meta,
+                rx_udp_bufs,
+                tx_udp_meta,
+                tx_udp_bufs,
+            );
+            defmt::info!("UDP socket bound to port {}", PORT);
+            udp.bind(PORT).expect("failed to bind UDP socket");
+            let mut remote_endpoint = None;
+            loop {
+                if !cx.local.net_stack.is_link_up() {
+                    defmt::warn!("Network link is down");
+                    cx.local.link_led.set_low();
+                    break;
                 }
-            } else if link_was_up {
-                link_led.set_low();
-                cx.shared.eth_link_up.lock(|link_up| *link_up = false);
-                defmt::info!("Ethernet link down");
-            }
-            Mono::delay(100.millis()).await;
-        }
-    }
-
-    #[task(binds=ETH, local=[net], shared=[sockets])]
-    fn eth_isr(mut cx: eth_isr::Context) {
-        // SAFETY: We do not write the register mentioned inside the docs anywhere else.
-        unsafe {
-            ethernet::interrupt_handler();
-        }
-        // Check and process ETH frames and DHCP. UDP is checked in a different task.
-        cx.shared.sockets.lock(|sockets| {
-            cx.local.net.poll(sockets);
-            cx.local.net.poll_dhcp(sockets);
-        });
-    }
-
-    /// This task routes UDP packets.
-    #[task(local=[udp], shared=[sockets, shared_pool])]
-    async fn udp_task(mut cx: udp_task::Context) {
-        loop {
-            cx.shared.sockets.lock(|sockets| {
-                cx.shared.shared_pool.lock(|pool| {
-                    cx.local.udp.poll(sockets, pool);
-                })
-            });
-            Mono::delay(40.millis()).await;
-        }
-    }
-
-    /// This task handles all the incoming telecommands.
-    #[task(local=[read_buf: [u8; 1024] = [0; 1024], tc_source_rx], shared=[shared_pool])]
-    async fn tc_source_task(mut cx: tc_source_task::Context) {
-        loop {
-            let recv_result = cx.local.tc_source_rx.recv().await;
-            match recv_result {
-                Ok(pool_addr) => {
-                    cx.shared.shared_pool.lock(|pool| {
-                        match pool.read(&pool_addr, cx.local.read_buf.as_mut()) {
-                            Ok(packet_len) => {
-                                defmt::info!("received {} bytes in the TC source task", packet_len);
-                                match PusTcReader::new(&cx.local.read_buf[0..packet_len]) {
-                                    Ok((packet, _tc_len)) => {
-                                        // TODO: Handle packet here or dispatch to dedicated PUS
-                                        // handler? Dispatching could simplify some things and make
-                                        // the software more scalable..
-                                        defmt::info!("received PUS packet: {}", packet);
-                                    }
-                                    Err(e) => {
-                                        defmt::info!("invalid TC format, not a PUS packet: {}", e);
-                                    }
-                                }
-                                if let Err(e) = pool.delete(pool_addr) {
-                                    defmt::warn!("deleting TC data failed: {}", e);
-                                }
-                            }
-                            Err(e) => {
-                                defmt::warn!("TC packet read failed: {}", e);
-                            }
+                match udp
+                    .recv_from(&mut rx_buffer)
+                    .with_timeout(Duration::from_millis(200))
+                    .await
+                {
+                    Ok(result) => match result {
+                        Ok((data, meta)) => {
+                            remote_endpoint = Some(meta.endpoint);
+                            defmt::debug!("UDP RX {}, Meta: {}", data, meta);
+                            cx.local.tc_tx.send(rx_buffer[0..data].to_vec()).await;
                         }
-                    });
+                        Err(e) => {
+                            defmt::warn!("udp receive error: {}", e);
+                            Timer::after_millis(100).await;
+                        }
+                    },
+                    Err(_e) => (),
                 }
-                Err(e) => {
-                    defmt::warn!("TC source reception error: {}", e);
+                if let Some(endpoint) = remote_endpoint {
+                    while let Ok(packet) = cx.local.tm_rx.try_receive() {
+                        match udp.send_to(&packet, endpoint).await {
+                            Ok(_) => {
+                                defmt::debug!("UDP TX: {} bytes to: {}", packet.len(), endpoint)
+                            }
+                            Err(e) => defmt::warn!("udp send error: {}", e),
+                        }
+                    }
                 }
-            };
+            }
         }
+    }
+
+    #[task(local = [tc_rx, tm_tx], shared=[sequence_count, blink_freq])]
+    async fn tc_handler(mut cx: tc_handler::Context) {
+        loop {
+            let tc = cx.local.tc_rx.receive().await;
+
+            match CcsdsPacketReader::new_with_checksum(&tc) {
+                Ok(packet) => {
+                    let packet_id = packet.packet_id();
+                    let psc = packet.psc();
+                    let tc_packet_id = CcsdsPacketIdAndPsc { packet_id, psc };
+                    if let Ok(request) =
+                        postcard::from_bytes::<stm32h7::Request>(packet.packet_data())
+                    {
+                        let response = match request {
+                            stm32h7::Request::Ping => {
+                                defmt::info!("Received Ping request");
+                                stm32h7::Response::Ok
+                            }
+                            stm32h7::Request::ChangeBlinkFrequency(duration) => {
+                                defmt::info!(
+                                    "Received blinky frequency change request: {} ms",
+                                    duration.as_millis()
+                                );
+                                cx.shared.blink_freq.lock(|current| {
+                                    *current = Duration::from_millis(duration.as_millis() as u64)
+                                });
+                                stm32h7::Response::Ok
+                            }
+                        };
+                        let sequence_count = cx.shared.sequence_count.lock(|v| {
+                            let current = *v;
+                            *v = v.wrapping_add(u14::new(1));
+                            current
+                        });
+
+                        // Send Pong/OK response immediately.
+                        if let Err(e) =
+                            send_tm(tc_packet_id, response, sequence_count, cx.local.tm_tx).await
+                        {
+                            defmt::warn!("Failed to send TM response: {}", e);
+                        }
+                    }
+                }
+                Err(e) => defmt::warn!("Failed to parse received TC packet: {}", e,),
+            }
+            defmt::info!("Received from UDP client: {}", tc.as_slice());
+        }
+    }
+
+    async fn send_tm(
+        tc_packet_id: CcsdsPacketIdAndPsc,
+        response: stm32h7::Response,
+        current_seq_count: u14,
+        sender: &embassy_sync::channel::Sender<
+            'static,
+            NoopRawMutex,
+            alloc::vec::Vec<u8>,
+            TM_QUEUE_DEPTH,
+        >,
+    ) -> Result<(), CcsdsPacketCreationError> {
+        let sp_header = SpHeader::new_for_unseg_tc(stm32h7::PUS_APID, current_seq_count, 0);
+        let tm_header = TmHeader {
+            tc_packet_id: Some(tc_packet_id),
+            uptime_millis: embassy_time::Instant::now().as_millis(),
+        };
+        let tm_size = tm_size(&tm_header, &response);
+        let mut packet = alloc::vec![0; tm_size];
+        create_tm_packet(&mut packet, sp_header, tm_header, response)?;
+        sender.send(packet).await;
+        Ok(())
     }
 }
