@@ -67,7 +67,7 @@ fn main() -> anyhow::Result<()> {
                 log::debug!("Received packet: {:?}", reader);
                 if let Ok(reader) = reader {
                     let packet_data = reader.packet_data();
-                    let tm_header = postcard::take_from_bytes::<TmHeader>(&packet_data);
+                    let tm_header = postcard::take_from_bytes::<TmHeader>(packet_data);
                     if let Ok((tm_header, remainder)) = tm_header {
                         let response = postcard::from_bytes::<stm32h7::Response>(remainder);
                         if let Ok(response) = response {
