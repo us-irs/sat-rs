@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use anyhow::bail;
 use clap::Parser;
 use cobs::CobsDecoderOwned;
 use embedded_client::setup_logger;
@@ -17,13 +18,17 @@ struct Cli {
     set_led_frequency: Option<u32>,
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     setup_logger().expect("failed to initialize logger");
     println!("-- STM32F3 TMTC client --");
     let cli = Cli::parse();
     let config = embedded_client::Config::new_from_file();
 
-    let serial = serialport::new(config.interface.serial_port, 115200)
+    if config.interface.serial_port.is_none() {
+        bail!("Serial port not specified in configuration file.");
+    }
+    let serial_port = config.interface.serial_port.as_ref().unwrap();
+    let serial = serialport::new(serial_port, 115200)
         .open()
         .expect("opening serial port failed");
     let mut transport = PacketTransportSerialCobs::new(serial, CobsDecoderOwned::new(1024));
