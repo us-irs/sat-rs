@@ -1,9 +1,9 @@
 #![no_std]
 #![no_main]
-use arbitrary_int::{u11, u14};
+use arbitrary_int::u14;
 use cortex_m_semihosting::debug::{self, EXIT_FAILURE, EXIT_SUCCESS};
-use satrs_stm32f3_disco_rtic::{create_tm_packet, tm_size, CcsdsPacketId, Request, Response};
-use spacepackets::{CcsdsPacketCreationError, SpHeader};
+use embedded_models::{create_tm_packet, stm32f3, tm_size, TmHeader};
+use spacepackets::{CcsdsPacketCreationError, CcsdsPacketIdAndPsc, SpHeader};
 
 use defmt_rtt as _; // global logger
 
@@ -22,8 +22,6 @@ const DEFAULT_BLINK_FREQ_MS: u32 = 1000;
 const TX_HANDLER_FREQ_MS: u32 = 20;
 const MAX_TC_LEN: usize = 128;
 const MAX_TM_LEN: usize = 128;
-
-pub const PUS_APID: u11 = u11::new(0x02);
 
 // This is the predictable maximum overhead of the COBS encoding scheme.
 // It is simply the maximum packet lenght dividied by 254 rounded up.
@@ -47,8 +45,8 @@ pub enum TmSendError {
 
 #[derive(Debug, defmt::Format)]
 pub struct RequestWithTcId {
-    pub request: Request,
-    pub tc_id: CcsdsPacketId,
+    pub request: stm32f3::Request,
+    pub tc_id: CcsdsPacketIdAndPsc,
 }
 
 #[app(device = embassy_stm32)]
@@ -57,12 +55,13 @@ mod app {
 
     use super::*;
     use arbitrary_int::u14;
+    use embedded_models::stm32f3::{Request, Response};
     use rtic::Mutex;
     use rtic_sync::{
         channel::{Receiver, Sender},
         make_channel,
     };
-    use satrs_stm32f3_disco_rtic::{CcsdsPacketId, LedPinSet, Request, Response};
+    use satrs_stm32f3_disco_rtic::LedPinSet;
     use spacepackets::CcsdsPacketReader;
 
     systick_monotonic!(Mono, 1000);
@@ -200,7 +199,7 @@ mod app {
                                     Ok(packet) => {
                                         let packet_id = packet.packet_id();
                                         let psc = packet.psc();
-                                        let tc_packet_id = CcsdsPacketId { packet_id, psc };
+                                        let tc_packet_id = CcsdsPacketIdAndPsc { packet_id, psc };
                                         if let Ok(request) =
                                             postcard::from_bytes::<Request>(packet.packet_data())
                                         {
@@ -260,17 +259,17 @@ mod app {
 
     fn handle_ping_request(
         cx: &mut req_handler::Context,
-        tc_packet_id: CcsdsPacketId,
+        tc_packet_id: CcsdsPacketIdAndPsc,
     ) -> Result<(), TmSendError> {
         defmt::info!("Received PUS ping telecommand, sending ping reply");
-        send_tm(tc_packet_id, Response::CommandDone, *cx.local.seq_count)?;
+        send_tm(tc_packet_id, Response::Ok, *cx.local.seq_count)?;
         *cx.local.seq_count = cx.local.seq_count.wrapping_add(u14::new(1));
         Ok(())
     }
 
     fn handle_change_blink_frequency_request(
         cx: &mut req_handler::Context,
-        tc_packet_id: CcsdsPacketId,
+        tc_packet_id: CcsdsPacketIdAndPsc,
         duration: Duration,
     ) -> Result<(), TmSendError> {
         defmt::info!(
@@ -280,21 +279,21 @@ mod app {
         cx.shared
             .blink_freq
             .lock(|blink_freq| *blink_freq = duration);
-        send_tm(tc_packet_id, Response::CommandDone, *cx.local.seq_count)?;
+        send_tm(tc_packet_id, Response::Ok, *cx.local.seq_count)?;
         *cx.local.seq_count = cx.local.seq_count.wrapping_add(u14::new(1));
         Ok(())
     }
 }
 
 fn send_tm(
-    tc_packet_id: CcsdsPacketId,
-    response: Response,
+    tc_packet_id: CcsdsPacketIdAndPsc,
+    response: stm32f3::Response,
     current_seq_count: u14,
 ) -> Result<(), TmSendError> {
-    let sp_header = SpHeader::new_for_unseg_tc(PUS_APID, current_seq_count, 0);
-    let tm_header = satrs_stm32f3_disco_rtic::TmHeader {
+    let sp_header = SpHeader::new_for_unseg_tc(stm32f3::PUS_APID, current_seq_count, 0);
+    let tm_header = TmHeader {
         tc_packet_id: Some(tc_packet_id),
-        uptime_millis: Mono::now().duration_since_epoch().to_millis(),
+        uptime_millis: Mono::now().duration_since_epoch().to_millis() as u64,
     };
     let mut tm_packet = TmPacket::new();
     let tm_size = tm_size(&tm_header, &response);

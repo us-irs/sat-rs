@@ -1,13 +1,10 @@
 #![no_main]
 #![no_std]
 
+use defmt_rtt as _;
+
 use arbitrary_int::u11;
-use core::time::Duration;
 use embassy_stm32::gpio::Output;
-use spacepackets::{
-    ccsds_packet_len_for_user_data_len_with_checksum, CcsdsPacketCreationError,
-    CcsdsPacketCreatorWithReservedData, CcsdsPacketIdAndPsc, SpacePacketHeader,
-};
 
 pub const APID: u11 = u11::new(0x02);
 
@@ -38,49 +35,6 @@ impl Direction {
         };
         (curr, *self)
     }
-}
-
-#[derive(Copy, Clone, Debug, defmt::Format, serde::Serialize, serde::Deserialize)]
-pub enum Request {
-    Ping,
-    ChangeBlinkFrequency(Duration),
-}
-
-#[derive(Debug, defmt::Format, serde::Serialize, serde::Deserialize)]
-pub struct TmHeader {
-    pub tc_packet_id: Option<CcsdsPacketIdAndPsc>,
-    pub uptime_millis: u32,
-}
-
-#[derive(Debug, defmt::Format, serde::Serialize, serde::Deserialize)]
-pub enum Response {
-    CommandDone,
-}
-
-pub fn tm_size(tm_header: &TmHeader, response: &Response) -> usize {
-    ccsds_packet_len_for_user_data_len_with_checksum(
-        postcard::experimental::serialized_size(tm_header).unwrap()
-            + postcard::experimental::serialized_size(response).unwrap(),
-    )
-    .unwrap()
-}
-
-pub fn create_tm_packet(
-    buf: &mut [u8],
-    sp_header: SpacePacketHeader,
-    tm_header: TmHeader,
-    response: Response,
-) -> Result<usize, CcsdsPacketCreationError> {
-    let packet_data_size = postcard::experimental::serialized_size(&tm_header).unwrap()
-        + postcard::experimental::serialized_size(&response).unwrap();
-    let mut creator =
-        CcsdsPacketCreatorWithReservedData::new_tm_with_checksum(sp_header, packet_data_size, buf)?;
-
-    let current_index = postcard::to_slice(&tm_header, creator.packet_data_mut())
-        .unwrap()
-        .len();
-    postcard::to_slice(&response, &mut creator.packet_data_mut()[current_index..]).unwrap();
-    Ok(creator.finish())
 }
 
 pub struct Leds {

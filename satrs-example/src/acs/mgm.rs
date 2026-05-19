@@ -169,7 +169,7 @@ impl MgmHandlerLis3Mdl {
         spi_com: SpiCommunication,
         shared_mgm_set: Arc<Mutex<MgmData>>,
         mode_leaf_helper: ModeLeafHelper,
-        mode_timeout: Duration
+        mode_timeout: Duration,
     ) -> Self {
         Self {
             id,
@@ -533,6 +533,7 @@ mod tests {
                 SpiCommunication::Test(TestSpiInterface::default()),
                 shared_mgm_set,
                 mode_leaf_helper,
+                Duration::from_millis(200),
             );
             Self {
                 assembly_mode_request_tx,
