@@ -11,7 +11,7 @@ serde = { version = "1", features = ["derive"] }
 satrs-stm32f3-disco-rtic = { path = "../stm32f3-disco-rtic" }
 spacepackets = { version = "0.17" }
 embedded-models = { path = "../models" }
-tmtc-utils = { git = "https://egit.irs.uni-stuttgart.de/rust/tmtc-utils.git", version = "0.1" }
+tmtc-utils = { git = "https://egit.irs.uni-stuttgart.de/rust/tmtc-utils.git", version = "0.1", rev = "d8015379a45e77400dd9c71afbf22ca415ed67d1" }
 postcard = { version = "1", features = ["alloc"] }
 anyhow = "1"
 cobs = "0.5"
