@@ -2,6 +2,7 @@
 #![no_std]
 
 use defmt_rtt as _;
+use panic_probe as _;
 
 use arbitrary_int::u11;
 use embassy_stm32::gpio::Output;

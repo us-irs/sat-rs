@@ -6,11 +6,8 @@ use rtic::app;
 
 #[app(device = embassy_stm32)]
 mod app {
-    use rtic_monotonics::fugit::ExtU32;
-    use rtic_monotonics::Monotonic as _;
+    use embassy_time::Timer;
     use satrs_stm32f3_disco_rtic::{Direction, LedPinSet, Leds};
-
-    rtic_monotonics::systick_monotonic!(Mono, 1000);
 
     #[shared]
     struct Shared {}
@@ -22,7 +19,7 @@ mod app {
     }
 
     #[init]
-    fn init(cx: init::Context) -> (Shared, Local) {
+    fn init(_cx: init::Context) -> (Shared, Local) {
         let p = embassy_stm32::init(Default::default());
 
         defmt::info!("Starting sat-rs demo application for the STM32F3-Discovery using RTICv2");
@@ -39,8 +36,6 @@ mod app {
         };
         let leds = Leds::new(led_pin_set);
 
-        // Initialize the systick interrupt & obtain the token to prove that we did
-        Mono::start(cx.core.SYST, 8_000_000);
         blinky::spawn().expect("failed to spawn blinky task");
         (
             Shared {},
@@ -55,7 +50,7 @@ mod app {
     async fn blinky(cx: blinky::Context) {
         loop {
             cx.local.leds.blink_next(cx.local.current_dir);
-            Mono::delay(200.millis()).await;
+            Timer::after_millis(200).await;
         }
     }
 }

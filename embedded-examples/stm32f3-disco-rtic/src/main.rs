@@ -2,24 +2,17 @@
 #![no_main]
 use arbitrary_int::u14;
 use cortex_m_semihosting::debug::{self, EXIT_FAILURE, EXIT_SUCCESS};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embedded_models::{create_tm_packet, stm32f3, tm_size, TmHeader};
 use spacepackets::{CcsdsPacketCreationError, CcsdsPacketIdAndPsc, SpHeader};
 
 use defmt_rtt as _; // global logger
-
 use panic_probe as _;
 
 use rtic::app;
 
-#[allow(unused_imports)]
-use rtic_monotonics::fugit::{MillisDurationU32, TimerInstantU32};
-use rtic_monotonics::systick::prelude::*;
-
-use crate::app::Mono;
-
 const UART_BAUD: u32 = 115200;
 const DEFAULT_BLINK_FREQ_MS: u32 = 1000;
-const TX_HANDLER_FREQ_MS: u32 = 20;
 const MAX_TC_LEN: usize = 128;
 const MAX_TM_LEN: usize = 128;
 
@@ -33,7 +26,8 @@ const TC_DMA_BUF_LEN: usize = 512;
 
 type TmPacket = heapless::Vec<u8, MAX_TM_LEN>;
 
-static TM_QUEUE: heapless::mpmc::Queue<TmPacket, 16> = heapless::mpmc::Queue::new();
+static TM_QUEUE: embassy_sync::channel::Channel<CriticalSectionRawMutex, TmPacket, 16> =
+    embassy_sync::channel::Channel::new();
 
 #[derive(Debug, defmt::Format, thiserror::Error)]
 pub enum TmSendError {
@@ -55,6 +49,7 @@ mod app {
 
     use super::*;
     use arbitrary_int::u14;
+    use embassy_time::Timer;
     use embedded_models::stm32f3::{Request, Response};
     use rtic::Mutex;
     use rtic_sync::{
@@ -64,10 +59,10 @@ mod app {
     use satrs_stm32f3_disco_rtic::LedPinSet;
     use spacepackets::CcsdsPacketReader;
 
-    systick_monotonic!(Mono, 1000);
-
     embassy_stm32::bind_interrupts!(struct Irqs {
         USART2 => embassy_stm32::usart::InterruptHandler<embassy_stm32::peripherals::USART2>;
+        DMA1_CHANNEL6 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH6>;
+        DMA1_CHANNEL7 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH7>;
     });
 
     #[shared]
@@ -85,15 +80,13 @@ mod app {
     }
 
     #[init]
-    fn init(cx: init::Context) -> (Shared, Local) {
+    fn init(_cx: init::Context) -> (Shared, Local) {
         static DMA_BUF: static_cell::ConstStaticCell<[u8; TC_DMA_BUF_LEN]> =
             static_cell::ConstStaticCell::new([0; TC_DMA_BUF_LEN]);
 
         let p = embassy_stm32::init(Default::default());
 
         let (req_sender, req_receiver) = make_channel!(RequestWithTcId, 16);
-        // Initialize the systick interrupt & obtain the token to prove that we did
-        Mono::start(cx.core.SYST, 8_000_000);
 
         defmt::info!("sat-rs demo application for the STM32F3-Discovery with RTICv2");
         let led_pin_set = LedPinSet {
@@ -111,7 +104,7 @@ mod app {
         let mut config = embassy_stm32::usart::Config::default();
         config.baudrate = UART_BAUD;
         let uart = embassy_stm32::usart::Uart::new(
-            p.USART2, p.PA3, p.PA2, Irqs, p.DMA1_CH7, p.DMA1_CH6, config,
+            p.USART2, p.PA3, p.PA2, p.DMA1_CH7, p.DMA1_CH6, Irqs, config,
         )
         .unwrap();
 
@@ -141,10 +134,7 @@ mod app {
         loop {
             cx.local.leds.blink_next(cx.local.current_dir);
             let current_blink_freq = cx.shared.blink_freq.lock(|current| *current);
-            Mono::delay(MillisDurationU32::from_ticks(
-                current_blink_freq.as_millis() as u32,
-            ))
-            .await;
+            Timer::after_millis(current_blink_freq.as_millis() as u64).await;
         }
     }
 
@@ -157,7 +147,8 @@ mod app {
     )]
     async fn serial_tx_handler(cx: serial_tx_handler::Context) {
         loop {
-            while let Some(vec) = TM_QUEUE.dequeue() {
+            loop {
+                let vec = TM_QUEUE.receive().await;
                 let encoded_len =
                     cobs::encode_including_sentinels(&vec[0..vec.len()], cx.local.encoded_buf);
                 defmt::debug!("sending {} bytes over UART", encoded_len);
@@ -166,9 +157,7 @@ mod app {
                     .write(&cx.local.encoded_buf[0..encoded_len])
                     .await
                     .unwrap();
-                continue;
             }
-            Mono::delay(TX_HANDLER_FREQ_MS.millis()).await;
         }
     }
 
@@ -197,9 +186,8 @@ mod app {
                                     &decoder.dest()[0..packet_size],
                                 ) {
                                     Ok(packet) => {
-                                        let packet_id = packet.packet_id();
-                                        let psc = packet.psc();
-                                        let tc_packet_id = CcsdsPacketIdAndPsc { packet_id, psc };
+                                        let tc_packet_id =
+                                            CcsdsPacketIdAndPsc::new_from_ccsds_packet(&packet);
                                         if let Ok(request) =
                                             postcard::from_bytes::<Request>(packet.packet_data())
                                         {
@@ -239,13 +227,16 @@ mod app {
             match receiver.recv().await {
                 Ok(request_with_tc_id) => {
                     let tm_send_result = match request_with_tc_id.request {
-                        Request::Ping => handle_ping_request(&mut cx, request_with_tc_id.tc_id),
+                        Request::Ping => {
+                            handle_ping_request(&mut cx, request_with_tc_id.tc_id).await
+                        }
                         Request::ChangeBlinkFrequency(duration) => {
                             handle_change_blink_frequency_request(
                                 &mut cx,
                                 request_with_tc_id.tc_id,
                                 duration,
                             )
+                            .await
                         }
                     };
                     if let Err(e) = tm_send_result {
@@ -257,18 +248,18 @@ mod app {
         }
     }
 
-    fn handle_ping_request(
-        cx: &mut req_handler::Context,
+    async fn handle_ping_request(
+        cx: &mut req_handler::Context<'_>,
         tc_packet_id: CcsdsPacketIdAndPsc,
     ) -> Result<(), TmSendError> {
         defmt::info!("Received PUS ping telecommand, sending ping reply");
-        send_tm(tc_packet_id, Response::Ok, *cx.local.seq_count)?;
+        send_tm(tc_packet_id, Response::Ok, *cx.local.seq_count).await?;
         *cx.local.seq_count = cx.local.seq_count.wrapping_add(u14::new(1));
         Ok(())
     }
 
-    fn handle_change_blink_frequency_request(
-        cx: &mut req_handler::Context,
+    async fn handle_change_blink_frequency_request(
+        cx: &mut req_handler::Context<'_>,
         tc_packet_id: CcsdsPacketIdAndPsc,
         duration: Duration,
     ) -> Result<(), TmSendError> {
@@ -279,13 +270,13 @@ mod app {
         cx.shared
             .blink_freq
             .lock(|blink_freq| *blink_freq = duration);
-        send_tm(tc_packet_id, Response::Ok, *cx.local.seq_count)?;
+        send_tm(tc_packet_id, Response::Ok, *cx.local.seq_count).await?;
         *cx.local.seq_count = cx.local.seq_count.wrapping_add(u14::new(1));
         Ok(())
     }
 }
 
-fn send_tm(
+async fn send_tm(
     tc_packet_id: CcsdsPacketIdAndPsc,
     response: stm32f3::Response,
     current_seq_count: u14,
@@ -293,16 +284,13 @@ fn send_tm(
     let sp_header = SpHeader::new_for_unseg_tc(stm32f3::PUS_APID, current_seq_count, 0);
     let tm_header = TmHeader {
         tc_packet_id: Some(tc_packet_id),
-        uptime_millis: Mono::now().duration_since_epoch().to_millis() as u64,
+        uptime_millis: embassy_time::Instant::now().as_millis(),
     };
     let mut tm_packet = TmPacket::new();
     let tm_size = tm_size(&tm_header, &response);
     tm_packet.resize(tm_size, 0).expect("vec resize failed");
     create_tm_packet(&mut tm_packet, sp_header, tm_header, response)?;
-    if TM_QUEUE.enqueue(tm_packet).is_err() {
-        defmt::warn!("TC queue full");
-        return Err(TmSendError::Queue);
-    }
+    TM_QUEUE.send(tm_packet).await;
     Ok(())
 }
 
