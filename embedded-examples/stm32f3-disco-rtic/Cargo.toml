@@ -20,7 +20,7 @@ embassy-time = { version = "0.5", features = ["defmt", "generic-queue-16", "defm
 enumset = "1"
 heapless = "0.9"
 embassy-sync = "0.8"
-spacepackets = { version = "0.17", default-features = false, features = ["defmt", "serde"] }
+spacepackets = { version = "0.18", default-features = false, features = ["defmt", "serde"] }
 static_cell = "2"
 cobs = { version = "0.5", default-features = false, features = ["defmt"] }
 postcard = { version = "1" }

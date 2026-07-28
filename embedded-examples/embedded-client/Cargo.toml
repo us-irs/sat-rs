@@ -8,8 +8,7 @@ clap = { version = "4", features = ["derive"] }
 serialport = "4"
 toml = "0.9"
 serde = { version = "1", features = ["derive"] }
-satrs-stm32f3-disco-rtic = { path = "../stm32f3-disco-rtic" }
-spacepackets = { version = "0.17" }
+spacepackets = { version = "0.18" }
 embedded-models = { path = "../models" }
 tmtc-utils = { git = "https://egit.irs.uni-stuttgart.de/rust/tmtc-utils.git", version = "0.1", rev = "d8015379a45e77400dd9c71afbf22ca415ed67d1" }
 postcard = { version = "1", features = ["alloc"] }

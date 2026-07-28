@@ -42,7 +42,7 @@ pub mod request {
 }
 
 #[derive(Default, Debug, Copy, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MgmData {
+pub struct SensorData {
     pub valid: bool,
     pub x: f32,
     pub y: f32,
@@ -50,11 +50,11 @@ pub struct MgmData {
 }
 
 pub mod response {
-    use crate::{DeviceMode, Message, mgm::MgmData};
+    use crate::{DeviceMode, Message, acs::mgm::SensorData};
 
     #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
     pub enum HkResponse {
-        MgmData(MgmData),
+        MgmData(SensorData),
     }
 
     #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]

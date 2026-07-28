@@ -1,8 +1,8 @@
-use models::mgm::MgmData;
-use models::mgm::request::ModeRequest;
-use models::mgm::response::ModeResponse;
+use models::acs::mgm::SensorData;
+use models::acs::mgm::request::ModeRequest;
+use models::acs::mgm::response::ModeResponse;
 use models::pcdu::SwitchId;
-use models::{ComponentId, DeviceMode, HkRequestType, mgm};
+use models::{ComponentId, DeviceMode, HkRequestType, acs::mgm};
 use satrs::spacepackets::CcsdsPacketIdAndPsc;
 use satrs_example::{HkHelperSingleSet, ModeHelper, TimestampHelper, TmtcQueues};
 use satrs_minisim::acs::MgmRequestLis3Mdl;
@@ -153,7 +153,7 @@ pub struct MgmHandlerLis3Mdl {
     switch_helper: PowerSwitchHelper,
     tmtc_queues: TmtcQueues,
     pub spi_com: SpiCommunication,
-    shared_mgm_set: Arc<Mutex<MgmData>>,
+    shared_mgm_set: Arc<Mutex<SensorData>>,
     buffers: BufWrapper,
     stamp_helper: TimestampHelper,
     hk_helper: HkHelperSingleSet,
@@ -167,7 +167,7 @@ impl MgmHandlerLis3Mdl {
         tmtc_queues: TmtcQueues,
         switch_helper: PowerSwitchHelper,
         spi_com: SpiCommunication,
-        shared_mgm_set: Arc<Mutex<MgmData>>,
+        shared_mgm_set: Arc<Mutex<SensorData>>,
         mode_leaf_helper: ModeLeafHelper,
         mode_timeout: Duration,
     ) -> Self {
@@ -308,7 +308,7 @@ impl MgmHandlerLis3Mdl {
     pub fn handle_hk_request(
         &mut self,
         tc_id: Option<CcsdsPacketIdAndPsc>,
-        hk_request: &models::mgm::request::HkRequest,
+        hk_request: &models::acs::mgm::request::HkRequest,
     ) {
         match hk_request.req_type {
             HkRequestType::OneShot => {
@@ -462,8 +462,8 @@ mod tests {
     use arbitrary_int::u11;
     use models::{
         Apid, ComponentId, TcHeader,
+        acs::mgm::request::HkRequest,
         ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned},
-        mgm::request::HkRequest,
         pcdu::{SwitchRequest, SwitchState, SwitchStateBinary},
     };
     use satrs::{request::GenericMessage, spacepackets::SpacePacketHeader};
@@ -490,7 +490,7 @@ mod tests {
 
     pub fn create_request_tc(
         select: MgmSelect,
-        request: models::mgm::request::Request,
+        request: models::acs::mgm::request::Request,
     ) -> models::ccsds::CcsdsTcPacketOwned {
         models::ccsds::CcsdsTcPacketOwned::new_with_request(
             SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
@@ -533,7 +533,7 @@ mod tests {
                 SpiCommunication::Test(TestSpiInterface::default()),
                 shared_mgm_set,
                 mode_leaf_helper,
-                Duration::from_millis(200),
+                Duration::from_millis(100),
             );
             Self {
                 assembly_mode_request_tx,
@@ -601,9 +601,10 @@ mod tests {
 
         assert_eq!(tm_packet.tm_header.sender_id, ComponentId::AcsMgm0);
 
-        let response = postcard::from_bytes::<models::mgm::response::Response>(&tm_packet.payload)
-            .expect("failed to deserialize mode reply");
-        matches!(response, models::mgm::response::Response::Ok);
+        let response =
+            postcard::from_bytes::<models::acs::mgm::response::Response>(&tm_packet.payload)
+                .expect("failed to deserialize mode reply");
+        matches!(response, models::acs::mgm::response::Response::Ok);
         // The device should have been polled once.
         assert_eq!(testbench.test_spi_interface().call_count, 1);
         let mgm_set = *testbench.handler.shared_mgm_set.lock().unwrap();
@@ -689,9 +690,10 @@ mod tests {
 
         assert_eq!(tm_packet.tm_header.sender_id, ComponentId::AcsMgm0);
 
-        let response = postcard::from_bytes::<models::mgm::response::Response>(&tm_packet.payload)
-            .expect("failed to deserialize mode reply");
-        if let models::mgm::response::Response::Hk(mgm::response::HkResponse::MgmData(data)) =
+        let response =
+            postcard::from_bytes::<models::acs::mgm::response::Response>(&tm_packet.payload)
+                .expect("failed to deserialize mode reply");
+        if let models::acs::mgm::response::Response::Hk(mgm::response::HkResponse::MgmData(data)) =
             response
         {
             assert_eq!(data.valid, false);
@@ -740,17 +742,18 @@ mod tests {
 
         assert_eq!(mode_tm.tm_header.sender_id, ComponentId::AcsMgm0);
 
-        let response = postcard::from_bytes::<models::mgm::response::Response>(&mode_tm.payload)
-            .expect("failed to deserialize mode reply");
-        matches!(response, models::mgm::response::Response::Ok);
+        let response =
+            postcard::from_bytes::<models::acs::mgm::response::Response>(&mode_tm.payload)
+                .expect("failed to deserialize mode reply");
+        matches!(response, models::acs::mgm::response::Response::Ok);
 
         let hk_tm = testbench.tm_rx.try_recv().expect("no hk reply generated");
 
         assert_eq!(hk_tm.tm_header.sender_id, ComponentId::AcsMgm0);
 
-        let response = postcard::from_bytes::<models::mgm::response::Response>(&hk_tm.payload)
+        let response = postcard::from_bytes::<models::acs::mgm::response::Response>(&hk_tm.payload)
             .expect("failed to deserialize mode reply");
-        if let models::mgm::response::Response::Hk(mgm::response::HkResponse::MgmData(data)) =
+        if let models::acs::mgm::response::Response::Hk(mgm::response::HkResponse::MgmData(data)) =
             response
         {
             // Set is now valid.

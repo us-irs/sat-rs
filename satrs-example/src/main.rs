@@ -23,16 +23,13 @@ use logger::setup_logger;
 use models::{ComponentId, DeviceMode};
 use satrs::{
     hal::std::{tcp_server::ServerConfig, udp_server::UdpTcServer},
-    mode::{Mode, ModeAndSubmode, ModeRequest},
     pus::HandlingStatus,
-    request::{GenericMessage, MessageMetadata},
     spacepackets::time::cds::CdsTime,
 };
 use satrs_example::{
     TmtcQueues,
     config::{
         OBSW_SERVER_ADDR, PACKET_ID_VALIDATOR, SERVER_PORT,
-        components::NO_SENDER,
         tasks::{FREQ_MS_AOCS, FREQ_MS_CONTROLLER, FREQ_MS_UDP_TMTC, SIM_CLIENT_IDLE_DELAY_MS},
     },
 };
@@ -40,7 +37,7 @@ use tmtc::sender::TmTcSender;
 use tmtc::{tc_source::TcSourceTask, tm_sink::TmSink};
 
 use crate::{
-    acs::{mgm, mgm_assembly},
+    acs::{mgm, mgm_assembly, subsystem},
     control::Controller,
     eps::pcdu::SwitchSet,
     event_manager::EventManager,
@@ -80,12 +77,19 @@ fn main() {
     let (mgm_0_handler_tc_tx, mgm_0_handler_tc_rx) = mpsc::sync_channel(10);
     let (mgm_1_handler_tc_tx, mgm_1_handler_tc_rx) = mpsc::sync_channel(10);
     let (mgm_assembly_tc_tx, mgm_assembly_tc_rx) = mpsc::sync_channel(10);
+    let (acs_subsystem_tc_tx, acs_subsystem_tc_rx) = mpsc::sync_channel(10);
     let (pcdu_handler_tc_tx, pcdu_handler_tc_rx) = mpsc::sync_channel(30);
     let (controller_tc_tx, controller_tc_rx) = mpsc::sync_channel(10);
 
+    let (mgt_request_tx, _mgt_request_rx) = mpsc::sync_channel(5);
+    let (_mgt_report_tx, mgt_report_rx) = mpsc::sync_channel(5);
+
+    let (acs_ctrl_request_tx, _acs_ctrl_request_rx) = mpsc::sync_channel(5);
+    let (_acs_ctrl_response_tx, acs_ctrl_response_rx) = mpsc::sync_channel(5);
+
     // These message handles need to go into the MGM assembly and ACS subsystem.
-    let (_mgm_assembly_request_tx, mgm_assembly_request_rx) = mpsc::sync_channel(5);
-    let (mgm_assembly_report_tx, _mgm_assembly_report_rx) = mpsc::sync_channel(5);
+    let (mgm_assembly_request_tx, mgm_assembly_request_rx) = mpsc::sync_channel(5);
+    let (mgm_assembly_report_tx, mgm_assembly_report_rx) = mpsc::sync_channel(5);
 
     // These message handles need to go into the MGM assembly and MGM devices.
     let (mgm_0_mode_request_tx, mgm_0_mode_request_rx) = mpsc::sync_channel(5);
@@ -110,6 +114,7 @@ fn main() {
     tc_source.add_target(ComponentId::AcsMgm0, mgm_0_handler_tc_tx);
     tc_source.add_target(ComponentId::AcsMgm1, mgm_1_handler_tc_tx);
     tc_source.add_target(ComponentId::AcsMgmAssembly, mgm_assembly_tc_tx);
+    tc_source.add_target(ComponentId::AcsSubsystem, acs_subsystem_tc_tx);
 
     let tc_sender = TmTcSender::Normal(tc_source_tx.clone());
     let udp_tm_handler = UdpTmHandlerWithChannel {
@@ -221,6 +226,23 @@ fn main() {
         Duration::from_millis(2000),
     );
 
+    let mut acs_subsystem = subsystem::Subsystem::new(
+        subsystem::ModeRequestSenders {
+            mode_request_ctrl: acs_ctrl_request_tx,
+            mode_request_assy: mgm_assembly_request_tx,
+            mode_request_mgt: mgt_request_tx,
+        },
+        subsystem::ModeReportReceivers {
+            mode_response_ctrl: acs_ctrl_response_rx,
+            mode_response_assy: mgm_assembly_report_rx,
+            mode_response_mgt: mgt_report_rx,
+        },
+        TmtcQueues {
+            tc_rx: acs_subsystem_tc_rx,
+            tm_tx: tm_sink_tx.clone(),
+        },
+    );
+
     let pcdu_serial_interface = if let Some(sim_client) = opt_sim_client.as_mut() {
         sim_client.add_reply_recipient(satrs_minisim::SimComponent::Pcdu, pcdu_sim_reply_tx);
         SerialSimInterfaceWrapper::Sim(SerialInterfaceToSim::new(
@@ -241,13 +263,7 @@ fn main() {
 
     // The PCDU is a critical component which should be in normal mode immediately.
     pcdu_handler_mode_tx
-        .send(GenericMessage::new(
-            MessageMetadata::new(0, NO_SENDER),
-            ModeRequest::SetMode {
-                mode_and_submode: ModeAndSubmode::new(DeviceMode::Normal as Mode, 0),
-                forced: false,
-            },
-        ))
+        .send(models::pcdu::request::Request::Mode(DeviceMode::Normal))
         .expect("sending initial mode request failed");
 
     info!("Starting TMTC and UDP task");
@@ -324,6 +340,7 @@ fn main() {
                 mgm_0_handler.periodic_operation();
                 mgm_1_handler.periodic_operation();
                 mgm_assembly.periodic_operation();
+                acs_subsystem.periodic_operation();
                 thread::sleep(Duration::from_millis(FREQ_MS_AOCS));
             }
         })

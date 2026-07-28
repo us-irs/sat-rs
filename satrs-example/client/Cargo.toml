@@ -11,7 +11,7 @@ humantime = "2"
 serde = { version = "1" }
 satrs-example = { path = ".." }
 models = { path = "../models" }
-spacepackets = { version = "0.17", git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git", default-features = false }
+spacepackets = { version = "0.18", default-features = false }
 bitbybit = "2"
 arbitrary-int = "2"
 ctrlc = { version = "3.5" }

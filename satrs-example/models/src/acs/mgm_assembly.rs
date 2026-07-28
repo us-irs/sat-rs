@@ -1,9 +1,12 @@
 use core::str::FromStr;
 
+use num_enum::TryFromPrimitive as _;
+use satrs::mode::ModeRaw;
+
 use crate::DeviceMode;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AssemblyMode {
+pub enum Mode {
     /// The assembly mode ressembles the modes of the devices it controls. It also tries to keep
     /// the children in the correct mode by re-commanding them into the correct mode.
     Device(DeviceMode),
@@ -11,22 +14,48 @@ pub enum AssemblyMode {
     NoModeKeeping,
 }
 
-impl FromStr for AssemblyMode {
+impl From<Mode> for ModeRaw {
+    fn from(value: Mode) -> Self {
+        match value {
+            Mode::Device(device_mode) => device_mode.into(),
+            Mode::NoModeKeeping => 5,
+        }
+    }
+}
+
+impl TryFrom<ModeRaw> for Mode {
+    type Error = ();
+
+    fn try_from(value: ModeRaw) -> Result<Self, Self::Error> {
+        match DeviceMode::try_from_primitive(value) {
+            Ok(val) => Ok(Mode::Device(val)),
+            Err(_) => {
+                if value == 5 {
+                    Ok(Mode::NoModeKeeping)
+                } else {
+                    Err(())
+                }
+            }
+        }
+    }
+}
+
+impl FromStr for Mode {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "off" => Ok(AssemblyMode::Device(DeviceMode::Off)),
-            "on" => Ok(AssemblyMode::Device(DeviceMode::On)),
-            "normal" => Ok(AssemblyMode::Device(DeviceMode::Normal)),
-            "no_mode_keeping" => Ok(AssemblyMode::NoModeKeeping),
+            "off" => Ok(Mode::Device(DeviceMode::Off)),
+            "on" => Ok(Mode::Device(DeviceMode::On)),
+            "normal" => Ok(Mode::Device(DeviceMode::Normal)),
+            "no_mode_keeping" => Ok(Mode::NoModeKeeping),
             _ => Err(()),
         }
     }
 }
 
 pub mod request {
-    use crate::{HkRequestType, Message, mgm_assembly::AssemblyMode};
+    use crate::{HkRequestType, Message, acs::mgm_assembly::Mode};
 
     #[derive(Debug, PartialEq, Eq, Clone, Copy, serde::Serialize, serde::Deserialize)]
     pub enum HkId {
@@ -35,7 +64,7 @@ pub mod request {
 
     #[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     pub enum ModeRequest {
-        SetMode(AssemblyMode),
+        SetMode(Mode),
         ReadMode,
     }
 
@@ -75,9 +104,9 @@ pub mod response {
     }
 
     #[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    pub enum ModeReport {
+    pub enum ModeResponse {
         /// Mode of the assembly.
-        Mode(super::AssemblyMode),
+        Mode(super::Mode),
         /// Timeout failure setting the children modes.
         SetModeTimeout([Option<DeviceMode>; 2]),
         /// Children are in wrong mode after commanding.
@@ -89,7 +118,7 @@ pub mod response {
     #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Response {
         Ok,
-        Mode(ModeReport),
+        Mode(ModeResponse),
     }
 
     impl Response {

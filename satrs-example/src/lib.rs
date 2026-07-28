@@ -95,6 +95,7 @@ impl HkHelperSingleSet {
     }
 }
 
+#[derive(Debug)]
 pub struct TmtcQueues {
     pub tc_rx: mpsc::Receiver<CcsdsTcPacketOwned>,
     pub tm_tx: mpsc::SyncSender<CcsdsTmPacketOwned>,

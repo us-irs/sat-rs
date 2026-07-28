@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-spacepackets = { version = "0.17", git = "https://egit.irs.uni-stuttgart.de/rust/spacepackets.git", default-features = false }
+spacepackets = { version = "0.18", default-features = false }
 satrs = { path = "../../satrs" }
 num_enum = { version = "0.7" }
 strum = { version = "0.28", features = ["derive"] }

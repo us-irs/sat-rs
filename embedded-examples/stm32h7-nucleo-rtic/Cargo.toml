@@ -25,7 +25,7 @@ panic-probe = { version = "1", features = ["print-defmt"] }
 embedded-alloc = "0.7"
 static_cell = "2"
 rtic = { version = "2", features = ["thumbv7-backend"] }
-spacepackets = { version = "0.17", default-features = false, features = ["defmt"] }
+spacepackets = { version = "0.18", default-features = false, features = ["defmt"] }
 postcard = "1"
 
 embassy-stm32 =  { git = "https://github.com/embassy-rs/embassy.git", rev = "dd8e4c14e53f088bae27c5d841ab7a4fa338a52c", version = "0.6", features = ["stm32h743zi", "memory-x", "defmt", "time-driver-any"]}

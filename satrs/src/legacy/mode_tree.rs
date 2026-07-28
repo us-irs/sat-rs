@@ -1,7 +1,9 @@
 use alloc::vec::Vec;
 use hashbrown::HashMap;
 
-use crate::{ComponentId, mode::ModeRaw};
+use crate::{
+    ComponentId, mode::{Mode, ModeAndSubmode, ModeRaw, ModeReply, ModeRequest, Submode}, request::MessageSenderProvider,
+};
 
 #[cfg(feature = "alloc")]
 pub use alloc_mod::*;
@@ -9,6 +11,44 @@ pub use alloc_mod::*;
 /// Common trait for node modes which can have mode parents or mode children.
 pub trait ModeNode {
     fn id(&self) -> ComponentId;
+}
+/// Trait which denotes that an object is a parent in a mode tree.
+///
+/// A mode parent is capable of sending mode requests to child objects and has a unique component
+/// ID.
+pub trait ModeParent: ModeNode {
+    type Sender: MessageSenderProvider<ModeRequest>;
+
+    fn add_mode_child(&mut self, id: ComponentId, request_sender: Self::Sender);
+}
+
+/// Trait which denotes that an object is a child in a mode tree.
+///
+/// A child is capable of sending mode replies to parent objects and has a unique component ID.
+pub trait ModeChild: ModeNode {
+    type Sender: MessageSenderProvider<ModeReply>;
+
+    fn add_mode_parent(&mut self, id: ComponentId, reply_sender: Self::Sender);
+}
+
+/// Utility method which connects a mode tree parent object to a child object by calling
+/// [ModeParent::add_mode_child] on the [parent][ModeParent] and calling
+/// [ModeChild::add_mode_parent] on the [child][ModeChild].
+///
+/// # Arguments
+///
+/// * `parent` - The parent object which implements [ModeParent].
+/// * `request_sender` - Sender object to send mode requests to the child.
+/// * `child` - The child object which implements [ModeChild].
+/// * `reply_sender` - Sender object to send mode replies to the parent.
+pub fn connect_mode_nodes<ReqSender, ReplySender>(
+    parent: &mut impl ModeParent<Sender = ReqSender>,
+    request_sender: ReqSender,
+    child: &mut impl ModeChild<Sender = ReplySender>,
+    reply_sender: ReplySender,
+) {
+    parent.add_mode_child(child.id(), request_sender);
+    child.add_mode_parent(parent.id(), reply_sender);
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -37,45 +77,65 @@ pub struct ModeTableEntryCommon {
     ///  - For target tables, this is the mode which the target children should have and which
     ///    might be monitored depending on configuration.
     pub mode: ModeRaw,
+    /// This mask allows to specify multiple allowed submodes for a given mode.
+    pub allowed_submode_mask: Option<Submode>,
+}
+
+impl ModeTableEntryCommon {
+    pub fn set_allowed_submode_mask(&mut self, mask: Submode) {
+        self.allowed_submode_mask = Some(mask);
+    }
+
+    pub fn allowed_submode_mask(&self) -> Option<Submode> {
+        self.allowed_submode_mask
+    }
 }
 
 /// An entry for the target tables.
 #[derive(Debug)]
 pub struct TargetTableEntry {
     pub common: ModeTableEntryCommon,
-    /// To allow multiple modes, you can specify mask bits which are ignored during mode
-    /// checking.
-    pub ignored_bits: Option<u32>,
     pub monitor_state: bool,
 }
 
 impl TargetTableEntry {
-    pub fn new(name: &'static str, target_id: ComponentId, mode: ModeRaw) -> Self {
-        Self {
-            common: ModeTableEntryCommon {
-                name,
-                target_id,
-                mode,
-            },
-            ignored_bits: None,
-            monitor_state: true,
-        }
-    }
-
-    pub fn new_with_ignored_bits(
+    pub fn new(
         name: &'static str,
         target_id: ComponentId,
-        mode: ModeRaw,
-        ignored_bits: Option<u32>,
+        mode_submode: ModeAndSubmode,
+        allowed_submode_mask: Option<Submode>,
     ) -> Self {
         Self {
             common: ModeTableEntryCommon {
                 name,
                 target_id,
-                mode,
+                mode_submode,
+                allowed_submode_mask,
             },
-            ignored_bits,
             monitor_state: true,
+        }
+    }
+
+    pub fn new_with_precise_submode(
+        name: &'static str,
+        target_id: ComponentId,
+        mode_submode: ModeAndSubmode,
+    ) -> Self {
+        Self {
+            common: ModeTableEntryCommon {
+                name,
+                target_id,
+                mode_submode,
+                allowed_submode_mask: None,
+            },
+            monitor_state: true,
+        }
+    }
+
+    delegate::delegate! {
+        to self.common {
+            pub fn set_allowed_submode_mask(&mut self, mask: Submode);
+            pub fn allowed_submode_mask(&self) -> Option<Submode>;
         }
     }
 }
@@ -94,14 +154,15 @@ impl SequenceTableEntry {
     pub fn new(
         name: &'static str,
         target_id: ComponentId,
-        mode: ModeRaw,
+        mode_submode: ModeAndSubmode,
         check_success: bool,
     ) -> Self {
         Self {
             common: ModeTableEntryCommon {
                 name,
                 target_id,
-                mode,
+                mode_submode,
+                allowed_submode_mask: None,
             },
             check_success,
         }
@@ -109,6 +170,8 @@ impl SequenceTableEntry {
 
     delegate::delegate! {
         to self.common {
+            pub fn set_allowed_submode_mask(&mut self, mask: Submode);
+            pub fn allowed_submode_mask(&self) -> Option<Submode>;
         }
     }
 }
@@ -123,16 +186,16 @@ pub struct ModeStoreValue {
     /// ID of the mode component.
     id: ComponentId,
     /// Current mode and submode of the component.
-    pub mode: ModeRaw,
+    pub mode_and_submode: ModeAndSubmode,
     /// State information to track whether a reply should be awaited for the mode component.
     pub awaiting_reply: bool,
 }
 
 impl ModeStoreValue {
-    pub fn new(id: ComponentId, mode: ModeRaw) -> Self {
+    pub fn new(id: ComponentId, mode_and_submode: ModeAndSubmode) -> Self {
         Self {
             id,
-            mode,
+            mode_and_submode,
             awaiting_reply: false,
         }
     }
@@ -141,26 +204,13 @@ impl ModeStoreValue {
         self.id
     }
 
-    pub fn mode(&self) -> ModeRaw {
-        self.mode
+    pub fn mode_and_submode(&self) -> ModeAndSubmode {
+        self.mode_and_submode
     }
 }
 
-pub trait SequenceTableProvider {
-    fn sequence_at_index(&self, index: u8) -> Option<&[SequenceTableEntry]>;
-    fn number_of_sequences(&self) -> usize;
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("mode store is full")]
-pub struct FullError;
-
 pub trait ModeStoreProvider {
-    fn add_component(
-        &mut self,
-        target_id: ComponentId,
-        initial_mode: ModeRaw,
-    ) -> Result<(), FullError>;
+    fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode);
 
     fn has_component(&self, target_id: ComponentId) -> bool;
 
@@ -171,11 +221,11 @@ pub trait ModeStoreProvider {
     /// Generic handler for mode replies received from child components.
     ///
     /// Implementation should clear the awaition flag if the `handle_reply_awaition` argument is
-    /// true and returns whether any children are still awaiting replies.
+    /// true and returns whether any children are still awaiting replies. If the flag is not set
     fn mode_reply_handler_with_reply_awaition(
         &mut self,
         sender_id: ComponentId,
-        reported_mode_and_submode: Option<ModeRaw>,
+        reported_mode_and_submode: Option<ModeAndSubmode>,
     ) -> bool {
         self.mode_reply_handler(sender_id, reported_mode_and_submode, true)
             .unwrap_or(false)
@@ -184,139 +234,37 @@ pub trait ModeStoreProvider {
     fn mode_reply_handler_without_reply_awaition(
         &mut self,
         sender_id: ComponentId,
-        reported_mode_and_submode: Option<ModeRaw>,
+        reported_mode_and_submode: Option<ModeAndSubmode>,
     ) {
         self.mode_reply_handler(sender_id, reported_mode_and_submode, false);
     }
 
-    /// This function should return whether any children are still awaiting replies.
     fn mode_reply_handler(
         &mut self,
         sender_id: ComponentId,
-        reported_mode_and_submode: Option<ModeRaw>,
+        reported_mode_and_submode: Option<ModeAndSubmode>,
         with_reply_awaition: bool,
     ) -> Option<bool>;
-
-    fn set_reply_awaition_flag(&mut self, target_id: ComponentId);
-}
-
-impl<const N: usize> ModeStoreProvider for heapless::Vec<ModeStoreValue, N> {
-    fn add_component(
-        &mut self,
-        target_id: ComponentId,
-        initial_mode: ModeRaw,
-    ) -> Result<(), FullError> {
-        if self.is_full() {
-            return Err(FullError);
-        }
-        self.push(ModeStoreValue::new(target_id, initial_mode))
-            .unwrap();
-        Ok(())
-    }
-
-    fn has_component(&self, target_id: ComponentId) -> bool {
-        self.iter().any(|val| val.id == target_id)
-    }
-
-    fn get(&self, target_id: ComponentId) -> Option<&ModeStoreValue> {
-        self.iter().find(|val| val.id == target_id)
-    }
-
-    fn get_mut(&mut self, target_id: ComponentId) -> Option<&mut ModeStoreValue> {
-        self.iter_mut().find(|val| val.id == target_id)
-    }
-
-    fn mode_reply_handler(
-        &mut self,
-        sender_id: ComponentId,
-        reported_mode_and_submode: Option<ModeRaw>,
-        with_reply_awaition: bool,
-    ) -> Option<bool> {
-        let mut still_awating_replies = None;
-        if with_reply_awaition {
-            still_awating_replies = Some(false);
-        }
-        self.iter_mut().for_each(|val| {
-            if val.id() == sender_id {
-                if let Some(mode) = reported_mode_and_submode {
-                    val.mode = mode;
-                }
-                if with_reply_awaition {
-                    val.awaiting_reply = false;
-                }
-            }
-            if with_reply_awaition && val.awaiting_reply {
-                still_awating_replies = Some(true);
-            }
-        });
-        still_awating_replies
-    }
-
-    fn set_reply_awaition_flag(&mut self, target_id: ComponentId) {
-        self.iter_mut().for_each(|val| {
-            if val.id() == target_id {
-                val.awaiting_reply = true;
-            }
-        });
-    }
-}
-
-pub struct HeaplessModeStoreProvider<const N: usize>(pub heapless::Vec<ModeStoreValue, N>);
-
-impl<const N: usize> ModeStoreProvider for HeaplessModeStoreProvider<N> {
-    fn add_component(
-        &mut self,
-        target_id: ComponentId,
-        initial_mode: ModeRaw,
-    ) -> Result<(), FullError> {
-        self.0.add_component(target_id, initial_mode)
-    }
-
-    fn has_component(&self, target_id: ComponentId) -> bool {
-        self.0.has_component(target_id)
-    }
-
-    fn get(&self, target_id: ComponentId) -> Option<&ModeStoreValue> {
-        self.0.get(target_id)
-    }
-
-    fn get_mut(&mut self, target_id: ComponentId) -> Option<&mut ModeStoreValue> {
-        self.0.get_mut(target_id)
-    }
-
-    fn mode_reply_handler(
-        &mut self,
-        sender_id: ComponentId,
-        reported_mode_and_submode: Option<ModeRaw>,
-        with_reply_awaition: bool,
-    ) -> Option<bool> {
-        self.0
-            .mode_reply_handler(sender_id, reported_mode_and_submode, with_reply_awaition)
-    }
-
-    fn set_reply_awaition_flag(&mut self, target_id: ComponentId) {
-        self.0.set_reply_awaition_flag(target_id)
-    }
 }
 
 #[cfg(feature = "alloc")]
 pub mod alloc_mod {
     use crate::subsystem::ModeRaw;
 
-    use super::*;
+use super::*;
 
     #[derive(Debug)]
     pub struct TargetTablesMapValue {
         /// Name for a given mode table entry.
         pub name: &'static str,
         /// Optional fallback mode if the target mode can not be kept.
-        pub fallback_mode: Option<ModeRaw>,
+        pub fallback_mode: Option<Mode>,
         /// These are the rows of the a target table.
         pub entries: Vec<TargetTableEntry>,
     }
 
     impl TargetTablesMapValue {
-        pub fn new(name: &'static str, fallback_mode: Option<ModeRaw>) -> Self {
+        pub fn new(name: &'static str, fallback_mode: Option<Mode>) -> Self {
             Self {
                 name,
                 fallback_mode,
@@ -380,33 +328,21 @@ pub mod alloc_mod {
         }
     }
 
-    impl SequenceTableProvider for SequenceTablesMapValue {
-        fn sequence_at_index(&self, index: u8) -> Option<&[SequenceTableEntry]> {
-            self.entries
-                .get(index as usize)
-                .map(|table| table.entries.as_slice())
-        }
-
-        fn number_of_sequences(&self) -> usize {
-            self.entries.len()
-        }
-    }
-
     #[derive(Debug, Default)]
-    pub struct TargetModeTables(pub HashMap<ModeRaw, TargetTablesMapValue>);
+    pub struct TargetModeTables(pub HashMap<Mode, TargetTablesMapValue>);
 
     impl TargetModeTables {
-        pub fn name(&self, mode: ModeRaw) -> Option<&'static str> {
+        pub fn name(&self, mode: Mode) -> Option<&'static str> {
             self.0.get(&mode).map(|value| value.name)
         }
     }
 
     impl SequenceModeTables {
-        pub fn name(&self, mode: ModeRaw) -> Option<&'static str> {
+        pub fn name(&self, mode: Mode) -> Option<&'static str> {
             self.0.get(&mode).map(|value| value.name)
         }
 
-        pub fn name_of_sequence(&self, mode: ModeRaw, seq_idx: usize) -> Option<&'static str> {
+        pub fn name_of_sequence(&self, mode: Mode, seq_idx: usize) -> Option<&'static str> {
             self.0
                 .get(&mode)
                 .map(|value| value.entries.get(seq_idx).map(|v| v.name))?
@@ -416,7 +352,7 @@ pub mod alloc_mod {
     /// This is the core data structure used to store mode sequence tables.
     ///
     /// A mode sequence table specifies which commands have to be sent in which order
-    /// to reach a certain [mode][ModeRaw]. Therefore, it simply maps a [mode][ModeRaw] to a [SequenceTablesMapValue].
+    /// to reach a certain [Mode]. Therefore, it simply maps a [Mode] to a [SequenceTablesMapValue].
     #[derive(Debug, Default)]
     pub struct SequenceModeTables(pub HashMap<ModeRaw, SequenceTablesMapValue>);
 
@@ -455,42 +391,37 @@ pub mod alloc_mod {
         }
     }
 
-    impl ModeStoreProvider for alloc::vec::Vec<ModeStoreValue> {
-        fn add_component(
-            &mut self,
-            target_id: ComponentId,
-            mode: ModeRaw,
-        ) -> Result<(), FullError> {
-            self.push(ModeStoreValue::new(target_id, mode));
-            Ok(())
+    impl ModeStoreProvider for ModeStoreVec {
+        fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode) {
+            self.0.push(ModeStoreValue::new(target_id, mode));
         }
 
         fn has_component(&self, target_id: ComponentId) -> bool {
-            self.iter().any(|val| val.id == target_id)
+            self.0.iter().any(|val| val.id == target_id)
         }
 
         fn get(&self, target_id: ComponentId) -> Option<&ModeStoreValue> {
-            self.iter().find(|val| val.id == target_id)
+            self.0.iter().find(|val| val.id == target_id)
         }
 
         fn get_mut(&mut self, target_id: ComponentId) -> Option<&mut ModeStoreValue> {
-            self.iter_mut().find(|val| val.id == target_id)
+            self.0.iter_mut().find(|val| val.id == target_id)
         }
 
         fn mode_reply_handler(
             &mut self,
             sender_id: ComponentId,
-            reported_mode_and_submode: Option<ModeRaw>,
+            reported_mode_and_submode: Option<ModeAndSubmode>,
             handle_reply_awaition: bool,
         ) -> Option<bool> {
             let mut still_awating_replies = None;
             if handle_reply_awaition {
                 still_awating_replies = Some(false);
             }
-            self.iter_mut().for_each(|val| {
+            self.0.iter_mut().for_each(|val| {
                 if val.id() == sender_id {
-                    if let Some(mode) = reported_mode_and_submode {
-                        val.mode = mode;
+                    if let Some(mode_and_submode) = reported_mode_and_submode {
+                        val.mode_and_submode = mode_and_submode;
                     }
                     if handle_reply_awaition {
                         val.awaiting_reply = false;
@@ -502,60 +433,12 @@ pub mod alloc_mod {
             });
             still_awating_replies
         }
-
-        fn set_reply_awaition_flag(&mut self, target_id: ComponentId) {
-            self.iter_mut().for_each(|val| {
-                if val.id() == target_id {
-                    val.awaiting_reply = true;
-                }
-            });
-        }
-    }
-    impl ModeStoreProvider for ModeStoreVec {
-        fn add_component(
-            &mut self,
-            target_id: ComponentId,
-            mode: ModeRaw,
-        ) -> Result<(), FullError> {
-            self.0.add_component(target_id, mode)
-        }
-
-        fn has_component(&self, target_id: ComponentId) -> bool {
-            self.0.has_component(target_id)
-        }
-
-        fn get(&self, target_id: ComponentId) -> Option<&ModeStoreValue> {
-            self.0.get(target_id)
-        }
-
-        fn get_mut(&mut self, target_id: ComponentId) -> Option<&mut ModeStoreValue> {
-            self.0.get_mut(target_id)
-        }
-
-        fn mode_reply_handler(
-            &mut self,
-            sender_id: ComponentId,
-            reported_mode_and_submode: Option<ModeRaw>,
-            handle_reply_awaition: bool,
-        ) -> Option<bool> {
-            self.0
-                .mode_reply_handler(sender_id, reported_mode_and_submode, handle_reply_awaition)
-        }
-
-        fn set_reply_awaition_flag(&mut self, target_id: ComponentId) {
-            self.0.set_reply_awaition_flag(target_id)
-        }
     }
 
     impl ModeStoreProvider for ModeStoreMap {
-        fn add_component(
-            &mut self,
-            target_id: ComponentId,
-            mode: ModeRaw,
-        ) -> Result<(), FullError> {
+        fn add_component(&mut self, target_id: ComponentId, mode: ModeAndSubmode) {
             self.0
                 .insert(target_id, ModeStoreValue::new(target_id, mode));
-            Ok(())
         }
 
         fn has_component(&self, target_id: ComponentId) -> bool {
@@ -573,7 +456,7 @@ pub mod alloc_mod {
         fn mode_reply_handler(
             &mut self,
             sender_id: ComponentId,
-            reported_mode_and_submode: Option<ModeRaw>,
+            reported_mode_and_submode: Option<ModeAndSubmode>,
             handle_reply_awaition: bool,
         ) -> Option<bool> {
             let mut still_awating_replies = None;
@@ -582,8 +465,8 @@ pub mod alloc_mod {
             }
             for val in self.0.values_mut() {
                 if val.id() == sender_id {
-                    if let Some(mode) = reported_mode_and_submode {
-                        val.mode = mode;
+                    if let Some(mode_and_submode) = reported_mode_and_submode {
+                        val.mode_and_submode = mode_and_submode;
                     }
                     if handle_reply_awaition {
                         val.awaiting_reply = false;
@@ -595,14 +478,6 @@ pub mod alloc_mod {
             }
             still_awating_replies
         }
-
-        fn set_reply_awaition_flag(&mut self, target_id: ComponentId) {
-            self.0.iter_mut().for_each(|(_, val)| {
-                if val.id() == target_id {
-                    val.awaiting_reply = true;
-                }
-            });
-        }
     }
 }
 
@@ -611,11 +486,14 @@ mod tests {
     use super::*;
 
     fn generic_test(mode_store: &mut impl ModeStoreProvider) {
-        mode_store.add_component(1, 0).unwrap();
-        mode_store.add_component(2, 1).unwrap();
+        mode_store.add_component(1, ModeAndSubmode::new(0, 0));
+        mode_store.add_component(2, ModeAndSubmode::new(1, 0));
         assert!(mode_store.has_component(1));
         assert!(mode_store.has_component(2));
-        assert_eq!(mode_store.get(1).unwrap().mode(), 0);
+        assert_eq!(
+            mode_store.get(1).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(0, 0)
+        );
         assert!(!mode_store.get(1).unwrap().awaiting_reply);
         assert!(!mode_store.get(2).unwrap().awaiting_reply);
         assert_eq!(mode_store.get(1).unwrap().id, 1);
@@ -625,47 +503,66 @@ mod tests {
     }
 
     fn generic_reply_handling_with_reply_awaition(mode_store: &mut impl ModeStoreProvider) {
-        mode_store.add_component(1, 0).unwrap();
-        mode_store.add_component(2, 1).unwrap();
+        mode_store.add_component(1, ModeAndSubmode::new(0, 0));
+        mode_store.add_component(2, ModeAndSubmode::new(1, 0));
         mode_store.get_mut(1).unwrap().awaiting_reply = true;
         mode_store.get_mut(2).unwrap().awaiting_reply = true;
         let mut reply_awation_pending =
-            mode_store.mode_reply_handler_with_reply_awaition(1, Some(2));
+            mode_store.mode_reply_handler_with_reply_awaition(1, Some(ModeAndSubmode::new(2, 0)));
         assert!(reply_awation_pending);
         reply_awation_pending = mode_store.mode_reply_handler_with_reply_awaition(2, None);
         assert!(!reply_awation_pending);
         assert!(!mode_store.get(1).unwrap().awaiting_reply);
         assert!(!mode_store.get(2).unwrap().awaiting_reply);
-        assert_eq!(mode_store.get(1).unwrap().mode(), 2);
-        assert_eq!(mode_store.get(2).unwrap().mode(), 1);
+        assert_eq!(
+            mode_store.get(1).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(2, 0)
+        );
+        assert_eq!(
+            mode_store.get(2).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(1, 0)
+        );
     }
 
     fn generic_reply_handling_test_no_reply_awaition(mode_store: &mut impl ModeStoreProvider) {
-        mode_store.add_component(1, 0).unwrap();
-        mode_store.add_component(2, 1).unwrap();
+        mode_store.add_component(1, ModeAndSubmode::new(0, 0));
+        mode_store.add_component(2, ModeAndSubmode::new(1, 0));
         mode_store.get_mut(1).unwrap().awaiting_reply = true;
         mode_store.get_mut(2).unwrap().awaiting_reply = true;
-        mode_store.mode_reply_handler_without_reply_awaition(1, Some(2));
+        mode_store.mode_reply_handler_without_reply_awaition(1, Some(ModeAndSubmode::new(2, 0)));
         mode_store.mode_reply_handler_without_reply_awaition(2, None);
         assert!(mode_store.get(1).unwrap().awaiting_reply);
         assert!(mode_store.get(2).unwrap().awaiting_reply);
-        assert_eq!(mode_store.get(1).unwrap().mode(), 2);
-        assert_eq!(mode_store.get(2).unwrap().mode(), 1);
+        assert_eq!(
+            mode_store.get(1).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(2, 0)
+        );
+        assert_eq!(
+            mode_store.get(2).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(1, 0)
+        );
     }
 
     fn generic_reply_handling_with_reply_awaition_2(mode_store: &mut impl ModeStoreProvider) {
-        mode_store.add_component(1, 0).unwrap();
-        mode_store.add_component(2, 1).unwrap();
+        mode_store.add_component(1, ModeAndSubmode::new(0, 0));
+        mode_store.add_component(2, ModeAndSubmode::new(1, 0));
         mode_store.get_mut(1).unwrap().awaiting_reply = true;
         mode_store.get_mut(2).unwrap().awaiting_reply = true;
-        let mut reply_awation_pending = mode_store.mode_reply_handler(1, Some(2), true);
+        let mut reply_awation_pending =
+            mode_store.mode_reply_handler(1, Some(ModeAndSubmode::new(2, 0)), true);
         assert!(reply_awation_pending.unwrap());
         reply_awation_pending = mode_store.mode_reply_handler(2, None, true);
         assert!(!reply_awation_pending.unwrap());
         assert!(!mode_store.get(1).unwrap().awaiting_reply);
         assert!(!mode_store.get(2).unwrap().awaiting_reply);
-        assert_eq!(mode_store.get(1).unwrap().mode(), 2);
-        assert_eq!(mode_store.get(2).unwrap().mode(), 1);
+        assert_eq!(
+            mode_store.get(1).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(2, 0)
+        );
+        assert_eq!(
+            mode_store.get(2).unwrap().mode_and_submode(),
+            ModeAndSubmode::new(1, 0)
+        );
     }
 
     #[test]

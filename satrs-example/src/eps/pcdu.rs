@@ -536,7 +536,6 @@ mod tests {
         pcdu::{SwitchMapBinary, SwitchStateBinary},
     };
     use satrs::{
-        mode::{ModeReply, ModeRequest},
         request::{GenericMessage, MessageMetadata},
         spacepackets::SpacePacketHeader,
     };
@@ -590,8 +589,8 @@ mod tests {
 
     #[allow(dead_code)]
     pub struct PcduTestbench {
-        pub mode_request_tx: mpsc::SyncSender<GenericMessage<ModeRequest>>,
-        pub mode_reply_rx_to_parent: mpsc::Receiver<GenericMessage<ModeReply>>,
+        pub mode_request_tx: mpsc::SyncSender<models::pcdu::request::Request>,
+        pub mode_reply_rx_to_parent: mpsc::Receiver<models::pcdu::response::Response>,
         pub tc_tx: mpsc::SyncSender<CcsdsTcPacketOwned>,
         pub tm_rx: mpsc::Receiver<CcsdsTmPacketOwned>,
         pub switch_request_tx: mpsc::Sender<GenericMessage<SwitchRequest>>,
