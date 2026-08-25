@@ -39,10 +39,10 @@ mod app {
     use embassy_time::Duration;
     use embassy_time::Timer;
     use embassy_time::WithTimeout as _;
-    use embedded_models::create_tm_packet;
-    use embedded_models::stm32h7;
-    use embedded_models::tm_size;
-    use embedded_models::TmHeader;
+    use embedded_types::create_tm_packet;
+    use embedded_types::stm32h7;
+    use embedded_types::tm_size;
+    use embedded_types::TmHeader;
     use spacepackets::CcsdsPacketCreationError;
     use spacepackets::CcsdsPacketIdAndPsc;
     use spacepackets::CcsdsPacketReader;

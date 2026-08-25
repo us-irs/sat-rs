@@ -10,7 +10,7 @@ fern = "0.7"
 humantime = "2"
 serde = { version = "1" }
 satrs-example = { path = ".." }
-models = { path = "../models" }
+types = { path = "../types" }
 spacepackets = { version = "0.18", default-features = false }
 bitbybit = "2"
 arbitrary-int = "2"

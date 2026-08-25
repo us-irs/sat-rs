@@ -1,10 +1,10 @@
 use arbitrary_int::u11;
-use models::{Apid, ComponentId, Message, TmHeader, ccsds::CcsdsTmPacketOwned};
 use satrs::spacepackets::{
     CcsdsPacketIdAndPsc, SpHeader,
     time::{StdTimestampError, cds::CdsTime},
 };
 use serde::Serialize;
+use types::{Apid, ComponentId, Message, TmHeader, ccsds::CcsdsTmPacketOwned};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CcsdsTmCreationError {

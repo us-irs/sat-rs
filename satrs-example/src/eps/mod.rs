@@ -1,6 +1,6 @@
 use derive_new::new;
-use models::pcdu::{SwitchId, SwitchRequest, SwitchState, SwitchStateBinary};
 use std::{cell::RefCell, collections::VecDeque, sync::mpsc, time::Duration};
+use types::pcdu::{SwitchId, SwitchRequest, SwitchState, SwitchStateBinary};
 
 use satrs::{
     queue::GenericSendError,

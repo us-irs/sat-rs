@@ -1,11 +1,11 @@
 use std::{sync::mpsc, time::Duration};
 
-use models::pcdu::{SwitchId, SwitchMapBinaryWrapper, SwitchStateBinary};
 use nexosim::{
     model::{Context, Model},
     ports::Output,
 };
 use satrs_minisim::{eps::PcduReply, SimReply};
+use types::pcdu::{SwitchId, SwitchMapBinaryWrapper, SwitchStateBinary};
 
 pub const SWITCH_INFO_DELAY_MS: u64 = 10;
 
@@ -73,10 +73,10 @@ pub(crate) mod tests {
     use super::*;
     use std::time::Duration;
 
-    use models::pcdu::SwitchMapBinary;
     use satrs_minisim::{
         eps::PcduRequest, SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimRequest,
     };
+    use types::pcdu::SwitchMapBinary;
 
     use crate::test_helpers::SimTestbench;
 

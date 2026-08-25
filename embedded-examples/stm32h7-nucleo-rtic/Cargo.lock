@@ -576,17 +576,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embedded-models"
-version = "0.1.0"
-dependencies = [
- "arbitrary-int",
- "defmt 1.1.0",
- "postcard",
- "serde",
- "spacepackets",
-]
-
-[[package]]
 name = "embedded-nal"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -618,6 +607,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1763775e2323b7d5f0aa6090657f5e21cfa02ede71f5dc40eead06d64dcd15cc"
 dependencies = [
  "embedded-storage",
+]
+
+[[package]]
+name = "embedded-types"
+version = "0.1.0"
+dependencies = [
+ "arbitrary-int",
+ "defmt 1.1.0",
+ "postcard",
+ "serde",
+ "spacepackets",
 ]
 
 [[package]]
@@ -1032,7 +1032,7 @@ dependencies = [
  "embassy-sync",
  "embassy-time",
  "embedded-alloc",
- "embedded-models",
+ "embedded-types",
  "panic-probe",
  "postcard",
  "rtic",

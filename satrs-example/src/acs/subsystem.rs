@@ -4,16 +4,16 @@ use std::{
     time::Duration,
 };
 
-use models::{
-    ComponentId,
-    acs::subsystem::{Mode, response},
-};
 use satrs::{
     mode_tree::{ModeStoreProvider, ModeStoreVec, SequenceModeTables, TargetModeTables},
     spacepackets::CcsdsPacketIdAndPsc,
     subsystem::SubsystemCommandingHelper,
 };
 use satrs_example::{ModeHelper, TmtcQueues};
+use types::{
+    ComponentId,
+    acs::subsystem::{Mode, response},
+};
 
 #[derive(Debug)]
 pub struct TransitionInfo {
@@ -29,16 +29,16 @@ pub enum TransitionState {
 
 #[derive(Debug)]
 pub struct ChildModes {
-    mgm_assembly_mode: models::acs::mgm_assembly::Mode,
-    mgt_mode: models::acs::mgt::Mode,
-    controller_mode: models::acs::ctrl::Mode,
+    mgm_assembly_mode: types::acs::mgm_assembly::Mode,
+    mgt_mode: types::acs::mgt::Mode,
+    controller_mode: types::acs::ctrl::Mode,
 }
 
 #[derive(Debug)]
 pub struct TransitionCommands {
-    mgm_assembly_mode: Option<(models::acs::mgm_assembly::Mode, TransitionInfo)>,
-    mgt_mode: Option<(models::acs::mgt::Mode, TransitionInfo)>,
-    controller_mode: Option<(models::acs::ctrl::Mode, TransitionInfo)>,
+    mgm_assembly_mode: Option<(types::acs::mgm_assembly::Mode, TransitionInfo)>,
+    mgt_mode: Option<(types::acs::mgt::Mode, TransitionInfo)>,
+    controller_mode: Option<(types::acs::ctrl::Mode, TransitionInfo)>,
 }
 
 const OFF_SEQUENCE: [TransitionCommands; 2] = [
@@ -46,7 +46,7 @@ const OFF_SEQUENCE: [TransitionCommands; 2] = [
         mgm_assembly_mode: None,
         mgt_mode: None,
         controller_mode: Some((
-            models::acs::ctrl::Mode::Passive,
+            types::acs::ctrl::Mode::Passive,
             TransitionInfo {
                 check_mode_reached: true,
             },
@@ -54,13 +54,13 @@ const OFF_SEQUENCE: [TransitionCommands; 2] = [
     },
     TransitionCommands {
         mgm_assembly_mode: Some((
-            models::acs::mgm_assembly::Mode::Device(models::DeviceMode::Off),
+            types::acs::mgm_assembly::Mode::Device(types::DeviceMode::Off),
             TransitionInfo {
                 check_mode_reached: false,
             },
         )),
         mgt_mode: Some((
-            models::acs::mgt::Mode::Off,
+            types::acs::mgt::Mode::Off,
             TransitionInfo {
                 check_mode_reached: false,
             },
@@ -72,13 +72,13 @@ const OFF_SEQUENCE: [TransitionCommands; 2] = [
 const SAFE_SEQUENCE: [TransitionCommands; 2] = [
     TransitionCommands {
         mgm_assembly_mode: Some((
-            models::acs::mgm_assembly::Mode::Device(models::DeviceMode::Normal),
+            types::acs::mgm_assembly::Mode::Device(types::DeviceMode::Normal),
             TransitionInfo {
                 check_mode_reached: false,
             },
         )),
         mgt_mode: Some((
-            models::acs::mgt::Mode::Normal,
+            types::acs::mgt::Mode::Normal,
             TransitionInfo {
                 check_mode_reached: false,
             },
@@ -89,7 +89,7 @@ const SAFE_SEQUENCE: [TransitionCommands; 2] = [
         mgm_assembly_mode: None,
         mgt_mode: None,
         controller_mode: Some((
-            models::acs::ctrl::Mode::Safe,
+            types::acs::ctrl::Mode::Safe,
             TransitionInfo {
                 check_mode_reached: false,
             },
@@ -99,21 +99,21 @@ const SAFE_SEQUENCE: [TransitionCommands; 2] = [
 
 #[derive(Debug)]
 pub struct ModeRequestSenders {
-    pub mode_request_ctrl: SyncSender<models::acs::ctrl::request::ModeRequest>,
-    pub mode_request_assy: SyncSender<models::acs::mgm_assembly::request::ModeRequest>,
-    pub mode_request_mgt: SyncSender<models::acs::mgt::request::ModeRequest>,
+    pub mode_request_ctrl: SyncSender<types::acs::ctrl::request::ModeRequest>,
+    pub mode_request_assy: SyncSender<types::acs::mgm_assembly::request::ModeRequest>,
+    pub mode_request_mgt: SyncSender<types::acs::mgt::request::ModeRequest>,
 }
 
 #[derive(Debug)]
 pub struct ModeReportReceivers {
-    pub mode_response_ctrl: Receiver<models::acs::ctrl::response::ModeReport>,
-    pub mode_response_assy: Receiver<models::acs::mgm_assembly::response::ModeResponse>,
-    pub mode_response_mgt: Receiver<models::acs::mgt::response::ModeReport>,
+    pub mode_response_ctrl: Receiver<types::acs::ctrl::response::ModeReport>,
+    pub mode_response_assy: Receiver<types::acs::mgm_assembly::response::ModeResponse>,
+    pub mode_response_mgt: Receiver<types::acs::mgt::response::ModeReport>,
 }
 
 #[derive(Debug)]
 pub struct Subsystem {
-    mode_helper: ModeHelper<models::acs::subsystem::Mode, TransitionState>,
+    mode_helper: ModeHelper<types::acs::subsystem::Mode, TransitionState>,
     transition_step: usize,
     current_child_modes: Option<ChildModes>,
     mode_request_senders: ModeRequestSenders,
@@ -134,19 +134,19 @@ impl Subsystem {
         mode_store_vec
             .add_component(
                 ComponentId::AcsMgmAssembly as satrs::ComponentId,
-                models::acs::mgm_assembly::Mode::NoModeKeeping.into(),
+                types::acs::mgm_assembly::Mode::NoModeKeeping.into(),
             )
             .unwrap();
         mode_store_vec
             .add_component(
                 ComponentId::AcsController as satrs::ComponentId,
-                models::acs::ctrl::Mode::Passive.into(),
+                types::acs::ctrl::Mode::Passive.into(),
             )
             .unwrap();
         mode_store_vec
             .add_component(
                 ComponentId::AcsMgt as satrs::ComponentId,
-                models::acs::mgt::Mode::Off.into(),
+                types::acs::mgt::Mode::Off.into(),
             )
             .unwrap();
 
@@ -156,7 +156,7 @@ impl Subsystem {
 
         Self {
             mode_helper: ModeHelper::new(
-                models::acs::subsystem::Mode::Off,
+                types::acs::subsystem::Mode::Off,
                 Duration::from_millis(2000),
             ),
             current_child_modes: None,
@@ -181,14 +181,14 @@ impl Subsystem {
             match self.tmtc_queues.tc_rx.try_recv() {
                 Ok(packet) => {
                     let tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&packet.sp_header);
-                    match postcard::from_bytes::<models::acs::subsystem::request::Request>(
+                    match postcard::from_bytes::<types::acs::subsystem::request::Request>(
                         &packet.payload,
                     ) {
                         Ok(request) => match request {
-                            models::acs::subsystem::request::Request::Ping => {
+                            types::acs::subsystem::request::Request::Ping => {
                                 self.send_telemetry(Some(tc_id), response::Response::Ok)
                             }
-                            models::acs::subsystem::request::Request::Mode(mode_request) => {
+                            types::acs::subsystem::request::Request::Mode(mode_request) => {
                                 self.handle_mode_request(mode_request);
                             }
                         },
@@ -216,7 +216,7 @@ impl Subsystem {
         if let Some((target_mode, _info)) = &step.mgm_assembly_mode {
             self.mode_request_senders
                 .mode_request_assy
-                .send(models::acs::mgm_assembly::request::ModeRequest::SetMode(
+                .send(types::acs::mgm_assembly::request::ModeRequest::SetMode(
                     *target_mode,
                 ))
                 .expect("failed to send mode request to MGM assembly");
@@ -224,15 +224,13 @@ impl Subsystem {
         if let Some((target_mode, _info)) = &step.mgt_mode {
             self.mode_request_senders
                 .mode_request_mgt
-                .send(models::acs::mgt::request::ModeRequest::SetMode(
-                    *target_mode,
-                ))
+                .send(types::acs::mgt::request::ModeRequest::SetMode(*target_mode))
                 .expect("failed to send mode request to MGM assembly");
         }
         if let Some((target_mode, _info)) = &step.controller_mode {
             self.mode_request_senders
                 .mode_request_ctrl
-                .send(models::acs::ctrl::request::ModeRequest::SetMode(
+                .send(types::acs::ctrl::request::ModeRequest::SetMode(
                     *target_mode,
                 ))
                 .expect("failed to send mode request to MGM assembly");
@@ -241,10 +239,10 @@ impl Subsystem {
 
     pub fn handle_mode_request(
         &mut self,
-        mode_request: models::acs::subsystem::request::ModeRequest,
+        mode_request: types::acs::subsystem::request::ModeRequest,
     ) {
         match mode_request {
-            models::acs::subsystem::request::ModeRequest::SetMode(target_mode) => {
+            types::acs::subsystem::request::ModeRequest::SetMode(target_mode) => {
                 self.mode_helper.start(target_mode);
                 self.transition_step = 0;
                 let first_step = Self::transition_sequence_for_mode(target_mode)
@@ -252,7 +250,7 @@ impl Subsystem {
                     .expect("empty transition table");
                 self.execute_transition_step(first_step);
             }
-            models::acs::subsystem::request::ModeRequest::ReadMode => {
+            types::acs::subsystem::request::ModeRequest::ReadMode => {
                 self.send_telemetry(
                     None,
                     response::Response::Mode(response::ModeResponse::Mode(
@@ -266,7 +264,7 @@ impl Subsystem {
     pub fn send_telemetry(
         &self,
         tc_id: Option<CcsdsPacketIdAndPsc>,
-        response: models::acs::subsystem::response::Response,
+        response: types::acs::subsystem::response::Response,
     ) {
         match crate::ccsds::pack_ccsds_tm_packet_for_now(Self::ID, tc_id, &response) {
             Ok(packet) => {

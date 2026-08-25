@@ -3,7 +3,7 @@ use std::{net::UdpSocket, time::Duration};
 use anyhow::{Context as _, bail};
 use clap::Parser;
 use embedded_client::setup_logger;
-use embedded_models::{TmHeader, stm32h7};
+use embedded_types::{TmHeader, stm32h7};
 use spacepackets::{CcsdsPacketCreatorOwned, CcsdsPacketReader, SpHeader};
 use tmtc_utils::transport::udp::PacketTransportUdp;
 
@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()> {
         .with_context(|| "crateing UDP transport failed")?;
 
     if cli.ping {
-        let tc = create_stm32h7_tc(&embedded_models::stm32h7::Request::Ping);
+        let tc = create_stm32h7_tc(&embedded_types::stm32h7::Request::Ping);
         log::info!(
             "Sending ping request with TC ID: {:#010x}",
             tc.ccsds_packet_id_and_psc().raw()
@@ -90,6 +90,6 @@ fn main() -> anyhow::Result<()> {
 
 fn create_stm32h7_tc(request: &stm32h7::Request) -> CcsdsPacketCreatorOwned {
     let req_raw = postcard::to_allocvec(&request).unwrap();
-    let sp_header = SpHeader::new_from_apid(embedded_models::stm32h7::PUS_APID);
+    let sp_header = SpHeader::new_from_apid(embedded_types::stm32h7::PUS_APID);
     CcsdsPacketCreatorOwned::new_tc_with_checksum(sp_header, &req_raw).unwrap()
 }

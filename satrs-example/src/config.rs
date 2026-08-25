@@ -39,14 +39,14 @@ pub const SERVER_PORT: u16 = 7301;
 lazy_static! {
     pub static ref PACKET_ID_VALIDATOR: HashSet<PacketId> = {
         let mut set = HashSet::new();
-        for id in models::Apid::iter() {
+        for id in types::Apid::iter() {
             set.insert(PacketId::new(PacketType::Tc, true, u11::new(id as u16)));
         }
         set
     };
     pub static ref APID_VALIDATOR: HashSet<u16> = {
         let mut set = HashSet::new();
-        for id in models::Apid::iter() {
+        for id in types::Apid::iter() {
             set.insert(id as u16);
         }
         set

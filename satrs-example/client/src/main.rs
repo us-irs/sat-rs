@@ -1,7 +1,6 @@
 use anyhow::bail;
 use arbitrary_int::u11;
 use clap::Parser as _;
-use models::{Apid, MessageType, TcHeader, acs::mgm::request::HkRequest};
 use satrs_example::config::{OBSW_SERVER_ADDR, SERVER_PORT};
 use spacepackets::{CcsdsPacketIdAndPsc, SpacePacketHeader};
 use std::{
@@ -12,6 +11,7 @@ use std::{
     },
     time::{Duration, SystemTime},
 };
+use types::{Apid, MessageType, TcHeader, acs::mgm::request::HkRequest};
 
 #[derive(clap::Parser)]
 pub struct Cli {
@@ -33,11 +33,11 @@ enum Commands {
 
 impl Commands {
     #[inline]
-    pub fn target_id(&self) -> models::ComponentId {
+    pub fn target_id(&self) -> types::ComponentId {
         match self {
-            Commands::Mgm0(_mgm_args) => models::ComponentId::AcsMgm0,
-            Commands::Mgm1(_mgm_args) => models::ComponentId::AcsMgm1,
-            Commands::MgmAssy(_mgm_assembly_args) => models::ComponentId::AcsMgmAssembly,
+            Commands::Mgm0(_mgm_args) => types::ComponentId::AcsMgm0,
+            Commands::Mgm1(_mgm_args) => types::ComponentId::AcsMgm1,
+            Commands::MgmAssy(_mgm_assembly_args) => types::ComponentId::AcsMgmAssembly,
         }
     }
 }
@@ -104,10 +104,10 @@ fn main() -> anyhow::Result<()> {
     client.set_read_timeout(Some(Duration::from_millis(200)))?;
 
     if cli.ping {
-        let request = models::ccsds::CcsdsTcPacketOwned::new_with_request(
+        let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
             SpacePacketHeader::new_from_apid(u11::new(Apid::Tmtc as u16)),
-            TcHeader::new(models::ComponentId::Controller, models::MessageType::Ping),
-            models::control::request::Request::Ping,
+            TcHeader::new(types::ComponentId::Controller, types::MessageType::Ping),
+            types::control::request::Request::Ping,
         );
         let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
         log::info!("sending ping request with TC ID {:#010x}", sent_tc_id.raw());
@@ -115,10 +115,10 @@ fn main() -> anyhow::Result<()> {
         client.send_to(&request_packet, addr).unwrap();
     }
     if cli.test_event {
-        let request = models::ccsds::CcsdsTcPacketOwned::new_with_request(
+        let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
             SpacePacketHeader::new_from_apid(u11::new(Apid::Tmtc as u16)),
-            TcHeader::new(models::ComponentId::Controller, models::MessageType::Event),
-            models::control::request::Request::TestEvent,
+            TcHeader::new(types::ComponentId::Controller, types::MessageType::Event),
+            types::control::request::Request::TestEvent,
         );
         let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
         log::info!(
@@ -133,10 +133,10 @@ fn main() -> anyhow::Result<()> {
         match cmd {
             Commands::Mgm0(args) | Commands::Mgm1(args) => {
                 if args.ping {
-                    let request = models::ccsds::CcsdsTcPacketOwned::new_with_request(
+                    let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
                         SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
-                        TcHeader::new(cmd.target_id(), models::MessageType::Ping),
-                        models::acs::mgm::request::Request::Ping,
+                        TcHeader::new(cmd.target_id(), types::MessageType::Ping),
+                        types::acs::mgm::request::Request::Ping,
                     );
                     let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
                     log::info!(
@@ -148,12 +148,12 @@ fn main() -> anyhow::Result<()> {
                     client.send_to(&request_packet, addr).unwrap();
                 }
                 if args.request_hk {
-                    let request = models::ccsds::CcsdsTcPacketOwned::new_with_request(
+                    let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
                         SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
-                        TcHeader::new(target_id, models::MessageType::Hk),
-                        models::acs::mgm::request::Request::Hk(HkRequest {
-                            id: models::acs::mgm::request::HkId::Sensor,
-                            req_type: models::HkRequestType::OneShot,
+                        TcHeader::new(target_id, types::MessageType::Hk),
+                        types::acs::mgm::request::Request::Hk(HkRequest {
+                            id: types::acs::mgm::request::HkId::Sensor,
+                            req_type: types::HkRequestType::OneShot,
                         }),
                     );
                     let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
@@ -167,15 +167,15 @@ fn main() -> anyhow::Result<()> {
                 }
                 if let Some(mode) = args.mode {
                     let dev_mode = match mode {
-                        DeviceModeSelect::Off => models::DeviceMode::Off,
-                        DeviceModeSelect::Normal => models::DeviceMode::Normal,
+                        DeviceModeSelect::Off => types::DeviceMode::Off,
+                        DeviceModeSelect::Normal => types::DeviceMode::Normal,
                     };
 
-                    let request = models::ccsds::CcsdsTcPacketOwned::new_with_request(
+                    let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
                         SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
-                        TcHeader::new(target_id, models::MessageType::Mode),
-                        models::acs::mgm::request::Request::Mode(
-                            models::acs::mgm::request::ModeRequest::SetMode(dev_mode),
+                        TcHeader::new(target_id, types::MessageType::Mode),
+                        types::acs::mgm::request::Request::Mode(
+                            types::acs::mgm::request::ModeRequest::SetMode(dev_mode),
                         ),
                     );
                     let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
@@ -190,10 +190,10 @@ fn main() -> anyhow::Result<()> {
             }
             Commands::MgmAssy(mgm_assembly_args) => {
                 if mgm_assembly_args.ping {
-                    let request = models::ccsds::CcsdsTcPacketOwned::new_with_request(
+                    let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
                         SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
-                        TcHeader::new(cmd.target_id(), models::MessageType::Ping),
-                        models::acs::mgm::request::Request::Ping,
+                        TcHeader::new(cmd.target_id(), types::MessageType::Ping),
+                        types::acs::mgm::request::Request::Ping,
                     );
                     let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
                     log::info!(
@@ -207,21 +207,21 @@ fn main() -> anyhow::Result<()> {
                 if let Some(mode) = mgm_assembly_args.mode {
                     let assembly_mode = match mode {
                         AssemblyModeSelect::NoModeKeeping => {
-                            models::acs::mgm_assembly::Mode::NoModeKeeping
+                            types::acs::mgm_assembly::Mode::NoModeKeeping
                         }
                         AssemblyModeSelect::Off => {
-                            models::acs::mgm_assembly::Mode::Device(models::DeviceMode::Off)
+                            types::acs::mgm_assembly::Mode::Device(types::DeviceMode::Off)
                         }
                         AssemblyModeSelect::Normal => {
-                            models::acs::mgm_assembly::Mode::Device(models::DeviceMode::Normal)
+                            types::acs::mgm_assembly::Mode::Device(types::DeviceMode::Normal)
                         }
                     };
 
-                    let request = models::ccsds::CcsdsTcPacketOwned::new_with_request(
+                    let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
                         SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
-                        TcHeader::new(target_id, models::MessageType::Mode),
-                        models::acs::mgm_assembly::request::Request::Mode(
-                            models::acs::mgm_assembly::request::ModeRequest::SetMode(assembly_mode),
+                        TcHeader::new(target_id, types::MessageType::Mode),
+                        types::acs::mgm_assembly::request::Request::Mode(
+                            types::acs::mgm_assembly::request::ModeRequest::SetMode(assembly_mode),
                         ),
                     );
                     let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
@@ -262,8 +262,7 @@ fn main() -> anyhow::Result<()> {
 fn handle_raw_tm_packet(data: &[u8]) -> anyhow::Result<()> {
     match spacepackets::CcsdsPacketReader::new_with_checksum(data) {
         Ok(packet) => {
-            let tm_header_result =
-                postcard::take_from_bytes::<models::TmHeader>(packet.user_data());
+            let tm_header_result = postcard::take_from_bytes::<types::TmHeader>(packet.user_data());
             if let Err(e) = tm_header_result {
                 bail!("Failed to deserialize TM header: {}", e);
             }
@@ -283,7 +282,7 @@ fn handle_raw_tm_packet(data: &[u8]) -> anyhow::Result<()> {
                 );
             }
             if tm_header.message_type == MessageType::Event {
-                let response = postcard::from_bytes::<models::Event>(remainder);
+                let response = postcard::from_bytes::<types::Event>(remainder);
                 log::info!(
                     "Received event from {:?}: {:?}",
                     tm_header.sender_id,
@@ -292,43 +291,43 @@ fn handle_raw_tm_packet(data: &[u8]) -> anyhow::Result<()> {
                 return Ok(());
             }
             match tm_header.sender_id {
-                models::ComponentId::EpsPcdu => {
+                types::ComponentId::EpsPcdu => {
                     let response =
-                        postcard::from_bytes::<models::pcdu::response::Response>(remainder);
+                        postcard::from_bytes::<types::pcdu::response::Response>(remainder);
                     log::info!("Received response from PCDU: {:?}", response.unwrap());
                 }
-                models::ComponentId::Controller => {
+                types::ComponentId::Controller => {
                     let response =
-                        postcard::from_bytes::<models::control::response::Response>(remainder);
+                        postcard::from_bytes::<types::control::response::Response>(remainder);
                     log::info!("Received response from controller: {:?}", response.unwrap());
                 }
-                models::ComponentId::AcsMgmAssembly => {
+                types::ComponentId::AcsMgmAssembly => {
                     let response = postcard::from_bytes::<
-                        models::acs::mgm_assembly::response::Response,
+                        types::acs::mgm_assembly::response::Response,
                     >(remainder);
                     log::info!(
                         "Received response from MGM Assembly: {:?}",
                         response.unwrap()
                     );
                 }
-                models::ComponentId::AcsMgm0 => {
+                types::ComponentId::AcsMgm0 => {
                     let response =
-                        postcard::from_bytes::<models::acs::mgm::response::Response>(remainder);
+                        postcard::from_bytes::<types::acs::mgm::response::Response>(remainder);
                     log::info!("Received response from MGM0: {:?}", response.unwrap());
                 }
-                models::ComponentId::AcsMgm1 => {
+                types::ComponentId::AcsMgm1 => {
                     let response =
-                        postcard::from_bytes::<models::acs::mgm::response::Response>(remainder);
+                        postcard::from_bytes::<types::acs::mgm::response::Response>(remainder);
                     log::info!("Received response from MGM1: {:?}", response.unwrap());
                 }
-                models::ComponentId::AcsSubsystem => todo!(),
-                models::ComponentId::EpsSubsystem => todo!(),
-                models::ComponentId::UdpServer => todo!(),
-                models::ComponentId::TcpServer => todo!(),
-                models::ComponentId::Ground => todo!(),
-                models::ComponentId::EventManager => {}
-                models::ComponentId::AcsController => todo!(),
-                models::ComponentId::AcsMgt => todo!(),
+                types::ComponentId::AcsSubsystem => todo!(),
+                types::ComponentId::EpsSubsystem => todo!(),
+                types::ComponentId::UdpServer => todo!(),
+                types::ComponentId::TcpServer => todo!(),
+                types::ComponentId::Ground => todo!(),
+                types::ComponentId::EventManager => {}
+                types::ComponentId::AcsController => todo!(),
+                types::ComponentId::AcsMgt => todo!(),
             }
         }
         Err(_) => todo!(),

@@ -3,7 +3,7 @@
 use arbitrary_int::u14;
 use cortex_m_semihosting::debug::{self, EXIT_FAILURE, EXIT_SUCCESS};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embedded_models::{create_tm_packet, stm32f3, tm_size, TmHeader};
+use embedded_types::{create_tm_packet, stm32f3, tm_size, TmHeader};
 use spacepackets::{CcsdsPacketCreationError, CcsdsPacketIdAndPsc, SpHeader};
 
 use defmt_rtt as _; // global logger
@@ -50,7 +50,7 @@ mod app {
     use super::*;
     use arbitrary_int::u14;
     use embassy_time::Timer;
-    use embedded_models::stm32f3::{Request, Response};
+    use embedded_types::stm32f3::{Request, Response};
     use rtic::Mutex;
     use rtic_sync::{
         channel::{Receiver, Sender},

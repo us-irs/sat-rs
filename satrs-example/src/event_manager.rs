@@ -1,4 +1,4 @@
-use models::{ComponentId, Event, Message, ccsds::CcsdsTmPacketOwned, control};
+use types::{ComponentId, Event, Message, ccsds::CcsdsTmPacketOwned, control};
 
 use crate::ccsds::pack_ccsds_tm_packet_for_now;
 

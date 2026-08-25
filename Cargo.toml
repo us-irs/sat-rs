@@ -4,12 +4,12 @@ members = [
     "satrs",
     "satrs-mib",
     "satrs-example",
-    "satrs-example/models",
+    "satrs-example/types",
     "satrs-example/client",
     "satrs-example/minisim",
     "satrs-shared",
     "embedded-examples/embedded-client",
-    "embedded-examples/models",
+    "embedded-examples/types",
 ]
 
 exclude = [

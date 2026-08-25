@@ -18,7 +18,7 @@ tai-time = { version = "0.3", features = ["serde"] }
 nexosim = { version = "0.3.1" }
 
 satrs = { path = "../../satrs" }
-models = { path = "../models" }
+types = { path = "../types" }
 
 [dev-dependencies]
 delegate = "0.13"

@@ -5,14 +5,6 @@ use std::{
 };
 
 use derive_new::new;
-use models::{
-    ComponentId, DeviceMode,
-    ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned},
-    pcdu::{
-        self, SwitchId, SwitchMapBinary, SwitchMapBinaryWrapper, SwitchRequest, SwitchState,
-        SwitchStateBinary, SwitchesBitfield,
-    },
-};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use satrs::{request::GenericMessage, spacepackets::CcsdsPacketIdAndPsc};
 use satrs_example::TimestampHelper;
@@ -22,6 +14,14 @@ use satrs_minisim::{
 };
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator as _;
+use types::{
+    ComponentId, DeviceMode,
+    ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned},
+    pcdu::{
+        self, SwitchId, SwitchMapBinary, SwitchMapBinaryWrapper, SwitchRequest, SwitchState,
+        SwitchStateBinary, SwitchesBitfield,
+    },
+};
 
 use crate::ccsds::pack_ccsds_tm_packet_for_now;
 
@@ -531,21 +531,21 @@ mod tests {
     use std::sync::mpsc;
 
     use arbitrary_int::u11;
-    use models::{
-        Apid, TcHeader,
-        pcdu::{SwitchMapBinary, SwitchStateBinary},
-    };
     use satrs::{
         request::{GenericMessage, MessageMetadata},
         spacepackets::SpacePacketHeader,
+    };
+    use types::{
+        Apid, TcHeader,
+        pcdu::{SwitchMapBinary, SwitchStateBinary},
     };
 
     use super::*;
 
     pub fn create_request_tc(
-        request: models::pcdu::request::Request,
-    ) -> models::ccsds::CcsdsTcPacketOwned {
-        models::ccsds::CcsdsTcPacketOwned::new_with_request(
+        request: types::pcdu::request::Request,
+    ) -> types::ccsds::CcsdsTcPacketOwned {
+        types::ccsds::CcsdsTcPacketOwned::new_with_request(
             SpacePacketHeader::new_from_apid(u11::new(Apid::Eps as u16)),
             TcHeader::new(ComponentId::EpsPcdu, request.message_type()),
             request,
@@ -589,8 +589,8 @@ mod tests {
 
     #[allow(dead_code)]
     pub struct PcduTestbench {
-        pub mode_request_tx: mpsc::SyncSender<models::pcdu::request::Request>,
-        pub mode_reply_rx_to_parent: mpsc::Receiver<models::pcdu::response::Response>,
+        pub mode_request_tx: mpsc::SyncSender<types::pcdu::request::Request>,
+        pub mode_reply_rx_to_parent: mpsc::Receiver<types::pcdu::response::Response>,
         pub tc_tx: mpsc::SyncSender<CcsdsTcPacketOwned>,
         pub tm_rx: mpsc::Receiver<CcsdsTmPacketOwned>,
         pub switch_request_tx: mpsc::Sender<GenericMessage<SwitchRequest>>,

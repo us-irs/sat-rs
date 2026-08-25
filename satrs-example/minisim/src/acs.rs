@@ -1,6 +1,5 @@
 use std::{f32::consts::PI, sync::mpsc, time::Duration};
 
-use models::pcdu::SwitchStateBinary;
 use nexosim::{
     model::{Context, Model},
     ports::Output,
@@ -12,6 +11,7 @@ use satrs_minisim::{
     },
     SimReply,
 };
+use types::pcdu::SwitchStateBinary;
 
 use crate::time::current_millis;
 
@@ -179,7 +179,6 @@ impl Model for MagnetorquerModel {}
 pub mod tests {
     use std::time::Duration;
 
-    use models::pcdu::{SwitchId, SwitchStateBinary};
     use satrs_minisim::{
         acs::{
             lis3mdl::{self, MgmLis3MdlReply},
@@ -187,6 +186,7 @@ pub mod tests {
         },
         SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimRequest,
     };
+    use types::pcdu::{SwitchId, SwitchStateBinary};
 
     use crate::{eps::tests::switch_device_on, test_helpers::SimTestbench};
 

@@ -1,8 +1,3 @@
-use models::acs::mgm::SensorData;
-use models::acs::mgm::request::ModeRequest;
-use models::acs::mgm::response::ModeResponse;
-use models::pcdu::SwitchId;
-use models::{ComponentId, DeviceMode, HkRequestType, acs::mgm};
 use satrs::spacepackets::CcsdsPacketIdAndPsc;
 use satrs_example::{HkHelperSingleSet, ModeHelper, TimestampHelper, TmtcQueues};
 use satrs_minisim::acs::MgmRequestLis3Mdl;
@@ -13,6 +8,11 @@ use satrs_minisim::{SerializableSimMsgPayload, SimReply, SimRequest};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use types::acs::mgm::SensorData;
+use types::acs::mgm::request::ModeRequest;
+use types::acs::mgm::response::ModeResponse;
+use types::pcdu::SwitchId;
+use types::{ComponentId, DeviceMode, HkRequestType, acs::mgm};
 
 use satrs::request::MessageMetadata;
 
@@ -308,7 +308,7 @@ impl MgmHandlerLis3Mdl {
     pub fn handle_hk_request(
         &mut self,
         tc_id: Option<CcsdsPacketIdAndPsc>,
-        hk_request: &models::acs::mgm::request::HkRequest,
+        hk_request: &types::acs::mgm::request::HkRequest,
     ) {
         match hk_request.req_type {
             HkRequestType::OneShot => {
@@ -460,14 +460,14 @@ mod tests {
     };
 
     use arbitrary_int::u11;
-    use models::{
+    use satrs::{request::GenericMessage, spacepackets::SpacePacketHeader};
+    use satrs_minisim::acs::lis3mdl::MgmLis3RawValues;
+    use types::{
         Apid, ComponentId, TcHeader,
         acs::mgm::request::HkRequest,
         ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned},
         pcdu::{SwitchRequest, SwitchState, SwitchStateBinary},
     };
-    use satrs::{request::GenericMessage, spacepackets::SpacePacketHeader};
-    use satrs_minisim::acs::lis3mdl::MgmLis3RawValues;
 
     use crate::eps::pcdu::{SharedSwitchSet, SwitchMap, SwitchSet};
 
@@ -490,11 +490,11 @@ mod tests {
 
     pub fn create_request_tc(
         select: MgmSelect,
-        request: models::acs::mgm::request::Request,
-    ) -> models::ccsds::CcsdsTcPacketOwned {
-        models::ccsds::CcsdsTcPacketOwned::new_with_request(
+        request: types::acs::mgm::request::Request,
+    ) -> types::ccsds::CcsdsTcPacketOwned {
+        types::ccsds::CcsdsTcPacketOwned::new_with_request(
             SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
-            TcHeader::new(select.id(), models::MessageType::Ping),
+            TcHeader::new(select.id(), types::MessageType::Ping),
             request,
         )
     }
@@ -602,9 +602,9 @@ mod tests {
         assert_eq!(tm_packet.tm_header.sender_id, ComponentId::AcsMgm0);
 
         let response =
-            postcard::from_bytes::<models::acs::mgm::response::Response>(&tm_packet.payload)
+            postcard::from_bytes::<types::acs::mgm::response::Response>(&tm_packet.payload)
                 .expect("failed to deserialize mode reply");
-        matches!(response, models::acs::mgm::response::Response::Ok);
+        matches!(response, types::acs::mgm::response::Response::Ok);
         // The device should have been polled once.
         assert_eq!(testbench.test_spi_interface().call_count, 1);
         let mgm_set = *testbench.handler.shared_mgm_set.lock().unwrap();
@@ -691,9 +691,9 @@ mod tests {
         assert_eq!(tm_packet.tm_header.sender_id, ComponentId::AcsMgm0);
 
         let response =
-            postcard::from_bytes::<models::acs::mgm::response::Response>(&tm_packet.payload)
+            postcard::from_bytes::<types::acs::mgm::response::Response>(&tm_packet.payload)
                 .expect("failed to deserialize mode reply");
-        if let models::acs::mgm::response::Response::Hk(mgm::response::HkResponse::MgmData(data)) =
+        if let types::acs::mgm::response::Response::Hk(mgm::response::HkResponse::MgmData(data)) =
             response
         {
             assert_eq!(data.valid, false);
@@ -743,17 +743,17 @@ mod tests {
         assert_eq!(mode_tm.tm_header.sender_id, ComponentId::AcsMgm0);
 
         let response =
-            postcard::from_bytes::<models::acs::mgm::response::Response>(&mode_tm.payload)
+            postcard::from_bytes::<types::acs::mgm::response::Response>(&mode_tm.payload)
                 .expect("failed to deserialize mode reply");
-        matches!(response, models::acs::mgm::response::Response::Ok);
+        matches!(response, types::acs::mgm::response::Response::Ok);
 
         let hk_tm = testbench.tm_rx.try_recv().expect("no hk reply generated");
 
         assert_eq!(hk_tm.tm_header.sender_id, ComponentId::AcsMgm0);
 
-        let response = postcard::from_bytes::<models::acs::mgm::response::Response>(&hk_tm.payload)
+        let response = postcard::from_bytes::<types::acs::mgm::response::Response>(&hk_tm.payload)
             .expect("failed to deserialize mode reply");
-        if let models::acs::mgm::response::Response::Hk(mgm::response::HkResponse::MgmData(data)) =
+        if let types::acs::mgm::response::Response::Hk(mgm::response::HkResponse::MgmData(data)) =
             response
         {
             // Set is now valid.

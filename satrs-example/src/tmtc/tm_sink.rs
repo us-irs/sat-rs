@@ -4,8 +4,8 @@ use std::{
 };
 
 use arbitrary_int::{u11, u14};
-use models::ccsds::CcsdsTmPacketOwned;
 use satrs::spacepackets::seq_count::{SequenceCounter, SequenceCounterCcsdsSimple};
+use types::ccsds::CcsdsTmPacketOwned;
 
 use crate::interface::tcp::SyncTcpTmSource;
 

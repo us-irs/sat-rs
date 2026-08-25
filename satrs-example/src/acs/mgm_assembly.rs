@@ -1,11 +1,11 @@
 use std::{sync::mpsc, time::Duration};
 
-use models::{
+use satrs::spacepackets::CcsdsPacketIdAndPsc;
+use satrs_example::{ModeHelper, TmtcQueues};
+use types::{
     ComponentId, DeviceMode,
     acs::mgm_assembly::{Mode, request, response},
 };
-use satrs::spacepackets::CcsdsPacketIdAndPsc;
-use satrs_example::{ModeHelper, TmtcQueues};
 
 use crate::ccsds::pack_ccsds_tm_packet_for_now;
 
@@ -16,8 +16,8 @@ pub struct ParentQueueHelper {
 
 /// Helper component for communication with a parent component, which is usually as assembly.
 pub struct ChildrenQueueHelper {
-    pub request_tx_queues: [mpsc::SyncSender<models::acs::mgm::request::ModeRequest>; 2],
-    pub report_rx_queues: [mpsc::Receiver<models::acs::mgm::response::ModeResponse>; 2],
+    pub request_tx_queues: [mpsc::SyncSender<types::acs::mgm::request::ModeRequest>; 2],
+    pub report_rx_queues: [mpsc::Receiver<types::acs::mgm::response::ModeResponse>; 2],
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -80,14 +80,14 @@ impl Assembly {
             match self.tmtc_queues.tc_rx.try_recv() {
                 Ok(packet) => {
                     let tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&packet.sp_header);
-                    match postcard::from_bytes::<models::acs::mgm_assembly::request::Request>(
+                    match postcard::from_bytes::<types::acs::mgm_assembly::request::Request>(
                         &packet.payload,
                     ) {
                         Ok(request) => match request {
-                            models::acs::mgm_assembly::request::Request::Ping => {
+                            types::acs::mgm_assembly::request::Request::Ping => {
                                 self.send_telemetry(Some(tc_id), response::Response::Ok)
                             }
-                            models::acs::mgm_assembly::request::Request::Mode(request) => {
+                            types::acs::mgm_assembly::request::Request::Mode(request) => {
                                 match request {
                                     request::ModeRequest::SetMode(assembly_mode) => {
                                         self.start_transition(false, assembly_mode, Some(tc_id))
@@ -117,7 +117,7 @@ impl Assembly {
     pub fn send_telemetry(
         &self,
         tc_id: Option<CcsdsPacketIdAndPsc>,
-        response: models::acs::mgm_assembly::response::Response,
+        response: types::acs::mgm_assembly::response::Response,
     ) {
         match pack_ccsds_tm_packet_for_now(Self::ID, tc_id, &response) {
             Ok(packet) => {
@@ -165,12 +165,12 @@ impl Assembly {
             loop {
                 match rx.try_recv() {
                     Ok(report) => match report {
-                        models::acs::mgm::response::ModeResponse::Mode(device_mode) => {
+                        types::acs::mgm::response::ModeResponse::Mode(device_mode) => {
                             self.mgm_modes[idx].mode = Some(device_mode);
                             self.mgm_modes[idx].reply_received = true;
                             mode_report_received = true;
                         }
-                        models::acs::mgm::response::ModeResponse::SetModeTimeout => {
+                        types::acs::mgm::response::ModeResponse::SetModeTimeout => {
                             // Ignore, handle this with our own timeout.
                             log::warn!("MGM {} mode timeout", idx);
                         }
@@ -275,7 +275,7 @@ impl Assembly {
 
     pub fn command_children(&self, mode: DeviceMode) {
         for tx in &self.children_queues.request_tx_queues {
-            tx.send(models::acs::mgm::request::ModeRequest::SetMode(mode))
+            tx.send(types::acs::mgm::request::ModeRequest::SetMode(mode))
                 .unwrap();
         }
     }
@@ -320,20 +320,20 @@ mod tests {
     use std::sync::mpsc::TryRecvError;
 
     use arbitrary_int::u11;
-    use models::{
+    use satrs::spacepackets::SpacePacketHeader;
+    use types::{
         Apid, Message, MessageType, TcHeader,
         acs::mgm_assembly,
         ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned},
     };
-    use satrs::spacepackets::SpacePacketHeader;
 
     use super::*;
 
     pub struct Testbench {
         subsystem_req_tx: mpsc::SyncSender<request::ModeRequest>,
         subsystem_report_rx: mpsc::Receiver<response::ModeResponse>,
-        mgm_request_rx: [mpsc::Receiver<models::acs::mgm::request::ModeRequest>; 2],
-        mgm_report_tx: [mpsc::SyncSender<models::acs::mgm::response::ModeResponse>; 2],
+        mgm_request_rx: [mpsc::Receiver<types::acs::mgm::request::ModeRequest>; 2],
+        mgm_report_tx: [mpsc::SyncSender<types::acs::mgm::response::ModeResponse>; 2],
         tc_tx: mpsc::SyncSender<CcsdsTcPacketOwned>,
         tm_rx: mpsc::Receiver<CcsdsTmPacketOwned>,
         assembly: Assembly,
@@ -396,9 +396,9 @@ mod tests {
     }
 
     pub fn create_request_tc(
-        request: models::acs::mgm_assembly::request::Request,
-    ) -> models::ccsds::CcsdsTcPacketOwned {
-        models::ccsds::CcsdsTcPacketOwned::new_with_request(
+        request: types::acs::mgm_assembly::request::Request,
+    ) -> types::ccsds::CcsdsTcPacketOwned {
+        types::ccsds::CcsdsTcPacketOwned::new_with_request(
             SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
             TcHeader::new(Assembly::ID, request.message_type()),
             request,
@@ -429,13 +429,13 @@ mod tests {
             let request = rx.try_recv().unwrap();
             assert_eq!(
                 request,
-                models::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
+                types::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
             );
         }
 
         // Confirm the mode is set.
         for tx in tb.mgm_report_tx.iter() {
-            tx.send(models::acs::mgm::response::ModeResponse::Mode(
+            tx.send(types::acs::mgm::response::ModeResponse::Mode(
                 DeviceMode::Normal,
             ))
             .unwrap();
@@ -467,13 +467,13 @@ mod tests {
             let request = rx.try_recv().unwrap();
             assert_eq!(
                 request,
-                models::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
+                types::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
             );
         }
 
         // Confirm the mode is set.
         for tx in tb.mgm_report_tx.iter() {
-            tx.send(models::acs::mgm::response::ModeResponse::Mode(
+            tx.send(types::acs::mgm::response::ModeResponse::Mode(
                 DeviceMode::Normal,
             ))
             .unwrap();
@@ -505,18 +505,18 @@ mod tests {
             let request = rx.try_recv().unwrap();
             assert_eq!(
                 request,
-                models::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
+                types::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
             );
         }
 
         // One device is sufficient.
         tb.mgm_report_tx[0]
-            .send(models::acs::mgm::response::ModeResponse::Mode(
+            .send(types::acs::mgm::response::ModeResponse::Mode(
                 DeviceMode::Normal,
             ))
             .unwrap();
         tb.mgm_report_tx[1]
-            .send(models::acs::mgm::response::ModeResponse::Mode(
+            .send(types::acs::mgm::response::ModeResponse::Mode(
                 DeviceMode::Off,
             ))
             .unwrap();
@@ -547,13 +547,13 @@ mod tests {
             let request = rx.try_recv().unwrap();
             assert_eq!(
                 request,
-                models::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
+                types::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
             );
         }
 
         // Confirm the mode is set.
         for tx in tb.mgm_report_tx.iter() {
-            tx.send(models::acs::mgm::response::ModeResponse::Mode(
+            tx.send(types::acs::mgm::response::ModeResponse::Mode(
                 DeviceMode::Off,
             ))
             .unwrap();
@@ -585,13 +585,13 @@ mod tests {
             let request = rx.try_recv().unwrap();
             assert_eq!(
                 request,
-                models::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
+                types::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
             );
         }
 
         // Confirm the mode is set.
         for tx in tb.mgm_report_tx.iter() {
-            tx.send(models::acs::mgm::response::ModeResponse::Mode(
+            tx.send(types::acs::mgm::response::ModeResponse::Mode(
                 DeviceMode::Normal,
             ))
             .unwrap();
@@ -608,7 +608,7 @@ mod tests {
         );
 
         for tx in tb.mgm_report_tx.iter() {
-            tx.send(models::acs::mgm::response::ModeResponse::Mode(
+            tx.send(types::acs::mgm::response::ModeResponse::Mode(
                 DeviceMode::Off,
             ))
             .unwrap();
@@ -621,13 +621,13 @@ mod tests {
             let request = rx.try_recv().unwrap();
             assert_eq!(
                 request,
-                models::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
+                types::acs::mgm::request::ModeRequest::SetMode(DeviceMode::Normal)
             );
         }
 
         // Let the mode keeping fail.
         for tx in tb.mgm_report_tx.iter() {
-            tx.send(models::acs::mgm::response::ModeResponse::Mode(
+            tx.send(types::acs::mgm::response::ModeResponse::Mode(
                 DeviceMode::Off,
             ))
             .unwrap();
