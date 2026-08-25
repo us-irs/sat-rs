@@ -1,5 +1,4 @@
 [package]
-authors = ["Robin Mueller <robin.mueller.m@gmail.com>"]
 name = "satrs-stm32h7-nucleo-rtic"
 edition = "2021"
 version = "0.1.0"

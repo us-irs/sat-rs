@@ -1,0 +1,16 @@
+[package]
+name = "tmtc-utils"
+description = "Commonly required utilities for writing TMTC clients with Rust"
+version = "0.1.0"
+edition = "2024"
+homepage = "https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/"
+repository = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
+license = "Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+thiserror = "2"
+serialport = { version = "4" }
+cobs = "0.5"
+log = "0.4"
