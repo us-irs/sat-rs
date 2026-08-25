@@ -37,7 +37,7 @@ use tmtc::{tc_source::TcSourceTask, tm_sink::TmSink};
 use types::{ComponentId, DeviceMode};
 
 use crate::{
-    acs::{mgm, mgm_assembly, subsystem},
+    acs::{ctrl, mgm, mgm_assembly, mgt, subsystem},
     control::Controller,
     eps::pcdu::SwitchSet,
     event_manager::EventManager,
@@ -81,11 +81,11 @@ fn main() {
     let (pcdu_handler_tc_tx, pcdu_handler_tc_rx) = mpsc::sync_channel(30);
     let (controller_tc_tx, controller_tc_rx) = mpsc::sync_channel(10);
 
-    let (mgt_request_tx, _mgt_request_rx) = mpsc::sync_channel(5);
-    let (_mgt_report_tx, mgt_report_rx) = mpsc::sync_channel(5);
+    let (mgt_request_tx, mgt_request_rx) = mpsc::sync_channel(5);
+    let (mgt_report_tx, mgt_report_rx) = mpsc::sync_channel(5);
 
-    let (acs_ctrl_request_tx, _acs_ctrl_request_rx) = mpsc::sync_channel(5);
-    let (_acs_ctrl_response_tx, acs_ctrl_response_rx) = mpsc::sync_channel(5);
+    let (acs_ctrl_request_tx, acs_ctrl_request_rx) = mpsc::sync_channel(5);
+    let (acs_ctrl_response_tx, acs_ctrl_response_rx) = mpsc::sync_channel(5);
 
     // These message handles need to go into the MGM assembly and ACS subsystem.
     let (mgm_assembly_request_tx, mgm_assembly_request_rx) = mpsc::sync_channel(5);
@@ -226,15 +226,25 @@ fn main() {
         Duration::from_millis(2000),
     );
 
+    let mut acs_controller = ctrl::Controller::new(ctrl::ModeLeafHelper {
+        request_rx: acs_ctrl_request_rx,
+        report_tx: acs_ctrl_response_tx,
+    });
+
+    let mut acs_mgt = mgt::Mgt::new(mgt::ModeLeafHelper {
+        request_rx: mgt_request_rx,
+        report_tx: mgt_report_tx,
+    });
+
     let mut acs_subsystem = subsystem::Subsystem::new(
         subsystem::ModeRequestSenders {
             mode_request_ctrl: acs_ctrl_request_tx,
-            mode_request_assy: mgm_assembly_request_tx,
+            mode_request_mgm_assy: mgm_assembly_request_tx,
             mode_request_mgt: mgt_request_tx,
         },
         subsystem::ModeReportReceivers {
             mode_response_ctrl: acs_ctrl_response_rx,
-            mode_response_assy: mgm_assembly_report_rx,
+            mode_response_mgm_assy: mgm_assembly_report_rx,
             mode_response_mgt: mgt_report_rx,
         },
         TmtcQueues {
@@ -340,6 +350,8 @@ fn main() {
                 mgm_0_handler.periodic_operation();
                 mgm_1_handler.periodic_operation();
                 mgm_assembly.periodic_operation();
+                acs_controller.periodic_operation();
+                acs_mgt.periodic_operation();
                 acs_subsystem.periodic_operation();
                 thread::sleep(Duration::from_millis(FREQ_MS_AOCS));
             }

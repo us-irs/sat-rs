@@ -5,20 +5,21 @@ use std::{
 };
 
 use satrs::{
-    mode_tree::{ModeStoreProvider, ModeStoreVec, SequenceModeTables, TargetModeTables},
+    mode_tree::{
+        ModeStoreProvider, ModeStoreVec, SequenceModeTables, SequenceTableEntry,
+        SequenceTableMapTable, SequenceTablesMapValue, TargetModeTables,
+    },
     spacepackets::CcsdsPacketIdAndPsc,
-    subsystem::SubsystemCommandingHelper,
+    subsystem::{
+        ModeCommandingResult, ModeRaw, ModeResponse, ModeSetRequest, ModeTreeHelperError,
+        SubsystemCommandingHelper, SubsystemHelperResult,
+    },
 };
 use satrs_example::{ModeHelper, TmtcQueues};
 use types::{
     ComponentId,
     acs::subsystem::{Mode, response},
 };
-
-#[derive(Debug)]
-pub struct TransitionInfo {
-    check_mode_reached: bool,
-}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum TransitionState {
@@ -27,95 +28,139 @@ pub enum TransitionState {
     AwaitingReplies,
 }
 
-#[derive(Debug)]
-pub struct ChildModes {
-    mgm_assembly_mode: types::acs::mgm_assembly::Mode,
-    mgt_mode: types::acs::mgt::Mode,
-    controller_mode: types::acs::ctrl::Mode,
+fn build_sequence_tables() -> SequenceModeTables {
+    let mut seq_tables = SequenceModeTables::default();
+
+    let mut off_table = SequenceTablesMapValue::new("OFF");
+    let mut off_step_0 = SequenceTableMapTable::new("OFF_STEP_0");
+    off_step_0.add_entry(SequenceTableEntry::new(
+        "OFF_CTRL_PASSIVE",
+        ComponentId::AcsController as satrs::ComponentId,
+        types::acs::ctrl::Mode::Passive.into(),
+        true,
+    ));
+    off_table.add_sequence_table(off_step_0);
+    let mut off_step_1 = SequenceTableMapTable::new("OFF_STEP_1");
+    off_step_1.add_entry(SequenceTableEntry::new(
+        "OFF_MGM_ASSY_OFF",
+        ComponentId::AcsMgmAssembly as satrs::ComponentId,
+        types::acs::mgm_assembly::Mode::Device(types::DeviceMode::Off).into(),
+        false,
+    ));
+    off_step_1.add_entry(SequenceTableEntry::new(
+        "OFF_MGT_OFF",
+        ComponentId::AcsMgt as satrs::ComponentId,
+        types::acs::mgt::Mode::Off.into(),
+        false,
+    ));
+    off_table.add_sequence_table(off_step_1);
+    seq_tables.0.insert(Mode::Off as ModeRaw, off_table);
+
+    let mut safe_table = SequenceTablesMapValue::new("SAFE");
+    let mut safe_step_0 = SequenceTableMapTable::new("SAFE_STEP_0");
+    safe_step_0.add_entry(SequenceTableEntry::new(
+        "SAFE_MGM_ASSY_NORMAL",
+        ComponentId::AcsMgmAssembly as satrs::ComponentId,
+        types::acs::mgm_assembly::Mode::Device(types::DeviceMode::Normal).into(),
+        false,
+    ));
+    safe_step_0.add_entry(SequenceTableEntry::new(
+        "SAFE_MGT_NORMAL",
+        ComponentId::AcsMgt as satrs::ComponentId,
+        types::acs::mgt::Mode::Normal.into(),
+        false,
+    ));
+    safe_table.add_sequence_table(safe_step_0);
+    let mut safe_step_1 = SequenceTableMapTable::new("SAFE_STEP_1");
+    safe_step_1.add_entry(SequenceTableEntry::new(
+        "SAFE_CTRL_SAFE",
+        ComponentId::AcsController as satrs::ComponentId,
+        types::acs::ctrl::Mode::Safe.into(),
+        false,
+    ));
+    safe_table.add_sequence_table(safe_step_1);
+    seq_tables.0.insert(Mode::Safe as ModeRaw, safe_table);
+
+    seq_tables
 }
 
-#[derive(Debug)]
-pub struct TransitionCommands {
-    mgm_assembly_mode: Option<(types::acs::mgm_assembly::Mode, TransitionInfo)>,
-    mgt_mode: Option<(types::acs::mgt::Mode, TransitionInfo)>,
-    controller_mode: Option<(types::acs::ctrl::Mode, TransitionInfo)>,
+fn ctrl_response_to_mode_response(
+    response: types::acs::ctrl::response::ModeReport,
+) -> ModeResponse {
+    let sender_id = ComponentId::AcsController as satrs::ComponentId;
+    match response {
+        types::acs::ctrl::response::ModeReport::Mode(mode) => ModeResponse {
+            request_id: 0,
+            sender_id,
+            reported_mode: mode.into(),
+            success: true,
+        },
+        types::acs::ctrl::response::ModeReport::WrongMode(_) => ModeResponse {
+            request_id: 0,
+            sender_id,
+            reported_mode: 0,
+            success: false,
+        },
+    }
 }
 
-const OFF_SEQUENCE: [TransitionCommands; 2] = [
-    TransitionCommands {
-        mgm_assembly_mode: None,
-        mgt_mode: None,
-        controller_mode: Some((
-            types::acs::ctrl::Mode::Passive,
-            TransitionInfo {
-                check_mode_reached: true,
-            },
-        )),
-    },
-    TransitionCommands {
-        mgm_assembly_mode: Some((
-            types::acs::mgm_assembly::Mode::Device(types::DeviceMode::Off),
-            TransitionInfo {
-                check_mode_reached: false,
-            },
-        )),
-        mgt_mode: Some((
-            types::acs::mgt::Mode::Off,
-            TransitionInfo {
-                check_mode_reached: false,
-            },
-        )),
-        controller_mode: None,
-    },
-];
+fn mgm_assy_response_to_mode_response(
+    response: types::acs::mgm_assembly::response::ModeResponse,
+) -> ModeResponse {
+    let sender_id = ComponentId::AcsMgmAssembly as satrs::ComponentId;
+    match response {
+        types::acs::mgm_assembly::response::ModeResponse::Mode(mode) => ModeResponse {
+            request_id: 0,
+            sender_id,
+            reported_mode: mode.into(),
+            success: true,
+        },
+        types::acs::mgm_assembly::response::ModeResponse::SetModeTimeout(_)
+        | types::acs::mgm_assembly::response::ModeResponse::WrongMode(_)
+        | types::acs::mgm_assembly::response::ModeResponse::CanNotKeepMode(_) => ModeResponse {
+            request_id: 0,
+            sender_id,
+            reported_mode: 0,
+            success: false,
+        },
+    }
+}
 
-const SAFE_SEQUENCE: [TransitionCommands; 2] = [
-    TransitionCommands {
-        mgm_assembly_mode: Some((
-            types::acs::mgm_assembly::Mode::Device(types::DeviceMode::Normal),
-            TransitionInfo {
-                check_mode_reached: false,
-            },
-        )),
-        mgt_mode: Some((
-            types::acs::mgt::Mode::Normal,
-            TransitionInfo {
-                check_mode_reached: false,
-            },
-        )),
-        controller_mode: None,
-    },
-    TransitionCommands {
-        mgm_assembly_mode: None,
-        mgt_mode: None,
-        controller_mode: Some((
-            types::acs::ctrl::Mode::Safe,
-            TransitionInfo {
-                check_mode_reached: false,
-            },
-        )),
-    },
-];
+fn mgt_response_to_mode_response(response: types::acs::mgt::response::ModeReport) -> ModeResponse {
+    let sender_id = ComponentId::AcsMgt as satrs::ComponentId;
+    match response {
+        types::acs::mgt::response::ModeReport::Mode(mode) => ModeResponse {
+            request_id: 0,
+            sender_id,
+            reported_mode: mode.into(),
+            success: true,
+        },
+        types::acs::mgt::response::ModeReport::WrongMode(_) => ModeResponse {
+            request_id: 0,
+            sender_id,
+            reported_mode: 0,
+            success: false,
+        },
+    }
+}
 
 #[derive(Debug)]
 pub struct ModeRequestSenders {
     pub mode_request_ctrl: SyncSender<types::acs::ctrl::request::ModeRequest>,
-    pub mode_request_assy: SyncSender<types::acs::mgm_assembly::request::ModeRequest>,
+    pub mode_request_mgm_assy: SyncSender<types::acs::mgm_assembly::request::ModeRequest>,
     pub mode_request_mgt: SyncSender<types::acs::mgt::request::ModeRequest>,
 }
 
 #[derive(Debug)]
 pub struct ModeReportReceivers {
     pub mode_response_ctrl: Receiver<types::acs::ctrl::response::ModeReport>,
-    pub mode_response_assy: Receiver<types::acs::mgm_assembly::response::ModeResponse>,
+    pub mode_response_mgm_assy: Receiver<types::acs::mgm_assembly::response::ModeResponse>,
     pub mode_response_mgt: Receiver<types::acs::mgt::response::ModeReport>,
 }
 
 #[derive(Debug)]
 pub struct Subsystem {
     mode_helper: ModeHelper<types::acs::subsystem::Mode, TransitionState>,
-    transition_step: usize,
-    current_child_modes: Option<ChildModes>,
     mode_request_senders: ModeRequestSenders,
     mode_report_receivers: ModeReportReceivers,
     tmtc_queues: TmtcQueues,
@@ -152,18 +197,16 @@ impl Subsystem {
 
         let target_tables = TargetModeTables::default();
 
-        let sequence_tables = SequenceModeTables::default();
+        let sequence_tables = build_sequence_tables();
 
         Self {
             mode_helper: ModeHelper::new(
                 types::acs::subsystem::Mode::Off,
                 Duration::from_millis(2000),
             ),
-            current_child_modes: None,
             mode_request_senders,
             mode_report_receivers,
             tmtc_queues,
-            transition_step: 0,
             subsystem_helper: SubsystemCommandingHelper::new(
                 mode_store_vec,
                 target_tables,
@@ -174,6 +217,116 @@ impl Subsystem {
 
     pub fn periodic_operation(&mut self) {
         self.handle_telecommands();
+        let mut mode_requests = Vec::new();
+
+        while let Ok(response) = self.mode_report_receivers.mode_response_ctrl.try_recv() {
+            let result = self
+                .subsystem_helper
+                .state_machine(Some(ctrl_response_to_mode_response(response)), |request| {
+                    mode_requests.push(request)
+                });
+            self.handle_state_machine_result(result);
+        }
+        while let Ok(response) = self.mode_report_receivers.mode_response_mgm_assy.try_recv() {
+            let result = self.subsystem_helper.state_machine(
+                Some(mgm_assy_response_to_mode_response(response)),
+                |request| mode_requests.push(request),
+            );
+            self.handle_state_machine_result(result);
+        }
+        while let Ok(response) = self.mode_report_receivers.mode_response_mgt.try_recv() {
+            let result = self
+                .subsystem_helper
+                .state_machine(Some(mgt_response_to_mode_response(response)), |request| {
+                    mode_requests.push(request)
+                });
+            self.handle_state_machine_result(result);
+        }
+
+        let result = self
+            .subsystem_helper
+            .state_machine(None, |request| mode_requests.push(request));
+        self.handle_state_machine_result(result);
+
+        for request in mode_requests {
+            self.handle_mode_set_request(request);
+        }
+    }
+
+    fn handle_state_machine_result(
+        &mut self,
+        result: Result<SubsystemHelperResult, ModeTreeHelperError>,
+    ) {
+        match result {
+            Ok(result) => match result {
+                SubsystemHelperResult::Idle => (),
+                SubsystemHelperResult::TargetKeeping => (),
+                SubsystemHelperResult::ModeCommanding(mode_commanding_result) => {
+                    match mode_commanding_result {
+                        ModeCommandingResult::Done => {
+                            let target_mode_typed =
+                                self.subsystem_helper.seq_exec_helper.target_mode();
+                            let target_mode = target_mode_typed.map(Mode::try_from);
+                            log::info!(
+                                "ACS SS: mode commanding for target mode {:?} done",
+                                target_mode
+                            );
+                            self.finish_mode_transition();
+                        }
+                        ModeCommandingResult::StepDone => log::info!("mode commanding step done"),
+                        ModeCommandingResult::AwaitingSuccessCheck => {
+                            log::info!("ACS SS: mode commanding awaiting success check")
+                        }
+                    }
+                }
+            },
+            Err(e) => {
+                log::error!("mode tree helper error: {}", e);
+                self.mode_helper.finish(false);
+            }
+        }
+    }
+
+    fn finish_mode_transition(&mut self) {
+        let tc_commander = self.mode_helper.finish(true);
+        if let Some(requestor) = tc_commander {
+            self.send_telemetry(
+                Some(requestor),
+                response::Response::Mode(response::ModeResponse::Mode(self.mode_helper.current)),
+            );
+        }
+    }
+
+    fn handle_mode_set_request(&mut self, request: ModeSetRequest) {
+        let target_id = ComponentId::try_from(request.target_id);
+        if let Ok(target_id) = target_id {
+            match target_id {
+                ComponentId::AcsMgmAssembly => self
+                    .mode_request_senders
+                    .mode_request_mgm_assy
+                    .send(types::acs::mgm_assembly::request::ModeRequest::SetMode(
+                        types::acs::mgm_assembly::Mode::try_from(request.mode).unwrap(),
+                    ))
+                    .unwrap(),
+                ComponentId::AcsController => self
+                    .mode_request_senders
+                    .mode_request_ctrl
+                    .send(types::acs::ctrl::request::ModeRequest::SetMode(
+                        types::acs::ctrl::Mode::try_from(request.mode).unwrap(),
+                    ))
+                    .unwrap(),
+                ComponentId::AcsMgt => self
+                    .mode_request_senders
+                    .mode_request_mgt
+                    .send(types::acs::mgt::request::ModeRequest::SetMode(
+                        types::acs::mgt::Mode::try_from(request.mode).unwrap(),
+                    ))
+                    .unwrap(),
+                _ => {
+                    log::error!("invalid target ID {:?} for mode command", target_id);
+                }
+            }
+        }
     }
 
     pub fn handle_telecommands(&mut self) {
@@ -189,7 +342,7 @@ impl Subsystem {
                                 self.send_telemetry(Some(tc_id), response::Response::Ok)
                             }
                             types::acs::subsystem::request::Request::Mode(mode_request) => {
-                                self.handle_mode_request(mode_request);
+                                self.handle_mode_request(Some(tc_id), mode_request);
                             }
                         },
                         Err(e) => {
@@ -205,50 +358,21 @@ impl Subsystem {
         }
     }
 
-    pub fn transition_sequence_for_mode(mode: Mode) -> &'static [TransitionCommands] {
-        match mode {
-            Mode::Off => &OFF_SEQUENCE,
-            Mode::Safe => &SAFE_SEQUENCE,
-        }
-    }
-
-    pub fn execute_transition_step(&mut self, step: &TransitionCommands) {
-        if let Some((target_mode, _info)) = &step.mgm_assembly_mode {
-            self.mode_request_senders
-                .mode_request_assy
-                .send(types::acs::mgm_assembly::request::ModeRequest::SetMode(
-                    *target_mode,
-                ))
-                .expect("failed to send mode request to MGM assembly");
-        }
-        if let Some((target_mode, _info)) = &step.mgt_mode {
-            self.mode_request_senders
-                .mode_request_mgt
-                .send(types::acs::mgt::request::ModeRequest::SetMode(*target_mode))
-                .expect("failed to send mode request to MGM assembly");
-        }
-        if let Some((target_mode, _info)) = &step.controller_mode {
-            self.mode_request_senders
-                .mode_request_ctrl
-                .send(types::acs::ctrl::request::ModeRequest::SetMode(
-                    *target_mode,
-                ))
-                .expect("failed to send mode request to MGM assembly");
-        }
-    }
-
     pub fn handle_mode_request(
         &mut self,
+        tc_id: Option<CcsdsPacketIdAndPsc>,
         mode_request: types::acs::subsystem::request::ModeRequest,
     ) {
         match mode_request {
             types::acs::subsystem::request::ModeRequest::SetMode(target_mode) => {
                 self.mode_helper.start(target_mode);
-                self.transition_step = 0;
-                let first_step = Self::transition_sequence_for_mode(target_mode)
-                    .get(self.transition_step)
-                    .expect("empty transition table");
-                self.execute_transition_step(first_step);
+                self.mode_helper.tc_commander = tc_id;
+                if let Err(e) = self
+                    .subsystem_helper
+                    .start_command_sequence(target_mode as ModeRaw)
+                {
+                    log::error!("error starting command sequence: {}", e);
+                }
             }
             types::acs::subsystem::request::ModeRequest::ReadMode => {
                 self.send_telemetry(

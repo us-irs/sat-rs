@@ -29,6 +29,7 @@ enum Commands {
     Mgm0(MgmArgs),
     Mgm1(MgmArgs),
     MgmAssy(MgmAssemblyArgs),
+    AcsSubsystem(SubsystemArgs),
 }
 
 impl Commands {
@@ -38,6 +39,7 @@ impl Commands {
             Commands::Mgm0(_mgm_args) => types::ComponentId::AcsMgm0,
             Commands::Mgm1(_mgm_args) => types::ComponentId::AcsMgm1,
             Commands::MgmAssy(_mgm_assembly_args) => types::ComponentId::AcsMgmAssembly,
+            Commands::AcsSubsystem(_subsystem_args) => types::ComponentId::AcsSubsystem,
         }
     }
 }
@@ -60,6 +62,14 @@ struct MgmAssemblyArgs {
     mode: Option<AssemblyModeSelect>,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy, clap::Parser)]
+struct SubsystemArgs {
+    #[arg(short, long)]
+    ping: bool,
+    #[arg(short, long)]
+    mode: Option<SubsystemModeSelect>,
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy, clap::ValueEnum)]
 pub enum DeviceModeSelect {
     Off,
@@ -71,6 +81,12 @@ pub enum AssemblyModeSelect {
     NoModeKeeping,
     Off,
     Normal,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, clap::ValueEnum)]
+pub enum SubsystemModeSelect {
+    Off,
+    Safe,
 }
 
 fn setup_logger(level: log::LevelFilter) -> Result<(), fern::InitError> {
@@ -234,6 +250,45 @@ fn main() -> anyhow::Result<()> {
                     client.send_to(&request_packet, addr).unwrap();
                 }
             }
+            Commands::AcsSubsystem(subsystem_args) => {
+                if subsystem_args.ping {
+                    let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
+                        SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
+                        TcHeader::new(cmd.target_id(), types::MessageType::Ping),
+                        types::acs::subsystem::request::Request::Ping,
+                    );
+                    let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
+                    log::info!(
+                        "sending {:?} ping request with TC ID {:#010x}",
+                        target_id,
+                        sent_tc_id.raw()
+                    );
+                    let request_packet = request.to_vec();
+                    client.send_to(&request_packet, addr).unwrap();
+                }
+                if let Some(mode) = subsystem_args.mode {
+                    let subsystem_mode = match mode {
+                        SubsystemModeSelect::Off => types::acs::subsystem::Mode::Off,
+                        SubsystemModeSelect::Safe => types::acs::subsystem::Mode::Safe,
+                    };
+
+                    let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
+                        SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
+                        TcHeader::new(target_id, types::MessageType::Mode),
+                        types::acs::subsystem::request::Request::Mode(
+                            types::acs::subsystem::request::ModeRequest::SetMode(subsystem_mode),
+                        ),
+                    );
+                    let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
+                    log::info!(
+                        "sending {:?} mode request with TC ID {:#010x}",
+                        target_id,
+                        sent_tc_id.raw()
+                    );
+                    let request_packet = request.to_vec();
+                    client.send_to(&request_packet, addr).unwrap();
+                }
+            }
         }
     }
 
@@ -320,7 +375,15 @@ fn handle_raw_tm_packet(data: &[u8]) -> anyhow::Result<()> {
                         postcard::from_bytes::<types::acs::mgm::response::Response>(remainder);
                     log::info!("Received response from MGM1: {:?}", response.unwrap());
                 }
-                types::ComponentId::AcsSubsystem => todo!(),
+                types::ComponentId::AcsSubsystem => {
+                    let response = postcard::from_bytes::<types::acs::subsystem::response::Response>(
+                        remainder,
+                    );
+                    log::info!(
+                        "Received response from ACS subsystem: {:?}",
+                        response.unwrap()
+                    );
+                }
                 types::ComponentId::EpsSubsystem => todo!(),
                 types::ComponentId::UdpServer => todo!(),
                 types::ComponentId::TcpServer => todo!(),
