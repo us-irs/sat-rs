@@ -1,6 +1,6 @@
 <p align="center"> <img src="misc/satrs-logo-v2.png" width="40%"> </p>
 
-[![sat-rs website](https://img.shields.io/badge/sat--rs-website-darkgreen?style=flat)](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/)
+<!-- [![sat-rs website](https://img.shields.io/badge/sat--rs-website-darkgreen?style=flat)](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/) -->
 [![sat-rs book](https://img.shields.io/badge/sat--rs-book-darkgreen?style=flat)](https://robamu.github.io/sat-rs/book/)
 [![Crates.io](https://img.shields.io/crates/v/satrs)](https://crates.io/crates/satrs)
 [![docs.rs](https://img.shields.io/docsrs/satrs)](https://docs.rs/satrs)

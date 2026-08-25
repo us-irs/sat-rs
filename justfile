@@ -35,3 +35,7 @@ docs-satrs:
   RUSTDOCFLAGS="--cfg docsrs --generate-link-to-definition -Z unstable-options" cargo +nightly doc -p satrs --all-features
 
 docs: docs-satrs
+
+[working-directory:"satrs-book"]
+book *args:
+  mdbook build {{args}}

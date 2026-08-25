@@ -3,8 +3,7 @@
 Satellites and space systems in general are complex systems with a wide range of requirements for
 both the hardware and the software. Consequently, the general design of the library is centered
 around many light-weight components which try to impose as few restrictions as possible on how to
-solve certain problems. This is also the reason why sat-rs is explicitely called a library
-instead of a framework.
+solve certain problems. 
 
 There are still a lot of common patterns and architectures across these systems where guidance
 of how to solve a problem and a common structure would still be extremely useful to avoid pitfalls

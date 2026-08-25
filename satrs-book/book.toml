@@ -1,9 +1,16 @@
 [book]
 authors = ["Robin Mueller"]
 language = "en"
-multilingual = false
 src = "src"
 title = "The sat-rs book"
 
 [output.html]
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
+
 [output.linkcheck]
+command = "mdbook-linkcheck2"
+
+[preprocessor]
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"

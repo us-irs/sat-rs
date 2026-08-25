@@ -3,7 +3,7 @@
 Software for space systems oftentimes has different requirements than the software for host
 systems or servers. Currently, most space systems are considered embedded systems.
 
-For these systems, the computation power and the available heap are important resources
+For these systems, the computation power and the available memory are important resources
 which are also constrained. This might make completeley heap based memory management schemes which
 are oftentimes used on host and server based systems unfeasable. Still, completely forbidding
 heap allocations might make software development unnecessarilly difficult, especially in a
@@ -13,6 +13,12 @@ A useful pattern commonly used in space systems is to limit heap allocations to 
 initialization time and avoid frequent run-time allocations. This prevents issues like
 running out of memory (something even Rust can not protect from) or heap fragmentation on systems
 without a MMU.
+
+# Using an embedded allocator
+
+The [`embedded-alloc`](https://github.com/rust-embedded/embedded-alloc) library provides
+a global allocator based on statically sized memory blocks. It also exposes an API
+which allows run-time tracking of the memory usage.
 
 # Using pre-allocated pool structures
 
