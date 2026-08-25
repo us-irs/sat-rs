@@ -1,9 +1,9 @@
-use models::{
+use satrs::spacepackets::CcsdsPacketIdAndPsc;
+use types::{
     ComponentId,
     ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned},
     control,
 };
-use satrs::spacepackets::CcsdsPacketIdAndPsc;
 
 use crate::ccsds::pack_ccsds_tm_packet_for_now;
 

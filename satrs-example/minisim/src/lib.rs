@@ -161,7 +161,7 @@ impl From<SimRequestError> for SimCtrlReply {
 
 pub mod eps {
     use super::*;
-    use models::pcdu::{SwitchId, SwitchMapBinary, SwitchStateBinary};
+    use types::pcdu::{SwitchId, SwitchMapBinary, SwitchStateBinary};
 
     #[derive(Debug, Copy, Clone)]
     #[repr(u8)]
@@ -197,7 +197,7 @@ pub mod eps {
 pub mod acs {
     use std::time::Duration;
 
-    use models::pcdu::SwitchStateBinary;
+    use types::pcdu::SwitchStateBinary;
 
     use super::*;
 

@@ -4,7 +4,7 @@ use anyhow::bail;
 use clap::Parser;
 use cobs::CobsDecoderOwned;
 use embedded_client::setup_logger;
-use embedded_models::stm32f3;
+use embedded_types::stm32f3;
 use spacepackets::{CcsdsPacketCreatorOwned, CcsdsPacketReader, SpHeader};
 use tmtc_utils::transport::serial::PacketTransportSerialCobs;
 
@@ -34,7 +34,7 @@ fn main() -> anyhow::Result<()> {
     let mut transport = PacketTransportSerialCobs::new(serial, CobsDecoderOwned::new(1024));
 
     if cli.ping {
-        let tc = create_stm32f3_tc(&embedded_models::stm32f3::Request::Ping);
+        let tc = create_stm32f3_tc(&embedded_types::stm32f3::Request::Ping);
         log::info!(
             "Sending ping request with TC ID: {:#010x}",
             tc.ccsds_packet_id_and_psc().raw()
@@ -66,6 +66,6 @@ fn main() -> anyhow::Result<()> {
 
 fn create_stm32f3_tc(request: &stm32f3::Request) -> CcsdsPacketCreatorOwned {
     let req_raw = postcard::to_allocvec(&request).unwrap();
-    let sp_header = SpHeader::new_from_apid(embedded_models::stm32f3::PUS_APID);
+    let sp_header = SpHeader::new_from_apid(embedded_types::stm32f3::PUS_APID);
     CcsdsPacketCreatorOwned::new_tc_with_checksum(sp_header, &req_raw).unwrap()
 }

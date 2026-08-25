@@ -5,9 +5,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub use models::ComponentId;
-use models::ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned};
 use satrs::spacepackets::{CcsdsPacketIdAndPsc, time::cds::CdsTime};
+pub use types::ComponentId;
+use types::ccsds::{CcsdsTcPacketOwned, CcsdsTmPacketOwned};
 
 pub mod config;
 

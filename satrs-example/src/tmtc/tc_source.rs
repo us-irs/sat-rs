@@ -1,4 +1,3 @@
-use models::{ComponentId, TcHeader, ccsds::CcsdsTcPacketOwned};
 use satrs::{
     pus::HandlingStatus,
     spacepackets::{CcsdsPacketReader, ChecksumType},
@@ -8,6 +7,7 @@ use std::{
     collections::HashMap,
     sync::mpsc::{self, TryRecvError},
 };
+use types::{ComponentId, TcHeader, ccsds::CcsdsTcPacketOwned};
 
 pub type CcsdsDistributor = HashMap<ComponentId, std::sync::mpsc::SyncSender<CcsdsTcPacketOwned>>;
 

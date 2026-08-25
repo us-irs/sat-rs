@@ -20,7 +20,6 @@ use interface::{
 };
 use log::info;
 use logger::setup_logger;
-use models::{ComponentId, DeviceMode};
 use satrs::{
     hal::std::{tcp_server::ServerConfig, udp_server::UdpTcServer},
     pus::HandlingStatus,
@@ -35,6 +34,7 @@ use satrs_example::{
 };
 use tmtc::sender::TmTcSender;
 use tmtc::{tc_source::TcSourceTask, tm_sink::TmSink};
+use types::{ComponentId, DeviceMode};
 
 use crate::{
     acs::{mgm, mgm_assembly, subsystem},
@@ -263,7 +263,7 @@ fn main() {
 
     // The PCDU is a critical component which should be in normal mode immediately.
     pcdu_handler_mode_tx
-        .send(models::pcdu::request::Request::Mode(DeviceMode::Normal))
+        .send(types::pcdu::request::Request::Mode(DeviceMode::Normal))
         .expect("sending initial mode request failed");
 
     info!("Starting TMTC and UDP task");

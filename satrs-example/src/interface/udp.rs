@@ -4,10 +4,10 @@ use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex, mpsc};
 
 use log::warn;
-use models::ccsds::CcsdsTmPacketOwned;
 use satrs::hal::std::udp_server::{ReceiveResult, UdpTcServer};
 use satrs::pus::HandlingStatus;
 use satrs::queue::GenericSendError;
+use types::ccsds::CcsdsTmPacketOwned;
 
 use crate::tmtc::sender::TmTcSender;
 
@@ -112,7 +112,6 @@ mod tests {
 
     use arbitrary_int::traits::Integer as _;
     use arbitrary_int::u14;
-    use models::Apid;
     use satrs::spacepackets::ecss::{CreatorConfig, MessageTypeId};
     use satrs::{
         ComponentId,
@@ -122,6 +121,7 @@ mod tests {
         },
     };
     use satrs_example::config::OBSW_SERVER_ADDR;
+    use types::Apid;
 
     use crate::tmtc::sender::MockSender;
 
