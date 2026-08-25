@@ -14,15 +14,14 @@ The primary goal of the sat-rs library is to provide re-usable components
 to write on-board software for remote systems like rovers or satellites. It is specifically written
 for the special requirements for these systems.
 
-It should be noted that sat-rs is early-stage software. Important features are missing. New releases
-with breaking changes are released regularly, with all changes documented inside respective
-changelog files. You should only use this library if your are willing to work in this
-environment.
-
-A lot of the architecture and general design considerations are based on the
+Some architecture and general design considerations are based on the
 [FSFW](https://egit.irs.uni-stuttgart.de/fsfw/fsfw) C++ framework which has flight heritage
 through the 2 missions [FLP](https://www.irs.uni-stuttgart.de/en/research/satellitetechnology-and-instruments/smallsatelliteprogram/flying-laptop/)
 and [EIVE](https://www.irs.uni-stuttgart.de/en/research/satellitetechnology-and-instruments/smallsatelliteprogram/EIVE/).
+
+However, `sat-rs` has a significantly reduced scope compared to those frameworks. Rust provides
+a great ecosystem and a powerful standard library which reduced the need of large and complex
+frameworks.
 
 # Getting started with the example
 
@@ -30,7 +29,7 @@ The [`satrs-example`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/m
 provides various practical usage examples of the `sat-rs` framework. If you are more interested in
 the practical application of `sat-rs` inside an application, it is recommended to have a look at
 the example application. The [`satrs-minisim`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-minisim)
-applicatin complements the example application and can be used to simulate some physical devices
+application complements the example application and can be used to simulate some physical devices
 for the `satrs-example` device handlers.
 
 # Flight Heritage
