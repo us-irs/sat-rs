@@ -23,7 +23,7 @@ pub mod pcdu;
     num_enum::TryFromPrimitive,
     num_enum::IntoPrimitive,
 )]
-#[repr(u64)]
+#[repr(u32)]
 pub enum ComponentId {
     Controller,
 
