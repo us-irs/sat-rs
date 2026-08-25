@@ -8,6 +8,7 @@ members = [
     "satrs-example/client",
     "satrs-example/minisim",
     "satrs-shared",
+    "tmtc-utils",
     "embedded-examples/embedded-client",
     "embedded-examples/types",
 ]
