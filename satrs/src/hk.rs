@@ -8,7 +8,10 @@
 //! Pick a helper based on what clock is available:
 //!
 //! - [SingleSetHkHelperStd](crate::hk::SingleSetHkHelperStd): `std::time::Instant`, behind the `std` feature.
-//! - [SingleSetHkHelperEmbassy](crate::hk::SingleSetHkHelperEmbassy): `embassy_time::Instant`, behind the `embassy-time` feature.
+#![cfg_attr(
+    feature = "embassy-time",
+    doc = "- [SingleSetHkHelperEmbassy](crate::hk::SingleSetHkHelperEmbassy): `embassy_time::Instant`, behind the `embassy-time` feature."
+)]
 //! - [SingleSetHkHelperCountdown](crate::hk::SingleSetHkHelperCountdown): any clock implementing [Countdown](crate::time::Countdown), for example a
 //!   `fugit`-based monotonic.
 //!
@@ -19,8 +22,9 @@ use crate::time::Countdown;
 
 /// Generic single-set HK helper for any clock, backed by a [Countdown] implementation.
 ///
-/// Useful for clocks not covered by [SingleSetHkHelperStd] or [SingleSetHkHelperEmbassy], for
-/// example a `fugit`-based monotonic. Users implement [Countdown] for their clock and hand it in.
+/// Useful for clocks not covered by [SingleSetHkHelperStd] or other feature-specific backends,
+/// for example a `fugit`-based monotonic. Users implement [Countdown] for their clock and hand
+/// it in.
 pub struct SingleSetHkHelperCountdown<C: Countdown> {
     countdown: C,
     enabled: bool,
