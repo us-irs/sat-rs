@@ -73,8 +73,6 @@ In summary, a component which has modes has to expose the following 4 capabiliti
 3. Announce the mode
 4. Announce the mode recursively
 
-## Using ECSS PUS to perform mode commanding
-
 # Health
 
 Health is an important concept for systems and components which might fail.
@@ -99,5 +97,3 @@ could be power-cycled if there were multiple communication issues in the last ti
    example, on operator might be interested in testing a component in isolation, and the interference
    of the system is not desired. In that case, the `EXTERNAL CONTROL` health state might be used
    to prevent mode commands from the system while allowing external mode commands.
-
-

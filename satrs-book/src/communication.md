@@ -81,15 +81,14 @@ This is a protocol which already provides us with some useful fields:
 - Basic sequence counter which can be used to determine missed packets
 
 However, how does the actual payload that we want to send to or from the satellite actually look
-like? While there are standards like the Packet Utilisation Standard (PUS), we recommend a payload
-format which is created with the excellent [`serde`](https://serde.rs/) library. The
-[TMTC modelling](./tmtc-modelling.md) chapter provides more information.
+like? We recommend a payload format which is created with the excellent [`serde`](https://serde.rs/)
+library. The [TMTC modelling](./tmtc-modelling.md) chapter provides more information.
 
 # Low-level protocols and the bridge to the communcation subsystem
 
 Many satellite systems usually use the lower levels of the OSI layer in addition to the application
-layer covered by the PUS standard or the CCSDS space packets standard. This oftentimes requires
-special hardware like dedicated FPGAs to handle forward error correction fast enough. `sat-rs`
+layer. This oftentimes requires special hardware like dedicated FPGAs to handle forward error
+correction fast enough. `sat-rs`
 might provide components to handle standard like the Unified Space Data Link Standard (USLP) in
 software but most of the time the handling of communication is performed through custom
 software and hardware. Still, connecting this custom software and hardware to `sat-rs` can mostly

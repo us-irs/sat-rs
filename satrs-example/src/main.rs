@@ -38,7 +38,7 @@ use types::{ComponentId, DeviceMode};
 
 use crate::{
     acs::{ctrl, mgm, mgm_assembly, mgt, subsystem},
-    control::Controller,
+    controller::Controller,
     eps::pcdu::SwitchSet,
     event_manager::EventManager,
     interface::udp::UdpTmHandlerWithChannel,
@@ -47,7 +47,7 @@ use crate::{
 
 mod acs;
 mod ccsds;
-mod control;
+mod controller;
 mod eps;
 mod event_manager;
 mod interface;

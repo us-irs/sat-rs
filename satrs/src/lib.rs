@@ -27,6 +27,8 @@ pub mod encoding;
 pub mod executable;
 pub mod hal;
 pub mod health;
+/// Helpers to track when housekeeping sets need to be regenerated.
+pub mod hk;
 pub mod legacy;
 pub mod mode;
 #[cfg(feature = "std")]
