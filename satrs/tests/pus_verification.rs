@@ -3,12 +3,12 @@ pub mod crossbeam_test {
     use arbitrary_int::traits::Integer as _;
     use arbitrary_int::u14;
     use hashbrown::HashMap;
-    use satrs::pool::{PoolProvider, PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
-    use satrs::pus::test_util::{TEST_APID, TEST_COMPONENT_ID_0};
-    use satrs::pus::verification::{
+    use satrs::legacy::pus::test_util::{TEST_APID, TEST_COMPONENT_ID_0};
+    use satrs::legacy::pus::verification::{
         FailParams, RequestId, VerificationReporter, VerificationReporterConfig,
         VerificationReportingProvider,
     };
+    use satrs::pool::{PoolProvider, PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
     use satrs::tmtc::{PacketSenderWithSharedPool, SharedStaticMemoryPool};
     use spacepackets::SpHeader;
     use spacepackets::ecss::tc::{PusTcCreator, PusTcReader, PusTcSecondaryHeader};

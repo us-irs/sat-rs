@@ -1,5 +1,5 @@
 use crate::{
-    action::{ActionId, ActionRequest},
+    legacy::action::{ActionId, ActionRequest},
     params::Params,
     request::{GenericMessage, MessageMetadata, RequestId},
 };
@@ -66,7 +66,7 @@ impl GenericActionReplyPus {
 pub mod alloc_mod {
     use crate::{
         ComponentId,
-        action::ActionRequest,
+        legacy::action::ActionRequest,
         queue::{GenericReceiveError, GenericSendError},
         request::{
             GenericMessage, MessageReceiverProvider, MessageSenderAndReceiver,
@@ -142,7 +142,7 @@ pub mod std_mod {
 
     use crate::{
         ComponentId,
-        pus::{
+        legacy::pus::{
             ActivePusRequestStd, ActiveRequest, DefaultActiveRequestMap,
             verification::{self, TcStateToken},
         },

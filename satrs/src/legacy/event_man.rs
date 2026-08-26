@@ -579,7 +579,7 @@ mod tests {
 
     use super::*;
     use crate::legacy::events::{EventErasedAlloc, Severity};
-    use crate::pus::test_util::{TEST_COMPONENT_ID_0, TEST_COMPONENT_ID_1};
+    use crate::legacy::pus::test_util::{TEST_COMPONENT_ID_0, TEST_COMPONENT_ID_1};
     use std::sync::mpsc;
 
     const TEST_GROUP_ID_0: u14 = u14::new(0);

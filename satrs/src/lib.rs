@@ -1,16 +1,7 @@
-//! # sat-rs: A library to build on-board software for remote systems
+//! # sat-rs: A helper library to build on-board software for remote systems
 //!
-//! You can find more information about the sat-rs framework on the
-//! [homepage](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/).
-//! The [satrs-book](https://absatsw.irs.uni-stuttgart.de/projects/sat-rs/book/) contains
-//! high-level information about this framework.
-//!
-//! ## Overview
-//!
-//! The core modules of this crate include
-//!
-//!  - The [pus] module which provides special support for projects using
-//!    the [ECSS PUS C standard](https://ecss.nl/standard/ecss-e-st-70-41c-space-engineering-telemetry-and-telecommand-packet-utilization-15-april-2016/).
+//! The [satrs-book](https://robamu.github.io/sat-rs/book/) contains
+//! high-level information about this library.
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #[cfg(any(feature = "alloc", test))]
@@ -20,23 +11,22 @@ extern crate downcast_rs;
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
-pub mod action;
 pub mod ccsds;
 pub mod encoding;
 #[cfg(feature = "std")]
 pub mod executable;
 pub mod hal;
 pub mod health;
+/// Helpers to track when housekeeping sets need to be regenerated.
+pub mod hk;
 pub mod legacy;
 pub mod mode;
 #[cfg(feature = "std")]
 pub mod mode_tree;
 pub mod params;
 pub mod pool;
-pub mod pus;
 pub mod queue;
 pub mod request;
-pub mod res_code;
 #[cfg(feature = "alloc")]
 pub mod scheduling;
 #[cfg(feature = "alloc")]
@@ -47,6 +37,15 @@ pub mod tmtc;
 pub use spacepackets;
 
 use spacepackets::PacketId;
+
+/// Generic handling status for an object which is able to continuosly handle a queue to handle
+/// request or replies until the queue is empty.
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum HandlingStatus {
+    HandledOne,
+    Empty,
+}
 
 /// Generic component ID type.
 pub type ComponentId = u32;

@@ -1,12 +1,12 @@
+use super::PusPacketHandlingError;
 use super::scheduler::PusScheduler;
 use super::verification::{VerificationReporter, VerificationReportingProvider};
 use super::{
     CacheAndReadRawEcssTc, DirectPusPacketHandlerResult, EcssTcInSharedPoolCacher, EcssTcReceiver,
-    EcssTcVecCacher, EcssTmSender, HandlingStatus, MpscTcReceiver, PartialPusHandlingError,
-    PusServiceHelper,
+    EcssTcVecCacher, EcssTmSender, MpscTcReceiver, PartialPusHandlingError, PusServiceHelper,
 };
+use crate::HandlingStatus;
 use crate::pool::PoolProvider;
-use crate::pus::PusPacketHandlingError;
 use crate::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
 use alloc::string::ToString;
 use spacepackets::ecss::{PusPacket, scheduling};
@@ -247,12 +247,14 @@ pub type PusService11SchedHandlerStaticWithBoundedMpsc<PusScheduler> = PusSchedS
 
 #[cfg(test)]
 mod tests {
+    use crate::legacy::pus::test_util::{PusTestHarness, TEST_APID};
+    use crate::legacy::pus::verification::{VerificationReporter, VerificationReportingProvider};
     use crate::pool::{StaticMemoryPool, StaticPoolConfig};
-    use crate::pus::test_util::{PusTestHarness, TEST_APID};
-    use crate::pus::verification::{VerificationReporter, VerificationReportingProvider};
 
-    use crate::pus::{DirectPusPacketHandlerResult, MpscTcReceiver, PusPacketHandlingError};
-    use crate::pus::{
+    use crate::legacy::pus::{
+        DirectPusPacketHandlerResult, MpscTcReceiver, PusPacketHandlingError,
+    };
+    use crate::legacy::pus::{
         EcssTcInSharedPoolCacher,
         scheduler::{self, PusScheduler, TcInfo},
         tests::PusServiceHandlerWithSharedStoreCommon,
@@ -377,8 +379,8 @@ mod tests {
         fn insert_unwrapped_and_stored_tc(
             &mut self,
             _time_stamp: spacepackets::time::UnixTime,
-            info: crate::pus::scheduler::TcInfo,
-        ) -> Result<(), crate::pus::scheduler::ScheduleError> {
+            info: crate::legacy::pus::scheduler::TcInfo,
+        ) -> Result<(), crate::legacy::pus::scheduler::ScheduleError> {
             self.inserted_tcs.push_back(info);
             Ok(())
         }

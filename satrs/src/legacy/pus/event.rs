@@ -1,4 +1,3 @@
-use crate::pus::source_buffer_large_enough;
 use arbitrary_int::u11;
 use spacepackets::ByteConversionError;
 use spacepackets::SpHeader;
@@ -110,7 +109,7 @@ impl EventReportCreator {
         if let Some(aux_data) = params {
             src_data_len += aux_data.len();
         }
-        source_buffer_large_enough(src_data_buf.len(), src_data_len)?;
+        super::source_buffer_large_enough(src_data_buf.len(), src_data_len)?;
         let sec_header = PusTmSecondaryHeader::new(
             MessageTypeId::new(5, subservice.into()),
             0,
@@ -137,7 +136,7 @@ impl EventReportCreator {
 mod alloc_mod {
     use super::*;
     use crate::ComponentId;
-    use crate::pus::{EcssTmSender, EcssTmtcError};
+    use crate::legacy::pus::{EcssTmSender, EcssTmtcError};
     use alloc::vec;
     use alloc::vec::Vec;
     use core::cell::RefCell;

@@ -1,5 +1,5 @@
 use satrs::{
-    pus::HandlingStatus,
+    HandlingStatus,
     spacepackets::{CcsdsPacketReader, ChecksumType},
     tmtc::PacketAsVec,
 };

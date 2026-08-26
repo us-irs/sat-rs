@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use satrs::pus::HandlingStatus;
+use satrs::HandlingStatus;
 use satrs_minisim::{
     SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimReply, SimRequest,
     udp::SIM_CTRL_PORT,

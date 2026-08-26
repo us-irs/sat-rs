@@ -591,7 +591,7 @@ mod tests {
     use crate::legacy::event_man_legacy::EventManager;
     use crate::legacy::events_legacy::{EventU32, GenericEvent, Severity};
     use crate::params::{ParamsHeapless, ParamsRaw};
-    use crate::pus::test_util::{TEST_COMPONENT_ID_0, TEST_COMPONENT_ID_1};
+    use crate::legacy::pus::test_util::{TEST_COMPONENT_ID_0, TEST_COMPONENT_ID_1};
     use std::format;
     use std::sync::mpsc::{self};
 
