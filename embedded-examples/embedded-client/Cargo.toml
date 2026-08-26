@@ -10,7 +10,7 @@ toml = "0.9"
 serde = { version = "1", features = ["derive"] }
 spacepackets = { version = "0.18" }
 embedded-types = { path = "../types" }
-tmtc-utils = { git = "https://egit.irs.uni-stuttgart.de/rust/tmtc-utils.git", version = "0.1", rev = "d8015379a45e77400dd9c71afbf22ca415ed67d1" }
+tmtc-utils = { path = "../../tmtc-utils" }
 postcard = { version = "1", features = ["alloc"] }
 anyhow = "1"
 cobs = "0.5"

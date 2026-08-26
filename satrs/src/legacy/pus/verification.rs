@@ -16,7 +16,7 @@
 //! use std::sync::{Arc, mpsc, RwLock};
 //! use std::time::Duration;
 //! use satrs::pool::{PoolProviderWithGuards, StaticMemoryPool, StaticPoolConfig};
-//! use satrs::pus::verification::{
+//! use satrs::legacy::pus::verification::{
 //!     VerificationReportingProvider, VerificationReporterConfig, VerificationReporter
 //! };
 //! use satrs::tmtc::{SharedStaticMemoryPool, PacketSenderWithSharedPool};
@@ -80,8 +80,8 @@
 //! The [integration test](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-core/tests/verification_test.rs)
 //! for the verification module contains examples how this module could be used in a more complex
 //! context involving multiple threads
+use super::{EcssTmSender, EcssTmtcError, source_buffer_large_enough};
 use crate::params::{Params, WritableToBeBytes};
-use crate::pus::{EcssTmSender, EcssTmtcError, source_buffer_large_enough};
 use arbitrary_int::{u3, u11, u14};
 use core::fmt::{Debug, Display, Formatter};
 use core::hash::{Hash, Hasher};
@@ -841,7 +841,7 @@ pub mod alloc_mod {
     use spacepackets::ecss::PusError;
 
     use super::*;
-    use crate::pus::PusTmVariant;
+    use crate::legacy::pus::PusTmVariant;
     use core::cell::RefCell;
 
     #[derive(Clone)]
@@ -1712,16 +1712,16 @@ pub mod test_util {
 #[cfg(test)]
 pub mod tests {
     use crate::ComponentId;
-    use crate::params::Params;
-    use crate::pool::{SharedStaticMemoryPool, StaticMemoryPool, StaticPoolConfig};
-    use crate::pus::test_util::{TEST_APID, TEST_COMPONENT_ID_0};
-    use crate::pus::tests::CommonTmInfo;
-    use crate::pus::verification::{
+    use crate::legacy::pus::test_util::{TEST_APID, TEST_COMPONENT_ID_0};
+    use crate::legacy::pus::tests::CommonTmInfo;
+    use crate::legacy::pus::verification::{
         EcssTmSender, EcssTmtcError, FailParams, FailParamsWithStep, RequestId, TcStateNone,
         VerificationReporter, VerificationReporterConfig, VerificationToken,
         handle_step_failure_with_generic_params,
     };
-    use crate::pus::{ChannelWithId, PusTmVariant};
+    use crate::legacy::pus::{ChannelWithId, PusTmVariant};
+    use crate::params::Params;
+    use crate::pool::{SharedStaticMemoryPool, StaticMemoryPool, StaticPoolConfig};
     use crate::request::MessageMetadata;
     use crate::spacepackets::seq_count::{SequenceCounter, SequenceCounterCcsdsSimple};
     use crate::tmtc::{PacketSenderWithSharedPool, SharedPacketPool};

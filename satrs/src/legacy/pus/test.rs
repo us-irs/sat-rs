@@ -1,4 +1,4 @@
-use crate::pus::{
+use super::{
     DirectPusPacketHandlerResult, PartialPusHandlingError, PusPacketHandlingError, PusTmVariant,
 };
 use crate::tmtc::{PacketAsVec, PacketSenderWithSharedPool};
@@ -12,8 +12,9 @@ use std::sync::mpsc;
 use super::verification::{VerificationReporter, VerificationReportingProvider};
 use super::{
     CacheAndReadRawEcssTc, EcssTcInSharedPoolCacher, EcssTcReceiver, EcssTcVecCacher, EcssTmSender,
-    GenericConversionError, HandlingStatus, MpscTcReceiver, PusServiceHelper,
+    GenericConversionError, MpscTcReceiver, PusServiceHelper,
 };
+use crate::HandlingStatus;
 
 /// This is a helper class for [std] environments to handle generic PUS 17 (test service) packets.
 /// This handler only processes ping requests and generates a ping reply for them accordingly.
@@ -140,18 +141,19 @@ pub type PusService17TestHandlerStaticWithBoundedMpsc = PusService17TestHandler<
 #[cfg(test)]
 mod tests {
     use crate::ComponentId;
-    use crate::pus::test_util::{PusTestHarness, SimplePusPacketHandler, TEST_APID};
-    use crate::pus::tests::{
+    use crate::HandlingStatus;
+    use crate::legacy::pus::test_util::{PusTestHarness, SimplePusPacketHandler, TEST_APID};
+    use crate::legacy::pus::tests::{
         PusServiceHandlerWithSharedStoreCommon, PusServiceHandlerWithVecCommon,
     };
-    use crate::pus::verification::{
+    use crate::legacy::pus::verification::{
         RequestId, VerificationReporter, VerificationReportingProvider,
     };
-    use crate::pus::verification::{TcStateAccepted, VerificationToken};
-    use crate::pus::{
+    use crate::legacy::pus::verification::{TcStateAccepted, VerificationToken};
+    use crate::legacy::pus::{
         DirectPusPacketHandlerResult, EcssTcInSharedPoolCacher, EcssTcVecCacher,
-        GenericConversionError, HandlingStatus, MpscTcReceiver, MpscTmAsVecSender,
-        PartialPusHandlingError, PusPacketHandlingError,
+        GenericConversionError, MpscTcReceiver, MpscTmAsVecSender, PartialPusHandlingError,
+        PusPacketHandlingError,
     };
     use crate::tmtc::PacketSenderWithSharedPool;
     use arbitrary_int::traits::Integer as _;

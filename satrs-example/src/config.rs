@@ -1,7 +1,7 @@
 use arbitrary_int::u11;
 use lazy_static::lazy_static;
 use satrs::{
-    res_code::ResultU16,
+    legacy::res_code::ResultU16,
     spacepackets::{PacketId, PacketType},
 };
 use satrs_mib::res_code::ResultU16Info;

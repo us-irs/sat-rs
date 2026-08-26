@@ -21,8 +21,8 @@ use interface::{
 use log::info;
 use logger::setup_logger;
 use satrs::{
+    HandlingStatus,
     hal::std::{tcp_server::ServerConfig, udp_server::UdpTcServer},
-    pus::HandlingStatus,
     spacepackets::time::cds::CdsTime,
 };
 use satrs_example::{
@@ -38,7 +38,7 @@ use types::{ComponentId, DeviceMode};
 
 use crate::{
     acs::{ctrl, mgm, mgm_assembly, mgt, subsystem},
-    control::Controller,
+    controller::Controller,
     eps::pcdu::SwitchSet,
     event_manager::EventManager,
     interface::udp::UdpTmHandlerWithChannel,
@@ -47,7 +47,7 @@ use crate::{
 
 mod acs;
 mod ccsds;
-mod control;
+mod controller;
 mod eps;
 mod event_manager;
 mod interface;

@@ -4,8 +4,8 @@ use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex, mpsc};
 
 use log::warn;
+use satrs::HandlingStatus;
 use satrs::hal::std::udp_server::{ReceiveResult, UdpTcServer};
-use satrs::pus::HandlingStatus;
 use satrs::queue::GenericSendError;
 use types::ccsds::CcsdsTmPacketOwned;
 

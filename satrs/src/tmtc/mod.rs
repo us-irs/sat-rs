@@ -229,8 +229,8 @@ pub mod std_mod {
     use spacepackets::ecss::WritablePusPacket;
     use thiserror::Error;
 
+    use crate::legacy::pus::{EcssTmSender, EcssTmtcError, PacketSenderPusTc};
     use crate::pool::PoolProvider;
-    use crate::pus::{EcssTmSender, EcssTmtcError, PacketSenderPusTc};
 
     use super::*;
 
@@ -460,16 +460,16 @@ pub mod std_mod {
         fn send_tm(
             &self,
             sender_id: crate::ComponentId,
-            tm: crate::pus::PusTmVariant,
-        ) -> Result<(), crate::pus::EcssTmtcError> {
+            tm: crate::legacy::pus::PusTmVariant,
+        ) -> Result<(), crate::legacy::pus::EcssTmtcError> {
             let send_addr = |store_addr: PoolAddr| {
                 self.sender
                     .send_packet(sender_id, store_addr)
                     .map_err(EcssTmtcError::Send)
             };
             match tm {
-                crate::pus::PusTmVariant::InStore(store_addr) => send_addr(store_addr),
-                crate::pus::PusTmVariant::Direct(tm_creator) => {
+                crate::legacy::pus::PusTmVariant::InStore(store_addr) => send_addr(store_addr),
+                crate::legacy::pus::PusTmVariant::Direct(tm_creator) => {
                     let mut pool = self.shared_pool.borrow_mut();
                     let store_addr = pool.add_pus_tm_from_creator(&tm_creator)?;
                     send_addr(store_addr)
