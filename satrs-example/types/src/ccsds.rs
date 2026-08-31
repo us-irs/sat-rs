@@ -54,7 +54,7 @@ impl CcsdsTcPacketOwned {
     pub fn len_written(&self) -> usize {
         ccsds_packet_len_for_user_data_len_with_checksum(
             postcard::experimental::serialized_size(&self.tc_header).unwrap() as usize
-                + postcard::experimental::serialized_size(&self.payload).unwrap() as usize,
+                + self.payload.len(),
         )
         .unwrap()
     }
@@ -116,7 +116,7 @@ impl CcsdsTmPacketOwned {
     pub fn len_written(&self) -> usize {
         ccsds_packet_len_for_user_data_len_with_checksum(
             postcard::experimental::serialized_size(&self.tm_header).unwrap() as usize
-                + postcard::experimental::serialized_size(&self.payload).unwrap() as usize,
+                + self.payload.len(),
         )
         .unwrap()
     }
