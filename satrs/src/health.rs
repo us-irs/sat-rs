@@ -1,6 +1,7 @@
 use crate::ComponentId;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum HealthState {
     Healthy = 1,
     Faulty = 2,
@@ -24,6 +25,15 @@ pub struct HealthTableMapSync(
 impl HealthTableMapSync {
     pub fn new(health_table: hashbrown::HashMap<ComponentId, HealthState>) -> Self {
         Self(std::sync::Arc::new(std::sync::Mutex::new(health_table)))
+    }
+}
+
+#[cfg(feature = "std")]
+impl Default for HealthTableMapSync {
+    /// Creates an empty, shared health table. Absent entries are up to the consumer to
+    /// interpret, for example as [HealthState::Healthy] by default.
+    fn default() -> Self {
+        Self::new(hashbrown::HashMap::new())
     }
 }
 

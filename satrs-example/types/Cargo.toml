@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 spacepackets = { version = "0.18", default-features = false }
-satrs = { path = "../../satrs" }
+satrs = { path = "../../satrs", features = ["serde"] }
 num_enum = { version = "0.7" }
 strum = { version = "0.28", features = ["derive"] }
 postcard = { version = "1" }

@@ -7,6 +7,13 @@ pub mod request {
         ReadMode,
     }
 
+    #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum HealthRequest {
+        /// Overrides the device's autonomous FDIR health state, for example to clear a `Faulty`
+        /// state set by the handler after ground has fixed or worked around the underlying issue.
+        SetHealth(satrs::health::HealthState),
+    }
+
     #[derive(Debug, PartialEq, Eq, Clone, Copy, serde::Serialize, serde::Deserialize)]
     pub enum HkId {
         Sensor,
@@ -23,6 +30,7 @@ pub mod request {
         Ping,
         Hk(HkRequest),
         Mode(ModeRequest),
+        Health(HealthRequest),
     }
 
     impl Request {
@@ -31,6 +39,7 @@ pub mod request {
                 Request::Ping => crate::MessageType::Verification,
                 Request::Hk(_hk_request) => crate::MessageType::Hk,
                 Request::Mode(_mode) => crate::MessageType::Mode,
+                Request::Health(_health) => crate::MessageType::Health,
             }
         }
     }

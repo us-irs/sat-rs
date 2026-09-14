@@ -2,10 +2,7 @@ use derive_new::new;
 use std::{cell::RefCell, collections::VecDeque, sync::mpsc, time::Duration};
 use types::pcdu::{SwitchId, SwitchRequest, SwitchState, SwitchStateBinary};
 
-use satrs::{
-    queue::GenericSendError,
-    request::{GenericMessage, MessageMetadata},
-};
+use satrs::{queue::GenericSendError, request::MessageMetadata};
 use thiserror::Error;
 
 use crate::eps::pcdu::SwitchMapWrapper;
@@ -16,7 +13,7 @@ pub mod pcdu;
 
 #[derive(new, Clone)]
 pub struct PowerSwitchHelper {
-    switcher_tx: mpsc::SyncSender<GenericMessage<SwitchRequest>>,
+    switcher_tx: mpsc::SyncSender<SwitchRequest>,
     shared_switch_set: SharedSwitchSet,
 }
 
@@ -37,28 +34,15 @@ pub enum SwitchInfoError {
 }
 
 impl PowerSwitchHelper {
-    pub fn send_switch_on_cmd(
-        &self,
-        requestor_info: satrs::request::MessageMetadata,
-        switch_id: SwitchId,
-    ) -> Result<(), GenericSendError> {
-        self.switcher_tx.send(GenericMessage::new(
-            requestor_info,
-            SwitchRequest::new(switch_id, SwitchStateBinary::On),
-        ))?;
+    pub fn send_switch_on_cmd(&self, switch_id: SwitchId) -> Result<(), GenericSendError> {
+        self.switcher_tx
+            .send(SwitchRequest::new(switch_id, SwitchStateBinary::On))?;
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn send_switch_off_cmd(
-        &self,
-        requestor_info: satrs::request::MessageMetadata,
-        switch_id: SwitchId,
-    ) -> Result<(), GenericSendError> {
-        self.switcher_tx.send(GenericMessage::new(
-            requestor_info,
-            SwitchRequest::new(switch_id, SwitchStateBinary::Off),
-        ))?;
+    pub fn send_switch_off_cmd(&self, switch_id: SwitchId) -> Result<(), GenericSendError> {
+        self.switcher_tx
+            .send(SwitchRequest::new(switch_id, SwitchStateBinary::Off))?;
         Ok(())
     }
 

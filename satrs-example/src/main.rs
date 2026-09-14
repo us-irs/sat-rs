@@ -156,6 +156,9 @@ fn main() {
     let (switch_request_tx, switch_request_rx) = mpsc::sync_channel(20);
     let switch_helper = PowerSwitchHelper::new(switch_request_tx, shared_switch_set.clone());
 
+    // Global FDIR health table, shared by all software objects.
+    let health_table = satrs::health::HealthTableMapSync::default();
+
     let shared_mgm_0_set = Arc::default();
     let shared_mgm_1_set = Arc::default();
     let (mgm_0_spi_interface, mgm_1_spi_interface) =
@@ -194,6 +197,7 @@ fn main() {
             report_tx: mgm_0_mode_report_tx,
         },
         Duration::from_millis(1000),
+        health_table.clone(),
     );
     let mut mgm_1_handler = mgm::MgmHandlerLis3Mdl::new(
         mgm::MgmId::_1,
@@ -209,6 +213,7 @@ fn main() {
             report_tx: mgm_1_mode_report_tx,
         },
         Duration::from_millis(1000),
+        health_table.clone(),
     );
     let mut mgm_assembly = mgm_assembly::Assembly::new(
         mgm_assembly::ParentQueueHelper {

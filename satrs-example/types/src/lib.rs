@@ -150,6 +150,7 @@ pub enum MessageType {
     Action,
     Event,
     Verification,
+    Health,
 }
 
 pub trait Message {

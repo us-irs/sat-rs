@@ -7,7 +7,7 @@ use nexosim::{
 use satrs_minisim::{
     acs::{
         lis3mdl::MgmLis3MdlReply, MgmReplyCommon, MgmReplyProvider, MgmSensorValuesMicroTesla,
-        MgtDipole, MgtHkSet, MgtReply, MGT_GEN_MAGNETIC_FIELD,
+        MgtDipole, MgtHkSet, MgtReply, SpiFaultMode, MGT_GEN_MAGNETIC_FIELD,
     },
     SimReply,
 };
@@ -34,6 +34,7 @@ pub struct MagnetometerModel<ReplyProvider: MgmReplyProvider> {
     #[allow(dead_code)]
     pub periodicity: Duration,
     pub external_mag_field: Option<MgmSensorValuesMicroTesla>,
+    pub spi_fault: SpiFaultMode,
     pub reply_sender: mpsc::Sender<SimReply>,
     pub phatom: std::marker::PhantomData<ReplyProvider>,
 }
@@ -44,6 +45,7 @@ impl MagnetometerModel<MgmLis3MdlReply> {
             switch_state: SwitchStateBinary::Off,
             periodicity,
             external_mag_field: None,
+            spi_fault: SpiFaultMode::None,
             reply_sender,
             phatom: std::marker::PhantomData,
         }
@@ -55,12 +57,21 @@ impl<ReplyProvider: MgmReplyProvider> MagnetometerModel<ReplyProvider> {
         self.switch_state = switch_state;
     }
 
+    /// Force (or clear) a stuck-bus SPI fault, for FDIR testing purposes.
+    pub async fn set_spi_fault(&mut self, fault_mode: SpiFaultMode) {
+        self.spi_fault = fault_mode;
+    }
+
     pub async fn send_sensor_values(&mut self, _: (), scheduler: &mut Context<Self>) {
         self.reply_sender
-            .send(ReplyProvider::create_mgm_reply(MgmReplyCommon {
-                switch_state: self.switch_state,
-                sensor_values: self.calculate_current_mgm_tuple(current_millis(scheduler.time())),
-            }))
+            .send(ReplyProvider::create_mgm_reply(
+                MgmReplyCommon {
+                    switch_state: self.switch_state,
+                    sensor_values: self
+                        .calculate_current_mgm_tuple(current_millis(scheduler.time())),
+                },
+                self.spi_fault,
+            ))
             .expect("sending MGM sensor values failed");
     }
 
@@ -182,7 +193,7 @@ pub mod tests {
     use satrs_minisim::{
         acs::{
             lis3mdl::{self, MgmLis3MdlReply},
-            MgmRequestLis3Mdl, MgtDipole, MgtHkSet, MgtReply, MgtRequest,
+            MgmRequestLis3Mdl, MgtDipole, MgtHkSet, MgtReply, MgtRequest, SpiFaultMode,
         },
         SerializableSimMsgPayload, SimComponent, SimMessageProvider, SimRequest,
     };
@@ -209,6 +220,37 @@ pub mod tests {
         assert_eq!(reply.common.sensor_values.x, 0.0);
         assert_eq!(reply.common.sensor_values.y, 0.0);
         assert_eq!(reply.common.sensor_values.z, 0.0);
+    }
+
+    #[test]
+    fn test_mgm_spi_fault_injection_all_ones() {
+        let mut sim_testbench = SimTestbench::new();
+        switch_device_on(&mut sim_testbench, SwitchId::Mgm0);
+
+        let fault_request =
+            SimRequest::new_with_epoch_time(MgmRequestLis3Mdl::SetSpiFault(SpiFaultMode::AllOnes));
+        sim_testbench
+            .send_request(fault_request)
+            .expect("sending MGM fault injection request failed");
+        sim_testbench.handle_sim_requests_time_agnostic();
+        sim_testbench.step().unwrap();
+
+        let data_request = SimRequest::new_with_epoch_time(MgmRequestLis3Mdl::RequestSensorData);
+        sim_testbench
+            .send_request(data_request)
+            .expect("sending MGM request failed");
+        sim_testbench.handle_sim_requests_time_agnostic();
+        sim_testbench.step().unwrap();
+        let sim_reply = sim_testbench
+            .try_receive_next_reply()
+            .expect("no MGM reply received");
+        let reply = MgmLis3MdlReply::from_sim_message(&sim_reply)
+            .expect("failed to deserialize MGM sensor values");
+        // Even though the device is switched on, the injected fault forces a stuck-bus reply.
+        assert_eq!(reply.common.switch_state, SwitchStateBinary::On);
+        assert_eq!(reply.raw.x, -1);
+        assert_eq!(reply.raw.y, -1);
+        assert_eq!(reply.raw.z, -1);
     }
 
     #[test]

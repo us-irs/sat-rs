@@ -124,6 +124,7 @@ impl SimController {
         }
         match sim_ctrl_request {
             SimCtrlRequest::Ping => {
+                log::info!("received ping request, a client is connecting");
                 self.reply_sender
                     .send(SimReply::new(&SimCtrlReply::Pong))
                     .expect("sending reply from sim controller failed");
@@ -151,6 +152,18 @@ impl SimController {
                 };
                 self.simulation
                     .process_event(MagnetometerModel::send_sensor_values, (), addr)
+                    .expect("event execution error for mgm");
+            }
+            MgmRequestLis3Mdl::SetSpiFault(fault_mode) => {
+                let addr = match mgm_idx {
+                    0 => &self.addr_wrapper.mgm_0_addr,
+                    1 => &self.addr_wrapper.mgm_1_addr,
+
+                    _ => panic!("invalid mgm index"),
+                };
+                log::info!("MGM{mgm_idx}: setting SPI fault mode to {fault_mode:?}");
+                self.simulation
+                    .process_event(MagnetometerModel::set_spi_fault, fault_mode, addr)
                     .expect("event execution error for mgm");
             }
         }
