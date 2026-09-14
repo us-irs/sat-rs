@@ -28,6 +28,15 @@ impl HealthTableMapSync {
 }
 
 #[cfg(feature = "std")]
+impl Default for HealthTableMapSync {
+    /// Creates an empty, shared health table. Absent entries are up to the consumer to
+    /// interpret, for example as [HealthState::Healthy] by default.
+    fn default() -> Self {
+        Self::new(hashbrown::HashMap::new())
+    }
+}
+
+#[cfg(feature = "std")]
 impl HealthTableProvider for HealthTableMapSync {
     fn health(&self, id: ComponentId) -> Option<HealthState> {
         self.0.lock().unwrap().get(&id).copied()

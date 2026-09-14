@@ -15,6 +15,7 @@ pub mod ccsds;
 pub mod encoding;
 #[cfg(feature = "std")]
 pub mod executable;
+pub mod fdir;
 pub mod hal;
 pub mod health;
 /// Helpers to track when housekeeping sets need to be regenerated.

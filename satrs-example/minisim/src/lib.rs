@@ -202,12 +202,27 @@ pub mod acs {
     use super::*;
 
     pub trait MgmReplyProvider: Send + 'static {
-        fn create_mgm_reply(common: MgmReplyCommon) -> SimReply;
+        fn create_mgm_reply(common: MgmReplyCommon, fault_mode: SpiFaultMode) -> SimReply;
+    }
+
+    /// Fault mode injected on the simulated SPI bus, independent of the switch state.
+    ///
+    /// Models the classic symptom of a stuck SPI bus: an undriven MISO line commonly reads
+    /// back as all-1s, a shorted/grounded one as all-0s.
+    #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub enum SpiFaultMode {
+        #[default]
+        None,
+        AllZeros,
+        AllOnes,
     }
 
     #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
     pub enum MgmRequestLis3Mdl {
         RequestSensorData,
+        /// Force the raw register reply into a stuck-bus pattern, regardless of switch state.
+        /// Used to test FDIR handling of SPI bus faults.
+        SetSpiFault(SpiFaultMode),
     }
 
     impl SerializableSimMsgPayload<SimRequest> for MgmRequestLis3Mdl {
@@ -236,6 +251,7 @@ pub mod acs {
         z: 30.0,
     };
     pub const ALL_ONES_SENSOR_VAL: i16 = 0xffff_u16 as i16;
+    pub const ALL_ZEROS_SENSOR_VAL: i16 = 0;
 
     pub mod lis3mdl {
         use super::*;
@@ -263,7 +279,30 @@ pub mod acs {
         }
 
         impl MgmLis3MdlReply {
-            pub fn new(common: MgmReplyCommon) -> Self {
+            pub fn new(common: MgmReplyCommon, fault_mode: SpiFaultMode) -> Self {
+                match fault_mode {
+                    SpiFaultMode::AllZeros => {
+                        return Self {
+                            common,
+                            raw: MgmLis3RawValues {
+                                x: ALL_ZEROS_SENSOR_VAL,
+                                y: ALL_ZEROS_SENSOR_VAL,
+                                z: ALL_ZEROS_SENSOR_VAL,
+                            },
+                        };
+                    }
+                    SpiFaultMode::AllOnes => {
+                        return Self {
+                            common,
+                            raw: MgmLis3RawValues {
+                                x: ALL_ONES_SENSOR_VAL,
+                                y: ALL_ONES_SENSOR_VAL,
+                                z: ALL_ONES_SENSOR_VAL,
+                            },
+                        };
+                    }
+                    SpiFaultMode::None => (),
+                }
                 match common.switch_state {
                     SwitchStateBinary::Off => Self {
                         common,
@@ -306,8 +345,8 @@ pub mod acs {
         }
 
         impl MgmReplyProvider for MgmLis3MdlReply {
-            fn create_mgm_reply(common: MgmReplyCommon) -> SimReply {
-                SimReply::new(&Self::new(common))
+            fn create_mgm_reply(common: MgmReplyCommon, fault_mode: SpiFaultMode) -> SimReply {
+                SimReply::new(&Self::new(common, fault_mode))
             }
         }
     }

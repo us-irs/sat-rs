@@ -153,6 +153,17 @@ impl SimController {
                     .process_event(MagnetometerModel::send_sensor_values, (), addr)
                     .expect("event execution error for mgm");
             }
+            MgmRequestLis3Mdl::SetSpiFault(fault_mode) => {
+                let addr = match mgm_idx {
+                    0 => &self.addr_wrapper.mgm_0_addr,
+                    1 => &self.addr_wrapper.mgm_1_addr,
+
+                    _ => panic!("invalid mgm index"),
+                };
+                self.simulation
+                    .process_event(MagnetometerModel::set_spi_fault, fault_mode, addr)
+                    .expect("event execution error for mgm");
+            }
         }
         Ok(())
     }
