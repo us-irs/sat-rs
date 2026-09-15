@@ -12,11 +12,11 @@
 - [Housekeeping Data](./housekeeping.md)
 - [Events](./events.md)
 
+# Architecture
+
+- [System View](./system-view.md)
+- [Design](./design.md)
+
 # Example project
 
 - [The satrs-example application](./example.md)
-
-# Additional information
-
-- [Design](./design.md)
-
