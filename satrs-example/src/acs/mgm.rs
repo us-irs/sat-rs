@@ -1,7 +1,7 @@
 use satrs::fdir::FaultCounterStd;
 use satrs::health::{HealthState, HealthTableMapSync, HealthTableProvider};
 use satrs::spacepackets::CcsdsPacketIdAndPsc;
-use satrs_example::{HkHelperSingleSet, ModeHelper, TimestampHelper, TmtcQueues};
+use satrs_example::{HkHelperSingleSet, TimestampHelper, TmtcQueues};
 use satrs_minisim::acs::MgmRequestLis3Mdl;
 use satrs_minisim::acs::lis3mdl::{
     FIELD_LSB_PER_GAUSS_4_SENS, GAUSS_TO_MICROTESLA_FACTOR, MgmLis3MdlReply, MgmLis3RawValues,
@@ -17,6 +17,7 @@ use types::pcdu::SwitchId;
 use types::{ComponentId, DeviceMode, HkRequestType, acs::mgm};
 
 use crate::ccsds::pack_ccsds_tm_packet_for_now;
+use crate::device_mode::{ModeTransitionEvent, SwitchAndModeHelper};
 use crate::eps::PowerSwitchHelper;
 
 pub const NR_OF_DATA_AND_CFG_REGISTERS: usize = 14;
@@ -56,14 +57,14 @@ impl MgmId {
             MgmId::_1 => ComponentId::AcsMgm1,
         }
     }
-}
 
-#[derive(Default, Debug, PartialEq, Eq)]
-pub enum TransitionState {
-    #[default]
-    Idle,
-    PowerSwitching,
-    Done,
+    #[inline]
+    pub const fn switch_id(&self) -> SwitchId {
+        match self {
+            MgmId::_0 => SwitchId::Mgm0,
+            MgmId::_1 => SwitchId::Mgm1,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -159,14 +160,13 @@ pub struct ModeLeafHelper {
 /// Example MGM device handler strongly based on the LIS3MDL MEMS device.
 pub struct MgmHandlerLis3Mdl {
     id: MgmId,
-    switch_helper: PowerSwitchHelper,
     tmtc_queues: TmtcQueues,
     pub spi_com: SpiCommunication,
     shared_mgm_set: Arc<Mutex<SensorData>>,
     buffers: BufWrapper,
     stamp_helper: TimestampHelper,
     hk_helper: HkHelperSingleSet,
-    mode_helpers: ModeHelper<DeviceMode, TransitionState>,
+    switch_and_mode_helper: SwitchAndModeHelper<DeviceMode>,
     mode_leaf_helper: ModeLeafHelper,
     spi_fault_counter: FaultCounterStd,
     health_table: HealthTableMapSync,
@@ -187,10 +187,14 @@ impl MgmHandlerLis3Mdl {
         Self {
             id,
             tmtc_queues,
-            switch_helper,
             spi_com,
             shared_mgm_set,
-            mode_helpers: ModeHelper::new(DeviceMode::Off, mode_timeout),
+            switch_and_mode_helper: SwitchAndModeHelper::new(
+                DeviceMode::Off,
+                mode_timeout,
+                switch_helper,
+                id.switch_id(),
+            ),
             buffers: BufWrapper::default(),
             stamp_helper: TimestampHelper::default(),
             hk_helper: HkHelperSingleSet::new(false, Duration::from_millis(200)),
@@ -202,15 +206,7 @@ impl MgmHandlerLis3Mdl {
 
     #[inline]
     pub fn mode(&self) -> DeviceMode {
-        self.mode_helpers.current
-    }
-
-    #[inline]
-    pub fn switch_id(&self) -> SwitchId {
-        match self.id {
-            MgmId::_0 => SwitchId::Mgm0,
-            MgmId::_1 => SwitchId::Mgm1,
-        }
+        self.switch_and_mode_helper.mode()
     }
 
     pub fn periodic_operation(&mut self) {
@@ -224,7 +220,16 @@ impl MgmHandlerLis3Mdl {
         self.handle_mode_leaf_handling();
 
         // Handle mode transitions first.
-        self.handle_mode_transition();
+        if let Some(event) = self.switch_and_mode_helper.handle_mode_transition() {
+            match event {
+                ModeTransitionEvent::Reached(tc_commander) => {
+                    self.handle_mode_reached(tc_commander)
+                }
+                ModeTransitionEvent::Failed(tc_commander) => {
+                    self.handle_mode_transition_failure(tc_commander)
+                }
+            }
+        }
 
         // Poll sensor before checking and generating HK.
         if self.mode() == DeviceMode::Normal {
@@ -259,8 +264,7 @@ impl MgmHandlerLis3Mdl {
                                 }
                                 mgm::request::Request::Mode(device_mode) => match device_mode {
                                     ModeRequest::SetMode(device_mode) => {
-                                        self.mode_helpers.tc_commander = Some(tc_id);
-                                        self.start_transition(device_mode, false);
+                                        self.start_transition(device_mode, Some(tc_id));
                                     }
                                     ModeRequest::ReadMode => self.send_telemetry(
                                         Some(tc_id),
@@ -309,7 +313,7 @@ impl MgmHandlerLis3Mdl {
         loop {
             match self.mode_leaf_helper.request_rx.try_recv() {
                 Ok(request) => match request {
-                    ModeRequest::SetMode(device_mode) => self.start_transition(device_mode, false),
+                    ModeRequest::SetMode(device_mode) => self.start_transition(device_mode, None),
                     ModeRequest::ReadMode => self.report_mode_to_parent(),
                 },
                 Err(e) => match e {
@@ -445,59 +449,29 @@ impl MgmHandlerLis3Mdl {
                 // this every cycle the fault persists, and current stays Normal until the
                 // transition completes, so re-triggering here would keep resetting the
                 // transition state machine before it can ever finish.
-                if self.mode_helpers.target != Some(DeviceMode::Off) {
+                if self.switch_and_mode_helper.target() != Some(DeviceMode::Off) {
                     log::warn!("{}: commanding device off due to fault", self.id.str());
-                    self.start_transition(DeviceMode::Off, true);
+                    self.start_transition(DeviceMode::Off, None);
                 }
             }
         }
     }
 
-    fn start_transition(&mut self, target_mode: DeviceMode, _forced: bool) {
+    fn start_transition(
+        &mut self,
+        target_mode: DeviceMode,
+        tc_commander: Option<CcsdsPacketIdAndPsc>,
+    ) {
         log::info!("{}: transitioning to mode {:?}", self.id.str(), target_mode);
         if target_mode == DeviceMode::Off {
             self.shared_mgm_set.lock().unwrap().valid = false;
         }
-        self.mode_helpers.start(target_mode);
-    }
-
-    pub fn handle_mode_transition(&mut self) {
-        if self.mode_helpers.target.is_none() {
-            return;
-        }
-        let target_mode = self.mode_helpers.target.unwrap();
-        let switch_target_on = target_mode != DeviceMode::Off;
-        if self.mode_helpers.transition_state == TransitionState::Idle {
-            let result = if switch_target_on {
-                self.switch_helper.send_switch_on_cmd(self.switch_id())
-            } else {
-                self.switch_helper.send_switch_off_cmd(self.switch_id())
-            };
-            if result.is_err() {
-                // Could not send switch command.. still continue with transition.
-                log::error!(
-                    "failed to send switch {} command",
-                    if switch_target_on { "on" } else { "off" }
-                );
-            }
-            self.mode_helpers.transition_state = TransitionState::PowerSwitching;
-        }
-        if self.mode_helpers.transition_state == TransitionState::PowerSwitching {
-            if self.switch_helper.is_switch_on(self.switch_id()) == switch_target_on {
-                log::info!("switch is {}", if switch_target_on { "on" } else { "off" });
-                self.mode_helpers.transition_state = TransitionState::Done;
-            } else if self.mode_helpers.timed_out() {
-                self.handle_mode_transition_failure();
-            }
-        }
-        if self.mode_helpers.transition_state == TransitionState::Done {
-            self.handle_mode_reached();
-        }
+        self.switch_and_mode_helper
+            .start_transition(target_mode, tc_commander);
     }
 
     // Should be called to complete a mode transition which failed.
-    fn handle_mode_transition_failure(&mut self) {
-        let tc_commander = self.mode_helpers.finish(false);
+    fn handle_mode_transition_failure(&mut self, tc_commander: Option<CcsdsPacketIdAndPsc>) {
         if tc_commander.is_some() {
             self.send_telemetry(
                 tc_commander,
@@ -511,8 +485,7 @@ impl MgmHandlerLis3Mdl {
     }
 
     // Should be called to complete a mode transition successfully.
-    fn handle_mode_reached(&mut self) {
-        let tc_commander = self.mode_helpers.finish(true);
+    fn handle_mode_reached(&mut self, tc_commander: Option<CcsdsPacketIdAndPsc>) {
         self.announce_mode();
         if let Some(requestor) = tc_commander {
             self.send_mode_tm(requestor);
@@ -522,18 +495,14 @@ impl MgmHandlerLis3Mdl {
     }
 
     fn announce_mode(&self) {
-        log::info!(
-            "{} announcing mode: {:?}",
-            self.id.str(),
-            self.mode_helpers.current
-        );
+        log::info!("{} announcing mode: {:?}", self.id.str(), self.mode());
         // TODO: Event?
     }
 
     fn report_mode_to_parent(&self) {
         self.mode_leaf_helper
             .report_tx
-            .send(ModeResponse::Mode(self.mode_helpers.current))
+            .send(ModeResponse::Mode(self.mode()))
             .unwrap();
     }
 
