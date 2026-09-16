@@ -13,9 +13,7 @@ Flight software built with `sat-rs` is generally structured into three layers.
 ![Generic architecture](./images/satrs-arch-generic.drawio.png)
 
 - **Application**: The mission specific logic. This is the code a developer writes for a
-  particular mission. It covers mission logic, TMTC handling, event handling, FDIR and command
-  scheduling. `sat-rs` provides re-usable building blocks for all of these, but the concrete
-  wiring and mission behaviour lives here.
+  particular mission.
 - **System / platform**: The set of services the application is built on. This covers
   concepts like logging, serialization, IPC, task and memory management, hardware
   access, filesystem access and time. Most of these components are provided by external libraries
@@ -24,6 +22,12 @@ Flight software built with `sat-rs` is generally structured into three layers.
 
 The application layer stays largely the same across missions and targets. The system / platform
 layer is where the target environment determines which concrete crates and mechanisms are used.
+
+The book has specified chapters for some of the topics:
+
+- [TMTC handling and Serialization](./tmtc-modelling.md)
+- [Events](./events.md)
+- [Modes](./modes-and-health.md)
 
 ## Embedded Linux
 
