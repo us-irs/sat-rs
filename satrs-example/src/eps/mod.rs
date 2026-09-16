@@ -76,62 +76,6 @@ impl PowerSwitchHelper {
         }
     }
 }
-/*
-impl PowerSwitchInfo<SwitchId> for PowerSwitchHelper {
-    type Error = SwitchInfoError;
-
-    fn switch_state(&self, switch_id: SwitchId) -> Result<SwitchState, Self::Error> {
-        let switch_set = self
-            .shared_switch_set
-            .lock()
-            .expect("failed to lock switch set");
-        if !switch_set.valid {
-            return Err(SwitchInfoError::SwitchSetInvalid);
-        }
-
-        if let Some(state) = switch_set.switch_map.get(&switch_id) {
-            return Ok(*state);
-        }
-        Err(SwitchInfoError::SwitchIdNotInMap(switch_id))
-    }
-
-    fn switch_delay_ms(&self) -> Duration {
-        // Here, we could set device specific switch delays theoretically. Set it to this value
-        // for now.
-        Duration::from_millis(1000)
-    }
-}
-*/
-
-/*
-impl PowerSwitcherCommandSender<SwitchId> for PowerSwitchHelper {
-    type Error = SwitchCommandingError;
-
-    fn send_switch_on_cmd(
-        &self,
-        requestor_info: satrs::request::MessageMetadata,
-        switch_id: SwitchId,
-    ) -> Result<(), Self::Error> {
-        self.switcher_tx.send(GenericMessage::new(
-            requestor_info,
-            SwitchRequest::new(switch_id, SwitchStateBinary::On),
-        ));
-        Ok(())
-    }
-
-    fn send_switch_off_cmd(
-        &self,
-        requestor_info: satrs::request::MessageMetadata,
-        switch_id: SwitchId,
-    ) -> Result<(), Self::Error> {
-        self.switcher_tx.send(GenericMessage::new(
-            requestor_info,
-            SwitchRequest::new(switch_id, SwitchStateBinary::Off),
-        ));
-        Ok(())
-    }
-}
-*/
 
 #[allow(dead_code)]
 #[derive(new)]
@@ -165,73 +109,6 @@ impl Default for TestSwitchHelper {
         }
     }
 }
-
-/*
-impl PowerSwitchInfo<SwitchId> for TestSwitchHelper {
-    type Error = SwitchInfoError;
-
-    fn switch_state(&self, switch_id: SwitchId) -> Result<satrs::power::SwitchState, Self::Error> {
-        let mut switch_info_requests_mut = self.switch_info_requests.borrow_mut();
-        switch_info_requests_mut.push_back(switch_id);
-        if !self.switch_map_valid {
-            return Err(SwitchInfoError::SwitchSetInvalid);
-        }
-        let switch_map_mut = self.switch_map.borrow_mut();
-        if let Some(state) = switch_map_mut.0.get(&switch_id) {
-            return Ok(*state);
-        }
-        Err(SwitchInfoError::SwitchIdNotInMap(switch_id))
-    }
-
-    fn switch_delay_ms(&self) -> Duration {
-        self.next_switch_delay
-    }
-}
-
-impl PowerSwitcherCommandSender<SwitchId> for TestSwitchHelper {
-    type Error = SwitchCommandingError;
-
-    fn send_switch_on_cmd(
-        &self,
-        requestor_info: MessageMetadata,
-        switch_id: SwitchId,
-    ) -> Result<(), Self::Error> {
-        let mut switch_requests_mut = self.switch_requests.borrow_mut();
-        switch_requests_mut.push_back(SwitchRequestInfo {
-            requestor_info,
-            switch_id,
-            target_state: SwitchStateBinary::On,
-        });
-        // By default, the test helper immediately acknowledges the switch request by setting
-        // the appropriate switch state in the internal switch map.
-        let mut switch_map_mut = self.switch_map.borrow_mut();
-        if let Some(switch_state) = switch_map_mut.0.get_mut(&switch_id) {
-            *switch_state = SwitchState::On;
-        }
-        Ok(())
-    }
-
-    fn send_switch_off_cmd(
-        &self,
-        requestor_info: MessageMetadata,
-        switch_id: SwitchId,
-    ) -> Result<(), Self::Error> {
-        let mut switch_requests_mut = self.switch_requests.borrow_mut();
-        switch_requests_mut.push_back(SwitchRequestInfo {
-            requestor_info,
-            switch_id,
-            target_state: SwitchStateBinary::Off,
-        });
-        // By default, the test helper immediately acknowledges the switch request by setting
-        // the appropriate switch state in the internal switch map.
-        let mut switch_map_mut = self.switch_map.borrow_mut();
-        if let Some(switch_state) = switch_map_mut.0.get_mut(&switch_id) {
-            *switch_state = SwitchState::Off;
-        }
-        Ok(())
-    }
-}
-*/
 
 #[allow(dead_code)]
 impl TestSwitchHelper {

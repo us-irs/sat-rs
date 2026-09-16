@@ -48,6 +48,7 @@ use crate::{
 mod acs;
 mod ccsds;
 mod controller;
+mod device_mode;
 mod eps;
 mod event_manager;
 mod interface;
