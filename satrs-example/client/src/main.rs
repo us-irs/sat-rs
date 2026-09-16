@@ -2,9 +2,13 @@ use anyhow::bail;
 use arbitrary_int::u11;
 use clap::Parser as _;
 use satrs_example::config::{OBSW_SERVER_ADDR, SERVER_PORT};
+use satrs_minisim::{
+    SerializableSimMsgPayload, SimComponent, SimCtrlReply, SimCtrlRequest, SimMessageProvider,
+    SimReply, SimRequest, acs::MgmRequestLis3Mdl, acs::SpiFaultMode, udp::SIM_CTRL_PORT,
+};
 use spacepackets::{CcsdsPacketIdAndPsc, SpacePacketHeader};
 use std::{
-    net::{IpAddr, SocketAddr, UdpSocket},
+    net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -32,14 +36,40 @@ enum Commands {
     AcsSubsystem(SubsystemArgs),
 }
 
-impl Commands {
-    #[inline]
-    pub fn target_id(&self) -> types::ComponentId {
-        match self {
-            Commands::Mgm0(_mgm_args) => types::ComponentId::AcsMgm0,
-            Commands::Mgm1(_mgm_args) => types::ComponentId::AcsMgm1,
-            Commands::MgmAssy(_mgm_assembly_args) => types::ComponentId::AcsMgmAssembly,
-            Commands::AcsSubsystem(_subsystem_args) => types::ComponentId::AcsSubsystem,
+#[derive(Debug, PartialEq, Eq, Clone, Copy, clap::ValueEnum)]
+enum SpiFaultModeSelect {
+    None,
+    AllZeros,
+    AllOnes,
+}
+
+impl From<SpiFaultModeSelect> for SpiFaultMode {
+    fn from(mode: SpiFaultModeSelect) -> Self {
+        match mode {
+            SpiFaultModeSelect::None => SpiFaultMode::None,
+            SpiFaultModeSelect::AllZeros => SpiFaultMode::AllZeros,
+            SpiFaultModeSelect::AllOnes => SpiFaultMode::AllOnes,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, clap::ValueEnum)]
+enum HealthStateSelect {
+    Healthy,
+    Faulty,
+    PermanentFaulty,
+    ExternalControl,
+    NeedsRecovery,
+}
+
+impl From<HealthStateSelect> for satrs::health::HealthState {
+    fn from(state: HealthStateSelect) -> Self {
+        match state {
+            HealthStateSelect::Healthy => satrs::health::HealthState::Healthy,
+            HealthStateSelect::Faulty => satrs::health::HealthState::Faulty,
+            HealthStateSelect::PermanentFaulty => satrs::health::HealthState::PermanentFaulty,
+            HealthStateSelect::ExternalControl => satrs::health::HealthState::ExternalControl,
+            HealthStateSelect::NeedsRecovery => satrs::health::HealthState::NeedsRecovery,
         }
     }
 }
@@ -52,6 +82,16 @@ struct MgmArgs {
     request_hk: bool,
     #[arg(short, long)]
     mode: Option<DeviceModeSelect>,
+    /// Inject (or clear) an SPI bus failure on the simulated device, bypassing the OBSW.
+    ///
+    /// Only takes effect for MGM0: minisim always routes this fault to the MGM0 model
+    /// regardless of which MGM the request names (a pre-existing minisim limitation).
+    #[arg(long, value_enum)]
+    spi_fault: Option<SpiFaultModeSelect>,
+    /// Override the device's FDIR health state, for example to clear a `Faulty` state set by
+    /// the handler after the underlying issue has been fixed or worked around.
+    #[arg(long, value_enum)]
+    health: Option<HealthStateSelect>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, clap::Parser)]
@@ -87,6 +127,93 @@ pub enum AssemblyModeSelect {
 pub enum SubsystemModeSelect {
     Off,
     Safe,
+}
+
+fn handle_mgm_command(
+    client: &UdpSocket,
+    addr: SocketAddr,
+    target_id: types::ComponentId,
+    args: MgmArgs,
+) -> anyhow::Result<()> {
+    if let Some(mode) = args.spi_fault {
+        if target_id != types::ComponentId::AcsMgm0 {
+            bail!("SPI fault injection is only supported for MGM0 right now (minisim limitation)");
+        }
+        inject_mgm_failure(mode.into())?;
+    }
+    if args.ping {
+        let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
+            SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
+            TcHeader::new(target_id, types::MessageType::Ping),
+            types::acs::mgm::request::Request::Ping,
+        );
+        let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
+        log::info!(
+            "sending {:?} ping request with TC ID {:#010x}",
+            target_id,
+            sent_tc_id.raw()
+        );
+        let request_packet = request.to_vec();
+        client.send_to(&request_packet, addr).unwrap();
+    }
+    if args.request_hk {
+        let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
+            SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
+            TcHeader::new(target_id, types::MessageType::Hk),
+            types::acs::mgm::request::Request::Hk(HkRequest {
+                id: types::acs::mgm::request::HkId::Sensor,
+                req_type: types::HkRequestType::OneShot,
+            }),
+        );
+        let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
+        log::info!(
+            "sending {:?} HK request with TC ID {:#010x}",
+            target_id,
+            sent_tc_id.raw()
+        );
+        let request_packet = request.to_vec();
+        client.send_to(&request_packet, addr).unwrap();
+    }
+    if let Some(mode) = args.mode {
+        let dev_mode = match mode {
+            DeviceModeSelect::Off => types::DeviceMode::Off,
+            DeviceModeSelect::Normal => types::DeviceMode::Normal,
+        };
+
+        let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
+            SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
+            TcHeader::new(target_id, types::MessageType::Mode),
+            types::acs::mgm::request::Request::Mode(
+                types::acs::mgm::request::ModeRequest::SetMode(dev_mode),
+            ),
+        );
+        let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
+        log::info!(
+            "sending {:?} HK request with TC ID {:#010x}",
+            target_id,
+            sent_tc_id.raw()
+        );
+        let request_packet = request.to_vec();
+        client.send_to(&request_packet, addr).unwrap();
+    }
+    if let Some(health) = args.health {
+        let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
+            SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
+            TcHeader::new(target_id, types::MessageType::Health),
+            types::acs::mgm::request::Request::Health(
+                types::acs::mgm::request::HealthRequest::SetHealth(health.into()),
+            ),
+        );
+        let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
+        log::info!(
+            "sending {:?} set-health request with TC ID {:#010x}",
+            target_id,
+            sent_tc_id.raw()
+        );
+        let request_packet = request.to_vec();
+        client.send_to(&request_packet, addr).unwrap();
+    }
+    Ok(())
 }
 
 fn setup_logger(level: log::LevelFilter) -> Result<(), fern::InitError> {
@@ -145,70 +272,19 @@ fn main() -> anyhow::Result<()> {
         client.send_to(&request_packet, addr).unwrap();
     }
     if let Some(cmd) = cli.commands {
-        let target_id = cmd.target_id();
         match cmd {
-            Commands::Mgm0(args) | Commands::Mgm1(args) => {
-                if args.ping {
-                    let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
-                        SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
-                        TcHeader::new(cmd.target_id(), types::MessageType::Ping),
-                        types::acs::mgm::request::Request::Ping,
-                    );
-                    let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
-                    log::info!(
-                        "sending {:?} ping request with TC ID {:#010x}",
-                        target_id,
-                        sent_tc_id.raw()
-                    );
-                    let request_packet = request.to_vec();
-                    client.send_to(&request_packet, addr).unwrap();
-                }
-                if args.request_hk {
-                    let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
-                        SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
-                        TcHeader::new(target_id, types::MessageType::Hk),
-                        types::acs::mgm::request::Request::Hk(HkRequest {
-                            id: types::acs::mgm::request::HkId::Sensor,
-                            req_type: types::HkRequestType::OneShot,
-                        }),
-                    );
-                    let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
-                    log::info!(
-                        "sending {:?} HK request with TC ID {:#010x}",
-                        target_id,
-                        sent_tc_id.raw()
-                    );
-                    let request_packet = request.to_vec();
-                    client.send_to(&request_packet, addr).unwrap();
-                }
-                if let Some(mode) = args.mode {
-                    let dev_mode = match mode {
-                        DeviceModeSelect::Off => types::DeviceMode::Off,
-                        DeviceModeSelect::Normal => types::DeviceMode::Normal,
-                    };
-
-                    let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
-                        SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
-                        TcHeader::new(target_id, types::MessageType::Mode),
-                        types::acs::mgm::request::Request::Mode(
-                            types::acs::mgm::request::ModeRequest::SetMode(dev_mode),
-                        ),
-                    );
-                    let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
-                    log::info!(
-                        "sending {:?} HK request with TC ID {:#010x}",
-                        target_id,
-                        sent_tc_id.raw()
-                    );
-                    let request_packet = request.to_vec();
-                    client.send_to(&request_packet, addr).unwrap();
-                }
+            Commands::Mgm0(args) => {
+                handle_mgm_command(&client, addr, types::ComponentId::AcsMgm0, args)?
+            }
+            Commands::Mgm1(args) => {
+                handle_mgm_command(&client, addr, types::ComponentId::AcsMgm1, args)?
             }
             Commands::MgmAssy(mgm_assembly_args) => {
+                let target_id = types::ComponentId::AcsMgmAssembly;
                 if mgm_assembly_args.ping {
                     let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
                         SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
-                        TcHeader::new(cmd.target_id(), types::MessageType::Ping),
+                        TcHeader::new(target_id, types::MessageType::Ping),
                         types::acs::mgm::request::Request::Ping,
                     );
                     let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
@@ -251,10 +327,11 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             Commands::AcsSubsystem(subsystem_args) => {
+                let target_id = types::ComponentId::AcsSubsystem;
                 if subsystem_args.ping {
                     let request = types::ccsds::CcsdsTcPacketOwned::new_with_request(
                         SpacePacketHeader::new_from_apid(u11::new(Apid::Acs as u16)),
-                        TcHeader::new(cmd.target_id(), types::MessageType::Ping),
+                        TcHeader::new(target_id, types::MessageType::Ping),
                         types::acs::subsystem::request::Request::Ping,
                     );
                     let sent_tc_id = CcsdsPacketIdAndPsc::new_from_ccsds_packet(&request.sp_header);
@@ -311,6 +388,49 @@ fn main() -> anyhow::Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// Injects the given SPI fault mode directly into minisim's MGM0 model, bypassing the OBSW.
+///
+/// Confirms the simulator is actually reachable first (same ping/pong check the OBSW's own
+/// internal sim client does, see `SimClientUdp::attempt_connection`), since a fire-and-forget
+/// UDP send would otherwise silently do nothing if minisim is not running.
+fn inject_mgm_failure(mode: SpiFaultMode) -> anyhow::Result<()> {
+    let sim_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), SIM_CTRL_PORT);
+    let sim_socket = UdpSocket::bind("127.0.0.1:0")?;
+    sim_socket.set_read_timeout(Some(Duration::from_millis(200)))?;
+
+    let mut reply_buf = [0u8; 4096];
+    let ping = SimRequest::new_with_epoch_time(SimCtrlRequest::Ping);
+    sim_socket.send_to(&serde_json::to_vec(&ping)?, sim_addr)?;
+    match sim_socket.recv(&mut reply_buf) {
+        Ok(len) => {
+            let reply: SimReply = serde_json::from_slice(&reply_buf[..len])?;
+            if reply.component() != SimComponent::SimCtrl {
+                bail!("unexpected reply while checking minisim connectivity: {reply:?}");
+            }
+            match SimCtrlReply::from_sim_message(&reply).expect("invalid SIM reply") {
+                SimCtrlReply::Pong => {}
+                SimCtrlReply::InvalidRequest(e) => {
+                    bail!("minisim rejected connectivity ping: {e:?}")
+                }
+            }
+        }
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) =>
+        {
+            bail!("minisim not reachable at {sim_addr} (ping timed out) - is it running?");
+        }
+        Err(e) => return Err(e.into()),
+    }
+
+    let request = SimRequest::new_with_epoch_time(MgmRequestLis3Mdl::SetSpiFault(mode));
+    sim_socket.send_to(&serde_json::to_vec(&request)?, sim_addr)?;
+    log::info!("injected SPI fault mode {mode:?} into minisim MGM0");
     Ok(())
 }
 

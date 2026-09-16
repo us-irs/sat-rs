@@ -6,7 +6,7 @@ use std::{
 
 use derive_new::new;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use satrs::{request::GenericMessage, spacepackets::CcsdsPacketIdAndPsc};
+use satrs::spacepackets::CcsdsPacketIdAndPsc;
 use satrs_example::TimestampHelper;
 use satrs_minisim::{
     SerializableSimMsgPayload, SimReply, SimRequest,
@@ -264,7 +264,7 @@ pub enum OpCode {
 #[allow(clippy::too_many_arguments)]
 pub struct PcduHandler<ComInterface: SerialInterface> {
     dev_str: &'static str,
-    switch_request_rx: mpsc::Receiver<GenericMessage<SwitchRequest>>,
+    switch_request_rx: mpsc::Receiver<SwitchRequest>,
     tc_rx: std::sync::mpsc::Receiver<CcsdsTcPacketOwned>,
     tm_tx: mpsc::SyncSender<CcsdsTmPacketOwned>,
     pub com_interface: ComInterface,
@@ -277,7 +277,7 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
     pub fn new(
         tc_rx: std::sync::mpsc::Receiver<CcsdsTcPacketOwned>,
         tm_tx: std::sync::mpsc::SyncSender<CcsdsTmPacketOwned>,
-        switch_request_rx: mpsc::Receiver<GenericMessage<SwitchRequest>>,
+        switch_request_rx: mpsc::Receiver<SwitchRequest>,
         com_interface: ComInterface,
         shared_switch_map: Arc<Mutex<SwitchSet>>,
         init_mode: DeviceMode,
@@ -488,10 +488,7 @@ impl<ComInterface: SerialInterface> PcduHandler<ComInterface> {
         loop {
             match self.switch_request_rx.try_recv() {
                 Ok(switch_req) => {
-                    self.handle_device_switching(
-                        switch_req.message.switch_id(),
-                        switch_req.message.target_state(),
-                    );
+                    self.handle_device_switching(switch_req.switch_id(), switch_req.target_state());
                 }
                 Err(e) => match e {
                     mpsc::TryRecvError::Empty => break,
@@ -531,10 +528,7 @@ mod tests {
     use std::sync::mpsc;
 
     use arbitrary_int::u11;
-    use satrs::{
-        request::{GenericMessage, MessageMetadata},
-        spacepackets::SpacePacketHeader,
-    };
+    use satrs::spacepackets::SpacePacketHeader;
     use types::{
         Apid, TcHeader,
         pcdu::{SwitchMapBinary, SwitchStateBinary},
@@ -593,7 +587,7 @@ mod tests {
         pub mode_reply_rx_to_parent: mpsc::Receiver<types::pcdu::response::Response>,
         pub tc_tx: mpsc::SyncSender<CcsdsTcPacketOwned>,
         pub tm_rx: mpsc::Receiver<CcsdsTmPacketOwned>,
-        pub switch_request_tx: mpsc::Sender<GenericMessage<SwitchRequest>>,
+        pub switch_request_tx: mpsc::Sender<SwitchRequest>,
         pub handler: PcduHandler<SerialInterfaceTest>,
     }
 
@@ -730,10 +724,7 @@ mod tests {
             .unwrap();
         testbench
             .switch_request_tx
-            .send(GenericMessage::new(
-                MessageMetadata::new(0, ComponentId::AcsMgm0 as u32),
-                SwitchRequest::new(SwitchId::Mgm0, SwitchStateBinary::On),
-            ))
+            .send(SwitchRequest::new(SwitchId::Mgm0, SwitchStateBinary::On))
             .expect("failed to send switch request");
         testbench.handler.periodic_operation(OpCode::RegularOp);
         testbench
