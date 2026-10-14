@@ -11,6 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Install libudev-dev on Ubuntu
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: sudo apt update && sudo apt install -y libudev-dev
@@ -24,6 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Install nextest
         uses: taiki-e/install-action@nextest
       - run: sudo apt update && sudo apt install -y libudev-dev
@@ -43,6 +45,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: "armv7-unknown-linux-gnueabihf, thumbv7em-none-eabihf"
+      # The matrix values are not part of the automatic cache key.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
       - run: cargo check -p satrs --target=${{matrix.target}} --no-default-features
 
   fmt:
@@ -61,6 +67,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
       - run: RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc -p satrs --all-features --no-deps
 
   clippy:
@@ -71,5 +78,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - uses: Swatinem/rust-cache@v2
       - run: sudo apt update && sudo apt install -y libudev-dev
       - run: cargo clippy -- -D warnings
