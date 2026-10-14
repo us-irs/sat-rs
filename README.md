@@ -89,13 +89,11 @@ Currently this library has the following flight heritage:
 
 # Coverage
 
-Coverage was generated using [`grcov`](https://github.com/mozilla/grcov). If you have not done so
-already, install the `llvm-tools-preview`:
+Coverage is generated with [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov):
 
 ```sh
-rustup component add llvm-tools-preview
-cargo install grcov --locked
+cargo install cargo-llvm-cov --locked
+just coverage --open
 ```
 
-After that, you can simply run `coverage.py` to test the `satrs` crate with coverage. You can
-optionally supply the `--open` flag to open the coverage report in your webbrowser.
+This tests the `satrs` crate and opens the HTML report in your webbrowser.
