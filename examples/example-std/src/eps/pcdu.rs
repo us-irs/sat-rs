@@ -4,7 +4,6 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-use derive_new::new;
 use example_std::TimestampHelper;
 use minisim_types::{
     SimReply, SimRequestWithTime,
@@ -118,10 +117,21 @@ pub trait SerialInterface {
     ) -> Result<(), Self::Error>;
 }
 
-#[derive(new)]
 pub struct SerialInterfaceToSim {
     pub sim_request_tx: mpsc::Sender<SimRequestWithTime>,
     pub sim_reply_rx: mpsc::Receiver<SimReply>,
+}
+
+impl SerialInterfaceToSim {
+    pub fn new(
+        sim_request_tx: mpsc::Sender<SimRequestWithTime>,
+        sim_reply_rx: mpsc::Receiver<SimReply>,
+    ) -> Self {
+        Self {
+            sim_request_tx,
+            sim_reply_rx,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]

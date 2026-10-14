@@ -78,7 +78,6 @@
 pub use alloc_mod::*;
 use core::fmt::{Display, Formatter};
 use delegate::delegate;
-use derive_new::new;
 #[cfg(feature = "heapless")]
 pub use heapless_mod::*;
 #[cfg(feature = "serde")]
@@ -332,11 +331,20 @@ type UsedBlockSize = usize;
 pub const STORE_FREE: UsedBlockSize = UsedBlockSize::MAX;
 pub const MAX_BLOCK_SIZE: UsedBlockSize = STORE_FREE - 1;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, new)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct SubpoolConfig {
     num_blocks: NumBlocks,
     block_size: usize,
+}
+
+impl SubpoolConfig {
+    pub const fn new(num_blocks: NumBlocks, block_size: usize) -> Self {
+        Self {
+            num_blocks,
+            block_size,
+        }
+    }
 }
 
 #[cfg(feature = "heapless")]
