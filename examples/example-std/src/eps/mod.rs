@@ -1,4 +1,3 @@
-use derive_new::new;
 use std::{cell::RefCell, collections::VecDeque, sync::mpsc, time::Duration};
 use types::pcdu::{SwitchId, SwitchRequest, SwitchState, SwitchStateBinary};
 
@@ -11,10 +10,22 @@ use self::pcdu::SharedSwitchSet;
 
 pub mod pcdu;
 
-#[derive(new, Clone)]
+#[derive(Clone)]
 pub struct PowerSwitchHelper {
     switcher_tx: mpsc::SyncSender<SwitchRequest>,
     shared_switch_set: SharedSwitchSet,
+}
+
+impl PowerSwitchHelper {
+    pub fn new(
+        switcher_tx: mpsc::SyncSender<SwitchRequest>,
+        shared_switch_set: SharedSwitchSet,
+    ) -> Self {
+        Self {
+            switcher_tx,
+            shared_switch_set,
+        }
+    }
 }
 
 #[derive(Debug, Error, Copy, Clone, PartialEq, Eq)]
@@ -78,11 +89,25 @@ impl PowerSwitchHelper {
 }
 
 #[allow(dead_code)]
-#[derive(new)]
 pub struct SwitchRequestInfo {
     pub requestor_info: MessageMetadata,
     pub switch_id: SwitchId,
     pub target_state: SwitchStateBinary,
+}
+
+#[allow(dead_code)]
+impl SwitchRequestInfo {
+    pub fn new(
+        requestor_info: MessageMetadata,
+        switch_id: SwitchId,
+        target_state: SwitchStateBinary,
+    ) -> Self {
+        Self {
+            requestor_info,
+            switch_id,
+            target_state,
+        }
+    }
 }
 
 // Test switch helper which can be used for unittests.
