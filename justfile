@@ -11,6 +11,10 @@ test:
   cargo nextest run --all-features
   cargo test --doc --all-features
 
+# Writes an HTML coverage report of satrs to target/llvm-cov/html. Pass --open to open it.
+coverage *args:
+  cargo llvm-cov -p satrs --html {{args}}
+
 embedded: embedded-stm32h7 embedded-stm32h7-embassy
   cargo check -p satrs --target=thumbv7em-none-eabihf --no-default-features
 
