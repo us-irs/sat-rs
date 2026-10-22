@@ -12,6 +12,14 @@ pub struct SwitchesBitfield {
 }
 
 #[derive(
+    Debug, Copy, Clone, PartialEq, Eq, num_enum::TryFromPrimitive, num_enum::IntoPrimitive,
+)]
+#[repr(u32)]
+pub enum SetId {
+    SwitcherSet = 0,
+}
+
+#[derive(
     Debug,
     Copy,
     Clone,
@@ -88,6 +96,87 @@ impl Default for SwitchMapBinaryWrapper {
                 .expect("switch map capacity exceeded");
         }
         Self(switch_map)
+    }
+}
+
+pub type SwitchMap = heapless::LinearMap<SwitchId, SwitchState, { SwitchId::COUNT }>;
+
+pub struct SwitchMapWrapper(pub SwitchMap);
+
+impl Default for SwitchMapWrapper {
+    fn default() -> Self {
+        Self::new_with_all_switches(SwitchState::Unknown)
+    }
+}
+
+impl SwitchMapWrapper {
+    pub fn new_with_init_switches_off() -> Self {
+        Self::new_with_all_switches(SwitchState::Off)
+    }
+
+    fn new_with_all_switches(state: SwitchState) -> Self {
+        let mut switch_map = SwitchMap::default();
+        for entry in SwitchId::iter() {
+            switch_map
+                .insert(entry, state)
+                .expect("switch map capacity exceeded");
+        }
+        Self(switch_map)
+    }
+
+    pub fn from_binary_switch_map_ref(switch_map: &SwitchMapBinary) -> Self {
+        Self(
+            switch_map
+                .iter()
+                .map(|(key, value)| (*key, SwitchState::from(*value)))
+                .collect(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SwitchSet {
+    pub valid: bool,
+    pub switch_map: SwitchMap,
+}
+
+impl SwitchSet {
+    pub fn new(switch_map: SwitchMap) -> Self {
+        Self {
+            valid: true,
+            switch_map,
+        }
+    }
+
+    pub fn new_with_init_switches_unknown() -> Self {
+        Self::new(SwitchMapWrapper::default().0)
+    }
+
+    /// Returns [None] if a switch is missing in the map.
+    pub fn as_bitfield(&self) -> Option<SwitchesBitfield> {
+        let is_on = |id| {
+            self.switch_map
+                .get(&id)
+                .map(|state| *state == SwitchState::On)
+        };
+        Some(
+            SwitchesBitfield::builder()
+                .with_magnetorquer(is_on(SwitchId::Mgt)?)
+                .with_mgm1(is_on(SwitchId::Mgm1)?)
+                .with_mgm0(is_on(SwitchId::Mgm0)?)
+                .build(),
+        )
+    }
+
+    /// Returns false if the switch is not in the map.
+    pub fn set_switch_state(&mut self, switch_id: SwitchId, state: SwitchState) -> bool {
+        match self.switch_map.get_mut(&switch_id) {
+            Some(entry) => {
+                *entry = state;
+                true
+            }
+            None => false,
+        }
     }
 }
 

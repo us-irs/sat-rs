@@ -12,6 +12,7 @@ use crate::{
 
 /// Used by clients to route replies to the component handling them.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum ComponentId {
     SimCtrl,
     Mgm0Lis3Mdl,

@@ -1,18 +1,15 @@
 use alloc::vec::Vec;
 use arbitrary_int::u14;
-use defmt::Debug2Format;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
 use spacepackets::{CcsdsPacketIdAndPsc, CcsdsPacketReader, SpHeader};
 use types::ccsds::{CcsdsCreationError, CcsdsTmPacketOwned};
 use types::{Apid, ComponentId, Message, TcHeader, TmHeader, control, led, tmtc};
 
+use crate::config::{TC_QUEUE_DEPTH, TM_QUEUE_DEPTH};
 use crate::leds::LED_MODE;
 use crate::net::LAST_SENDER;
 use crate::sim_client;
-
-pub const TC_QUEUE_DEPTH: usize = 32;
-pub const TM_QUEUE_DEPTH: usize = 32;
 
 pub type TcChannel = Channel<NoopRawMutex, Vec<u8>, TC_QUEUE_DEPTH>;
 pub type TmChannel = Channel<NoopRawMutex, Vec<u8>, TM_QUEUE_DEPTH>;
@@ -47,7 +44,7 @@ pub async fn tc_handler(tc_rx: TcReceiver, telemetry: &mut Telemetry) {
             ComponentId::Controller => handle_controller_tc(payload, tc_id, telemetry).await,
             ComponentId::Led => handle_led_tc(payload, tc_id, telemetry).await,
             target_id => {
-                defmt::warn!("No TC handler for target ID {}", Debug2Format(&target_id));
+                defmt::warn!("No TC handler for target ID {}", &target_id);
                 send_tmtc_event(telemetry, tmtc::Event::UnknownTargetId(target_id)).await;
             }
         }
@@ -105,7 +102,7 @@ async fn handle_led_tc(payload: &[u8], tc_id: CcsdsPacketIdAndPsc, telemetry: &m
     match request {
         led::request::Request::Ping => defmt::info!("Received LED ping request"),
         led::request::Request::SetMode(mode) => {
-            defmt::info!("Received LED mode request: {}", Debug2Format(&mode));
+            defmt::info!("Received LED mode request: {}", &mode);
             LED_MODE.signal(mode);
         }
     }
@@ -150,7 +147,7 @@ impl Telemetry {
                 self.tx.send(raw_packet).await;
                 self.sequence_count = self.sequence_count.wrapping_add(u14::new(1));
             }
-            Err(e) => defmt::warn!("Failed to create TM packet: {}", Debug2Format(&e)),
+            Err(e) => defmt::warn!("Failed to create TM packet: {}", &e),
         }
     }
 }

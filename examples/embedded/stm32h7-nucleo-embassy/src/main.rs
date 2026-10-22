@@ -92,9 +92,25 @@ async fn main(spawner: Spawner) {
     static TM_CHANNEL: ConstStaticCell<shared_embedded::tmtc::TmChannel> =
         ConstStaticCell::new(shared_embedded::tmtc::TmChannel::new());
     let tm_channel = TM_CHANNEL.take();
+    static SIM_REQUEST_CHANNEL: ConstStaticCell<shared_embedded::sim_client::SimRequestChannel> =
+        ConstStaticCell::new(shared_embedded::sim_client::SimRequestChannel::new());
+    let sim_request_channel = SIM_REQUEST_CHANNEL.take();
+    static PCDU_SIM_REPLY_CHANNEL: ConstStaticCell<
+        shared_embedded::sim_client::PcduSimReplyChannel,
+    > = ConstStaticCell::new(shared_embedded::sim_client::PcduSimReplyChannel::new());
+    let pcdu_sim_reply_channel = PCDU_SIM_REPLY_CHANNEL.take();
 
     spawner.spawn(net_stack_task(runner).expect("spawning net stack task failed"));
-    spawner.spawn(sim_client_task(stack).expect("spawning sim client task failed"));
+    spawner.spawn(
+        sim_client_task(
+            stack,
+            sim_request_channel.receiver(),
+            shared_embedded::sim_client::SimReplySenders {
+                pcdu: pcdu_sim_reply_channel.sender(),
+            },
+        )
+        .expect("spawning sim client task failed"),
+    );
     spawner.spawn(
         udp_task(stack, tc_channel.sender(), tm_channel.receiver())
             .expect("spawning UDP task failed"),
@@ -127,8 +143,12 @@ async fn udp_task(
 }
 
 #[embassy_executor::task]
-async fn sim_client_task(stack: embassy_net::Stack<'static>) {
-    shared_embedded::sim_client::sim_client_task(stack).await
+async fn sim_client_task(
+    stack: embassy_net::Stack<'static>,
+    request_rx: shared_embedded::sim_client::SimRequestReceiver,
+    reply_senders: shared_embedded::sim_client::SimReplySenders,
+) {
+    shared_embedded::sim_client::sim_client_task(stack, request_rx, reply_senders).await
 }
 
 #[embassy_executor::task]

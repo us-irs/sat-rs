@@ -27,6 +27,7 @@ pub mod tmtc;
     num_enum::TryFromPrimitive,
     num_enum::IntoPrimitive,
 )]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[repr(u32)]
 pub enum ComponentId {
     Controller,

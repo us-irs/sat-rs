@@ -20,6 +20,8 @@ mod app {
         net_runner: embassy_net::Runner<'static, shared_embedded::net::Device>,
         net_stack: embassy_net::Stack<'static>,
         sim_net_stack: embassy_net::Stack<'static>,
+        sim_request_rx: shared_embedded::sim_client::SimRequestReceiver,
+        sim_reply_senders: shared_embedded::sim_client::SimReplySenders,
         leds: shared_embedded::leds::Leds,
         green_led: gpio::Output<'static>,
         tc_rx: shared_embedded::tmtc::TcReceiver,
@@ -107,6 +109,14 @@ mod app {
         static TM_CHANNEL: ConstStaticCell<shared_embedded::tmtc::TmChannel> =
             ConstStaticCell::new(shared_embedded::tmtc::TmChannel::new());
         let tm_channel = TM_CHANNEL.take();
+        static SIM_REQUEST_CHANNEL: ConstStaticCell<
+            shared_embedded::sim_client::SimRequestChannel,
+        > = ConstStaticCell::new(shared_embedded::sim_client::SimRequestChannel::new());
+        let sim_request_channel = SIM_REQUEST_CHANNEL.take();
+        static PCDU_SIM_REPLY_CHANNEL: ConstStaticCell<
+            shared_embedded::sim_client::PcduSimReplyChannel,
+        > = ConstStaticCell::new(shared_embedded::sim_client::PcduSimReplyChannel::new());
+        let pcdu_sim_reply_channel = PCDU_SIM_REPLY_CHANNEL.take();
 
         net_lib_task::spawn().expect("spawning net library task failed");
         udp_task::spawn().expect("spawning UDP task failed");
@@ -123,6 +133,10 @@ mod app {
                 net_runner: runner,
                 net_stack: stack,
                 sim_net_stack: stack,
+                sim_request_rx: sim_request_channel.receiver(),
+                sim_reply_senders: shared_embedded::sim_client::SimReplySenders {
+                    pcdu: pcdu_sim_reply_channel.sender(),
+                },
                 tc_tx: tc_channel.sender(),
                 tc_rx: tc_channel.receiver(),
                 telemetry: shared_embedded::tmtc::Telemetry::new(tm_channel.sender()),
@@ -151,9 +165,15 @@ mod app {
         shared_embedded::net::udp_task(*cx.local.net_stack, *cx.local.tc_tx, *cx.local.tm_rx).await;
     }
 
-    #[task(local = [sim_net_stack])]
+    #[task(local = [sim_net_stack, sim_request_rx, sim_reply_senders])]
     async fn sim_client_task(cx: sim_client_task::Context) {
-        shared_embedded::sim_client::sim_client_task(*cx.local.sim_net_stack).await;
+        let ctx = cx.local;
+        shared_embedded::sim_client::sim_client_task(
+            *ctx.sim_net_stack,
+            *ctx.sim_request_rx,
+            *ctx.sim_reply_senders,
+        )
+        .await;
     }
 
     #[task(local = [tc_rx, telemetry])]
