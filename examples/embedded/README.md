@@ -1,7 +1,7 @@
 sat-rs examples for the STM32H753ZI-Nucleo board
 =======
 
-These example applications show how the [sat-rs library](https://egit.irs.uni-stuttgart.de/rust/sat-rs)
+These example applications show how the [sat-rs library](https://github.com/ustgt-irs/sat-rs)
 can be used on an embedded target.
 They also show how a relatively simple OBSW could be built when no standard runtime is available.
 Both use the [defmt](https://defmt.ferrous-systems.com/) framework for logging and provide the

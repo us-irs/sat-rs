@@ -4,7 +4,7 @@ description = "Commonly required utilities for writing TMTC clients with Rust"
 version = "0.1.0"
 edition = "2024"
 homepage = "https://documentation.irs.uni-stuttgart.de/projects/sat-rs/"
-repository = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
+repository = "https://github.com/ustgt-irs/sat-rs"
 license = "Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

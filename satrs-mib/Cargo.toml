@@ -7,7 +7,7 @@ description = """
 Helper crate of the sat-rs framework to build a mission information base (MIB) from the
 On-Board Software (OBSW) code directly."""
 homepage = "https://documentation.irs.uni-stuttgart.de/projects/sat-rs/"
-repository = "https://egit.irs.uni-stuttgart.de/rust/sat-rs"
+repository = "https://github.com/ustgt-irs/sat-rs"
 license = "Apache-2.0"
 keywords = ["no-std", "space", "aerospace"]
 categories = ["aerospace", "aerospace::space-protocols", "no-std", "hardware-support", "embedded"]

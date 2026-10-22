@@ -5,4 +5,4 @@ satrs-mib
 =========
 
 This helper crate contains the procedural macros for the sat-rs framework.
-You can find more information on the [homepage](https://egit.irs.uni-stuttgart.de/rust/sat-rs).
+You can find more information on the [homepage](https://github.com/ustgt-irs/sat-rs).

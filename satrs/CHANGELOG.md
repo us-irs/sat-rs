@@ -48,8 +48,8 @@ Some trait renaming to be more in-line with Rust naming conventions.
 
 - Renamed `StaticPoolConfig::new` to `StaticPoolConfig::new_from_subpool_cfg_tuples`. The new
   `new` implementation expects a type struct instead of tuples.
-- Moved `cfdp` module to [dedicated crate](https://egit.irs.uni-stuttgart.de/rust/cfdp)
-- Moved `seq_count` module to [spacepackets](https://egit.irs.uni-stuttgart.de/rust/spacepackets)
+- Moved `cfdp` module to [dedicated crate](https://github.com/ustgt-irs/cfdp-rs)
+- Moved `seq_count` module to [spacepackets](https://github.com/ustgt-irs/spacepackets-rs)
   crate
 
 ## Added
@@ -231,8 +231,8 @@ docs-rs hotfix
 
 Initial release.
 
-[unreleased]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-v0.3.0-alpha.3...HEAD
-[v0.3.0-alpha.3]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-v0.3.0-alpha.2...satrs-v0.3.0-alpha.3
-[v0.3.0-alpha.2]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-v0.3.0-alpha.1...satrs-v0.3.0-alpha.2
-[v0.3.0-alpha.1]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-v0.3.0-alpha.0...satrs-v0.3.0-alpha.1
-[v0.3.0-alpha.0]: https://egit.irs.uni-stuttgart.de/rust/sat-rs/compare/satrs-v0.2.1...satrs-v0.3.0-alpha.0
+[unreleased]: https://github.com/ustgt-irs/sat-rs/compare/satrs-v0.3.0-alpha.3...HEAD
+[v0.3.0-alpha.3]: https://github.com/ustgt-irs/sat-rs/compare/satrs-v0.3.0-alpha.2...satrs-v0.3.0-alpha.3
+[v0.3.0-alpha.2]: https://github.com/ustgt-irs/sat-rs/compare/satrs-v0.3.0-alpha.1...satrs-v0.3.0-alpha.2
+[v0.3.0-alpha.1]: https://github.com/ustgt-irs/sat-rs/compare/satrs-v0.3.0-alpha.0...satrs-v0.3.0-alpha.1
+[v0.3.0-alpha.0]: https://github.com/ustgt-irs/sat-rs/compare/satrs-v0.2.1...satrs-v0.3.0-alpha.0

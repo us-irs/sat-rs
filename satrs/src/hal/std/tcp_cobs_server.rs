@@ -132,7 +132,7 @@ impl TcpTmSender for CobsTmSender {
 ///
 /// ## Example
 ///
-/// The [TCP integration tests](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs/tests/tcp_servers.rs)
+/// The [TCP integration tests](https://github.com/ustgt-irs/sat-rs/blob/main/satrs/tests/tcp_servers.rs)
 /// test also serves as the example application for this module.
 pub struct TcpTmtcInCobsServer<
     TmSource: PacketSource<Error = ()>,

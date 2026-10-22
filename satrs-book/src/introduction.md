@@ -1,7 +1,7 @@
 The sat-rs book
 ======
 
-This book is the primary information resource for the [sat-rs library](https://egit.irs.uni-stuttgart.de/rust/sat-rs)
+This book is the primary information resource for the [sat-rs library](https://github.com/ustgt-irs/sat-rs)
 in addition to the regular API documentation. It contains the following resources:
 
 1. Architecture information and considerations which would exceed the scope of the regular API.
@@ -25,10 +25,10 @@ frameworks.
 
 # Getting started with the example
 
-The [`example-std`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/examples/example-std)
+The [`example-std`](https://github.com/ustgt-irs/sat-rs/tree/main/examples/example-std)
 provides various practical usage examples of the `sat-rs` framework. If you are more interested in
 the practical application of `sat-rs` inside an application, it is recommended to have a look at
-the example application. The [`minisim`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/examples/minisim)
+the example application. The [`minisim`](https://github.com/ustgt-irs/sat-rs/tree/main/examples/minisim)
 application complements the example application and can be used to simulate some physical devices
 for the `example-std` device handlers.
 

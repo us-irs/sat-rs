@@ -77,7 +77,7 @@
 //! }
 //! ```
 //!
-//! The [integration test](https://egit.irs.uni-stuttgart.de/rust/fsrc-launchpad/src/branch/main/fsrc-core/tests/verification_test.rs)
+//! The [integration test](https://github.com/ustgt-irs/sat-rs/blob/main/satrs/tests/pus_verification.rs)
 //! for the verification module contains examples how this module could be used in a more complex
 //! context involving multiple threads
 use super::{EcssTmSender, EcssTmtcError, source_buffer_large_enough};
