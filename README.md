@@ -28,30 +28,30 @@ and [EIVE](https://www.irs.uni-stuttgart.de/en/research/satellitetechnology-and-
 
 This project currently contains the following crates:
 
-* [`satrs-book`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-book):
+* [`satrs-book`](https://github.com/ustgt-irs/sat-rs/tree/main/satrs-book):
    Primary information resource in addition to the API documentation, hosted
    [here](https://documentation.irs.uni-stuttgart.de/projects/sat-rs/book/). It can be useful to read
    this first before delving into the example application and the API documentation.
-* [`satrs`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs):
+* [`satrs`](https://github.com/ustgt-irs/sat-rs/tree/main/satrs):
    Primary crate.
-* [`satrs-mib`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs-mib):
+* [`satrs-mib`](https://github.com/ustgt-irs/sat-rs/tree/main/satrs-mib):
    Components to build a mission information base from the on-board software directly.
 
 ## Examples
 
 All examples and their helper crates are located inside the
-[`examples`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/examples) folder:
+[`examples`](https://github.com/ustgt-irs/sat-rs/tree/main/examples) folder:
 
-* [`example-std`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/examples/example-std):
+* [`example-std`](https://github.com/ustgt-irs/sat-rs/tree/main/examples/example-std):
    Example on-board software using various sat-rs components which can be run on a host computer
    or on any system with a standard runtime like a Raspberry Pi.
-* [`minisim`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/examples/minisim):
+* [`minisim`](https://github.com/ustgt-irs/sat-rs/tree/main/examples/minisim):
    Mini-Simulator based on [nexosim](https://github.com/asynchronics/nexosim) which
    simulates some physical devices for the `example-std` application device handlers.
-* [`client`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/examples/client): Ground client to command the `example-std` application and the STM32H7 examples.
-* [`types`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/examples/types): Telecommand and telemetry definitions shared by the
+* [`client`](https://github.com/ustgt-irs/sat-rs/tree/main/examples/client): Ground client to command the `example-std` application and the STM32H7 examples.
+* [`types`](https://github.com/ustgt-irs/sat-rs/tree/main/examples/types): Telecommand and telemetry definitions shared by the
    `example-std` application, the STM32H7 examples and the `client`.
-* [`embedded`](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/examples/embedded):
+* [`embedded`](https://github.com/ustgt-irs/sat-rs/tree/main/examples/embedded):
    Simple examples using sat-rs components on a bare-metal system with constrained resources,
    running on the NUCLEO-H753ZI board. `stm32h7-nucleo-rtic` uses the
    [RTIC](https://github.com/rtic-rs/rtic) framework and `stm32h7-nucleo-embassy` uses the
@@ -63,11 +63,11 @@ The library crates and the `example-std` application have their own `CHANGELOG.m
 
  In addition to the crates in this repository, the sat-rs project also maintains other libraries.
 
- * [`spacepackets`](https://egit.irs.uni-stuttgart.de/rust/spacepackets): Basic ECSS and CCSDS
+ * [`spacepackets`](https://github.com/ustgt-irs/spacepackets-rs): Basic ECSS and CCSDS
    packet protocol implementations. This repository is re-exported in the
-   [`satrs`](https://egit.irs.uni-stuttgart.de/rust/satrs/src/branch/main/satrs)
+   [`satrs`](https://github.com/ustgt-irs/sat-rs/tree/main/satrs)
    crate.
- * [`cfdp`](https://egit.irs.uni-stuttgart.de/rust/cfdp): CCSDS File Delivery Protocol
+ * [`cfdp`](https://github.com/ustgt-irs/cfdp-rs): CCSDS File Delivery Protocol
    (CFDP) high-level library components.
 
 # Flight Heritage

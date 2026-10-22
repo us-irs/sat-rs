@@ -1,8 +1,8 @@
 # System View
 
 This chapter gives a system level view of how a typical flight software built with `sat-rs`,
-[`spacepackets`](https://egit.irs.uni-stuttgart.de/rust/spacepackets) and
-[`cfdp`](https://egit.irs.uni-stuttgart.de/rust/cfdp) is layered. It complements the previous
+[`spacepackets`](https://github.com/ustgt-irs/spacepackets-rs) and
+[`cfdp`](https://github.com/ustgt-irs/cfdp-rs) is layered. It complements the previous
 chapters, which focus on individual components, by showing how those components fit together
 and where the line between application and platform is usually drawn.
 

@@ -9,7 +9,7 @@ Checklist for new releases
    `unreleased` section.
 4. Run `cargo test --all-features` or `cargo nextest r --all-features` and `cargo test --doc`.
 5. Run `cargo fmt` and `cargo clippy`. Check `cargo msrv` against MSRV in `Cargo.toml`.
-6. Wait for CI/CD results for EGit and Github. These also check cross-compilation for bare-metal
+6. Wait for CI/CD results for GitLab or GitHub. These also check cross-compilation for bare-metal
    targets.
 
 # Release
@@ -18,5 +18,5 @@ Checklist for new releases
 
 # Post-Release
 
-1. Create a new release on `EGit` with the name `satrs-<version>`.
+1. Create a new release on `GitLab` with the name `satrs-<version>`.
 

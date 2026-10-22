@@ -41,10 +41,10 @@
 //!
 //! # Examples
 //!
-//! The [example-std](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/examples/example-std)
+//! The [example-std](https://github.com/ustgt-irs/sat-rs/tree/main/examples/example-std)
 //! contains a full event manager instance and exposes a test event via the PUS test service.
-//! The [PUS event](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/examples/example-std/src/legacy/pus/event.rs)
-//! module and the generic [events module](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/examples/example-std/src/legacy/events.rs)
+//! The [PUS event](https://github.com/ustgt-irs/sat-rs/blob/main/examples/example-std/src/legacy/pus/event.rs)
+//! module and the generic [events module](https://github.com/ustgt-irs/sat-rs/blob/main/examples/example-std/src/legacy/events.rs)
 //! show how the event management modules can be integrated into a more complex software.
 use crate::legacy::events_legacy::{EventU16, EventU32, GenericEvent, LargestEventRaw, LargestGroupIdRaw};
 use crate::params::Params;

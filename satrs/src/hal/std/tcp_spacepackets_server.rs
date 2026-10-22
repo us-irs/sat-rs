@@ -148,7 +148,7 @@ impl TcpTmSender for SpacepacketsTmSender {
 ///
 /// ## Example
 ///
-/// The [TCP server integration tests](https://egit.irs.uni-stuttgart.de/rust/sat-rs/src/branch/main/satrs/tests/tcp_servers.rs)
+/// The [TCP server integration tests](https://github.com/ustgt-irs/sat-rs/blob/main/satrs/tests/tcp_servers.rs)
 /// also serves as the example application for this module.
 pub struct TcpSpacepacketsServer<
     TmSource: PacketSource<Error = ()>,
